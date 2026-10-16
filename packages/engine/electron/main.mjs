@@ -1,7 +1,7 @@
 // Renders every golden scenario in a hidden Electron window and compares it with the committed
 // goldens. SwiftShader makes Electron rasterize like headless Chromium in the vitest browser tests.
 // Run from the repo root: pnpm engine:electron
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { BrowserWindow, app } from 'electron';
@@ -11,12 +11,24 @@ import { PNG } from 'pngjs';
 const here = dirname(fileURLToPath(import.meta.url));
 const goldens = join(here, '..', 'test', '__golden__', 'golden.browser.test.ts');
 const diffs = join(here, '..', '..', '..', '.vitest', 'electron-diff');
-// Electron ships an older Chromium than Playwright: allow tiny text rasterization differences.
-const THRESHOLD = 0.1;
-const ALLOWED_RATIO = 0.002;
+// The same rule as the vitest goldens. Electron's SwiftShader output is byte-identical to Playwright's
+// today; a looser limit (the plan had 0.2 % of the pixels) let two different cursor goldens match.
+// If an Electron upgrade ever shifts text edges, raise this on purpose with the measured count.
+const THRESHOLD = 0.05;
+const ALLOWED_PIXELS = 0;
+// The slowest scenario takes about 150 ms; a crashed or stuck page must not hang the run.
+const STEP_TIMEOUT_MS = 30_000;
 
 app.disableHardwareAcceleration();
 app.commandLine.appendSwitch('enable-unsafe-swiftshader');
+
+function withTimeout(promise, label) {
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`${label} timed out after ${STEP_TIMEOUT_MS} ms`)), STEP_TIMEOUT_MS);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
 
 function writePng(path, width, height, data) {
   mkdirSync(dirname(path), { recursive: true });
@@ -28,11 +40,23 @@ function writePng(path, width, height, data) {
 async function check() {
   const win = new BrowserWindow({ show: false, width: 800, height: 600 });
   win.webContents.on('console-message', (event) => console.log(`[page] ${event.message}`));
-  await win.loadFile(join(here, 'index.html'));
-  const names = await win.webContents.executeJavaScript('window.cuttleCheck.names');
-  let failed = 0;
+  // A crashed renderer never settles a pending executeJavaScript: fail instead of hanging.
+  win.webContents.on('render-process-gone', (_event, details) => {
+    console.error(`FAIL the page's renderer is gone: ${details.reason} (exit code ${details.exitCode})`);
+    app.exit(1);
+  });
+  rmSync(diffs, { recursive: true, force: true });
+  await withTimeout(win.loadFile(join(here, 'index.html')), 'loading the page');
+  const names = await withTimeout(win.webContents.executeJavaScript('window.cuttleCheck.names'), 'listing the scenarios');
+  if (names.length === 0) throw new Error('the page lists no scenarios');
+  const suffix = `.${process.platform}.png`;
+  const orphans = existsSync(goldens)
+    ? readdirSync(goldens).filter((file) => file.endsWith(suffix) && !names.includes(file.slice(0, -suffix.length)))
+    : [];
+  for (const file of orphans) console.log(`FAIL ${file}: a golden without a scenario`);
+  let failed = orphans.length;
   for (let i = 0; i < names.length; i++) {
-    const result = await win.webContents.executeJavaScript(`window.cuttleCheck.render(${i})`);
+    const result = await withTimeout(win.webContents.executeJavaScript(`window.cuttleCheck.render(${i})`), `scenario ${names[i]}`);
     const file = join(goldens, `${result.name}.${process.platform}.png`);
     if (!existsSync(file)) {
       console.log(`FAIL ${result.name}: no golden at ${file}`);
@@ -48,7 +72,7 @@ async function check() {
     const actual = Buffer.from(result.rgba, 'base64');
     const diff = new Uint8Array(actual.length);
     const mismatched = pixelmatch(golden.data, actual, diff, result.width, result.height, { threshold: THRESHOLD });
-    const ok = mismatched <= ALLOWED_RATIO * result.width * result.height;
+    const ok = mismatched <= ALLOWED_PIXELS;
     console.log(`${ok ? 'ok  ' : 'FAIL'} ${result.name} (${mismatched} px differ)`);
     if (!ok) {
       failed++;
@@ -56,7 +80,7 @@ async function check() {
       writePng(join(diffs, `${result.name}.diff.png`), result.width, result.height, diff);
     }
   }
-  console.log(failed === 0 ? `all ${names.length} scenarios match the goldens` : `${failed} of ${names.length} scenarios differ, see ${diffs}`);
+  console.log(failed === 0 ? `all ${names.length} scenarios match the goldens` : `${failed} checks failed, diff images (if any) in ${diffs}`);
   return failed === 0;
 }
 

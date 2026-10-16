@@ -1,0 +1,159 @@
+import { describe, expect, it } from 'vitest';
+import {
+  cursorSizePx,
+  maskRectToOutput,
+  placeBadge,
+  placeOverlay,
+  sourceRectToOutput,
+  sourceToOutput,
+  stillCrop,
+  unitFor,
+  uvRect,
+  webcamRect,
+  windowLayout,
+} from '../src/layout';
+
+const HD = { width: 1920, height: 1080 };
+
+describe('unitFor', () => {
+  it('is 1 at 1080 px on the short side', () => {
+    expect(unitFor(HD)).toBe(1);
+    expect(unitFor({ width: 1080, height: 1920 })).toBe(1);
+    expect(unitFor({ width: 640, height: 360 })).toBeCloseTo(1 / 3);
+  });
+});
+
+describe('windowLayout', () => {
+  it('fits a 16:9 screen with a 36-unit title bar into 1080p, padded and centred', () => {
+    const layout = windowLayout(HD, 16 / 9, { titleBar: 36, radius: 14 });
+    // height-limited: 1080 - 2*64 - 36 = 916 rows of content, 916 * 16/9 = 1628.4 columns
+    expect(layout.content).toEqual([146, 100, 1628, 916]);
+    expect(layout.window).toEqual([146, 64, 1628, 952]);
+    expect(layout.titleBar).toBe(36);
+    expect(layout.radius).toBe(14);
+  });
+
+  it('is width-limited for a tall output', () => {
+    const layout = windowLayout({ width: 1080, height: 1920 }, 16 / 10, { titleBar: 36, radius: 14 });
+    expect(layout.content[2]).toBe(952); // 1080 - 2*64
+    expect(layout.content[3]).toBe(595); // 952 / 1.6
+    expect(layout.window[1]).toBe(Math.round((1920 - 595 - 36) / 2));
+  });
+
+  it('scales padding, title bar and radius with the output size', () => {
+    const layout = windowLayout({ width: 640, height: 360 }, 16 / 10, { titleBar: 36, radius: 15 });
+    expect(layout.titleBar).toBe(12);
+    expect(layout.radius).toBeCloseTo(5);
+    expect(layout.content[3]).toBe(Math.round(360 - (2 * 64) / 3 - 12));
+  });
+
+  it('fills the output without chrome', () => {
+    const layout = windowLayout(HD, 16 / 10, null);
+    expect(layout.content).toEqual([96, 0, 1728, 1080]);
+    expect(layout.window).toEqual(layout.content);
+    expect(layout.radius).toBe(0);
+    expect(layout.titleBar).toBe(0);
+  });
+
+  it('caps the radius at half the window size', () => {
+    expect(windowLayout({ width: 200, height: 200 }, 1, { titleBar: 0, radius: 900 }).radius).toBeLessThanOrEqual(100);
+  });
+});
+
+describe('source to output mapping', () => {
+  const content: [number, number, number, number] = [100, 50, 800, 500];
+
+  it('maps the full screen onto the content rect', () => {
+    const full: [number, number, number, number] = [0, 0, 1600, 1000];
+    expect(sourceToOutput(0, 0, full, content)).toEqual([100, 50]);
+    expect(sourceToOutput(1600, 1000, full, content)).toEqual([900, 550]);
+    expect(sourceRectToOutput([400, 250, 800, 500], full, content)).toEqual([300, 175, 400, 250]);
+  });
+
+  it('follows the zoom crop', () => {
+    const zoom: [number, number, number, number] = [800, 500, 800, 500]; // bottom-right quarter, 2x
+    expect(sourceToOutput(800, 500, zoom, content)).toEqual([100, 50]);
+    expect(sourceToOutput(1200, 750, zoom, content)).toEqual([500, 300]);
+    expect(sourceRectToOutput([800, 500, 100, 50], zoom, content)).toEqual([100, 50, 100, 50]);
+  });
+
+  it('grows mask rects to whole pixels plus one', () => {
+    const full: [number, number, number, number] = [0, 0, 1600, 1000];
+    expect(maskRectToOutput([400, 250, 800, 500], full, content)).toEqual([299, 174, 402, 252]);
+    expect(maskRectToOutput([401, 251, 3, 3], full, content)).toEqual([299, 174, 4, 4]); // 300.5..302 → 299..303
+  });
+
+  it('turns image px into texture coordinates', () => {
+    expect(uvRect([0, 0, 1600, 1000], { width: 1600, height: 1000 })).toEqual([0, 0, 1, 1]);
+    expect(uvRect([400, 250, 800, 500], { width: 1600, height: 1000 })).toEqual([0.25, 0.25, 0.5, 0.5]);
+  });
+});
+
+describe('cursorSizePx', () => {
+  it('is 32 source px on a 1080-row screen, scaled like the content', () => {
+    expect(cursorSizePx({ width: 1920, height: 1080 }, 1, [0, 0, 1920, 1080], [0, 0, 1920, 1080])).toBe(32);
+    expect(cursorSizePx({ width: 1920, height: 1080 }, 1, [0, 0, 1920, 1080], [0, 0, 960, 540])).toBe(16);
+  });
+
+  it('grows with the zoom, the size setting and the screen height', () => {
+    expect(cursorSizePx({ width: 1920, height: 1080 }, 1, [0, 0, 960, 540], [0, 0, 1920, 1080])).toBe(64);
+    expect(cursorSizePx({ width: 1920, height: 1080 }, 1.5, [0, 0, 1920, 1080], [0, 0, 1920, 1080])).toBe(48);
+    expect(cursorSizePx({ width: 2560, height: 1440 }, 1, [0, 0, 2560, 1440], [0, 0, 2560, 1440])).toBeCloseTo(42.67, 2);
+  });
+});
+
+describe('webcamRect', () => {
+  it('puts a square of size * short side into the chosen corner, 40 units from the edges', () => {
+    expect(webcamRect(HD, 'bottom-left', 0.2)).toEqual([40, 1080 - 40 - 216, 216, 216]);
+    expect(webcamRect(HD, 'top-right', 0.2)).toEqual([1920 - 40 - 216, 40, 216, 216]);
+    expect(webcamRect(HD, 'top-left', 0.2)).toEqual([40, 40, 216, 216]);
+    expect(webcamRect(HD, 'bottom-right', 0.2)).toEqual([1920 - 40 - 216, 1080 - 40 - 216, 216, 216]);
+  });
+});
+
+describe('placeOverlay and placeBadge', () => {
+  const sprite = { width: 300, height: 60 };
+
+  it('centres a text horizontally at the top, centre or bottom, 56 units from the edge', () => {
+    expect(placeOverlay(HD, sprite, 'top', 'center')).toEqual([810, 56, 300, 60]);
+    expect(placeOverlay(HD, sprite, 'center', 'center')).toEqual([810, 510, 300, 60]);
+    expect(placeOverlay(HD, sprite, 'bottom', 'center')).toEqual([810, 1080 - 56 - 60, 300, 60]);
+  });
+
+  it('left-aligns when asked', () => {
+    expect(placeOverlay(HD, sprite, 'bottom', 'left')).toEqual([56, 964, 300, 60]);
+  });
+
+  it('puts the badge into the content top-right corner', () => {
+    expect(placeBadge([100, 50, 800, 500], { width: 120, height: 40 }, 1)).toEqual([100 + 800 - 16 - 120, 66, 120, 40]);
+  });
+});
+
+describe('stillCrop', () => {
+  const view = { width: 1600, height: 1000 };
+  const page = { width: 1280, height: 2400 };
+
+  it('shows the top of a tall image at the view width', () => {
+    expect(stillCrop(page, view, 'none', 0.5)).toEqual([0, 0, 1280, 800]);
+  });
+
+  it('scrolls a tall image from top to bottom, eased', () => {
+    expect(stillCrop(page, view, 'scroll', 0)).toEqual([0, 0, 1280, 800]);
+    expect(stillCrop(page, view, 'scroll', 0.5)).toEqual([0, 800, 1280, 800]);
+    expect(stillCrop(page, view, 'scroll', 1)).toEqual([0, 1600, 1280, 800]);
+  });
+
+  it('covers the view with a wide image, centred', () => {
+    expect(stillCrop({ width: 2000, height: 500 }, view, 'none', 0)).toEqual([600, 0, 800, 500]);
+    expect(stillCrop({ width: 2000, height: 500 }, view, 'scroll', 1)).toEqual([600, 0, 800, 500]);
+  });
+
+  it('zooms into the centre for kenburns', () => {
+    expect(stillCrop(page, view, 'kenburns', 0)).toEqual([0, 0, 1280, 800]);
+    const [x, y, w, h] = stillCrop(page, view, 'kenburns', 1);
+    expect(w).toBeCloseTo(1280 / 1.08);
+    expect(h).toBeCloseTo(800 / 1.08);
+    expect(x + w / 2).toBeCloseTo(640);
+    expect(y + h / 2).toBeCloseTo(400);
+  });
+});

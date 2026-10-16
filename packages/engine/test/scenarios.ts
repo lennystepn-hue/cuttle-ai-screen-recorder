@@ -147,7 +147,10 @@ export const SCENARIOS: Scenario[] = [
     name: 'text-lower-third-webcam',
     project: project(
       { frame: { title: TITLE }, webcam: { enabled: true } },
-      { texts: [{ at: 0, duration: 10, text: 'One prompt, one call', style: 'lower-third', position: 'bottom' }] },
+      {
+        sources: { screen: 'screen.mp4', webcam: 'webcam.mp4' },
+        texts: [{ at: 0, duration: 10, text: 'One prompt, one call', style: 'lower-third', position: 'bottom' }],
+      },
     ),
     t: 5,
     webcam: true,

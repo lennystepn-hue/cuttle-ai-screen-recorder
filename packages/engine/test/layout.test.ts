@@ -139,18 +139,56 @@ describe('placeOverlay and placeBadge', () => {
 
   it('moves a top or bottom text clear of the webcam bubble, half a margin away', () => {
     const bottomLeft = webcamRect(HD, 'bottom-left', 0.18); // the default bubble: [40, 846, 194, 194]
-    expect(placeOverlay(HD, sprite, 'bottom', 'left', bottomLeft)).toEqual([56, 846 - 28 - 60, 300, 60]);
-    expect(placeOverlay(HD, sprite, 'bottom', 'center', bottomLeft)).toEqual([810, 964, 300, 60]); // not in the way
-    expect(placeOverlay(HD, sprite, 'top', 'left', webcamRect(HD, 'top-left', 0.18))).toEqual([56, 40 + 194 + 28, 300, 60]);
-    expect(placeOverlay(HD, sprite, 'center', 'left', webcamRect(HD, 'top-left', 0.5))).toEqual([56, 510, 300, 60]); // centre stays
+    expect(placeOverlay(HD, sprite, 'bottom', 'left', [bottomLeft])).toEqual([56, 846 - 28 - 60, 300, 60]);
+    expect(placeOverlay(HD, sprite, 'bottom', 'center', [bottomLeft])).toEqual([810, 964, 300, 60]); // not in the way
+    expect(placeOverlay(HD, sprite, 'top', 'left', [webcamRect(HD, 'top-left', 0.18)])).toEqual([56, 40 + 194 + 28, 300, 60]);
+    expect(placeOverlay(HD, sprite, 'center', 'left', [webcamRect(HD, 'top-left', 0.5)])).toEqual([56, 510, 300, 60]); // centre stays
   });
 
-  it('moves the badge left of a webcam bubble in its corner', () => {
+  it('moves a text past every obstacle in its way, nearest to its edge first', () => {
+    const square = { width: 1080, height: 1080 };
+    const bubble = webcamRect(square, 'top-right', 0.22); // [802, 40, 238, 238]
+    const badge = placeBadge([64, 290, 952, 536], { width: 108, height: 37 }, 1, bubble); // stays at [892, 306, 108, 37]
+    // a wide top pill dodges the bubble to y = 306, where the badge is, so it moves on below the badge
+    expect(placeOverlay(square, { width: 800, height: 60 }, 'top', 'center', [badge, bubble])).toEqual([140, 306 + 37 + 28, 800, 60]);
+  });
+
+  it('moves the badge left of a webcam bubble in its corner, or below it when there is no room', () => {
     const topRight = webcamRect(HD, 'top-right', 0.18); // [1686, 40, 194, 194]
     expect(placeBadge([146, 100, 1628, 916], { width: 108, height: 37 }, 1, topRight)).toEqual([1686 - 16 - 108, 116, 108, 37]);
     expect(placeBadge([146, 100, 1628, 916], { width: 108, height: 37 }, 1, webcamRect(HD, 'bottom-right', 0.18))).toEqual([
       1650, 116, 108, 37,
     ]);
+    // 1:1 without a frame, a big bubble and a long custom badge: left of the bubble would leave the content
+    const square = { width: 1080, height: 1080 };
+    const big = webcamRect(square, 'top-right', 0.5); // [500, 40, 540, 540]
+    expect(placeBadge([0, 236, 1080, 608], { width: 540, height: 37 }, 1, big)).toEqual([524, 40 + 540 + 16, 540, 37]);
+  });
+
+  it('never moves a text or the badge out of the output or onto the bubble, in any format, corner and size', () => {
+    const inside = (rect: number[], area: { width: number; height: number }) =>
+      rect[0]! >= 0 && rect[1]! >= 0 && rect[0]! + rect[2]! <= area.width && rect[1]! + rect[3]! <= area.height;
+    const overlap = (a: number[], b: number[]) => a[0]! < b[0]! + b[2]! && b[0]! < a[0]! + a[2]! && a[1]! < b[1]! + b[3]! && b[1]! < a[1]! + a[3]!;
+    for (const output of [HD, { width: 1080, height: 1080 }, { width: 1080, height: 1920 }]) {
+      const unit = unitFor(output);
+      const { content } = windowLayout(output, 16 / 9, { titleBar: 36, radius: 14 });
+      for (const corner of ['top-left', 'top-right', 'bottom-left', 'bottom-right'] as const) {
+        for (const size of [0.18, 0.35, 0.5]) {
+          const bubble = webcamRect(output, corner, size);
+          for (const width of [Math.round(300 * unit), Math.round(output.width * 0.8)]) {
+            const badge = placeBadge(content, { width: Math.round(content[2] / 2), height: Math.round(37 * unit) }, unit, bubble);
+            const where = `${output.width}x${output.height} ${corner} ${size} ${width}`;
+            expect(inside(badge, output) && !overlap(badge, bubble), `badge ${where}`).toBe(true);
+            for (const position of ['top', 'bottom'] as const) {
+              for (const align of ['left', 'center'] as const) {
+                const text = placeOverlay(output, { width, height: Math.round(67 * unit) }, position, align, [bubble, badge]);
+                expect(inside(text, output) && !overlap(text, bubble) && !overlap(text, badge), `${position} ${align} ${where}`).toBe(true);
+              }
+            }
+          }
+        }
+      }
+    }
   });
 });
 

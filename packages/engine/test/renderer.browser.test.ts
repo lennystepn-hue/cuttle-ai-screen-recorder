@@ -109,9 +109,19 @@ describe('render', () => {
 
   it('shows the transparent parts of a still on white, like a blank page', async () => {
     const project = parse({ scenes: [{ type: 'still', image: 'p.png', duration: 1 }] });
-    const transparent = await createImageBitmap(new ImageData(16, 10), { premultiplyAlpha: 'premultiply' });
-    const sources: FrameSources = { screens: new Map(), webcams: new Map(), stills: new Map([[0, transparent]]) };
-    expect(pixelAt(render(project, { t: 0, layers: [layer(0, 1, 'still')] }, sources).pixels, 32, 18)).toEqual([255, 255, 255, 255]);
+    const still = async (rgba: [number, number, number, number]) => {
+      const data = new ImageData(16, 10);
+      for (let i = 0; i < data.data.length; i += 4) data.data.set(rgba, i);
+      const image = await createImageBitmap(data, { premultiplyAlpha: 'premultiply' });
+      const sources: FrameSources = { screens: new Map(), webcams: new Map(), stills: new Map([[0, image]]) };
+      return pixelAt(render(project, { t: 0, layers: [layer(0, 1, 'still')] }, sources).pixels, 32, 18);
+    };
+    expect(await still([0, 0, 0, 0])).toEqual([255, 255, 255, 255]);
+    // half-transparent red over white is pink: (255, 127, 127); a straight-alpha mix would give red 191
+    const [r, g, b] = await still([255, 0, 0, 128]);
+    expect(r).toBe(255);
+    expect(Math.abs(g! - 127)).toBeLessThanOrEqual(1);
+    expect(Math.abs(b! - 127)).toBeLessThanOrEqual(1);
   });
 
   it('refuses a still image that is closed or bigger than the GPU can hold, instead of drawing black', async () => {

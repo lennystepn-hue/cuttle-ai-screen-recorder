@@ -94,9 +94,10 @@ export function createRenderer(canvas: HTMLCanvasElement | OffscreenCanvas, proj
   const look = project.look;
   const unit = unitFor(output);
   const maxTextureSize = gl.getParameter(gl.MAX_TEXTURE_SIZE) as number;
-  // Texts and the badge keep clear of the webcam bubble. Taken from the look, not from whether a
-  // webcam frame arrived, so they do not jump when the webcam track ends early.
-  const webcamArea = look.webcam.enabled ? webcamRect(output, look.webcam.corner, look.webcam.size) : undefined;
+  // Texts and the badge keep clear of the webcam bubble. Taken from the look and the project's
+  // sources, not from whether a webcam frame arrived, so they do not jump when the webcam track ends.
+  const webcamArea =
+    look.webcam.enabled && project.sources.webcam ? webcamRect(output, look.webcam.corner, look.webcam.size) : undefined;
   const full: Rect = [0, 0, screenSize.width, screenSize.height];
   const screenAspect = screenSize.width / screenSize.height;
 
@@ -133,12 +134,13 @@ export function createRenderer(canvas: HTMLCanvasElement | OffscreenCanvas, proj
     return { chrome, layout: windowLayout(output, screenAspect, chrome ? { titleBar: chrome.titleBar, radius: look.frame.radius } : null) };
   }
 
-  function drawTexts(texts: readonly ActiveText[]): void {
+  /** `avoid`: rects the texts move clear of (the webcam bubble, the badge). */
+  function drawTexts(texts: readonly ActiveText[], avoid: readonly Rect[]): void {
     for (const { overlay, opacity } of texts) {
       if (opacity <= 0) continue;
       const style = TEXT_LABELS[overlay.style];
       const sprite = sprites.label(overlay.text, style, unit, output.width * TEXT_MAX_WIDTH);
-      const [x, y] = placeOverlay(output, sprite.box, overlay.position, style.align, webcamArea);
+      const [x, y] = placeOverlay(output, sprite.box, overlay.position, style.align, avoid);
       spritePass.drawSprite(sprite, x, y, opacity);
     }
   }
@@ -161,12 +163,11 @@ export function createRenderer(canvas: HTMLCanvasElement | OffscreenCanvas, proj
       uploadTexture(gl, webcamTexture, camera, true);
       webcam.draw(webcamTexture, sourceSize(camera), look.webcam);
     }
-    drawTexts(layer.texts);
-    if (layer.badge) {
-      const sprite = sprites.label(layer.badge, BADGE_STYLE, unit, layout.content[2] * BADGE_MAX_WIDTH);
-      const [x, y] = placeBadge(layout.content, sprite.box, unit, webcamArea);
-      spritePass.drawSprite(sprite, x, y, 1);
-    }
+    // The badge is placed first so the texts can move clear of it; it is drawn on top of them.
+    const badge = layer.badge ? sprites.label(layer.badge, BADGE_STYLE, unit, layout.content[2] * BADGE_MAX_WIDTH) : undefined;
+    const badgeRect = badge ? placeBadge(layout.content, badge.box, unit, webcamArea) : undefined;
+    drawTexts(layer.texts, [webcamArea, badgeRect].filter((rect): rect is Rect => rect !== undefined));
+    if (badge && badgeRect) spritePass.drawSprite(badge, badgeRect[0], badgeRect[1], 1);
   }
 
   function drawStill(layer: SceneFrame, scene: StillScene, sources: FrameSources): void {

@@ -119,10 +119,10 @@ function overlaps(a: Rect, b: Rect): boolean {
 
 /**
  * Where a text overlay sprite goes in the output: `position` picks the row, `align` the column.
- * A top or bottom text that would cover `avoid` (the webcam bubble) moves vertically clear of it,
- * half a margin away; a centred row stays.
+ * A top or bottom text moves vertically past each rect of `avoid` it would cover (the webcam
+ * bubble, the badge), half a margin away, nearest to its edge first; a centred row stays.
  */
-export function placeOverlay(output: Size, sprite: Size, position: TextPosition, align: 'center' | 'left', avoid?: Rect): Rect {
+export function placeOverlay(output: Size, sprite: Size, position: TextPosition, align: 'center' | 'left', avoid: readonly Rect[] = []): Rect {
   const margin = Math.round(OVERLAY_MARGIN * unitFor(output));
   const x = align === 'left' ? margin : Math.round((output.width - sprite.width) / 2);
   let y =
@@ -131,9 +131,13 @@ export function placeOverlay(output: Size, sprite: Size, position: TextPosition,
       : position === 'bottom'
         ? output.height - margin - sprite.height
         : Math.round((output.height - sprite.height) / 2);
-  if (avoid && position !== 'center' && overlaps([x, y, sprite.width, sprite.height], avoid)) {
+  if (position !== 'center') {
     const gap = Math.round(margin / 2);
-    y = position === 'bottom' ? avoid[1] - gap - sprite.height : avoid[1] + avoid[3] + gap;
+    const nearestFirst = [...avoid].sort((a, b) => (position === 'bottom' ? b[1] + b[3] - (a[1] + a[3]) : a[1] - b[1]));
+    for (const rect of nearestFirst) {
+      if (!overlaps([x, y, sprite.width, sprite.height], rect)) continue;
+      y = position === 'bottom' ? rect[1] - gap - sprite.height : rect[1] + rect[3] + gap;
+    }
   }
   return [x, y, sprite.width, sprite.height];
 }
@@ -141,11 +145,18 @@ export function placeOverlay(output: Size, sprite: Size, position: TextPosition,
 /** Space between the speed badge and the content's top-right corner, in units. */
 export const BADGE_MARGIN = 16;
 
-/** The speed badge sits in the top-right corner of the content, or left of `avoid` (the webcam bubble) when it would cover it. */
+/**
+ * The speed badge sits in the top-right corner of the content. When it would cover `avoid` (the
+ * webcam bubble) it moves left of it, or below it if that would leave the content.
+ */
 export function placeBadge(content: Rect, sprite: Size, unit: number, avoid?: Rect): Rect {
   const margin = Math.round(BADGE_MARGIN * unit);
   const badge: Rect = [Math.round(content[0] + content[2] - margin - sprite.width), Math.round(content[1] + margin), sprite.width, sprite.height];
-  if (avoid && overlaps(badge, avoid)) badge[0] = Math.round(avoid[0] - margin - sprite.width);
+  if (avoid && overlaps(badge, avoid)) {
+    const left = Math.round(avoid[0] - margin - sprite.width);
+    if (left >= content[0] + margin) badge[0] = left;
+    else badge[1] = Math.round(avoid[1] + avoid[3] + margin);
+  }
   return badge;
 }
 

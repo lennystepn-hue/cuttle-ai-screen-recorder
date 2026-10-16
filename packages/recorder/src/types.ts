@@ -22,7 +22,7 @@ export interface WindowInfo {
   title: string;
   /** The visible frame without the invisible resize border. */
   bounds: Bounds;
-  /** Index of the monitor that holds the window's centre. */
+  /** Index of the monitor that holds most of the window. */
   monitor: number;
 }
 
@@ -43,15 +43,19 @@ export type CaptureSource =
   | { kind: 'window'; title: string };
 
 export interface StopOptions {
+  /** Stops this many seconds after the screen track's first frame. */
   maxSeconds?: number;
   /** Stops once this file exists; it must not exist when the recording starts. */
   untilFile?: string;
-  /** Stops once the screen has not changed for this many seconds, after it changed at least once. */
+  /**
+   * Stops once the screen has not changed and no input arrived for this many seconds, after the screen
+   * changed at least once (someone pointing at a still chart is not idle).
+   */
   untilIdleSeconds?: number;
   /**
-   * The folder Claude Code runs in. Stops shortly after the first session in that folder that
-   * submits a prompt during the recording finishes its turn; its prompts, tool calls and final
-   * answer become markers.
+   * The folder Claude Code runs in. Stops `CLAUDE_TAIL_SECONDS` after the first session in that folder
+   * that submits a prompt after `record()` was called (the countdown included) finishes its turn; its
+   * prompts, tool calls and final answer become markers.
    */
   untilClaude?: string;
 }

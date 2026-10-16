@@ -5,8 +5,9 @@ import type { Monitor, WindowInfo } from './types';
 export interface Win32 {
   /** Outputs of the default adapter, in the order of ffmpeg ddagrab's `output_idx`. */
   monitors(): Monitor[];
-  /** Visible top-level windows with a title on one of the monitors, front to back. */
+  /** Visible top-level windows with a title on one of the monitors, front to back; not this process's own. */
   windows(): WindowInfo[];
+  /** The pointer in physical desktop pixels, like the input hook's events. */
   cursorPosition(): { x: number; y: number };
   cursorShape(): CursorShape;
 }
@@ -15,7 +16,10 @@ let loaded: Promise<Win32> | undefined;
 
 /** Loads the bindings once and makes the process per-monitor DPI aware, so coordinates are physical pixels. */
 export function loadWin32(): Promise<Win32> {
-  loaded ??= create();
+  loaded ??= create().catch((error: unknown) => {
+    loaded = undefined; // the next call tries again
+    throw error;
+  });
   return loaded;
 }
 
@@ -50,6 +54,7 @@ interface OutputDesc {
 async function create(): Promise<Win32> {
   const { default: koffi } = await import('koffi');
   const user32 = koffi.load('user32.dll');
+  const kernel32 = koffi.load('kernel32.dll');
   const dxgi = koffi.load('dxgi.dll');
   const shcore = koffi.load('shcore.dll');
   const dwmapi = koffi.load('dwmapi.dll');
@@ -74,7 +79,9 @@ async function create(): Promise<Win32> {
   const WNDENUMPROC = koffi.proto('__stdcall', typeName('WNDENUMPROC'), 'int', ['void *', 'intptr_t']);
 
   const SetProcessDpiAwarenessContext = user32.func('__stdcall', 'SetProcessDpiAwarenessContext', 'int', ['intptr_t']);
-  const GetCursorPos = user32.func('__stdcall', 'GetCursorPos', 'int', [koffi.out(koffi.pointer(POINT))]);
+  // Physical pixels whatever the process's DPI awareness (GetCursorPos would be logical in a process
+  // that was already made system-aware).
+  const GetPhysicalCursorPos = user32.func('__stdcall', 'GetPhysicalCursorPos', 'int', [koffi.out(koffi.pointer(POINT))]);
   const GetCursorInfo = user32.func('__stdcall', 'GetCursorInfo', 'int', [koffi.inout(koffi.pointer(CURSORINFO))]);
   const LoadCursorW = user32.func('__stdcall', 'LoadCursorW', 'void *', ['void *', 'uintptr_t']);
   const EnumWindows = user32.func('__stdcall', 'EnumWindows', 'int', [koffi.pointer(WNDENUMPROC), 'intptr_t']);
@@ -83,7 +90,9 @@ async function create(): Promise<Win32> {
   const GetWindowLongPtrW = user32.func('__stdcall', 'GetWindowLongPtrW', 'intptr_t', ['void *', 'int']);
   const GetWindowTextLengthW = user32.func('__stdcall', 'GetWindowTextLengthW', 'int', ['void *']);
   const GetWindowTextW = user32.func('__stdcall', 'GetWindowTextW', 'int', ['void *', 'void *', 'int']);
+  const GetWindowThreadProcessId = user32.func('__stdcall', 'GetWindowThreadProcessId', 'uint32', ['void *', koffi.out(koffi.pointer('uint32'))]);
   const MonitorFromWindow = user32.func('__stdcall', 'MonitorFromWindow', 'void *', ['void *', 'uint32']);
+  const GetConsoleWindow = kernel32.func('__stdcall', 'GetConsoleWindow', 'void *', []);
   const DwmGetWindowAttribute = dwmapi.func('__stdcall', 'DwmGetWindowAttribute', 'long', ['void *', 'uint32', 'void *', 'uint32']);
   const GetDpiForMonitor = shcore.func('__stdcall', 'GetDpiForMonitor', 'long', ['void *', 'int', koffi.out(koffi.pointer('uint32')), koffi.out(koffi.pointer('uint32'))]);
   const CreateDXGIFactory1 = dxgi.func('__stdcall', 'CreateDXGIFactory1', 'long', [koffi.pointer(GUID), koffi.out(koffi.pointer('void *'))]);
@@ -94,28 +103,37 @@ async function create(): Promise<Win32> {
   const EnumAdapters1 = koffi.proto('__stdcall', typeName('EnumAdapters1'), 'long', ['void *', 'uint32', koffi.out(koffi.pointer('void *'))]);
   const EnumOutputs = koffi.proto('__stdcall', typeName('EnumOutputs'), 'long', ['void *', 'uint32', koffi.out(koffi.pointer('void *'))]);
   const GetDesc = koffi.proto('__stdcall', typeName('GetDesc'), 'long', ['void *', koffi.out(koffi.pointer(DXGI_OUTPUT_DESC))]);
+  const pointerSize = koffi.sizeof('void *');
   const call = (object: unknown, slot: number, proto: unknown, ...args: unknown[]) => {
     const vtable = koffi.decode(object, 'void *');
-    const method = koffi.decode(vtable, slot * 8, 'void *');
+    const method = koffi.decode(vtable, slot * pointerSize, 'void *');
     return koffi.call(method, proto as never, object, ...args) as number;
+  };
+  const release = (object: unknown) => {
+    if (object) call(object, 2, Release);
   };
 
   SetProcessDpiAwarenessContext(PER_MONITOR_AWARE_V2);
   const cursorShapes = new Map(SYSTEM_CURSORS.map(([id, shape]) => [koffi.address(LoadCursorW(null, id)), shape]));
+  const ownConsole = koffi.address(GetConsoleWindow());
 
   /** The monitors with their HMONITOR, which places windows on them. */
   const outputs = (): { monitor: Monitor; handle: bigint }[] => {
-    const factory: unknown[] = [null];
-    if (CreateDXGIFactory1(IID_IDXGIFactory1, factory) < 0) return [];
-    const adapter: unknown[] = [null];
     const result: { monitor: Monitor; handle: bigint }[] = [];
-    if (call(factory[0], 12, EnumAdapters1, 0, adapter) >= 0) {
+    const factory: unknown[] = [null];
+    const adapter: unknown[] = [null];
+    if (CreateDXGIFactory1(IID_IDXGIFactory1, factory) < 0) return result;
+    try {
+      if (call(factory[0], 12, EnumAdapters1, 0, adapter) < 0) return result;
       for (let index = 0; ; index++) {
         const output: unknown[] = [null];
         if (call(adapter[0], 7, EnumOutputs, index, output) < 0) break;
         const desc = {} as OutputDesc;
-        call(output[0], 7, GetDesc, desc);
-        call(output[0], 2, Release);
+        try {
+          if (call(output[0], 7, GetDesc, desc) < 0) continue;
+        } finally {
+          release(output[0]);
+        }
         const { left, top, right, bottom } = desc.DesktopCoordinates;
         const dpiX = [96];
         const dpiY = [96];
@@ -130,10 +148,11 @@ async function create(): Promise<Win32> {
         };
         result.push({ monitor, handle: koffi.address(desc.Monitor) });
       }
-      call(adapter[0], 2, Release);
+      return result;
+    } finally {
+      release(adapter[0]);
+      release(factory[0]);
     }
-    call(factory[0], 2, Release);
-    return result;
   };
 
   const windows = (): WindowInfo[] => {
@@ -144,12 +163,17 @@ async function create(): Promise<Win32> {
     const visit = koffi.register((hwnd: unknown) => {
       if (!IsWindowVisible(hwnd) || IsIconic(hwnd)) return 1;
       if ((Number(GetWindowLongPtrW(hwnd, GWL_EXSTYLE)) & WS_EX_TOOLWINDOW) !== 0) return 1;
+      // The recorder's own console (cmd.exe titles it with the command line) and windows.
+      const pid = [0];
+      GetWindowThreadProcessId(hwnd, pid);
+      if (pid[0] === process.pid || (ownConsole !== 0n && koffi.address(hwnd) === ownConsole)) return 1;
       // Cloaked: on another virtual desktop, or a suspended UWP app that is "visible" but not shown.
       if (DwmGetWindowAttribute(hwnd, DWMWA_CLOAKED, cloaked, 4) >= 0 && cloaked.readUInt32LE(0) !== 0) return 1;
       const length = GetWindowTextLengthW(hwnd);
       if (length === 0) return 1;
       const text = Buffer.alloc((length + 1) * 2);
       const title = text.toString('utf16le', 0, GetWindowTextW(hwnd, text, length + 1) * 2);
+      // The monitor that holds most of the window.
       const monitor = monitorOf.get(koffi.address(MonitorFromWindow(hwnd, MONITOR_DEFAULTTONULL)));
       if (title === '' || monitor === undefined) return 1;
       if (DwmGetWindowAttribute(hwnd, DWMWA_EXTENDED_FRAME_BOUNDS, rect, 16) < 0) return 1;
@@ -172,7 +196,7 @@ async function create(): Promise<Win32> {
     monitors: () => outputs().map(({ monitor }) => monitor),
     windows,
     cursorPosition() {
-      GetCursorPos(point);
+      GetPhysicalCursorPos(point);
       return { x: point.x, y: point.y };
     },
     cursorShape() {

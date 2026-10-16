@@ -55,6 +55,28 @@ describe('EventsWriter', () => {
     expect(moves.at(-1)).toEqual({ t: 0.064, type: 'move', x: 64, y: 0 });
   });
 
+  it('keeps where the pointer rested before a pause, so it does not creep towards the next move', () => {
+    const { events, read } = writer();
+    events.setStart(1000, []);
+    events.push({ type: 'move', time: 1001, x: 200, y: 50 });
+    events.push({ type: 'move', time: 1001.01, x: 240, y: 50 }); // same 1/60 s slot: held back
+    events.push({ type: 'move', time: 1006, x: 241, y: 50 }); // 5 s later
+    expect(read().map((move) => (move.type === 'move' ? [move.t, move.x] : []))).toEqual([
+      [1, 100],
+      [1.01, 140],
+      [6, 141],
+    ]);
+  });
+
+  it('keeps the newest input while the screen track has not started', () => {
+    const { events, read } = writer();
+    for (let i = 0; i < 2100; i++) events.push({ type: 'click', time: 999 + i / 1000, x: 100, y: 50, button: 'left' });
+    events.setStart(1000, []);
+    const clicks = read();
+    expect(clicks.length).toBe(1100); // 999.000 … 1001.099; the first 100 were dropped, then t < 0 too
+    expect(clicks.at(-1)?.t).toBe(1.099);
+  });
+
   it('writes a held-back move before a click, so the click comes after the pointer got there', () => {
     const { events, read } = writer();
     events.setStart(1000, []);

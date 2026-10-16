@@ -2,8 +2,9 @@ import type { InputEvent } from '@cuttle/project';
 import type { RawInput } from './types';
 
 /**
- * Moves are thinned to one per 1/60 s slot (a 125 Hz mouse would double the file for nothing); the
- * last move of a burst is kept, so the pointer ends where it stopped.
+ * Moves are thinned to one per 1/60 s slot (a 125 Hz mouse would double the file for nothing). The
+ * last move before a pause is kept, so the pointer rests where it stopped and does not creep towards
+ * the next move.
  */
 const MOVE_RATE = 60;
 /**
@@ -11,7 +12,7 @@ const MOVE_RATE = 60;
  * stored. The `keys` event carries the start of its half second, so it can come after later events.
  */
 export const KEY_WINDOW = 0.5;
-/** Events kept while the screen track's start is not known yet (about 2 s of input). */
+/** Events kept while the screen track's start is not known yet; the oldest go first (about 2 s of input). */
 const MAX_PENDING = 2_000;
 
 const round = (seconds: number) => Math.round(seconds * 1000) / 1000;
@@ -48,7 +49,8 @@ export class EventsWriter {
   push(input: RawInput): void {
     if (this.closed) return; // the hook can deliver a last event after it was stopped
     if (this.start === undefined) {
-      if (this.pending.length < MAX_PENDING) this.pending.push(input);
+      this.pending.push(input);
+      if (this.pending.length > MAX_PENDING) this.pending.shift();
       return;
     }
     const t = input.time - this.start;
@@ -63,6 +65,8 @@ export class EventsWriter {
           this.heldMove = { t: at, type: 'move', x, y };
           return;
         }
+        // After a pause the held move is where the pointer rested; in a continuous move the new one replaces it.
+        if (slot > this.lastSlot + 1) this.flushMove();
         this.lastSlot = slot;
         this.heldMove = undefined;
         return this.emit({ t: at, type: 'move', x, y });

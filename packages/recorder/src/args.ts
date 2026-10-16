@@ -65,6 +65,12 @@ export function freezeStart(line: string): number | undefined {
   return match ? Number(match[1]) : undefined;
 }
 
+/** `[Parsed_freezedetect_3 @ …] lavfi.freezedetect.freeze_end: 2.5` → 2.5 */
+export function freezeEnd(line: string): number | undefined {
+  const match = /lavfi\.freezedetect\.freeze_end: (\d+(?:\.\d+)?)/.exec(line);
+  return match ? Number(match[1]) : undefined;
+}
+
 /** `[Parsed_silencedetect_1 @ …] silence_start: 0.0180833` → 0.0180833 */
 export function silenceStart(line: string): number | undefined {
   const match = /silence_start: (-?\d+(?:\.\d+)?)/.exec(line);

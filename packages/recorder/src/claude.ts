@@ -6,6 +6,12 @@ import { StringDecoder } from 'node:string_decoder';
 
 /** How often the transcript folder is read. */
 const POLL_MS = 250;
+/**
+ * A transcript first seen after it changed at or after `since` is read from this far before its end:
+ * far more than a session writes in the seconds before the first read, and a bound on reading a long
+ * session's file. The first, cut-off line does not parse and is skipped.
+ */
+const CATCH_UP_BYTES = 4 * 1024 * 1024;
 
 /**
  * Where Claude Code keeps the transcripts (`<session id>.jsonl`) of sessions started in `cwd`:
@@ -31,15 +37,26 @@ interface TranscriptLine {
   timestamp?: unknown;
   isSidechain?: unknown;
   isMeta?: unknown;
+  isCompactSummary?: unknown;
   isApiErrorMessage?: unknown;
   message?: { id?: unknown; stop_reason?: unknown; content?: unknown };
 }
 
+/** Stop reasons that end a turn (`tool_use` continues it); an API error ends it as well. */
+const TURN_ENDS = new Set(['end_turn', 'refusal']);
+
 /**
- * The signals in one transcript line. Subagent lines (`isSidechain`) and meta lines are skipped. A
- * prompt is a user line with text (tool results are user lines too); every line of an assistant
- * message carries the message's final `stop_reason`, so an `end_turn` (or an API error, which ends the
- * turn as well) shows up once per line and is deduplicated by message id.
+ * User lines with text that the user did not type as a prompt: local slash-command output, bash
+ * mode, a background task's notice (which starts a turn in that session, not a demo) and the note an
+ * interrupt leaves.
+ */
+const NOT_PROMPTS = ['<local-command-', '<bash-', '<task-notification>', '[Request interrupted'];
+
+/**
+ * The signals in one transcript line. Subagent lines (`isSidechain`), meta lines and compaction
+ * summaries are skipped. A prompt is a user line with text (tool results are user lines too); every
+ * line of an assistant message carries the message's final `stop_reason`, so the end of a turn shows
+ * up once per line and is deduplicated by message id.
  */
 export function readTranscriptLine(text: string): ClaudeSignal[] {
   let line: TranscriptLine;
@@ -48,7 +65,7 @@ export function readTranscriptLine(text: string): ClaudeSignal[] {
   } catch {
     return [];
   }
-  if (typeof line !== 'object' || line === null || line.isSidechain === true || line.isMeta === true) return [];
+  if (typeof line !== 'object' || line === null || line.isSidechain === true || line.isMeta === true || line.isCompactSummary === true) return [];
   const time = typeof line.timestamp === 'string' ? Date.parse(line.timestamp) / 1000 : Number.NaN;
   if (!Number.isFinite(time)) return [];
   const content = line.message?.content;
@@ -60,7 +77,7 @@ export function readTranscriptLine(text: string): ClaudeSignal[] {
       signals.push({ kind: 'tool', time, label: item.name, ...(typeof item.id === 'string' && { id: item.id }) });
     }
   }
-  if (line.message?.stop_reason === 'end_turn' || line.isApiErrorMessage === true) {
+  if (TURN_ENDS.has(String(line.message?.stop_reason)) || line.isApiErrorMessage === true) {
     const id = line.message?.id;
     signals.push({ kind: 'answer', time, ...(typeof id === 'string' && { id }) });
   }
@@ -68,11 +85,14 @@ export function readTranscriptLine(text: string): ClaudeSignal[] {
 }
 
 function isPrompt(content: unknown): boolean {
-  // Output of a local slash command (`/model`, …) is written as a user line too.
-  if (typeof content === 'string') return content.trim() !== '' && !content.startsWith('<local-command-');
-  if (!Array.isArray(content)) return false;
-  const types = content.map((item: { type?: unknown }) => item?.type);
-  return types.includes('text') && !types.includes('tool_result');
+  const text =
+    typeof content === 'string'
+      ? content
+      : Array.isArray(content) && !content.some((item: { type?: unknown }) => item?.type === 'tool_result')
+        ? (content as { type?: unknown; text?: unknown }[]).find((item) => item?.type === 'text')?.text
+        : undefined;
+  if (typeof text !== 'string' || text.trim() === '') return false;
+  return !NOT_PROMPTS.some((prefix) => text.startsWith(prefix));
 }
 
 export interface ClaudeWatcher {
@@ -82,14 +102,14 @@ export interface ClaudeWatcher {
 /**
  * Polls the transcripts in `dir` and reports the signals of one session: the first one that submits
  * a prompt at or after `since` (wall-clock seconds). Other sessions in the same folder (another
- * Claude finishing its own turn) are ignored. Files that exist when watching starts are read from
- * their current end; files created later from the start.
+ * Claude finishing its own turn) are ignored. A transcript that last changed before `since` is read
+ * from its end; one that changed later (or appears later) from where its lines can be newer than
+ * `since`. `onSignal` must not throw; if it does, the error is dropped and watching goes on.
  */
 export function watchClaude(dir: string, since: number, onSignal: (signal: ClaudeSignal) => void): ClaudeWatcher {
   const files = new Map<string, { offset: number; partial: string; decoder: StringDecoder }>();
   const seen = new Set<string>();
   let session: string | undefined;
-  let first = true;
   let busy = false;
   let stopped = false;
 
@@ -105,7 +125,11 @@ export function watchClaude(dir: string, since: number, onSignal: (signal: Claud
       if (seen.has(key)) return;
       seen.add(key);
     }
-    onSignal(signal);
+    try {
+      onSignal(signal);
+    } catch {
+      // A failing listener must not lose the lines after this one.
+    }
   };
 
   const poll = async () => {
@@ -115,21 +139,27 @@ export function watchClaude(dir: string, since: number, onSignal: (signal: Claud
       const names = await readdir(dir).catch(() => [] as string[]);
       for (const name of names.filter((candidate) => candidate.endsWith('.jsonl'))) {
         const path = join(dir, name);
-        const size = await stat(path).then((info) => info.size, () => undefined);
-        if (size === undefined) continue;
+        const info = await stat(path).catch(() => undefined);
+        if (info === undefined) continue;
         let state = files.get(name);
         if (state === undefined) {
-          state = { offset: first ? size : 0, partial: '', decoder: new StringDecoder('utf8') };
+          const offset = info.mtimeMs / 1000 < since ? info.size : Math.max(0, info.size - CATCH_UP_BYTES);
+          state = { offset, partial: '', decoder: new StringDecoder('utf8') };
           files.set(name, state);
         }
-        if (size <= state.offset) continue;
-        const text = state.decoder.write(await readRange(path, state.offset, size));
-        state.offset = size;
-        const lines = (state.partial + text).split('\n');
+        if (info.size < state.offset) {
+          // Rewritten from the start: read it again; lines older than `since` are ignored anyway.
+          state.offset = 0;
+          state.partial = '';
+          state.decoder = new StringDecoder('utf8');
+        }
+        if (info.size === state.offset) continue;
+        const bytes = await readRange(path, state.offset, info.size);
+        state.offset += bytes.length;
+        const lines = (state.partial + state.decoder.write(bytes)).split('\n');
         state.partial = lines.pop() ?? '';
         for (const line of lines) for (const signal of readTranscriptLine(line)) if (!stopped) handle(name, signal);
       }
-      first = false;
     } finally {
       busy = false;
     }

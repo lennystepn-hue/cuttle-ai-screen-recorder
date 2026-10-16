@@ -1,16 +1,34 @@
 import { spawn } from 'node:child_process';
+import { RecorderError } from './errors';
 import { ffmpegMissing, ffmpegPath } from './ffmpeg';
-import { TEST_DEVICES, platformFor } from './sources';
-import type { Backend, Devices } from './types';
+import { TEST_DEVICES, platformFor, type Platform } from './sources';
+import type { Backend, Devices, WindowInfo } from './types';
+
+/** Seconds the DirectShow listing may take before it counts as hung. */
+const LISTING_TIMEOUT_SECONDS = 10;
 
 /** Monitors, windows, cameras and microphones the recorder can capture. */
-export async function listDevices(options: { backend?: Backend } = {}): Promise<Devices> {
-  if (platformFor(options.backend) === 'test') return structuredClone(TEST_DEVICES);
+export function listDevices(options: { backend?: Backend } = {}): Promise<Devices> {
+  return devicesFor(platformFor(options.backend), true);
+}
+
+/**
+ * The devices of a platform; cameras and mics only with `media` (the DirectShow listing starts an
+ * ffmpeg, which a take without webcam and mic does not need).
+ */
+export async function devicesFor(platform: Platform, media: boolean): Promise<Devices> {
+  if (platform === 'test') return structuredClone(TEST_DEVICES);
   const { loadWin32 } = await import('./win32');
   const win = await loadWin32();
-  const monitors = win.monitors();
-  const { cameras, mics } = parseDshowDevices(await dshowListing());
-  return { monitors, windows: win.windows(), cameras, mics };
+  const { cameras, mics } = media ? parseDshowDevices(await dshowListing()) : { cameras: [], mics: [] };
+  return { monitors: win.monitors(), windows: win.windows(), cameras, mics };
+}
+
+/** The windows now, for a window source that is resolved again when the countdown ends. */
+export async function windowsFor(platform: Platform): Promise<WindowInfo[]> {
+  if (platform === 'test') return structuredClone(TEST_DEVICES.windows);
+  const { loadWin32 } = await import('./win32');
+  return (await loadWin32()).windows();
 }
 
 /**
@@ -36,10 +54,20 @@ function dshowListing(): Promise<string> {
       stdio: ['ignore', 'ignore', 'pipe'],
       windowsHide: true,
     });
+    const timer = setTimeout(() => {
+      child.kill();
+      reject(new RecorderError('capture', `listing the cameras and microphones took more than ${LISTING_TIMEOUT_SECONDS} s`));
+    }, LISTING_TIMEOUT_SECONDS * 1000);
     let log = '';
     child.stderr.setEncoding('utf8');
     child.stderr.on('data', (chunk: string) => (log += chunk));
-    child.on('error', (error: NodeJS.ErrnoException) => reject(error.code === 'ENOENT' ? ffmpegMissing(error) : error));
-    child.on('close', () => resolve(log));
+    child.on('error', (error: NodeJS.ErrnoException) => {
+      clearTimeout(timer);
+      reject(error.code === 'ENOENT' ? ffmpegMissing(error) : new RecorderError('capture', `listing the cameras and microphones failed: ${error.message}`, { cause: error }));
+    });
+    child.on('close', () => {
+      clearTimeout(timer);
+      resolve(log);
+    });
   });
 }

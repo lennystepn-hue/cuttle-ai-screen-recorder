@@ -16,6 +16,8 @@ const temp = (prefix: string) => {
 };
 const project = () => temp('cuttle-record-');
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+/** Each test records in real time, and several run at once. */
+const SLOW = 20_000;
 const test = { source: { kind: 'monitor', index: 0 }, countdownSeconds: 0, backend: 'test' } as const satisfies Partial<RecordOptions>;
 
 /** ffprobe's view of a track: codec, size, colour tags, sample rate and duration. */
@@ -26,6 +28,12 @@ function probe(file: string) {
 }
 
 const read = (projectDir: string, file: string) => readFileSync(join(projectDir, file), 'utf8');
+
+function markersOf(projectDir: string, file: string) {
+  const markers = parseMarkersJson(read(projectDir, file));
+  if (!markers.ok) throw new Error(JSON.stringify(markers.issues));
+  return markers.markers;
+}
 
 describe.concurrent('record (test backend)', () => {
   it('records a 3 s take with every track', async () => {
@@ -61,10 +69,9 @@ describe.concurrent('record (test backend)', () => {
     expect(input.slice(0, 2)).toEqual([expect.objectContaining({ t: 0, type: 'move' }), { t: 0, type: 'shape', shape: 'arrow' }]);
     expect(new Set(input.map((event) => event.type))).toEqual(new Set(['move', 'shape', 'click', 'scroll', 'keys']));
 
-    const markers = parseMarkersJson(read(projectDir, take.markers));
-    expect(markers).toEqual({ ok: true, markers: [{ t: expect.closeTo(1, 0), kind: 'manual', label: 'one second' }] });
+    expect(markersOf(projectDir, take.markers)).toEqual([{ t: expect.closeTo(1, 0), kind: 'manual', label: 'one second' }]);
     expect(events.map((event) => event.type)).toEqual(['recording', 'marker', 'stopping']);
-  });
+  }, SLOW);
 
   it('stops once untilFile exists', async () => {
     const projectDir = project();
@@ -72,61 +79,24 @@ describe.concurrent('record (test backend)', () => {
     setTimeout(() => writeFileSync(flag, ''), 1500);
     const take = await record({ ...test, projectDir, stop: { untilFile: flag, maxSeconds: 20 } }).done;
     expect(take.stopReason).toBe('file');
-    expect(take.seconds).toBeGreaterThan(1.2);
+    expect(take.seconds).toBeGreaterThan(1);
     expect(take.seconds).toBeLessThan(3);
-  });
+  }, SLOW);
 
-  it('stops shortly after the Claude session in that folder finishes its turn, with markers from its transcript', async () => {
-    const projectDir = project();
-    const config = temp('cuttle-claude-');
-    const cwd = join(config, 'demo app');
-    const previous = process.env.CLAUDE_CONFIG_DIR;
-    process.env.CLAUDE_CONFIG_DIR = config;
-    try {
-      const dir = claudeTranscriptDir(cwd);
-      mkdirSync(dir, { recursive: true });
-      const write = (session: string, value: object) => appendFileSync(join(dir, `${session}.jsonl`), `${JSON.stringify({ timestamp: new Date().toISOString(), ...value })}\n`);
-      const recording = record({ ...test, projectDir, stop: { untilClaude: cwd, maxSeconds: 20 } });
-      await sleep(600);
-      write('other', { type: 'assistant', message: { id: 'o1', stop_reason: 'end_turn', content: [{ type: 'text' }] } });
-      await sleep(400);
-      write('demo', { type: 'user', message: { content: 'build it' } });
-      await sleep(300);
-      write('demo', { type: 'assistant', message: { id: 'a1', stop_reason: 'tool_use', content: [{ type: 'tool_use', id: 't1', name: 'Bash' }] } });
-      write('demo', { type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 't1' }] } });
-      await sleep(300);
-      write('demo', { type: 'assistant', isSidechain: true, message: { id: 's1', stop_reason: 'end_turn', content: [{ type: 'text' }] } });
-      await sleep(300);
-      write('demo', { type: 'assistant', message: { id: 'a2', stop_reason: 'end_turn', content: [{ type: 'text' }] } });
-      const take = await recording.done;
-
-      expect(take.stopReason).toBe('claude');
-      const markers = parseMarkersJson(read(projectDir, take.markers));
-      if (!markers.ok) throw new Error(JSON.stringify(markers.issues));
-      expect(markers.markers.map(({ kind, label }) => (label ? `${kind}:${label}` : kind))).toEqual(['prompt', 'tool:Bash', 'answer']);
-      const answer = markers.markers[2]!.t;
-      expect(take.seconds).toBeGreaterThan(answer + CLAUDE_TAIL_SECONDS - 0.3);
-      expect(take.seconds).toBeLessThan(answer + CLAUDE_TAIL_SECONDS + 1);
-    } finally {
-      if (previous === undefined) delete process.env.CLAUDE_CONFIG_DIR;
-      else process.env.CLAUDE_CONFIG_DIR = previous;
-    }
-  });
-
-  it('stops once the screen stood still for untilIdleSeconds after it changed', async () => {
-    // The still test monitor moves for 1 s, then stands still.
+  it('stops once the screen stood still and the input rested for untilIdleSeconds', async () => {
+    // The still test monitor moves for 1 s, then stands still; the synthetic input rests from 1.5 s.
     const take = await record({ ...test, projectDir: project(), source: { kind: 'monitor', index: 1 }, stop: { untilIdleSeconds: 1, maxSeconds: 20 } }).done;
     expect(take.stopReason).toBe('idle');
-    expect(take.seconds).toBeGreaterThan(1.8);
-    expect(take.seconds).toBeLessThan(3);
+    expect(take.seconds).toBeGreaterThan(2.2);
+    expect(take.seconds).toBeLessThan(3.5);
     expect(take.screenSize).toEqual({ width: 640, height: 360 });
-  });
+  }, SLOW);
 
   it('does not count a screen that has not changed yet as idle', async () => {
     // This strip at the top of the test pattern stays the same for the first 3 s.
     const take = await record({ ...test, projectDir: project(), source: { kind: 'region', rect: [540, 0, 200, 40], monitor: 0 }, stop: { untilIdleSeconds: 0.5, maxSeconds: 2 } }).done;
     expect(take.stopReason).toBe('max-seconds');
-  });
+  }, SLOW);
 
   it('stops when asked and warns about a silent microphone', async () => {
     const projectDir = project();
@@ -137,7 +107,22 @@ describe.concurrent('record (test backend)', () => {
     expect(take.stopReason).toBe('stop');
     expect(take.warnings).toEqual(['the microphone "Silent Test Microphone" records silence: it may be muted, or blocked for desktop apps (Windows: Settings > Privacy & security > Microphone)']);
     expect(warnings).toEqual(take.warnings);
-  });
+  }, SLOW);
+
+  it('turns a throwing onEvent into a warning instead of a failed take', async () => {
+    const recording = record({
+      ...test,
+      projectDir: project(),
+      stop: { maxSeconds: 1.5 },
+      onEvent: (event) => {
+        if (event.type === 'marker') throw new Error('listener bug');
+      },
+    });
+    setTimeout(() => recording.marker(), 500);
+    const take = await recording.done;
+    expect(take.stopReason).toBe('max-seconds');
+    expect(take.warnings).toEqual(['onEvent failed on "marker": listener bug']);
+  }, SLOW);
 
   it('cancels without a take folder when stopped during the countdown', async () => {
     const projectDir = project();
@@ -147,16 +132,23 @@ describe.concurrent('record (test backend)', () => {
     await expect(recording.done).rejects.toMatchObject({ name: 'RecorderError', code: 'cancelled' });
     expect(countdown).toEqual([3]);
     expect(existsSync(join(projectDir, 'takes'))).toBe(false);
-  });
+  }, SLOW);
+
+  it('cancels without a take folder when stopped before anything started', async () => {
+    const projectDir = project();
+    const recording = record({ ...test, projectDir, stop: {} });
+    await expect(recording.stop()).rejects.toMatchObject({ code: 'cancelled' });
+    expect(existsSync(join(projectDir, 'takes'))).toBe(false);
+  }, SLOW);
 
   it('fails when a track breaks off, and lets the other tracks finish their files', async () => {
     const projectDir = project();
     await expect(record({ ...test, projectDir, webcam: 'Failing Test Camera', stop: { maxSeconds: 20 } }).done).rejects.toMatchObject({
       code: 'capture',
-      message: expect.stringContaining('the webcam capture stopped unexpectedly'),
+      message: expect.stringMatching(/the webcam capture stopped unexpectedly[\s\S]*\(what was recorded is in takes\/1\)$/),
     });
     expect(probe(join(projectDir, 'takes/1/screen.mp4')).duration).toBeGreaterThan(0.8);
-  });
+  }, SLOW);
 
   it('captures a region and a window, with input relative to them, in numbered takes', async () => {
     const projectDir = project();
@@ -169,7 +161,7 @@ describe.concurrent('record (test backend)', () => {
     const first = parseEventsJsonl(read(projectDir, window.events)).events[0]!;
     if (first.type !== 'move') throw new Error('expected a move');
     expect(Math.hypot(first.x + 100 - 640, first.y + 60 - 360)).toBeCloseTo(200, -1);
-  });
+  }, SLOW);
 
   it('refuses options it cannot record with, before creating a take folder', async () => {
     const projectDir = project();
@@ -187,5 +179,73 @@ describe.concurrent('record (test backend)', () => {
       await expect(record({ ...test, projectDir, stop: {}, ...options }).done).rejects.toMatchObject({ code });
     }
     expect(existsSync(join(projectDir, 'takes'))).toBe(false);
-  });
+  }, SLOW);
+});
+
+// Not concurrent: these set CLAUDE_CONFIG_DIR, which the watcher reads when the recording starts.
+describe('record until a Claude Code turn ends (test backend)', () => {
+  function transcripts() {
+    const config = temp('cuttle-claude-');
+    const cwd = join(config, 'demo app');
+    const dir = claudeTranscriptDir(cwd, config);
+    mkdirSync(dir, { recursive: true });
+    const write = (session: string, value: object) => appendFileSync(join(dir, `${session}.jsonl`), `${JSON.stringify({ timestamp: new Date().toISOString(), ...value })}\n`);
+    return { config, cwd, write };
+  }
+
+  async function withConfig<T>(config: string, body: () => Promise<T>): Promise<T> {
+    const previous = process.env.CLAUDE_CONFIG_DIR;
+    process.env.CLAUDE_CONFIG_DIR = config;
+    try {
+      return await body();
+    } finally {
+      if (previous === undefined) delete process.env.CLAUDE_CONFIG_DIR;
+      else process.env.CLAUDE_CONFIG_DIR = previous;
+    }
+  }
+
+  it('stops shortly after the session that prompted finishes its turn, with markers from its transcript', async () => {
+    const projectDir = project();
+    const { config, cwd, write } = transcripts();
+    await withConfig(config, async () => {
+      const recording = record({ ...test, projectDir, stop: { untilClaude: cwd, maxSeconds: 20 } });
+      await sleep(600);
+      write('other', { type: 'assistant', message: { id: 'o1', stop_reason: 'end_turn', content: [{ type: 'text' }] } });
+      await sleep(400);
+      write('demo', { type: 'user', message: { content: 'build it' } });
+      await sleep(300);
+      write('demo', { type: 'assistant', message: { id: 'a1', stop_reason: 'tool_use', content: [{ type: 'tool_use', id: 't1', name: 'Bash' }] } });
+      write('demo', { type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 't1' }] } });
+      await sleep(300);
+      write('demo', { type: 'assistant', isSidechain: true, message: { id: 's1', stop_reason: 'end_turn', content: [{ type: 'text' }] } });
+      await sleep(300);
+      write('demo', { type: 'assistant', message: { id: 'a2', stop_reason: 'end_turn', content: [{ type: 'text' }] } });
+      const take = await recording.done;
+
+      expect(take.stopReason).toBe('claude');
+      const markers = markersOf(projectDir, take.markers);
+      expect(markers.map(({ kind, label }) => (label ? `${kind}:${label}` : kind))).toEqual(['prompt', 'tool:Bash', 'answer']);
+      const answer = markers[2]!.t;
+      expect(take.seconds).toBeGreaterThan(answer + CLAUDE_TAIL_SECONDS - 0.3);
+      expect(take.seconds).toBeLessThan(answer + CLAUDE_TAIL_SECONDS + 1);
+    });
+  }, SLOW);
+
+  it('follows a session whose prompt came during the countdown', async () => {
+    const projectDir = project();
+    const { config, cwd, write } = transcripts();
+    await withConfig(config, async () => {
+      write('demo', { type: 'user', message: { content: 'an earlier turn' } }); // the session exists before the recording
+      await sleep(50);
+      const recording = record({ ...test, projectDir, countdownSeconds: 1, stop: { untilClaude: cwd, maxSeconds: 20 } });
+      await sleep(300);
+      write('demo', { type: 'user', message: { content: 'build it' } }); // during the countdown
+      await sleep(1500);
+      write('demo', { type: 'assistant', message: { id: 'a1', stop_reason: 'end_turn', content: [{ type: 'text' }] } });
+      const take = await recording.done;
+      expect(take.stopReason).toBe('claude');
+      // The prompt came before the first frame, so only the answer is a marker.
+      expect(markersOf(projectDir, take.markers).map((marker) => marker.kind)).toEqual(['answer']);
+    });
+  }, SLOW);
 });

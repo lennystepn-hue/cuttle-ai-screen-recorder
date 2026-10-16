@@ -51,13 +51,16 @@ export function resolveArea(source: CaptureSource, devices: Devices): ScreenArea
     throw new RecorderError('device-not-found', `there is no monitor ${index}; monitors: ${known || 'none'}`);
   };
   switch (source.kind) {
-    case 'monitor':
-      return { monitor: monitorAt(source.index) };
+    case 'monitor': {
+      // H.264 4:2:0 needs even sizes; a monitor with an odd one loses its last column or row.
+      const monitor = monitorAt(source.index);
+      return { monitor, crop: fullOrCrop(monitor, { x: 0, y: 0, width: even(monitor.bounds.width), height: even(monitor.bounds.height) }) };
+    }
     case 'region': {
       const monitor = monitorAt(source.monitor);
       const [x, y, width, height] = source.rect.map(Math.round) as [number, number, number, number];
       const crop = { x, y, width: even(width), height: even(height) };
-      if (x < 0 || y < 0 || crop.width < 2 || crop.height < 2 || x + crop.width > monitor.bounds.width || y + crop.height > monitor.bounds.height) {
+      if (![x, y, width, height].every(Number.isFinite) || x < 0 || y < 0 || crop.width < 2 || crop.height < 2 || x + crop.width > monitor.bounds.width || y + crop.height > monitor.bounds.height) {
         throw new RecorderError(
           'invalid-options',
           `region [${source.rect.join(', ')}] is not inside monitor ${monitor.index} (${monitor.bounds.width}×${monitor.bounds.height}); give it in that monitor's pixels`,
@@ -69,7 +72,7 @@ export function resolveArea(source: CaptureSource, devices: Devices): ScreenArea
       const window = findWindow(source.title, devices);
       const monitor = monitorAt(window.monitor);
       const { bounds } = monitor;
-      // The part of the window on the monitor that holds its centre, in that monitor's pixels.
+      // The part of the window on the monitor that holds most of it, in that monitor's pixels.
       const left = Math.max(window.bounds.x, bounds.x) - bounds.x;
       const top = Math.max(window.bounds.y, bounds.y) - bounds.y;
       const right = Math.min(window.bounds.x + window.bounds.width, bounds.x + bounds.width) - bounds.x;
@@ -86,12 +89,11 @@ function fullOrCrop(monitor: Monitor, crop: Bounds): Bounds | undefined {
   return full ? undefined : crop;
 }
 
-/** An exact title, otherwise the one window whose title contains `title` (ignoring case). */
+/** The one window with exactly this title, otherwise the one whose title contains it (ignoring case). */
 function findWindow(title: string, devices: Devices) {
-  const exact = devices.windows.find((window) => window.title === title);
-  if (exact) return exact;
+  const exact = devices.windows.filter((window) => window.title === title);
   const needle = title.toLowerCase();
-  const matches = devices.windows.filter((window) => window.title.toLowerCase().includes(needle));
+  const matches = exact.length > 0 ? exact : devices.windows.filter((window) => window.title.toLowerCase().includes(needle));
   if (matches.length === 1) return matches[0]!;
   if (matches.length > 1) {
     throw new RecorderError('invalid-options', `"${title}" matches ${matches.length} windows: ${matches.map((window) => `"${window.title}"`).join(', ')}`);

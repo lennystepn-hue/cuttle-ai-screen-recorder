@@ -53,8 +53,13 @@ describe('resolveArea', () => {
     expect(resolveArea({ kind: 'region', rect: [0, 0, 1920, 1080], monitor: 1 }, devices).crop).toBeUndefined();
   });
 
-  it('refuses a region outside its monitor', () => {
-    for (const rect of [[1800, 0, 200, 100], [-1, 0, 200, 100], [0, 0, 1, 100]] as const) {
+  it('crops an odd-sized monitor to even numbers', () => {
+    const odd = { ...devices, monitors: [{ ...devices.monitors[0]!, bounds: { x: 0, y: 0, width: 1365, height: 767 } }] };
+    expect(resolveArea({ kind: 'monitor', index: 0 }, odd).crop).toEqual({ x: 0, y: 0, width: 1364, height: 766 });
+  });
+
+  it('refuses a region outside its monitor, and one that is not a number', () => {
+    for (const rect of [[1800, 0, 200, 100], [-1, 0, 200, 100], [0, 0, 1, 100], [Number.NaN, 0, 200, 100], [0, 0, 200, Number.POSITIVE_INFINITY]] as const) {
       expect(() => resolveArea({ kind: 'region', rect: [...rect], monitor: 1 }, devices)).toThrow(expect.objectContaining({ code: 'invalid-options' }));
     }
   });
@@ -65,7 +70,7 @@ describe('resolveArea', () => {
     expect(areaGeometry(area).origin).toEqual({ x: 2600, y: 600 });
   });
 
-  it('clips a window to the monitor that holds its centre', () => {
+  it('clips a window to the monitor that holds most of it', () => {
     expect(resolveArea({ kind: 'window', title: 'Editor' }, devices).crop).toEqual({ x: 0, y: 435, width: 580, height: 400 });
   });
 
@@ -75,6 +80,13 @@ describe('resolveArea', () => {
       expect.objectContaining({ code: 'invalid-options', message: '"browser" matches 2 windows: "Browser - docs", "Browser - mail"' }),
     );
     expect(() => resolveArea({ kind: 'window', title: 'Terminal' }, devices)).toThrow(expect.objectContaining({ code: 'device-not-found' }));
+  });
+
+  it('refuses a title that two windows have exactly', () => {
+    const twins = { ...devices, windows: [...devices.windows, { ...devices.windows[1]! }] };
+    expect(() => resolveArea({ kind: 'window', title: 'Editor' }, twins)).toThrow(
+      expect.objectContaining({ code: 'invalid-options', message: '"Editor" matches 2 windows: "Editor", "Editor"' }),
+    );
   });
 });
 

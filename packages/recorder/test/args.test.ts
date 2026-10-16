@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { freezeStart, micArgs, screenArgs, silenceStart, webcamArgs } from '../src/args';
+import { freezeEnd, freezeStart, micArgs, screenArgs, silenceStart, webcamArgs } from '../src/args';
 
 const input = ['-f', 'lavfi', '-i', 'testsrc2'];
 const BT709 = 'scale=out_color_matrix=bt709:out_range=tv,format=yuv420p,setparams=color_primaries=bt709:color_trc=bt709:colorspace=bt709:range=tv';
@@ -37,6 +37,8 @@ describe('ffmpeg arguments', () => {
     expect(freezeStart('[Parsed_freezedetect_3 @ 00000132707ccd00] lavfi.freezedetect.freeze_start: 0.973633')).toBe(0.973633);
     expect(freezeStart('[Parsed_freezedetect_3 @ 0000] lavfi.freezedetect.freeze_start: 0')).toBe(0);
     expect(freezeStart('[Parsed_freezedetect_3 @ 0000] lavfi.freezedetect.freeze_end: 2.5')).toBeUndefined();
+    expect(freezeEnd('[Parsed_freezedetect_3 @ 0000] lavfi.freezedetect.freeze_end: 2.5')).toBe(2.5);
+    expect(freezeEnd('[Parsed_freezedetect_3 @ 0000] lavfi.freezedetect.freeze_duration: 1.5')).toBeUndefined();
     expect(silenceStart('[Parsed_silencedetect_1 @ 000001d796c83380] silence_start: 0.0180833')).toBe(0.0180833);
     expect(silenceStart('[Parsed_silencedetect_1 @ 0000] silence_end: 3.032 | silence_duration: 3.01')).toBeUndefined();
   });

@@ -45,6 +45,17 @@ describe('readTranscriptLine', () => {
     expect(readTranscriptLine(line({ type: 'user', message: { content: '<local-command-stdout>ok</local-command-stdout>' } }))).toEqual([]);
   });
 
+  it('skips user lines with text that were not typed as a prompt', () => {
+    const notPrompts = [
+      { message: { content: '<task-notification>\n<task-id>b1</task-id>' } }, // a background task finished
+      { message: { content: '<bash-input>ls</bash-input>' } }, // bash mode
+      { message: { content: [{ type: 'text', text: '[Request interrupted by user]' }] } },
+      { isCompactSummary: true, message: { content: 'This session is being continued …' } },
+    ];
+    for (const value of notPrompts) expect(readTranscriptLine(line({ type: 'user', ...value }))).toEqual([]);
+    expect(readTranscriptLine(line({ type: 'user', message: { content: '<command-name>/review</command-name>' } }))).toEqual([{ kind: 'prompt', time }]);
+  });
+
   it('reads tool calls and the end of the turn', () => {
     expect(readTranscriptLine(line({ type: 'assistant', message: { id: 'm1', stop_reason: 'tool_use', content: [{ type: 'tool_use', id: 't1', name: 'Bash' }, { type: 'tool_use', id: 't2', name: 'Read' }] } }))).toEqual([
       { kind: 'tool', time, label: 'Bash', id: 't1' },
@@ -52,6 +63,7 @@ describe('readTranscriptLine', () => {
     ]);
     expect(readTranscriptLine(line({ type: 'assistant', message: { id: 'm2', stop_reason: 'end_turn', content: [{ type: 'thinking' }] } }))).toEqual([{ kind: 'answer', time, id: 'm2' }]);
     expect(readTranscriptLine(line({ type: 'assistant', isApiErrorMessage: true, message: { id: 'm3', stop_reason: 'stop_sequence', content: [] } }))).toEqual([{ kind: 'answer', time, id: 'm3' }]);
+    expect(readTranscriptLine(line({ type: 'assistant', message: { id: 'm5', stop_reason: 'refusal', content: [] } }))).toEqual([{ kind: 'answer', time, id: 'm5' }]);
     expect(readTranscriptLine(line({ type: 'assistant', isSidechain: true, message: { id: 'm4', stop_reason: 'end_turn', content: [] } }))).toEqual([]);
   });
 
@@ -66,7 +78,7 @@ describe('readTranscriptLine', () => {
 describe('watchClaude', () => {
   const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
   const now = () => new Date().toISOString();
-  const entry = (value: object) => `${JSON.stringify({ timestamp: now(), ...value })}\n`;
+  const entry = (value: object, timestamp = now()) => `${JSON.stringify({ timestamp, ...value })}\n`;
   const prompt = () => entry({ type: 'user', message: { content: 'go' } });
   const end = (id: string) => entry({ type: 'assistant', message: { id, stop_reason: 'end_turn', content: [{ type: 'text' }] } });
 
@@ -78,7 +90,7 @@ describe('watchClaude', () => {
 
   it('follows the first session that submits a prompt and ignores the others', async () => {
     const { dir, signals, kinds } = setup();
-    writeFileSync(join(dir, 'busy.jsonl'), entry({ type: 'user', message: { content: 'old prompt' } }));
+    writeFileSync(join(dir, 'busy.jsonl'), entry({ type: 'user', message: { content: 'old prompt' } }, new Date(Date.now() - 60_000).toISOString()));
     const watcher = watchClaude(dir, Date.now() / 1000 - 0.1, (signal) => signals.push(signal));
     await sleep(300);
     appendFileSync(join(dir, 'busy.jsonl'), end('b1')); // another session finishing its own turn
@@ -106,6 +118,22 @@ describe('watchClaude', () => {
     await sleep(400);
     watcher.stop();
     expect(kinds()).toEqual(['prompt']);
+  });
+
+  it('reads a prompt written after `since` to a transcript that existed before watching started', async () => {
+    // The user submits the prompt during the countdown, before the watcher's first look.
+    const { dir, signals, kinds } = setup();
+    const file = join(dir, 'session.jsonl');
+    writeFileSync(file, entry({ type: 'user', message: { content: 'earlier' } }, new Date(Date.now() - 60_000).toISOString()));
+    const since = Date.now() / 1000;
+    await sleep(50);
+    appendFileSync(file, prompt());
+    const watcher = watchClaude(dir, since, (signal) => signals.push(signal));
+    await sleep(300);
+    appendFileSync(file, end('e1'));
+    await sleep(400);
+    watcher.stop();
+    expect(kinds()).toEqual(['prompt', 'answer']);
   });
 
   it('waits for the transcript folder and for lines that are written in pieces', async () => {

@@ -4,5 +4,5 @@
     "types": ["node"],
     "allowImportingTsExtensions": true
   },
-  "include": ["vitest.config.ts", "tools"]
+  "include": ["vitest.config.ts", "tools", "packages/engine/electron/vite.config.ts"]
 }

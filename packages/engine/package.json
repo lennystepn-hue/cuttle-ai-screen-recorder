@@ -1,0 +1,11 @@
+{
+  "name": "@cuttle/engine",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": { ".": "./src/index.ts" },
+  "dependencies": {
+    "@cuttle/project": "workspace:*",
+    "@cuttle/timeline": "workspace:*"
+  }
+}

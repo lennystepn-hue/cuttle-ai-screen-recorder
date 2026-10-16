@@ -1,6 +1,5 @@
 import { createRenderer, loadEngineAssets } from '@cuttle/engine';
 import { createCursorTrack, createTimeline } from '@cuttle/timeline';
-import type { VideoSinkDecoderOptions } from 'mediabunny';
 import { planFrames } from '../frame-plan';
 import type { ExportJob, PageResult, PageSuccess } from '../job';
 import { host, PageError } from './host';
@@ -11,12 +10,6 @@ import { createVideoOutput } from './video-output';
 
 /** Seconds before a scene first shows that its decoders start. */
 const LOOKAHEAD_SECONDS = 1;
-/**
- * Decode in software: Chromium's software H.264 decoder is multi-threaded and keeps the GPU's video
- * engine free for the encoder. On the reference PC it made a 12× speed-up export 2.1× faster and a
- * plain 60 s export 1.2× faster than hardware decoding.
- */
-const DECODER: VideoSinkDecoderOptions = { hardwareAcceleration: 'prefer-software' };
 /** A clip may end this far past the last frame of the recording (rounding of recorded durations). */
 const END_TOLERANCE_SECONDS = 0.05;
 
@@ -75,7 +68,7 @@ async function exportVideo(job: ExportJob): Promise<PageSuccess> {
     const output = await createVideoOutput(canvas, project.output, job.encoder);
     sources = new SceneSources(
       plan,
-      { screen, webcam: webcam && job.webcam ? { ...webcam, offset: job.webcam.offset } : undefined, stills: job.stills, maxTextureSize, decoder: DECODER },
+      { screen, webcam: webcam && job.webcam ? { ...webcam, offset: job.webcam.offset } : undefined, stills: job.stills, maxTextureSize },
       Math.round(LOOKAHEAD_SECONDS * fps),
     );
 
@@ -132,8 +125,10 @@ export async function run(): Promise<PageResult> {
   try {
     return await exportVideo(await host().job());
   } catch (error) {
-    // Unexpected errors keep their stack on stderr (the main process forwards page errors).
-    if (!(error instanceof PageError)) console.error(error);
+    // Unexpected errors keep their stack on stderr (the main process forwards page errors as text,
+    // so name and message are spelled out: a DOMException would print as "[object DOMException]").
+    if (!(error instanceof PageError)) console.error(error instanceof Error ? `${error.name}: ${error.message}
+${error.stack ?? ''}` : String(error));
     return {
       ok: false,
       code: error instanceof PageError ? error.code : 'render',

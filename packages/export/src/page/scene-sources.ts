@@ -1,6 +1,5 @@
 import type { FrameSources } from '@cuttle/engine';
 import type { RenderState } from '@cuttle/timeline';
-import type { VideoSinkDecoderOptions } from 'mediabunny';
 import type { FramePlan, ScenePlan } from '../frame-plan';
 import { PageError } from './host';
 import { loadImage } from './images';
@@ -14,7 +13,6 @@ export interface SceneMedia {
   /** Scene index → image path of a still scene. */
   stills: Readonly<Record<number, string>>;
   maxTextureSize: number;
-  decoder: VideoSinkDecoderOptions;
 }
 
 interface OpenScene {
@@ -55,14 +53,14 @@ export class SceneSources {
   }
 
   private openScene(plan: ScenePlan): OpenScene {
-    const { screen, webcam, decoder } = this.media;
+    const { screen, webcam } = this.media;
     if (plan.kind === 'clip') {
       const screenTimes = [...new Set(plan.sourceTimes.map((t) => this.screenTime(t)))];
       const webcamTimes = plan.sourceTimes.map((t) => this.webcamTime(t)).filter((t): t is number => t !== undefined);
       return {
         plan,
-        screen: new TrackReader(screen.track, screenTimes, decoder),
-        webcam: webcam && webcamTimes.length > 0 ? new TrackReader(webcam.track, webcamTimes, decoder) : undefined,
+        screen: new TrackReader(screen.track, screenTimes, screen.decoder),
+        webcam: webcam && webcamTimes.length > 0 ? new TrackReader(webcam.track, webcamTimes, webcam.decoder) : undefined,
       };
     }
     if (plan.kind === 'still') {

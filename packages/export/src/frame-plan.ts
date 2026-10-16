@@ -1,0 +1,58 @@
+import type { Timeline } from '@cuttle/timeline';
+
+/** Where one scene is visible in the export and which source times its clip frames come from. */
+export interface ScenePlan {
+  index: number;
+  kind: 'clip' | 'still' | 'card';
+  /** First and last output frame (inclusive) on which the scene is drawn, crossfades included. */
+  firstFrame: number;
+  lastFrame: number;
+  /**
+   * Clip scenes: every source time the frames ask for, in frame order, without repeats (seconds
+   * of the screen track). Ascending: the timeline never goes back within a clip. Empty for still
+   * and card scenes.
+   */
+  sourceTimes: number[];
+}
+
+export interface FramePlan {
+  fps: number;
+  /** Output frames; frame i shows output time i / fps. */
+  frames: number;
+  /** Scenes in the order they first appear. */
+  scenes: ScenePlan[];
+}
+
+/** Frames for `duration` output seconds: every started frame counts, so the video never ends early. */
+export function frameCount(duration: number, fps: number): number {
+  return Math.max(1, Math.ceil(duration * fps - 1e-6));
+}
+
+/**
+ * Walks the timeline frame by frame and records, per scene, the frames it is visible on and the
+ * source times it needs. Export opens each scene's decoder at `firstFrame`, closes it after
+ * `lastFrame`, and decodes exactly `sourceTimes`.
+ */
+export function planFrames(timeline: Timeline, fps: number): FramePlan {
+  if (timeline.spans.length === 0) throw new Error('planFrames: the project has no scenes');
+  const frames = frameCount(timeline.duration, fps);
+  const byIndex = new Map<number, ScenePlan>();
+  for (let frame = 0; frame < frames; frame++) {
+    for (const layer of timeline.frameAt(frame / fps).layers) {
+      let plan = byIndex.get(layer.index);
+      if (!plan) {
+        plan = { index: layer.index, kind: layer.kind, firstFrame: frame, lastFrame: frame, sourceTimes: [] };
+        byIndex.set(layer.index, plan);
+      }
+      plan.lastFrame = frame;
+      if (layer.sourceTime === undefined) continue;
+      const last = plan.sourceTimes.at(-1);
+      if (last !== undefined && layer.sourceTime < last) {
+        throw new Error(`planFrames: scene ${layer.index} goes back in source time on frame ${frame}`);
+      }
+      if (layer.sourceTime !== last) plan.sourceTimes.push(layer.sourceTime);
+    }
+  }
+  // Map order is first appearance: frame order, and within a frame the layers back to front.
+  return { fps, frames, scenes: [...byIndex.values()] };
+}

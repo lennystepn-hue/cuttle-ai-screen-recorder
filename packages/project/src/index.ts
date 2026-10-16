@@ -42,3 +42,4 @@ export {
 export { formatPath, parseProject, parseProjectJson, type ParseResult, type ProjectIssue } from './parse';
 export { defaultProject } from './defaults';
 export { parseEventsJsonl } from './events';
+export { TAKE_VERSION, TakeFileSchema, parseTakeJson, trackOffset, type TakeFile, type TakeFileParseResult, type TakeFileTrack } from './take';

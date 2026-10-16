@@ -1,9 +1,9 @@
-import type { CardScene, CuttleProject, FrameStyle, Rect } from '@cuttle/project';
+import type { CardScene, CuttleProject, FrameStyle, Rect, StillScene } from '@cuttle/project';
 import type { ActiveText, RenderState, SceneFrame } from '@cuttle/timeline';
 import type { EngineAssets } from './assets';
 import { createRenderTarget, deleteRenderTarget, type RenderTarget } from './gl/target';
 import { createTexture, sourceSize, uploadTexture } from './gl/texture';
-import { placeBadge, placeOverlay, unitFor, uvRect, windowLayout, type Size, type WindowLayout } from './layout';
+import { placeBadge, placeOverlay, stillCrop, unitFor, uvRect, windowLayout, type Size, type WindowLayout } from './layout';
 import { BackgroundPass } from './passes/background';
 import { ContentPass } from './passes/content';
 import { CursorPass } from './passes/cursor';
@@ -108,6 +108,8 @@ export function createRenderer(canvas: HTMLCanvasElement | OffscreenCanvas, proj
   const cursor = own(new CursorPass(gl, output, options.assets));
   const webcam = own(new WebcamPass(gl, output));
   const webcamTexture = texture(true);
+  const stillTexture = texture(true);
+  let uploadedStill: ImageBitmap | undefined;
   let layerTarget: RenderTarget | undefined;
   let disposed = false;
 
@@ -149,6 +151,20 @@ export function createRenderer(canvas: HTMLCanvasElement | OffscreenCanvas, proj
     }
   }
 
+  function drawStill(layer: SceneFrame, scene: StillScene, sources: FrameSources): void {
+    const { chrome, layout } = frame(scene.frame);
+    if (chrome) windowPass.draw(layout, chrome, look.frame.shadow, '');
+    const image = sources.stills.get(layer.index);
+    if (!image) throw new Error(`render: no image for still scene ${layer.index}`);
+    if (image !== uploadedStill) {
+      uploadTexture(gl, stillTexture, image, true);
+      uploadedStill = image;
+    }
+    const size = { width: image.width, height: image.height };
+    const crop = stillCrop(size, { width: layout.content[2], height: layout.content[3] }, scene.motion, layer.progress);
+    content.draw(stillTexture, uvRect(crop, size), layout);
+  }
+
   function drawCard(scene: CardScene): void {
     const maxWidth = output.width * CARD_MAX_WIDTH;
     const title = sprites.label(scene.title, CARD_TITLE_STYLE, unit, maxWidth);
@@ -168,7 +184,7 @@ export function createRenderer(canvas: HTMLCanvasElement | OffscreenCanvas, proj
     background.draw(t);
     if (scene.type === 'card') drawCard(scene);
     else if (scene.type === 'clip') drawClip(layer, sources);
-    else throw new Error(`render: ${scene.type} scenes are not supported yet`);
+    else drawStill(layer, scene, sources);
   }
 
   return {

@@ -142,4 +142,21 @@ export const SCENARIOS: Scenario[] = [
   textScenario('lower-third', 'bottom'),
   textScenario('caption', 'bottom'),
   { name: 'badge', project: project({ frame: { title: TITLE } }, { scenes: [{ type: 'clip', from: 0, to: 120, speed: 12 }] }), t: 5 },
+
+  // Still scenes
+  {
+    name: 'still-browser',
+    project: project({}, { scenes: [{ type: 'still', image: 'page.png', duration: 4, frame: 'browser-light' }] }),
+    t: 1,
+  },
+  {
+    name: 'still-scroll',
+    project: project({}, { scenes: [{ type: 'still', image: 'page.png', duration: 4, motion: 'scroll', frame: 'mac-light' }] }),
+    t: 2,
+  },
+  {
+    name: 'still-kenburns',
+    project: project({}, { scenes: [{ type: 'still', image: 'page.png', duration: 4, motion: 'kenburns' }] }),
+    t: 3,
+  },
 ];

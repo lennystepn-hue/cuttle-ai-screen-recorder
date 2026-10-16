@@ -87,6 +87,11 @@ describe('render', () => {
     expect(() => render(project, { t: 0, layers: [layer(0, 1, 'clip')] })).toThrow('render: no screen frame for scene 0');
   });
 
+  it('names the still scene whose image is missing', () => {
+    const project = parse({ scenes: [{ type: 'still', image: 'p.png', duration: 1 }] });
+    expect(() => render(project, { t: 0, layers: [layer(0, 1, 'still')] })).toThrow('render: no image for still scene 0');
+  });
+
   it('crossfades: a top layer at opacity 0 changes nothing, at 1 it replaces the bottom one', () => {
     const a = render(CARDS, { t: 0, layers: [layer(0, 1)] }).pixels.data;
     const b = render(CARDS, { t: 0, layers: [layer(1, 1)] }).pixels.data;

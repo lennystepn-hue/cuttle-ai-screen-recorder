@@ -188,6 +188,27 @@ SVG rather than copied from the OS), `arrow-white`,
 `arrow-black`, `dot`, `ring`, `spotlight` (a soft light circle that slightly dims the rest). Presets are data
 plus a shader, so new ones are added without touching the engine core.
 
+Look rules (fixed in M2):
+
+- Chrome sizes are in units: 1 unit is 1 px when the output's short side is 1080 px, so every
+  format scales the same way.
+- `look.frame.enabled: false` shows the screen alone, filling the output (letterboxed) with square
+  corners and no shadow. `style: "none"` keeps the padding, the rounded corners and the shadow,
+  without a title bar. Still scenes use their own `frame` style with `look.frame.radius` and
+  `shadow`, and no title.
+- Only `system` follows the pointer shape; its art is Windows-like for now (macOS lookalikes come in
+  phase 3), and the designed cursors keep their look. The cursor is 32 source px tall on a
+  1080-row screen (proportionally bigger on taller screens), times `size`, scaled with the zoom
+  like the screen, clipped to the window's rounded corners, and hidden while off the captured area.
+- `fill` masks use the median colour around the mask; `blur` masks blur so strongly that text
+  cannot be read, and more strongly the larger the mask. Both cover every source pixel they touch
+  plus at least one extra output pixel on every side, more under strong zoom, so no hairline of
+  the hidden content shows. `fill` is the safer choice for tokens and keys.
+- Texts: `position` picks top, centre or bottom of the output; `lower-third` is left-aligned, the
+  other styles centred. The speed badge sits in the screen's top-right corner. The webcam
+  bubble is not mirrored.
+- Procedural backgrounds drift slowly with output time.
+
 ## Export (`packages/export`)
 
 - Runs in a hidden Electron window (CLI and app).
@@ -266,8 +287,9 @@ It also records the lessons from the treg demo:
 ## Testing
 
 - `project`, `timeline`: vitest unit tests (time mapping, easing, overlaps, migrations).
-- `engine`: golden-image tests; render known states in headless Electron and compare PNGs with a
-  tolerance.
+- `engine`: golden-image tests: known states rendered in headless Chromium (vitest browser mode,
+  SwiftShader) and compared with committed PNGs, one set per platform; `pnpm engine:electron`
+  renders the same states in a hidden Electron window and compares them with the same PNGs.
 - `export`: end-to-end render of a short ffmpeg `testsrc` fixture; check duration, frame count and
   audio with ffprobe.
 - `recorder`: a test backend that uses ffmpeg `testsrc`/`sine` instead of real devices; trigger

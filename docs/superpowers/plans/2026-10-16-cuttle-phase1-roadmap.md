@@ -31,7 +31,7 @@ files, no overlap).
 | # | Milestone | Detailed plan | Done when |
 |---|---|---|---|
 | M1 | Monorepo, `@cuttle/project`, `@cuttle/timeline` | `2026-10-16-cuttle-m1-foundation.md` | `pnpm test` and `pnpm typecheck` pass; timeline answers every spec rule with a test |
-| M2 | `@cuttle/engine` (WebGL2 compositor + presets) | write before starting | Golden-image tests for each preset, frame style, mask style, text style, the badge and all six cursor styles (with click ripple) pass in headless Electron |
+| M2 | `@cuttle/engine` (WebGL2 compositor + presets) | `2026-10-16-cuttle-m2-engine.md` | Golden-image tests for each preset, frame style, mask style, text style, the badge and all six cursor styles (with click ripple) pass in headless Electron |
 | M3 | `@cuttle/export` (decode → render → encode → mux, audio via ffmpeg) | write before starting | A 10 s `testsrc` fixture renders to 16:9, 1:1 and 9:16; ffprobe shows the expected duration (±1 frame), size, H.264 and AAC |
 | M4 | `@cuttle/recorder` (devices, ffmpeg backends, events, triggers, markers) | write before starting | The `test` backend records a 3 s take with all tracks; `untilFile` and `untilClaude` (fake transcript) stop it; a manual Windows run records a monitor |
 | M5 | `apps/cli` (`cuttle …`) | write before starting | Every spec command exists with `--json`; snapshot tests pass; the treg demo can be rebuilt from its takes with `cuttle suggest`, a few JSON edits and `cuttle render` |
@@ -97,10 +97,19 @@ Interfaces the later milestones introduce (their detailed plans must keep these 
 export interface FrameSources {
   screens: Map<number, TexImageSource>;    // scene index → decoded frame at that layer's sourceTime
   webcams: Map<number, TexImageSource>;    // scene index → webcam frame at that layer's sourceTime
-  stills: Map<number, ImageBitmap>;        // scene index → image for still scenes
+  stills: Map<number, ImageBitmap>;        // scene index → image for still scenes (premultiplied, not flipped,
+                                           //   at most MAX_TEXTURE_SIZE per side)
 }
+// render throws on a missing screen frame or still, a lost WebGL context and an oversized still
 export interface Renderer { render(state: RenderState, sources: FrameSources): void; dispose(): void }
-export function createRenderer(canvas: HTMLCanvasElement | OffscreenCanvas, project: CuttleProject): Renderer;
+export interface EngineAssets { cursors: ReadonlyMap<CursorImage, ImageBitmap> }
+export function loadEngineAssets(): Promise<EngineAssets>;  // Inter fonts + cursor art; needs a window, load once
+export interface RendererOptions {
+  assets: EngineAssets;
+  screenSize: { width: number; height: number };            // same as for createTimeline
+  backgroundImage?: ImageBitmap;                            // required for look.background.preset 'image'
+}
+export function createRenderer(canvas: HTMLCanvasElement | OffscreenCanvas, project: CuttleProject, options: RendererOptions): Renderer;
 
 // @cuttle/export (M3)
 export interface ExportOptions { projectDir: string; format: '16:9' | '1:1' | '9:16'; out: string; onProgress?: (done: number, total: number) => void }
@@ -127,11 +136,8 @@ export function record(opts: RecordOptions): { stop(): Promise<Take>; done: Prom
   import them without a bundler (or tsx), so M3–M5 need one. M2 needs the DOM lib: move to
   per-package tsconfigs instead of adding DOM to the root config, which would leak DOM globals into
   the pure packages.
-- **M2:** WebGL2 in Electron's hidden `BrowserWindow` with `show: false` and `offscreen: true`
-  (preserveDrawingBuffer for readback); how to load a golden PNG in the test harness; pixelmatch
-  tolerance that survives GPU differences between Windows and macOS CI. Cursor art: the `system`
-  style needs redistributable pointer images per shape (draw our own lookalikes as SVG rather than
-  copying OS cursor files, whose license is unclear); the five designed cursors are SVG too.
+- **M2:** done; see "Decisions made while planning" and "Changes during execution" in
+  `2026-10-16-cuttle-m2-engine.md`.
 - **M3:** Electron's WebCodecs H.264 encoder availability (`VideoEncoder.isConfigSupported` with
   `avc1.640028`, 1920×1080) on Windows and macOS; fallback is piping RGBA frames to an ffmpeg
   child on stdin. Current mp4-muxer and mp4box.js APIs. Decoding strategy: sequential decode with
@@ -139,6 +145,20 @@ export function record(opts: RecordOptions): { stop(): Promise<Take>; done: Prom
   before the boundary while the outgoing clip still plays, so pre-decode each clip's first frame
   (or run a second decoder) and hold one cloned frame for the outgoing layer. Read `screenSize`
   from the track metadata and fail clearly when it is missing (a crashed take).
+  Already verified in the M2 spike (Electron 44.7.2, Chromium 152, Windows): `VideoEncoder` reports
+  `avc1.640028` 1080p30 as supported (hardware and software); a 30-frame H.264 encode and decode of
+  a WebGL canvas through `new VideoFrame(canvas)` works at 640×360 and 1920×1080, under SwiftShader
+  too. WebCodecs needs a secure context: load the export page with `loadFile` (as
+  `packages/engine/electron/main.mjs` does), never a `data:` URL, where `VideoEncoder` is undefined.
+  A hidden window (`show: false`) keeps rendering at full rate; `offscreen: true` and
+  `backgroundThrottling: false` changed nothing.
+  From the M2 reviews: create one renderer per export or preview session (each `createRenderer`
+  compiles every program) and drop the canvas or call `loseContext()` when it ends; `render` throws
+  on a lost context, but check `gl.isContextLost()` before encoding each frame as well. Pass only
+  decoded frames: a 0×0 source (a video element without data) draws the previous frame or black
+  without an error, and a missing webcam frame draws no bubble. Still images larger than
+  `MAX_TEXTURE_SIZE` (8192 under SwiftShader) are refused: upload only the visible band
+  (`UNPACK_SKIP_ROWS` with a sized `texImage2D`, checked in a probe) or downscale at decode time.
 - **M4:** Mapping from Electron `screen.getAllDisplays()` to ffmpeg `ddagrab output_idx` (on the
   user's PC, `output_idx=0` was the 2560×1440 primary and `1` a 1920×1080 secondary; match by
   size and position, never by order). Graceful ffmpeg stop by writing `q` to stdin. Fragmented MP4

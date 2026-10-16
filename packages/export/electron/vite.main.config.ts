@@ -17,6 +17,7 @@ export default defineConfig({
     rollupOptions: {
       input: {
         cli: fileURLToPath(new URL('./cli.ts', import.meta.url)),
+        check: fileURLToPath(new URL('./check.ts', import.meta.url)),
       },
       external: ['electron'],
       // Shared chunks stay next to the entries: exportProject finds export-page/ relative to its own file.

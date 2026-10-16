@@ -1,0 +1,116 @@
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { TEST_DEVICES, areaGeometry, checkDevice, micInput, micLatency, platformFor, resolveArea, screenInput, webcamInput } from '../src/sources';
+import type { Devices } from '../src/types';
+
+const devices: Devices = {
+  monitors: [
+    { index: 0, name: 'DISPLAY1', bounds: { x: 0, y: 0, width: 2560, height: 1440 }, scale: 1.25, primary: true },
+    { index: 1, name: 'DISPLAY2', bounds: { x: 2560, y: 509, width: 1920, height: 1080 }, scale: 1, primary: false },
+    { index: 2, name: 'DISPLAY3', bounds: { x: -1080, y: -335, width: 1080, height: 1920 }, scale: 1, primary: false },
+  ],
+  windows: [
+    { title: 'Claude Code - demo', bounds: { x: 2600, y: 600, width: 801, height: 501 }, monitor: 1 },
+    { title: 'Editor', bounds: { x: -1200, y: 100, width: 700, height: 400 }, monitor: 2 },
+    { title: 'Browser - docs', bounds: { x: 10, y: 10, width: 100, height: 100 }, monitor: 0 },
+    { title: 'Browser - mail', bounds: { x: 10, y: 10, width: 100, height: 100 }, monitor: 0 },
+  ],
+  cameras: ['Cam'],
+  mics: ['Mic (USB)'],
+};
+
+afterEach(() => vi.unstubAllGlobals());
+
+describe('platformFor', () => {
+  it('uses the test backend anywhere and real capture on Windows only', () => {
+    expect(platformFor('test')).toBe('test');
+    vi.stubGlobal('process', { ...process, platform: 'darwin' });
+    expect(() => platformFor('auto')).toThrow(expect.objectContaining({ code: 'unsupported-platform' }));
+    vi.stubGlobal('process', { ...process, platform: 'win32' });
+    expect(platformFor()).toBe('windows');
+  });
+});
+
+describe('resolveArea', () => {
+  it('captures a whole monitor', () => {
+    const area = resolveArea({ kind: 'monitor', index: 1 }, devices);
+    expect(area).toEqual({ monitor: devices.monitors[1] });
+    expect(areaGeometry(area)).toEqual({ size: { width: 1920, height: 1080 }, origin: { x: 2560, y: 509 } });
+  });
+
+  it('names the monitors when the index does not exist', () => {
+    expect(() => resolveArea({ kind: 'monitor', index: 5 }, devices)).toThrow(
+      expect.objectContaining({ code: 'device-not-found', message: 'there is no monitor 5; monitors: 0 (2560×1440), 1 (1920×1080), 2 (1080×1920)' }),
+    );
+  });
+
+  it('crops a region in monitor pixels, rounding the size down to even numbers', () => {
+    const area = resolveArea({ kind: 'region', rect: [100, 50, 401, 301], monitor: 2 }, devices);
+    expect(area.crop).toEqual({ x: 100, y: 50, width: 400, height: 300 });
+    expect(areaGeometry(area)).toEqual({ size: { width: 400, height: 300 }, origin: { x: -980, y: -285 } });
+  });
+
+  it('treats a region that covers the whole monitor as the monitor', () => {
+    expect(resolveArea({ kind: 'region', rect: [0, 0, 1920, 1080], monitor: 1 }, devices).crop).toBeUndefined();
+  });
+
+  it('refuses a region outside its monitor', () => {
+    for (const rect of [[1800, 0, 200, 100], [-1, 0, 200, 100], [0, 0, 1, 100]] as const) {
+      expect(() => resolveArea({ kind: 'region', rect: [...rect], monitor: 1 }, devices)).toThrow(expect.objectContaining({ code: 'invalid-options' }));
+    }
+  });
+
+  it('captures a window as the region of its bounds', () => {
+    const area = resolveArea({ kind: 'window', title: 'Claude Code - demo' }, devices);
+    expect(area).toEqual({ monitor: devices.monitors[1], crop: { x: 40, y: 91, width: 800, height: 500 } });
+    expect(areaGeometry(area).origin).toEqual({ x: 2600, y: 600 });
+  });
+
+  it('clips a window to the monitor that holds its centre', () => {
+    expect(resolveArea({ kind: 'window', title: 'Editor' }, devices).crop).toEqual({ x: 0, y: 435, width: 580, height: 400 });
+  });
+
+  it('finds a window by a unique part of its title, ignoring case', () => {
+    expect(resolveArea({ kind: 'window', title: 'claude code' }, devices).monitor.index).toBe(1);
+    expect(() => resolveArea({ kind: 'window', title: 'browser' }, devices)).toThrow(
+      expect.objectContaining({ code: 'invalid-options', message: '"browser" matches 2 windows: "Browser - docs", "Browser - mail"' }),
+    );
+    expect(() => resolveArea({ kind: 'window', title: 'Terminal' }, devices)).toThrow(expect.objectContaining({ code: 'device-not-found' }));
+  });
+});
+
+describe('checkDevice', () => {
+  it('checks camera and mic names against the list', () => {
+    expect(() => checkDevice('mic', 'Mic (USB)', devices)).not.toThrow();
+    expect(() => checkDevice('camera', 'Webcam', devices)).toThrow(
+      expect.objectContaining({ code: 'device-not-found', message: 'there is no camera "Webcam"; cameras: "Cam"' }),
+    );
+  });
+});
+
+describe('ffmpeg inputs', () => {
+  it('grabs a monitor with ddagrab on Windows, cropped on the GPU for a region', () => {
+    const monitor = devices.monitors[1]!;
+    expect(screenInput('windows', { monitor }, false)).toEqual(['-f', 'lavfi', '-i', 'ddagrab=output_idx=1:framerate=30:draw_mouse=0,hwdownload,format=bgra,settb=1/1000000']);
+    expect(screenInput('windows', { monitor, crop: { x: 40, y: 92, width: 800, height: 500 } }, true)[3]).toBe(
+      'ddagrab=output_idx=1:framerate=30:draw_mouse=1:offset_x=40:offset_y=92:video_size=800x500,hwdownload,format=bgra,settb=1/1000000',
+    );
+  });
+
+  it('paces the test patterns in real time', () => {
+    const [moving, still] = TEST_DEVICES.monitors;
+    expect(screenInput('test', { monitor: moving! }, false)[3]).toBe('testsrc2=s=1280x720:r=30,realtime,settb=1/1000000');
+    expect(screenInput('test', { monitor: still! }, false)[3]).toBe('testsrc2=s=640x360:r=30:d=1,tpad=stop=-1:stop_mode=clone,realtime,settb=1/1000000');
+    expect(screenInput('test', { monitor: moving!, crop: { x: 2, y: 4, width: 100, height: 50 } }, false)[3]).toBe(
+      'testsrc2=s=1280x720:r=30,crop=100:50:2:4,realtime,settb=1/1000000',
+    );
+    expect(webcamInput('test', 'Failing Test Camera')[3]).toBe('testsrc=s=640x480:r=30:d=1,realtime,settb=1/1000000');
+    expect(micInput('test', 'Silent Test Microphone')[3]).toBe('anullsrc=r=48000:cl=mono,arealtime');
+  });
+
+  it('opens DirectShow devices with a small mic buffer and corrects the mic start by it', () => {
+    expect(webcamInput('windows', 'Cam')).toEqual(['-f', 'dshow', '-rtbufsize', '256M', '-i', 'video=Cam']);
+    expect(micInput('windows', 'Mic (USB)')).toEqual(['-f', 'dshow', '-audio_buffer_size', '50', '-i', 'audio=Mic (USB)']);
+    expect(micLatency('windows')).toBe(0.05);
+    expect(micLatency('test')).toBe(0);
+  });
+});

@@ -14,7 +14,7 @@ TypeScript tested with vitest. `engine` and `export` run in Chromium (a hidden E
 use WebGL2 and WebCodecs. `recorder` is Node and drives ffmpeg. `apps/cli` ties them together.
 
 **Tech Stack:** TypeScript 5, pnpm workspaces, vitest, zod 4, Electron, WebGL2, WebCodecs,
-mp4box.js, mp4-muxer, ffmpeg, uiohook-napi, commander.
+Mediabunny, ffmpeg, uiohook-napi, commander.
 
 ---
 
@@ -32,7 +32,7 @@ files, no overlap).
 |---|---|---|---|
 | M1 | Monorepo, `@cuttle/project`, `@cuttle/timeline` | `2026-10-16-cuttle-m1-foundation.md` | `pnpm test` and `pnpm typecheck` pass; timeline answers every spec rule with a test |
 | M2 | `@cuttle/engine` (WebGL2 compositor + presets) | `2026-10-16-cuttle-m2-engine.md` | Golden-image tests for each preset, frame style, mask style, text style, the badge and all six cursor styles (with click ripple) pass in headless Electron |
-| M3 | `@cuttle/export` (decode → render → encode → mux, audio via ffmpeg) | write before starting | A 10 s `testsrc` fixture renders to 16:9, 1:1 and 9:16; ffprobe shows the expected duration (±1 frame), size, H.264 and AAC |
+| M3 | `@cuttle/export` (decode → render → encode → mux, audio via ffmpeg) | `2026-10-16-cuttle-m3-export.md` | A 10 s `testsrc` fixture renders to 16:9, 1:1 and 9:16; ffprobe shows the expected duration (±1 frame), size, H.264 and AAC |
 | M4 | `@cuttle/recorder` (devices, ffmpeg backends, events, triggers, markers) | write before starting | The `test` backend records a 3 s take with all tracks; `untilFile` and `untilClaude` (fake transcript) stop it; a manual Windows run records a monitor |
 | M5 | `apps/cli` (`cuttle …`) | write before starting | Every spec command exists with `--json`; snapshot tests pass; the treg demo can be rebuilt from its takes with `cuttle suggest`, a few JSON edits and `cuttle render` |
 | M6 | `skill/` + installer | write before starting | `pnpm skill:install` writes `~/.claude/skills/cuttle/SKILL.md`; a fresh Claude Code session follows it end to end |
@@ -55,7 +55,12 @@ export type TextOverlay = CuttleProject['texts'][number];
 export type InputEvent = z.output<typeof InputEventSchema>;   // one line of events.jsonl;
 // t in source seconds; x, y in source pixels of the screen track (capture origin subtracted,
 // display scale applied); outside [0, width) × [0, height) means off the captured area
-export function parseEventsJsonl(text: string): { events: InputEvent[]; issues: ProjectIssue[] }; // M4, first step
+export function parseEventsJsonl(text: string): { events: InputEvent[]; issues: ProjectIssue[] }; // M3; drops a cut-off last line
+export type TakeFile = z.output<typeof TakeFileSchema>;         // take.json (M3): per-track first-capture times
+// { version: 1, tracks: { screen: { file, start }, webcam?: { file, start }, mic?: { file, start } } },
+// start in seconds on one monotonic clock; written by the recorder next to the take's tracks
+export function parseTakeJson(text: string): { ok: true; take: TakeFile } | { ok: false; issues: ProjectIssue[] };
+export function trackOffset(take: TakeFile, track: 'webcam' | 'mic'): number | undefined; // track start − screen start
 export type CursorShape = 'arrow' | 'text' | 'pointer' | 'wait' | 'crosshair' | 'move' | 'not-allowed';
 export type CursorStyle = 'system' | 'arrow-white' | 'arrow-black' | 'dot' | 'ring' | 'spotlight';
 export function parseProject(raw: unknown): ParseResult;
@@ -115,9 +120,26 @@ export interface RendererOptions {
 }
 export function createRenderer(canvas: HTMLCanvasElement | OffscreenCanvas, project: CuttleProject, options: RendererOptions): Renderer;
 
-// @cuttle/export (M3)
-export interface ExportOptions { projectDir: string; format: '16:9' | '1:1' | '9:16'; out: string; onProgress?: (done: number, total: number) => void }
-export function exportProject(opts: ExportOptions): Promise<{ out: string; frames: number; seconds: number }>;
+// @cuttle/export (M3) – Electron main process; bundle it with Vite and ship dist/export-page/ next to the bundle
+export interface ExportOptions {
+  projectDir: string;
+  format?: '16:9' | '1:1' | '9:16';                         // without it: the project's output size
+  out: string;                                               // written only on success (temp file + rename)
+  onProgress?: (done: number, total: number) => void;        // frames
+  encoder?: 'auto' | 'hardware' | 'software';                // auto: hardware first, software fallback
+  pageDir?: string;                                          // default: export-page/ next to the bundle
+}
+export interface ExportResult {
+  out: string; frames: number; seconds: number;              // seconds = frames / fps
+  stats: { gpu: string; codec: string; hardwareAcceleration: 'prefer-hardware' | 'prefer-software'; bitrate: number;
+           page: { decodeMs: number; renderMs: number; encodeMs: number; finalizeMs: number; totalMs: number };
+           audioMs: number; totalMs: number };
+}
+export function exportProject(opts: ExportOptions): Promise<ExportResult>;
+export class ExportError extends Error {                     // CLI exit codes: 1, 1, 1, 2, 3
+  code: 'invalid-project' | 'missing-file' | 'invalid-media' | 'ffmpeg-missing' | 'render';
+}
+export const EXPORT_FORMATS: Record<'16:9' | '1:1' | '9:16', { width: number; height: number }>; // 1920×1080, 1080×1080, 1080×1920
 
 // @cuttle/recorder (M4)
 export interface RecordOptions {
@@ -145,29 +167,7 @@ export function record(opts: RecordOptions): { stop(): Promise<Take>; done: Prom
   imports; the engine imports its fonts that way).
 - **M2:** done; see "Decisions made while planning" and "Changes during execution" in
   `2026-10-16-cuttle-m2-engine.md`.
-- **M3:** Electron's WebCodecs H.264 encoder availability (`VideoEncoder.isConfigSupported` with
-  `avc1.640028`, 1920×1080) on Windows and macOS; fallback is piping RGBA frames to an ffmpeg
-  child on stdin. Current mp4-muxer and mp4box.js APIs. Decoding strategy: sequential decode with
-  a frame queue, not per-frame seeking; but a crossfade needs the incoming clip's first frame
-  before the boundary while the outgoing clip still plays, so pre-decode each clip's first frame
-  (or run a second decoder) and hold one cloned frame for the outgoing layer. Read `screenSize`
-  from the track metadata and fail clearly when it is missing (a crashed take).
-  Already verified in the M2 spike (Electron 44.7.2, Chromium 152, Windows): `VideoEncoder` reports
-  `avc1.640028` 1080p30 as supported (hardware and software); a 30-frame H.264 encode and decode of
-  a WebGL canvas through `new VideoFrame(canvas)` works at 640×360 and 1920×1080, under SwiftShader
-  too. WebCodecs needs a secure context: load the export page with `loadFile` (as
-  `packages/engine/electron/main.mjs` does), never a `data:` URL, where `VideoEncoder` is undefined.
-  A hidden window (`show: false`) keeps rendering at full rate; `offscreen: true` and
-  `backgroundThrottling: false` changed nothing.
-  From the M2 reviews: create one renderer per export or preview session (each `createRenderer`
-  compiles every program) and drop the canvas or call `loseContext()` when it ends; `render` throws
-  on a lost context, but check `gl.isContextLost()` before encoding each frame as well. It also
-  throws on an empty (0×0) screen frame, e.g. a closed `VideoFrame`; a missing or empty webcam
-  frame only drops the bubble, so supply one wherever the webcam track covers the source time.
-  No golden covers a clip inside the crossfade target yet (clip→clip with masks and a cursor);
-  add one when the export first crossfades real clips. Still images larger than
-  `MAX_TEXTURE_SIZE` (8192 under SwiftShader) are refused: upload only the visible band
-  (`UNPACK_SKIP_ROWS` with a sized `texImage2D`, checked in a probe) or downscale at decode time.
+- **M3:** done; see "Decisions made while planning" in `2026-10-16-cuttle-m3-export.md`.
 - **M4:** Mapping from Electron `screen.getAllDisplays()` to ffmpeg `ddagrab output_idx` (on the
   user's PC, `output_idx=0` was the 2560×1440 primary and `1` a 1920×1080 secondary; match by
   size and position, never by order). Graceful ffmpeg stop by writing `q` to stdin. Fragmented MP4
@@ -178,11 +178,25 @@ export function record(opts: RecordOptions): { stop(): Promise<Take>; done: Prom
   macOS: best effort, `arrow` fallback. uiohook reports global desktop coordinates (negative left of
   the primary monitor; points, not Retina pixels, on macOS): subtract the capture origin and apply
   the display scale before writing `events.jsonl`. Drop events with `t < 0` (before the first
-  frame). First step of M4: `parseEventsJsonl` in `@cuttle/project`, tolerant of a truncated last
-  line, shared by M3 (cursor track for export) and M5 (`cuttle suggest`). Claude transcripts live in `~/.claude/projects/<cwd with : \ / replaced by ->/`
+  frame). M3 added `parseEventsJsonl` (tolerant of a cut-off last line) and the take.json schema
+  (`TakeFileSchema`, `parseTakeJson`, `trackOffset`) to `@cuttle/project`: write events.jsonl in
+  screen-track seconds and take.json next to the tracks, each track with its file name and the time
+  its first frame or sample was captured on one monotonic clock. Encode screen and webcam with the
+  BT.709 matrix and tags (`-vf scale=out_color_matrix=bt709:out_range=tv,format=yuv420p -colorspace
+  bt709 -color_range tv`): Chromium decodes untagged HD video as BT.709 and ffmpeg's default RGB
+  conversion is BT.601, which shifts every colour. Force a key frame every 2 s
+  (`-force_key_frames "expr:gte(t,n_forced*2)"`, works with variable frame rate): each fragment is
+  one GOP, so libx264's default of 250 frames loses up to 8 s in a crash and makes export decode up
+  to 249 extra frames at a scene start. Claude transcripts live in `~/.claude/projects/<cwd with : \ / replaced by ->/`
   and have `timestamp`, `type` and `message.stop_reason`.
 - **M5:** commander version; how the CLI starts the bundled Electron for `render`, `preview` and
-  `capture-page`; `pnpm link --global` on Windows.
+  `capture-page`; `pnpm link --global` on Windows. From M3: bundle the Electron entry with Vite like
+  `packages/export/electron/vite.main.config.ts` (`ssr.noExternal: true`, `electron` external) and
+  copy the page build (`vite.page.config.ts`) to `export-page/` next to it, or pass `pageDir`;
+  register a no-op `window-all-closed` (closing the export window must not quit) and an
+  `uncaughtException` handler; drop Chromium switches from `process.argv` (see
+  `packages/export/electron/cli.ts`); map `ExportError.code` to exit codes 1/1/1/2/3; `--json`
+  prints `ExportResult`.
 - **M6:** current Claude skill frontmatter (`name`, `description`) and the user-level skill folder.
 
 ## Lessons from the manual run (carry into M4–M6)

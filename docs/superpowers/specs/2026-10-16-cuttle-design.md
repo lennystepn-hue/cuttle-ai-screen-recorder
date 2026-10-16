@@ -137,12 +137,14 @@ webcam and mic.
 | Mic | ffmpeg `dshow` | ffmpeg `avfoundation` |
 | Input events | `uiohook-napi` | `uiohook-napi` |
 
-- Video tracks are written as fragmented MP4 (H.264, 4:2:0, high quality CRF) so a killed process
-  leaves a readable file.
+- Video tracks are written as fragmented MP4 (H.264, 4:2:0, high quality CRF, BT.709 matrix and
+  tags, a key frame every 2 s) so a killed process leaves a readable file.
 - `events.jsonl`: mouse position (~60 Hz), clicks, scroll, cursor shape changes and key-press
   counts. Key contents are never stored. Cursor shape comes from `GetCursorInfo` on Windows; on
   macOS it is best effort and falls back to `arrow`.
-- `take.json`: per-track start times on one monotonic clock, used for sync.
+- `take.json`: per-track start times on one monotonic clock, used for sync: `{ "version": 1,
+  "tracks": { "screen": { "file": "screen.mp4", "start": 1000.0 }, "webcam": { … }, "mic": { … } } }`,
+  `start` = when the track's first frame or sample was captured (schema in `@cuttle/project`).
 - Stop triggers, combinable: hotkey, max duration, `--until-file <path>`, `--until-idle <s>`
   (screen unchanged for N seconds), `--until-claude [<cwd>]` (latest Claude Code transcript for that
   folder shows an assistant message with `stop_reason: end_turn` after the recording started; then a
@@ -163,8 +165,9 @@ webcam and mic.
   (default 0.6 s in, 0.6 s out). Overlapping zooms fold in `at` order, each easing from the rect
   already on screen, so the one with the later `at` wins without jumping to the full frame. Zoom
   targets are fitted to the screen's aspect ratio and kept inside the screen.
-- A clip that is still visible after its end (outgoing side of a crossfade) holds its last output
-  frame, which lies inside `[from, to)`, so masks stay on.
+- A clip that is still visible after its end (outgoing side of a crossfade) holds the last output
+  frame shown before its end, which lies inside `[from, to)`, so masks stay on and the clip's
+  source time never goes back.
 - Active masks and texts for the current source time.
 - Badge text for scenes with `speed > 1`.
 - Cursor at the source time: position interpolated between logged samples, the latest shape, and
@@ -215,11 +218,16 @@ Look rules (fixed in M2):
 
 ## Export (`packages/export`)
 
-- Runs in a hidden Electron window (CLI and app).
-- Demux with mp4box.js, decode with WebCodecs `VideoDecoder`, render each output frame with the
-  engine, encode with `VideoEncoder` (H.264 High, hardware when available), mux with mp4-muxer.
-- Audio: ffmpeg cuts the mic track to the scene list, mutes sped-up scenes (`muteSpedUp`), and muxes
-  it into the final file. AAC 48 kHz.
+- Runs in a hidden, sandboxed Electron window (CLI and app). The main process serves the project's
+  files to it over IPC by byte range, so recordings never sit in memory.
+- Demux, decode and mux with Mediabunny: decode with WebCodecs `VideoDecoder` (in software, one
+  decoder per scene and track, started a second before the scene shows), render each output frame
+  with the engine, encode with `VideoEncoder` (H.264 High at the smallest fitting level, about
+  10 Mbit/s at 1080p30, a key frame every 2 s; hardware when available, software otherwise).
+- Webcam and mic are lined up with the screen by the start times in `take.json`.
+- Audio: ffmpeg cuts the mic track to the scene list, mutes sped-up scenes (`muteSpedUp`; otherwise
+  `atempo`), fades out and in at cuts over half the crossfade (at least 10 ms), and muxes it into
+  the final file. AAC 48 kHz stereo; a silent track when there is no mic or audio is off.
 - Output presets: 16:9 1920×1080 (default), 1:1 1080×1080, 9:16 1080×1920. The window frame and
   content scale to fit; masks and zooms keep their source coordinates.
 - Target: 1080p30 export in at most 2× the video's duration on the user's PC.
@@ -294,8 +302,10 @@ It also records the lessons from the treg demo:
 - `engine`: golden-image tests: known states rendered in headless Chromium (vitest browser mode,
   SwiftShader) and compared with committed PNGs, one set per platform; `pnpm engine:electron`
   renders the same states in a hidden Electron window and compares them with the same PNGs.
-- `export`: end-to-end render of a short ffmpeg `testsrc` fixture; check duration, frame count and
-  audio with ffprobe.
+- `export`: unit tests for the pure parts (formats, codec string, frame plan, audio filter graph,
+  source loading); `pnpm export:check` renders a 10 s ffmpeg `testsrc` fixture (every scene type,
+  speed-up, zoom, masks, texts, webcam, cursor, crossfades, mic) to all three formats in a hidden
+  Electron window and checks duration, frame count, size, codecs and audio with ffprobe.
 - `recorder`: a test backend that uses ffmpeg `testsrc`/`sine` instead of real devices; trigger
   tests for `--until-file`, `--until-idle` and `--until-claude` with a fake transcript.
 - `cli`: snapshot tests of `--json` output.

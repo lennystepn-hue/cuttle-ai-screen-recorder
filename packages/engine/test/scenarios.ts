@@ -159,4 +159,30 @@ export const SCENARIOS: Scenario[] = [
     project: project({}, { scenes: [{ type: 'still', image: 'page.png', duration: 4, motion: 'kenburns' }] }),
     t: 3,
   },
+
+  // Crossfade from a clip to a card, halfway
+  {
+    name: 'crossfade',
+    project: project(
+      { frame: { title: TITLE } },
+      { scenes: [{ type: 'clip', from: 0, to: 2 }, { type: 'card', title: 'The end', duration: 2 }] },
+    ),
+    t: 2,
+  },
+
+  // Other output formats: everything scales with the short side
+  ...(
+    [
+      ['format-square', 360, 360],
+      ['format-vertical', 360, 640],
+    ] as const
+  ).map(([name, width, height]) => ({
+    name,
+    project: project(
+      { frame: { title: TITLE }, webcam: { enabled: true } },
+      { output: { width, height, fps: 30 }, texts: [{ at: 0, duration: 10, text: 'One prompt, one call' }] },
+    ),
+    t: 5,
+    webcam: true,
+  })),
 ];

@@ -1,16 +1,4 @@
 {
-  "compilerOptions": {
-    "target": "ES2022",
-    "module": "ESNext",
-    "moduleResolution": "Bundler",
-    "lib": ["ES2022"],
-    "strict": true,
-    "noUncheckedIndexedAccess": true,
-    "isolatedModules": true,
-    "verbatimModuleSyntax": true,
-    "skipLibCheck": true,
-    "noEmit": true,
-    "types": []
-  },
-  "include": ["packages/*/src", "packages/*/test", "vitest.config.ts"]
+  "extends": "./tsconfig.base.json",
+  "include": ["packages/project/src", "packages/project/test", "packages/timeline/src", "packages/timeline/test"]
 }

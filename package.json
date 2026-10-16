@@ -6,10 +6,20 @@
   "scripts": {
     "test": "vitest run",
     "test:watch": "vitest",
-    "typecheck": "tsc -p tsconfig.json"
+    "engine:electron": "vite build --config packages/engine/electron/vite.config.ts && electron packages/engine/electron/main.mjs",
+    "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.node.json && tsc -p packages/engine/tsconfig.json"
   },
   "devDependencies": {
+    "@types/node": "^22.20.5",
+    "@types/pngjs": "^6.0.5",
+    "@vitest/browser-playwright": "5.0.5",
+    "electron": "^44.7.2",
+    "pixelmatch": "^8.0.0",
+    "playwright": "1.64.1",
+    "pngjs": "^7.0.0",
     "typescript": "^5.9.3",
-    "vitest": "^5.0.5"
+    "vite": "8.3.4",
+    "vitest": "5.0.5",
+    "zod": "^4.6.7"
   }
 }

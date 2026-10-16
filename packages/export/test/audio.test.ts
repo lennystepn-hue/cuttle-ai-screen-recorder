@@ -31,18 +31,24 @@ describe('planAudio', () => {
   it('plays the mic for clips, mutes sped-up clips and keeps stills silent', () => {
     const segments = plan({ scenes });
     expect(segments.map((s) => s.mic)).toEqual([
-      { from: 48_000, to: 144_000, speed: 1 },
+      { from: 48_000, to: 144_000, speed: 1, content: 96_000 },
       undefined,
       undefined,
-      { from: 24_000, to: 72_000, speed: 1 },
+      { from: 24_000, to: 72_000, speed: 1, content: 48_000 },
     ]);
     const loud = plan({ scenes, look: { audio: { muteSpedUp: false } } });
-    expect(loud[1]!.mic).toEqual({ from: 144_000, to: 528_000, speed: 4 });
+    expect(loud[1]!.mic).toEqual({ from: 144_000, to: 528_000, speed: 4, content: 96_000 });
   });
 
   it('is silent without a mic or with audio switched off', () => {
     expect(plan({ scenes }, 6, false).every((s) => s.mic === undefined)).toBe(true);
     expect(plan({ scenes, look: { audio: { enabled: false } } }).every((s) => s.mic === undefined)).toBe(true);
+  });
+
+  it('knows how much of each segment the mic fills; the rest is padding up to the frame grid', () => {
+    const segments = plan({ scenes }, 6.02);
+    expect(segments.map((s) => s.mic?.content)).toEqual([96_000, undefined, undefined, 48_000]);
+    expect(segments[3]!.samples).toBe(48_960);
   });
 
   it('fades over half the crossfade at cuts and 10 ms at the very start and end', () => {
@@ -75,6 +81,18 @@ describe('audioFilterGraph', () => {
     ]);
   });
 
+  it('ends the fade-out where the mic ends, not in the padding after it', () => {
+    const graph = audioFilterGraph(plan({ scenes }, 6.02));
+    expect(graph).toContain('atrim=end_sample=48960,asetpts=N/SR/TB,afade=t=in:ss=0:ns=7200,afade=t=out:ss=47520:ns=480[s3]');
+  });
+
+  it('reads a little past a sped-up clip, because atempo returns fewer samples, then cuts to the clip', () => {
+    const graph = audioFilterGraph(plan({ scenes, look: { audio: { muteSpedUp: false } } }));
+    expect(graph).toContain(
+      '[m1]atrim=start_sample=144000:end_sample=536192,asetpts=N/SR/TB,atempo=4,atrim=end_sample=96000,asetpts=N/SR/TB,apad,',
+    );
+  });
+
   it('drops the start of a mic that started before the screen', () => {
     expect(audioFilterGraph(plan({ scenes }), -0.25)).toContain('channel_layouts=mono,atrim=start_sample=12000,asetpts=N/SR/TB,asplit=2');
   });
@@ -93,5 +111,11 @@ describe('muxArgs', () => {
       '-hide_banner -nostdin -loglevel error -y -i v.mp4 -i m.m4a -filter_complex G -map 0:v:0 -map [aout] -c:v copy -c:a aac -b:a 160k -ar 48000 -movflags +faststart -f mp4 o.mp4',
     );
     expect(muxArgs({ video: 'v.mp4', graph: 'G', out: 'o.mp4' })).not.toContain('m.m4a');
+  });
+
+  it('reads a long graph from a file (Windows limits a command line to 32 767 characters)', () => {
+    const args = muxArgs({ video: 'v.mp4', mic: 'm.m4a', graph: 'G', graphFile: 'audio.graph', out: 'o.mp4' });
+    expect(args.join(' ')).toContain('-/filter_complex audio.graph -map 0:v:0');
+    expect(args).not.toContain('G');
   });
 });

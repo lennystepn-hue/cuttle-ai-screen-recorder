@@ -4,15 +4,15 @@
 //   pnpm export:check [--seconds 10] [--layout showcase|long|speedup] [--formats 16:9,1:1,9:16]
 //                     [--encoder auto|hardware|software] [--keep <dir>] [--frames t1,t2,...]
 import { execFile } from 'node:child_process';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { promisify } from 'node:util';
 import { parseProjectJson } from '@cuttle/project';
 import { sceneSpans, totalDuration } from '@cuttle/timeline';
-import { app } from 'electron';
+import { BrowserWindow, app } from 'electron';
 import { frameCount } from '../src/frame-plan';
-import { EXPORT_FORMATS, exportProject, isExportFormat, type EncoderPreference, type ExportFormat } from '../src/index';
+import { EXPORT_FORMATS, exportProject, isExportFormat, type EncoderPreference, type ExportError, type ExportErrorCode, type ExportFormat } from '../src/index';
 import { createFixtureProject, type FixtureLayout } from '../test/fixture';
 
 const run = promisify(execFile);
@@ -121,9 +121,70 @@ async function check(): Promise<boolean> {
       console.log(`     frame at ${t} s: ${png}`);
     }
   }
+  await mkdir(join(root, 'out'), { recursive: true });
+  const failurePaths = await checkFailurePaths(projectDir, join(root, 'out'));
   if (!keep) await rm(root, { recursive: true, force: true });
   console.log(failures === 0 ? `all ${formats.length} formats pass` : `${failures} of ${formats.length} formats fail`);
-  return failures === 0;
+  console.log(failurePaths === 0 ? 'all failure paths behave' : `${failurePaths} failure paths misbehave`);
+  return failures === 0 && failurePaths === 0;
+}
+
+/** Work folders of exports in the temp folder (each export must remove its own). */
+async function workFolders(): Promise<string[]> {
+  return (await readdir(tmpdir())).filter((name) => name.startsWith('cuttle-export-'));
+}
+
+/**
+ * The failures M5 and the app rely on: each must reject with its code within seconds, leave no
+ * output, no partial file and no work folder, and never touch the project's files.
+ */
+async function checkFailurePaths(projectDir: string, outDir: string): Promise<number> {
+  const project = join(projectDir, 'cuttle.json');
+  const cases: { name: string; code: ExportErrorCode; run(out: string): Promise<unknown> }[] = [
+    { name: 'the output is the project file', code: 'invalid-project', run: () => exportProject({ projectDir, out: project }) },
+    {
+      name: 'cancelled after 10 frames',
+      code: 'cancelled',
+      run(out) {
+        const cancel = new AbortController();
+        return exportProject({ projectDir, out, signal: cancel.signal, onProgress: (done) => done === 10 && cancel.abort() });
+      },
+    },
+    {
+      name: 'the export window closed from outside after 10 frames',
+      code: 'render',
+      run: (out) =>
+        exportProject({
+          projectDir,
+          out,
+          onProgress: (done) => done === 10 && BrowserWindow.getAllWindows().forEach((window) => window.destroy()),
+        }),
+    },
+  ];
+  const before = await readFile(project, 'utf8');
+  const folders = await workFolders();
+  let failures = 0;
+  for (const { name, code, run } of cases) {
+    const out = join(outDir, `failure-${cases.findIndex((entry) => entry.name === name)}.mp4`);
+    const started = performance.now();
+    const error = await run(out).then(
+      () => undefined,
+      (failure: ExportError) => failure,
+    );
+    const seconds = (performance.now() - started) / 1000;
+    const leftovers = (await readdir(outDir)).filter((file) => file.startsWith(`.${basename(out)}.`) || file === basename(out));
+    const problems = [
+      error?.code === code || `expected ${code}, got ${error ? `${error.code}: ${error.message}` : 'success'}`,
+      seconds < 30 || `took ${seconds.toFixed(1)} s`,
+      leftovers.length === 0 || `left ${leftovers.join(', ')}`,
+      (await readFile(project, 'utf8')) === before || 'changed cuttle.json',
+      (await workFolders()).length === folders.length || 'left a work folder in the temp folder',
+    ].filter((entry): entry is string => entry !== true);
+    console.log(`${problems.length === 0 ? 'ok  ' : 'FAIL'} ${name}: ${error?.code} after ${seconds.toFixed(1)} s (${error?.message.split('\n')[0]})`);
+    for (const problem of problems) console.log(`     ${problem}`);
+    failures += problems.length > 0 ? 1 : 0;
+  }
+  return failures;
 }
 
 process.on('uncaughtException', (error) => {

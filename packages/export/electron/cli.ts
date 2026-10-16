@@ -1,6 +1,7 @@
 // Development entry until apps/cli exists (M5):
 //   pnpm export:run <projectDir> [--format 16:9|1:1|9:16] [-o <file>] [--encoder auto|hardware|software]
-// Prints the result as JSON. Exit codes as in the spec: 1 usage or validation, 2 missing ffmpeg, 3 render.
+// Prints the result as JSON. Exit codes as in the spec: 1 usage or validation, 2 missing ffmpeg, 3 render;
+// 130 when cancelled with Ctrl+C (a second Ctrl+C exits at once).
 import { join } from 'node:path';
 import { app } from 'electron';
 import { ExportError, exportProject, isExportFormat, type EncoderPreference, type ExportErrorCode, type ExportFormat } from '../src/index';
@@ -11,6 +12,7 @@ const EXIT_CODES: Record<ExportErrorCode, number> = {
   'invalid-media': 1,
   'ffmpeg-missing': 2,
   render: 3,
+  cancelled: 130,
 };
 
 const USAGE = 'usage: pnpm export:run <projectDir> [--format 16:9|1:1|9:16] [-o <file>] [--encoder auto|hardware|software]';
@@ -68,6 +70,15 @@ process.on('uncaughtException', (error) => {
 });
 // The export window is the app's only window; closing it must not quit before the audio is muxed.
 app.on('window-all-closed', () => {});
+// Ctrl+C (or a kill) cancels the export so it can delete its temp files; a second one exits at once.
+const cancel = new AbortController();
+for (const signal of ['SIGINT', 'SIGTERM', 'SIGBREAK'] as const) {
+  process.on(signal, () => {
+    if (cancel.signal.aborted) app.exit(EXIT_CODES.cancelled);
+    console.error('cancelling the export …');
+    cancel.abort();
+  });
+}
 
 app.whenReady().then(async () => {
   let args: CliArgs;
@@ -86,6 +97,7 @@ app.whenReady().then(async () => {
       format: args.format,
       out,
       encoder: args.encoder,
+      signal: cancel.signal,
       onProgress(done, total) {
         const percent = Math.floor((done / total) * 100);
         if (percent !== lastPercent && percent % 10 === 0) console.error(`frames ${done}/${total}`);

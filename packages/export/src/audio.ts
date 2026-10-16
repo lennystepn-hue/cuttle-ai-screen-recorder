@@ -7,13 +7,22 @@ export const AUDIO_SAMPLE_RATE = 48_000;
 export const AUDIO_BITRATE = '160k';
 /** Shortest fade at a cut, so hard cuts do not click. */
 const MIN_FADE_SECONDS = 0.01;
+/**
+ * Output samples read past a sped-up clip's end: `atempo` returns several hundred samples fewer
+ * than (to − from) / speed, and the clip's sound must reach its fade-out, not stop short of it.
+ */
+const ATEMPO_OVERREAD = 2048;
 
 /** One scene's stretch of the exported audio, in samples at `AUDIO_SAMPLE_RATE`. */
 export interface AudioSegment {
   /** Length in output samples; segments are laid end to end. */
   samples: number;
-  /** The mic stretch it plays, in samples of the mic lined up with the screen track; none means silence. */
-  mic?: { from: number; to: number; speed: number };
+  /**
+   * The mic stretch it plays, in samples of the mic lined up with the screen track; none means
+   * silence. `content`: output samples the clip fills (at most `samples`); the rest of the segment
+   * is padding up to the frame grid, after the fade-out.
+   */
+  mic?: { from: number; to: number; speed: number; content: number };
   /** Fade lengths in output samples at the segment's start and end. */
   fadeIn: number;
   fadeOut: number;
@@ -55,7 +64,11 @@ export function planAudio({ spans, look, mic, seconds }: AudioPlanOptions): Audi
     };
     const scene = span.scene;
     const audible = mic && look.audio.enabled && scene.type === 'clip' && !(look.audio.muteSpedUp && scene.speed > 1);
-    if (audible) segment.mic = { from: toSamples(scene.from), to: toSamples(scene.to), speed: scene.speed };
+    if (audible) {
+      const from = toSamples(scene.from);
+      const to = toSamples(scene.to);
+      segment.mic = { from, to, speed: scene.speed, content: Math.min(samples, Math.round((to - from) / scene.speed)) };
+    }
     return segment;
   });
 }
@@ -95,18 +108,25 @@ export function audioFilterGraph(segments: readonly AudioSegment[], micOffset = 
   segments.forEach((segment, i) => {
     const chain: string[] = [];
     if (segment.mic) {
+      const { from, to, speed, content } = segment.mic;
+      const tempo = atempoChain(speed);
+      // atempo comes up short, so read a little past the clip and cut its output to the clip's length.
+      const end = tempo.length > 0 ? to + Math.ceil(ATEMPO_OVERREAD * speed) : to;
+      chain.push(`[m${micIndex++}]atrim=start_sample=${from}:end_sample=${end}`, 'asetpts=N/SR/TB');
+      if (tempo.length > 0) chain.push(...tempo, `atrim=end_sample=${content}`, 'asetpts=N/SR/TB');
       chain.push(
-        `[m${micIndex++}]atrim=start_sample=${segment.mic.from}:end_sample=${segment.mic.to}`,
-        'asetpts=N/SR/TB',
-        ...atempoChain(segment.mic.speed),
-        // Pads a mic that ends early (or started late); without input frames apad's timestamps are
-        // unset, so they are rebuilt after the trim or concat fails ("Invalid data found").
+        // Pads a mic that ends early (or started late) and the last clip up to the frame grid;
+        // without input frames apad's timestamps are unset, so they are rebuilt after the trim or
+        // concat fails ("Invalid data found").
         'apad',
         `atrim=end_sample=${segment.samples}`,
         'asetpts=N/SR/TB',
       );
-      if (segment.fadeIn > 0) chain.push(`afade=t=in:ss=0:ns=${segment.fadeIn}`);
-      if (segment.fadeOut > 0) chain.push(`afade=t=out:ss=${segment.samples - segment.fadeOut}:ns=${segment.fadeOut}`);
+      // Both fades lie inside the clip's own sound: a fade-out in the padding would leave a click.
+      const fadeIn = Math.min(segment.fadeIn, content);
+      const fadeOut = Math.min(segment.fadeOut, content);
+      if (fadeIn > 0) chain.push(`afade=t=in:ss=0:ns=${fadeIn}`);
+      if (fadeOut > 0) chain.push(`afade=t=out:ss=${content - fadeOut}:ns=${fadeOut}`);
     } else {
       chain.push(`anullsrc=r=${AUDIO_SAMPLE_RATE}:cl=mono`, `atrim=end_sample=${segment.samples}`);
     }
@@ -117,17 +137,25 @@ export function audioFilterGraph(segments: readonly AudioSegment[], micOffset = 
   return filters.join(';');
 }
 
+/**
+ * Longest graph passed on the command line. Windows limits a command line to 32 767 characters
+ * (about 170 audible clips); longer graphs go into a file read with `-/filter_complex` (ffmpeg 7+).
+ */
+export const INLINE_GRAPH_LIMIT = 16_000;
+
 export interface MuxArgsOptions {
   /** The video-only MP4 from the frame loop. */
   video: string;
   /** The mic file, when the graph uses it. */
   mic?: string;
   graph: string;
+  /** A file holding `graph`, used instead of the inline graph when given. */
+  graphFile?: string;
   out: string;
 }
 
 /** ffmpeg arguments that add the audio to the video without re-encoding it: AAC 48 kHz, moov at the front. */
-export function muxArgs({ video, mic, graph, out }: MuxArgsOptions): string[] {
+export function muxArgs({ video, mic, graph, graphFile, out }: MuxArgsOptions): string[] {
   return [
     '-hide_banner',
     '-nostdin',
@@ -137,8 +165,7 @@ export function muxArgs({ video, mic, graph, out }: MuxArgsOptions): string[] {
     '-i',
     video,
     ...(mic ? ['-i', mic] : []),
-    '-filter_complex',
-    graph,
+    ...(graphFile ? ['-/filter_complex', graphFile] : ['-filter_complex', graph]),
     '-map',
     '0:v:0',
     '-map',

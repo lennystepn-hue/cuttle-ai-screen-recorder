@@ -8,7 +8,7 @@ import type { CuttleProject, InputEvent } from '@cuttle/project';
 export type EncoderPreference = 'auto' | 'hardware' | 'software';
 
 /** Why an export failed; the CLI maps these to exit codes (see `ExportError`). */
-export type ExportErrorCode = 'invalid-project' | 'missing-file' | 'invalid-media' | 'ffmpeg-missing' | 'render';
+export type ExportErrorCode = 'invalid-project' | 'missing-file' | 'invalid-media' | 'ffmpeg-missing' | 'render' | 'cancelled';
 
 /** Everything the page needs for one export. Paths are absolute; the page may read only these files. */
 export interface ExportJob {

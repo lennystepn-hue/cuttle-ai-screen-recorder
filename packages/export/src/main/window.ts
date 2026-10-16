@@ -3,7 +3,10 @@ import { BrowserWindow } from 'electron';
 
 export interface ExportWindow {
   win: BrowserWindow;
-  /** Rejects when the page's renderer process dies (a pending executeJavaScript would never settle). */
+  /**
+   * Rejects when the page's renderer process dies or the window is closed from outside (a pending
+   * executeJavaScript would never settle).
+   */
   gone: Promise<never>;
 }
 
@@ -37,8 +40,15 @@ export async function openExportWindow(pageDir: string): Promise<ExportWindow> {
     win.webContents.on('render-process-gone', (_event, details) => {
       reject(new Error(`the export page's renderer is gone: ${details.reason} (exit code ${details.exitCode})`));
     });
+    // An app that closes all its windows (or destroys this one) would otherwise leave the export hanging.
+    win.once('closed', () => reject(new Error('the export window was closed before the export finished')));
   });
   gone.catch(() => {}); // observed by the caller through Promise.race; avoid an unhandled rejection otherwise
-  await win.loadFile(join(pageDir, 'index.html'));
+  try {
+    await win.loadFile(join(pageDir, 'index.html'));
+  } catch (error) {
+    win.destroy();
+    throw error;
+  }
   return { win, gone };
 }

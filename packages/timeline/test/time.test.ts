@@ -24,6 +24,13 @@ describe('sceneSpans and totalDuration', () => {
     expect(totalDuration(spans)).toBe(22);
     expect(totalDuration([])).toBe(0);
   });
+
+  it('snaps summed scene lengths so boundaries land exactly on frame times', () => {
+    const spans = sceneSpans(Array.from({ length: 10 }, () => clip(0, 0.1)));
+    expect(spanAt(spans, 0.3)?.index).toBe(3);
+    expect(spanAt(spans, 9 / 30)?.index).toBe(3);
+    expect(totalDuration(spans)).toBe(1);
+  });
 });
 
 describe('spanAt', () => {
@@ -48,5 +55,13 @@ describe('sourceTimeAt', () => {
     expect(sourceTimeAt(clip(20, 140, 12), 5)).toBe(80);
     expect(sourceTimeAt(clip(20, 140, 12), -1)).toBe(20);
     expect(sourceTimeAt(clip(20, 140, 12), 50)).toBe(140);
+  });
+
+  it('never exceeds the clip end, even when rounding would push it past', () => {
+    const c = clip(0.1, 0.7, 3);
+    expect(sourceTimeAt(c, sceneDuration(c))).toBe(0.7);
+    // 0 + (0.7 / 0.3) * 0.3 rounds up to 0.7000000000000001 without the clamp.
+    const slow = clip(0, 0.7, 0.3);
+    expect(sourceTimeAt(slow, sceneDuration(slow))).toBe(0.7);
   });
 });

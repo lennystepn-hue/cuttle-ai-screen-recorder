@@ -16,7 +16,16 @@ export function easeInOutCubic(x: number): number {
 }
 
 export function ease(kind: EaseKind, x: number): number {
-  return kind === 'linear' ? clamp01(x) : easeInOutCubic(x);
+  switch (kind) {
+    case 'smooth':
+      return easeInOutCubic(x);
+    case 'linear':
+      return clamp01(x);
+    default: {
+      const unreachable: never = kind;
+      return unreachable;
+    }
+  }
 }
 
 export function lerp(a: number, b: number, t: number): number {

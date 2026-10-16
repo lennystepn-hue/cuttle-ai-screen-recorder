@@ -1,0 +1,117 @@
+import type { CursorShape, Marker, Rect } from '@cuttle/project';
+
+/** A rectangle on the desktop, in physical pixels (negative left of and above the primary monitor). */
+export interface Bounds {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+export interface Monitor {
+  /** ffmpeg ddagrab `output_idx` (Windows): the order of the default adapter's outputs. */
+  index: number;
+  name: string;
+  bounds: Bounds;
+  /** Display scale factor (1.25 at 125 %). */
+  scale: number;
+  primary: boolean;
+}
+
+export interface WindowInfo {
+  title: string;
+  /** The visible frame without the invisible resize border. */
+  bounds: Bounds;
+  /** Index of the monitor that holds the window's centre. */
+  monitor: number;
+}
+
+export interface Devices {
+  monitors: Monitor[];
+  windows: WindowInfo[];
+  cameras: string[];
+  mics: string[];
+}
+
+export type Backend = 'auto' | 'test';
+
+export type CaptureSource =
+  | { kind: 'monitor'; index: number }
+  /** `rect` is `[x, y, width, height]` in pixels of that monitor (origin at its top-left corner). */
+  | { kind: 'region'; rect: Rect; monitor: number }
+  /** Captured as the region of the window's bounds when the recording starts. */
+  | { kind: 'window'; title: string };
+
+export interface StopOptions {
+  maxSeconds?: number;
+  /** Stops once this file exists; it must not exist when the recording starts. */
+  untilFile?: string;
+  /** Stops once the screen has not changed for this many seconds, after it changed at least once. */
+  untilIdleSeconds?: number;
+  /**
+   * The folder Claude Code runs in. Stops shortly after the first session in that folder that
+   * submits a prompt during the recording finishes its turn; its prompts, tool calls and final
+   * answer become markers.
+   */
+  untilClaude?: string;
+}
+
+export interface RecordOptions {
+  projectDir: string;
+  source: CaptureSource;
+  /** Device names from `listDevices()`. */
+  webcam?: string;
+  mic?: string;
+  stop: StopOptions;
+  /** Seconds to wait before the capture starts (default 3). */
+  countdownSeconds?: number;
+  /** Bake the real pointer into the screen track (then set `look.cursor.enabled` to false). */
+  drawMouse?: boolean;
+  /** `test`: ffmpeg test sources and synthetic input instead of real devices (default `auto`). */
+  backend?: Backend;
+  onEvent?: (event: RecorderEvent) => void;
+}
+
+export type StopReason = 'stop' | 'hotkey' | 'max-seconds' | 'file' | 'idle' | 'claude';
+
+export type RecorderEvent =
+  | { type: 'countdown'; seconds: number }
+  /** Every track is capturing; `dir` is the take folder relative to the project. */
+  | { type: 'recording'; dir: string }
+  | { type: 'marker'; marker: Marker }
+  | { type: 'warning'; message: string }
+  | { type: 'stopping'; reason: StopReason };
+
+/** A finished take. Paths are relative to the project folder, with forward slashes. */
+export interface Take {
+  dir: string;
+  screen: string;
+  webcam?: string;
+  mic?: string;
+  events: string;
+  markers: string;
+  screenSize: { width: number; height: number };
+  /** Length of the screen track. */
+  seconds: number;
+  stopReason: StopReason;
+  warnings: string[];
+}
+
+export interface Recording {
+  /** Stops every track and resolves with the take (same promise as `done`). */
+  stop(): Promise<Take>;
+  /** Adds a manual marker at the current time. */
+  marker(label?: string): void;
+  /** Resolves when the recording has stopped for any reason; rejects with a `RecorderError`. */
+  done: Promise<Take>;
+}
+
+/** One input event before it is mapped into the screen track: wall-clock seconds, desktop pixels. */
+export type RawInput =
+  | { type: 'move'; time: number; x: number; y: number }
+  | { type: 'click'; time: number; x: number; y: number; button: 'left' | 'right' | 'middle' }
+  | { type: 'scroll'; time: number; x: number; y: number; dx: number; dy: number }
+  | { type: 'shape'; time: number; shape: CursorShape }
+  | { type: 'key'; time: number };
+
+export type HotkeyAction = 'stop' | 'marker';

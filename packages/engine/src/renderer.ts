@@ -2,13 +2,14 @@ import type { CardScene, CuttleProject, FrameStyle, Rect } from '@cuttle/project
 import type { RenderState, SceneFrame } from '@cuttle/timeline';
 import type { EngineAssets } from './assets';
 import { createRenderTarget, deleteRenderTarget, type RenderTarget } from './gl/target';
-import { createTexture, uploadTexture } from './gl/texture';
+import { createTexture, sourceSize, uploadTexture } from './gl/texture';
 import { unitFor, uvRect, windowLayout, type Size, type WindowLayout } from './layout';
 import { BackgroundPass } from './passes/background';
 import { ContentPass } from './passes/content';
 import { CursorPass } from './passes/cursor';
 import { MaskPass } from './passes/masks';
 import { SpritePass } from './passes/sprite';
+import { WebcamPass } from './passes/webcam';
 import { WindowPass } from './passes/window';
 import { FRAME_CHROME, type FrameChrome } from './presets/frames';
 import { CARD_SUBTITLE_STYLE, CARD_TITLE_STYLE } from './presets/labels';
@@ -101,6 +102,8 @@ export function createRenderer(canvas: HTMLCanvasElement | OffscreenCanvas, proj
   const screenTexture = texture(true);
   const masks = own(new MaskPass(gl, output));
   const cursor = own(new CursorPass(gl, output, options.assets));
+  const webcam = own(new WebcamPass(gl, output));
+  const webcamTexture = texture(true);
   let layerTarget: RenderTarget | undefined;
   let disposed = false;
 
@@ -119,6 +122,11 @@ export function createRenderer(canvas: HTMLCanvasElement | OffscreenCanvas, proj
     content.draw(screenTexture, uvRect(zoom, screenSize), layout);
     masks.draw(layer.masks, screenTexture, screenSize, zoom, layout);
     if (layer.cursor) cursor.draw(layer.cursor, look.cursor, screenSize, zoom, layout);
+    const camera = look.webcam.enabled ? sources.webcams.get(layer.index) : undefined;
+    if (camera) {
+      uploadTexture(gl, webcamTexture, camera, true);
+      webcam.draw(webcamTexture, sourceSize(camera), look.webcam);
+    }
   }
 
   function drawCard(scene: CardScene): void {

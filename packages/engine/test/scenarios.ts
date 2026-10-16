@@ -114,4 +114,18 @@ export const SCENARIOS: Scenario[] = [
   // Cursors: six styles with a click ripple, then the system shapes
   ...(['system', 'arrow-white', 'arrow-black', 'dot', 'ring', 'spotlight'] as const).map(cursorScenario),
   ...(['text', 'pointer', 'wait', 'crosshair', 'move', 'not-allowed'] as const).map(shapeScenario),
+
+  // Webcam bubble
+  {
+    name: 'webcam-circle',
+    project: project({ frame: { title: TITLE }, webcam: { enabled: true, shape: 'circle', corner: 'bottom-left', size: 0.25 } }),
+    t: 1,
+    webcam: true,
+  },
+  {
+    name: 'webcam-rounded',
+    project: project({ frame: { title: TITLE }, webcam: { enabled: true, shape: 'rounded', corner: 'top-right', size: 0.25 } }),
+    t: 1,
+    webcam: true,
+  },
 ];

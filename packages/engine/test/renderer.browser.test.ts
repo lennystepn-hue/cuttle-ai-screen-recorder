@@ -93,4 +93,12 @@ describe('render', () => {
     renderer.dispose();
     expect(() => renderer.render({ t: 0, layers: [] }, NO_SOURCES)).toThrow('render: the renderer was disposed');
   });
+
+  it('throws when the WebGL context was lost instead of drawing empty frames', () => {
+    const canvas = new OffscreenCanvas(1, 1);
+    const renderer = createRenderer(canvas, CARDS, { assets, screenSize: SCREEN });
+    canvas.getContext('webgl2')!.getExtension('WEBGL_lose_context')!.loseContext();
+    expect(() => renderer.render({ t: 0, layers: [layer(0, 1)] }, NO_SOURCES)).toThrow('render: the WebGL context was lost');
+    renderer.dispose();
+  });
 });

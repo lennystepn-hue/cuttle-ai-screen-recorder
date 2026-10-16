@@ -23,7 +23,10 @@ export interface FrameSources {
 }
 
 export interface Renderer {
-  /** Draws `state` into the canvas. Throws when a visible clip or still has no image in `sources`. */
+  /**
+   * Draws `state` into the canvas. Throws when a visible clip or still has no image in `sources`, and
+   * when the WebGL context was lost (create a new renderer after `webglcontextrestored`).
+   */
   render(state: RenderState, sources: FrameSources): void;
   /** Frees every GL object; `render` throws afterwards. Leaves the canvas and its context alone. */
   dispose(): void;
@@ -113,6 +116,8 @@ export function createRenderer(canvas: HTMLCanvasElement | OffscreenCanvas, proj
   return {
     render(state, sources) {
       if (disposed) throw new Error('render: the renderer was disposed');
+      // A lost context draws nothing and reports no error: fail loudly instead of exporting black frames.
+      if (gl.isContextLost()) throw new Error('render: the WebGL context was lost');
       gl.bindVertexArray(vao);
       gl.viewport(0, 0, output.width, output.height);
       gl.enable(gl.BLEND);

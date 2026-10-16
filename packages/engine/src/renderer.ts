@@ -100,7 +100,7 @@ export function createRenderer(canvas: HTMLCanvasElement | OffscreenCanvas, proj
   const content = own(new ContentPass(gl, output));
   const screenTexture = texture(true);
   const masks = own(new MaskPass(gl, output));
-  const cursor = own(new CursorPass(gl, output, options.assets, spritePass));
+  const cursor = own(new CursorPass(gl, output, options.assets));
   let layerTarget: RenderTarget | undefined;
   let disposed = false;
 

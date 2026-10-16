@@ -1,11 +1,11 @@
-import { BACKGROUND_PRESETS, parseProject, type CuttleProject, type CuttleProjectInput, type MaskStyle, type Rect } from '@cuttle/project';
-import type { RenderState, SceneFrame } from '@cuttle/timeline';
+import { BACKGROUND_PRESETS, parseProject, type CuttleProject, type CuttleProjectInput, type CursorStyle, type MaskStyle, type Rect } from '@cuttle/project';
+import type { CursorFrame, RenderState, SceneFrame } from '@cuttle/timeline';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { loadEngineAssets, type EngineAssets } from '../src/assets';
 import { maskRectToOutput, windowLayout } from '../src/layout';
 import { FRAME_CHROME } from '../src/presets/frames';
 import { createRenderer, type FrameSources } from '../src/renderer';
-import { SCREEN, fixtures } from './fixtures';
+import { SCREEN, fakeScreen, fixtures } from './fixtures';
 import { pixelAt, readPixels, type Pixels } from './gl-util';
 
 let assets: EngineAssets;
@@ -175,5 +175,55 @@ describe('masks hide what is under them', () => {
     const a = renderMask('blur', LARGE, screen(LARGE, 24, 0, 8));
     const b = renderMask('blur', LARGE, screen(LARGE, 24, 12, 8));
     expect(maxDifference(a.pixels, b.pixels, a.rect, 'inside')).toBeLessThanOrEqual(BLUR_TOLERANCE);
+  });
+});
+
+describe('the cursor', () => {
+  const OUTPUT = { width: 960, height: 540 };
+  /** look.frame.radius in units: 20 output px at 960×540. */
+  const RADIUS = 40;
+
+  function renderCursor(style: CursorStyle, cursor?: CursorFrame): Pixels {
+    const project = parse({ output: OUTPUT, look: { frame: { radius: RADIUS }, cursor: { style, size: 2 } }, scenes: [{ type: 'clip', from: 0, to: 1 }] });
+    const frame: SceneFrame = { ...layer(0, 1, 'clip'), cursor };
+    return render(project, { t: 0, layers: [frame] }, { screens: new Map([[0, fakeScreen()]]), webcams: new Map(), stills: new Map() }).pixels;
+  }
+
+  /** Pixels that differ between `a` and `b`; with `outsideWindow`, only those the window's rounded rect leaves out. */
+  function changed(a: Pixels, b: Pixels, outsideWindow = false): number {
+    const { window, radius } = windowLayout(OUTPUT, SCREEN.width / SCREEN.height, { titleBar: FRAME_CHROME['mac-dark'].titleBar, radius: RADIUS });
+    let count = 0;
+    for (let y = 0; y < a.height; y++) {
+      for (let x = 0; x < a.width; x++) {
+        if (outsideWindow) {
+          // sdRoundRect from the shaders at the pixel centre; at d >= 0.5 the window covers nothing.
+          const qx = Math.abs(x + 0.5 - window[0] - window[2] / 2) - window[2] / 2 + radius;
+          const qy = Math.abs(y + 0.5 - window[1] - window[3] / 2) - window[3] / 2 + radius;
+          const d = Math.hypot(Math.max(qx, 0), Math.max(qy, 0)) + Math.min(Math.max(qx, qy), 0) - radius;
+          if (d < 0.5) continue;
+        }
+        const i = (y * a.width + x) * 4;
+        if (a.data[i] !== b.data[i] || a.data[i + 1] !== b.data[i + 1] || a.data[i + 2] !== b.data[i + 2]) count++;
+      }
+    }
+    return count;
+  }
+
+  it('stays inside the window, also at its rounded corners', () => {
+    // Pointer and a fresh click at the screen's bottom-right corner, where the tray and the clock are.
+    const corner: CursorFrame = { x: 1270, y: 788, shape: 'arrow', clicks: [{ x: 1266, y: 786, progress: 0.3 }] };
+    for (const style of ['system', 'dot', 'ring'] as const) {
+      const without = renderCursor(style);
+      const withCursor = renderCursor(style, corner);
+      expect(changed(without, withCursor), style).toBeGreaterThan(0);
+      expect(changed(without, withCursor, true), style).toBe(0);
+    }
+  });
+
+  it('is not drawn while off the captured area, nor are its clicks', () => {
+    const off: CursorFrame = { x: -10, y: 400, shape: 'arrow', clicks: [{ x: 1300, y: 400, progress: 0.3 }] };
+    for (const style of ['system', 'spotlight'] as const) {
+      expect(changed(renderCursor(style), renderCursor(style, off)), style).toBe(0);
+    }
   });
 });

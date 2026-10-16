@@ -7,7 +7,6 @@ import { createTexture, uploadTexture } from '../gl/texture';
 import { cursorSizePx, sourceToOutput, type Size, type WindowLayout } from '../layout';
 import type { EngineAssets } from '../assets';
 import { CURSOR_ART, CURSOR_GRID, cursorImageFor, type CursorImage } from '../presets/cursors';
-import type { SpritePass } from './sprite';
 
 const SPOTLIGHT = `${FRAGMENT_PRELUDE}
 uniform vec2 u_center;
@@ -29,9 +28,11 @@ uniform float u_ringRadius;
 uniform float u_width;
 uniform vec3 u_color;
 uniform float u_alpha;
+uniform vec4 u_window;
+uniform float u_radius;
 void main() {
   float a = coverage(abs(length(v_px - u_center) - u_ringRadius) - u_width * 0.5) * u_alpha;
-  o_color = vec4(u_color * a, a);
+  o_color = vec4(u_color * a, a) * coverage(sdRoundRect(v_px, u_window, u_radius));
 }`;
 
 const SHAPE = `${FRAGMENT_PRELUDE}
@@ -39,6 +40,8 @@ uniform vec2 u_center;
 uniform float u_shapeRadius;
 uniform vec3 u_color;
 uniform int u_kind;   // 0 dot, 1 ring
+uniform vec4 u_window;
+uniform float u_radius;
 void main() {
   float d = length(v_px - u_center);
   float r = u_shapeRadius;
@@ -54,6 +57,15 @@ void main() {
     vec4 stroke = vec4(u_color * ring, ring);
     o_color = stroke + vec4(u_color * fill, fill) * (1.0 - stroke.a);
   }
+  o_color *= coverage(sdRoundRect(v_px, u_window, u_radius));
+}`;
+
+const IMAGE = `${FRAGMENT_PRELUDE}
+uniform sampler2D u_tex;
+uniform vec4 u_window;
+uniform float u_radius;
+void main() {
+  o_color = texture(u_tex, v_uv) * coverage(sdRoundRect(v_px, u_window, u_radius));
 }`;
 
 /** Ripple growth and fade over its 0..1 progress, in cursor heights. */
@@ -62,22 +74,26 @@ export function rippleAt(progress: number): { radius: number; alpha: number } {
   return { radius: 0.25 + 0.85 * (1 - (1 - p) ** 3), alpha: 0.9 * (1 - p) ** 2 };
 }
 
-/** The pointer, its click ripples and the spotlight, clipped to the content. Hidden while off the captured area. */
+/**
+ * The pointer, its click ripples and the spotlight, clipped to the content and the window's rounded
+ * corners. Hidden while off the captured area.
+ */
 export class CursorPass {
   private readonly spotlight: Shader;
   private readonly ripple: Shader;
   private readonly shape: Shader;
+  private readonly image: Shader;
   private readonly images = new Map<CursorImage, WebGLTexture>();
 
   constructor(
     private readonly gl: WebGL2RenderingContext,
     private readonly output: Size,
     assets: EngineAssets,
-    private readonly sprites: SpritePass,
   ) {
     this.spotlight = new Shader(gl, 'cursor spotlight', RECT_VERTEX, SPOTLIGHT);
     this.ripple = new Shader(gl, 'cursor ripple', RECT_VERTEX, RIPPLE);
     this.shape = new Shader(gl, 'cursor shape', RECT_VERTEX, SHAPE);
+    this.image = new Shader(gl, 'cursor image', RECT_VERTEX, IMAGE);
     for (const [image, bitmap] of assets.cursors) {
       const texture = createTexture(gl, true);
       uploadTexture(gl, texture, bitmap, true);
@@ -95,9 +111,9 @@ export class CursorPass {
       for (const click of cursor.clicks) {
         if (!onScreen(click.x, click.y)) continue;
         const [cx, cy] = sourceToOutput(click.x, click.y, zoom, layout.content);
-        this.drawRipple(cx, cy, size, click.progress, color);
+        this.drawRipple(cx, cy, size, click.progress, color, layout);
       }
-      if (onScreen(cursor.x, cursor.y)) this.drawPointer(x, y, size, look.style, cursor, color);
+      if (onScreen(cursor.x, cursor.y)) this.drawPointer(x, y, size, look.style, cursor, color, layout);
     });
   }
 
@@ -113,7 +129,7 @@ export class CursorPass {
     drawRect(this.gl, this.spotlight, layout.content, this.output);
   }
 
-  private drawRipple(x: number, y: number, size: number, progress: number, color: Rgb): void {
+  private drawRipple(x: number, y: number, size: number, progress: number, color: Rgb, layout: WindowLayout): void {
     const { radius, alpha } = rippleAt(progress);
     const ringRadius = radius * size;
     const width = Math.max(1.5, 0.1 * size);
@@ -124,23 +140,41 @@ export class CursorPass {
       .float('u_ringRadius', ringRadius)
       .float('u_width', width)
       .vec3('u_color', color)
-      .float('u_alpha', alpha);
+      .float('u_alpha', alpha)
+      .vec4('u_window', layout.window)
+      .float('u_radius', layout.radius);
     drawRect(this.gl, this.ripple, [x - extent, y - extent, 2 * extent, 2 * extent], this.output);
   }
 
-  private drawPointer(x: number, y: number, size: number, style: Look['cursor']['style'], cursor: CursorFrame, color: Rgb): void {
+  private drawPointer(
+    x: number,
+    y: number,
+    size: number,
+    style: Look['cursor']['style'],
+    cursor: CursorFrame,
+    color: Rgb,
+    layout: WindowLayout,
+  ): void {
     const image = cursorImageFor(style, cursor.shape);
     if (image) {
       const [hx, hy] = CURSOR_ART[image].hotspot;
       const texture = this.images.get(image);
       if (!texture) throw new Error(`cursor image ${image} was not loaded`);
-      this.sprites.draw(texture, [x - (hx / CURSOR_GRID) * size, y - (hy / CURSOR_GRID) * size, size, size], 1);
+      this.image.use().texture('u_tex', 0, texture).vec4('u_window', layout.window).float('u_radius', layout.radius);
+      drawRect(this.gl, this.image, [x - (hx / CURSOR_GRID) * size, y - (hy / CURSOR_GRID) * size, size, size], this.output);
       return;
     }
     const kind = style === 'ring' ? 1 : 0;
     const radius = (style === 'ring' ? 0.45 : style === 'dot' ? 0.28 : 0.14) * size;
     const extent = radius * 1.8 + 1;
-    this.shape.use().vec2('u_center', x, y).float('u_shapeRadius', radius).vec3('u_color', color).int('u_kind', kind);
+    this.shape
+      .use()
+      .vec2('u_center', x, y)
+      .float('u_shapeRadius', radius)
+      .vec3('u_color', color)
+      .int('u_kind', kind)
+      .vec4('u_window', layout.window)
+      .float('u_radius', layout.radius);
     drawRect(this.gl, this.shape, [x - extent, y - extent, 2 * extent, 2 * extent], this.output);
   }
 
@@ -148,6 +182,7 @@ export class CursorPass {
     this.spotlight.dispose();
     this.ripple.dispose();
     this.shape.dispose();
+    this.image.dispose();
     for (const texture of this.images.values()) this.gl.deleteTexture(texture);
   }
 }

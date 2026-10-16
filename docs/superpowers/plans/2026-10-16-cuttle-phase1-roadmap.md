@@ -52,7 +52,10 @@ export type CardScene = Extract<Scene, { type: 'card' }>;
 export type Zoom = CuttleProject['zooms'][number];
 export type Mask = CuttleProject['masks'][number];
 export type TextOverlay = CuttleProject['texts'][number];
-export type InputEvent = z.output<typeof InputEventSchema>;   // one line of events.jsonl
+export type InputEvent = z.output<typeof InputEventSchema>;   // one line of events.jsonl;
+// t in source seconds; x, y in source pixels of the screen track (capture origin subtracted,
+// display scale applied); outside [0, width) × [0, height) means off the captured area
+export function parseEventsJsonl(text: string): { events: InputEvent[]; issues: ProjectIssue[] }; // M4, first step
 export type CursorShape = 'arrow' | 'text' | 'pointer' | 'wait' | 'crosshair' | 'move' | 'not-allowed';
 export type CursorStyle = 'system' | 'arrow-white' | 'arrow-black' | 'dot' | 'ring' | 'spotlight';
 export function parseProject(raw: unknown): ParseResult;
@@ -67,8 +70,8 @@ export interface SceneFrame {
   local: number;        // seconds since the scene started, clamped to its duration
   progress: number;     // local / duration, 0..1
   opacity: number;      // 1 except during a crossfade
-  sourceTime?: number;  // clip scenes: seconds into the screen track
-  zoom?: Rect;          // clip scenes: crop rect in source pixels
+  sourceTime?: number;  // clip scenes: source seconds, always inside the clip's [from, to)
+  zoom?: Rect;          // clip scenes: crop rect in source pixels, screen aspect, inside the screen
   masks: Mask[];        // clip scenes: active masks
   texts: ActiveText[];  // clip scenes: active texts with fade opacity
   badge?: string;       // clip scenes: e.g. "12× speed"
@@ -78,6 +81,7 @@ export interface CursorFrame { x: number; y: number; shape: CursorShape; clicks:
 export interface RenderState { t: number; layers: SceneFrame[] } // back to front
 export interface Timeline { duration: number; spans: SceneSpan[]; frameAt(t: number): RenderState }
 export function createCursorTrack(events: readonly InputEvent[]): CursorTrack;
+export function fitZoomRect(rect: Rect, full: Rect): Rect; // screen aspect, kept inside the screen
 export function createTimeline(
   project: CuttleProject,
   opts: { screenSize: { width: number; height: number }; cursor?: CursorTrack },
@@ -88,10 +92,12 @@ Interfaces the later milestones introduce (their detailed plans must keep these 
 
 ```ts
 // @cuttle/engine (M2)
+// Keyed by SceneFrame.index: during a crossfade two clip layers with unrelated source times are
+// visible at once, so every per-layer image is looked up by scene index.
 export interface FrameSources {
-  screen?: TexImageSource;                 // decoded VideoFrame for SceneFrame.sourceTime
+  screens: Map<number, TexImageSource>;    // scene index → decoded frame at that layer's sourceTime
+  webcams: Map<number, TexImageSource>;    // scene index → webcam frame at that layer's sourceTime
   stills: Map<number, ImageBitmap>;        // scene index → image for still scenes
-  webcam?: TexImageSource;
 }
 export interface Renderer { render(state: RenderState, sources: FrameSources): void; dispose(): void }
 export function createRenderer(canvas: HTMLCanvasElement | OffscreenCanvas, project: CuttleProject): Renderer;
@@ -116,6 +122,11 @@ export function record(opts: RecordOptions): { stop(): Promise<Take>; done: Prom
 
 ## Things each later plan must verify first (before writing its tasks)
 
+- **All milestones:** packages ship TypeScript source (`exports: ./src/index.ts`, extensionless
+  relative imports, `moduleResolution: Bundler`). Plain Node and the Electron main process cannot
+  import them without a bundler (or tsx), so M3–M5 need one. M2 needs the DOM lib: move to
+  per-package tsconfigs instead of adding DOM to the root config, which would leak DOM globals into
+  the pure packages.
 - **M2:** WebGL2 in Electron's hidden `BrowserWindow` with `show: false` and `offscreen: true`
   (preserveDrawingBuffer for readback); how to load a golden PNG in the test harness; pixelmatch
   tolerance that survives GPU differences between Windows and macOS CI. Cursor art: the `system`
@@ -124,7 +135,10 @@ export function record(opts: RecordOptions): { stop(): Promise<Take>; done: Prom
 - **M3:** Electron's WebCodecs H.264 encoder availability (`VideoEncoder.isConfigSupported` with
   `avc1.640028`, 1920×1080) on Windows and macOS; fallback is piping RGBA frames to an ffmpeg
   child on stdin. Current mp4-muxer and mp4box.js APIs. Decoding strategy: sequential decode with
-  a frame queue, not per-frame seeking.
+  a frame queue, not per-frame seeking; but a crossfade needs the incoming clip's first frame
+  before the boundary while the outgoing clip still plays, so pre-decode each clip's first frame
+  (or run a second decoder) and hold one cloned frame for the outgoing layer. Read `screenSize`
+  from the track metadata and fail clearly when it is missing (a crashed take).
 - **M4:** Mapping from Electron `screen.getAllDisplays()` to ffmpeg `ddagrab output_idx` (on the
   user's PC, `output_idx=0` was the 2560×1440 primary and `1` a 1920×1080 secondary; match by
   size and position, never by order). Graceful ffmpeg stop by writing `q` to stdin. Fragmented MP4
@@ -132,7 +146,11 @@ export function record(opts: RecordOptions): { stop(): Promise<Take>; done: Prom
   the Electron ABI. Cursor shape on Windows: poll `GetCursorInfo` (user32, via koffi) at ~30 Hz and
   compare `hCursor` with `LoadCursor(NULL, IDC_ARROW | IDC_IBEAM | IDC_HAND | IDC_WAIT | IDC_CROSS |
   IDC_SIZEALL | IDC_NO)`; write a `shape` event only when it changes; unknown handles map to `arrow`.
-  macOS: best effort, `arrow` fallback. Claude transcripts live in `~/.claude/projects/<cwd with : \ / replaced by ->/`
+  macOS: best effort, `arrow` fallback. uiohook reports global desktop coordinates (negative left of
+  the primary monitor; points, not Retina pixels, on macOS): subtract the capture origin and apply
+  the display scale before writing `events.jsonl`. Drop events with `t < 0` (before the first
+  frame). First step of M4: `parseEventsJsonl` in `@cuttle/project`, tolerant of a truncated last
+  line, shared by M3 (cursor track for export) and M5 (`cuttle suggest`). Claude transcripts live in `~/.claude/projects/<cwd with : \ / replaced by ->/`
   and have `timestamp`, `type` and `message.stop_reason`.
 - **M5:** commander version; how the CLI starts the bundled Electron for `render`, `preview` and
   `capture-page`; `pnpm link --global` on Windows.

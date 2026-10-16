@@ -1702,3 +1702,41 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 | Cursor position, shape and click effects at the source time | 8, 9 |
 
 Engine, export, recorder, CLI and skill are milestones M2 to M6 in the roadmap.
+
+## Changes during execution
+
+The code blocks above are the original plan. Code review changed these points; the repo is the
+source of truth:
+
+- **Task 1:** TypeScript is pinned to `^5` (pnpm had resolved 7.0, the native port, which lacks the
+  JS API later bundlers need). Root `package.json` has `"packageManager": "pnpm@11.20.0"`.
+- **Task 2:**
+  - Cross-field checks live on their own objects (`ClipSceneSchema` and `MaskSchema` refine
+    `to > from`, `BackgroundSchema` checks color/image), not in a root `superRefine`, so one parse
+    reports every issue.
+  - `output.width`/`height` must be even and at most 4096, with per-field defaults
+    (`OutputSchema.prefault({})`).
+  - `.finite()` is gone (no-op in zod 4).
+  - `CURRENT_VERSION` lives in `schema.ts`.
+  - The enum lists are exported constants (`EASES`, `MASK_STYLES`, `TEXT_POSITIONS`,
+    `STILL_MOTIONS`, `WEBCAM_SHAPES`, `WEBCAM_CORNERS`, `CLICK_EFFECTS`, `MOUSE_BUTTONS`) with
+    types `Ease`, `MaskStyle`, `TextPosition`, `StillMotion`, `BackgroundPreset`, `FrameStyle`,
+    `TextStyle`, `Look`, `Output`.
+  - More tests: 29 project tests instead of 17.
+- **Task 3:** the "newer Cuttle" guard only fires for integer versions.
+- **Task 4:** `EaseKind` is an alias of the project's `Ease` type; `ease` is an exhaustive switch.
+- **Task 5:** scene boundaries are snapped to whole microseconds (summed float lengths put the
+  first frame of a cut into the previous scene); `sourceTimeAt` clamps its result to `[from, to]`.
+- **Task 6:** overlapping zooms fold in `at` order (no jump to the full frame), zoom ends are
+  half-open, and targets go through the exported `fitZoomRect` (screen aspect, inside the screen);
+  `zoomRectAt` always returns a new array.
+- **Task 7:** the automatic badge only shows when the speed rounded to one decimal is above 1.
+- **Task 8:** the click-effect length variable is `effectLength` (not `window`).
+- **Task 9:**
+  - `frameAt` maps NaN to 0 and clamps ±Infinity to the ends.
+  - A clip evaluated past its end holds its last output frame (`to - 1/fps` in output time), so
+    masks stay on while it fades out.
+  - `look.cursor.clickEffect: 'none'` empties `cursor.clicks`.
+  - `createTimeline` throws on a non-positive or non-finite `screenSize`.
+  - `index.ts` also exports `fitZoomRect`.
+- **Task 10:** the full suite has more tests than planned (project 29, timeline over 50).

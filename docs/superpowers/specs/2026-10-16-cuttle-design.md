@@ -118,7 +118,9 @@ Rules:
   cursor and hand) or one of five designed cursors: `arrow-white`, `arrow-black`, `dot`, `ring`,
   `spotlight`. `color` tints `dot`, `ring` and `spotlight`. `clickEffect` is `ripple` or `none`.
   `enabled: false` hides the cursor.
-- `events.jsonl` holds one input event per line, times in source seconds:
+- `events.jsonl` holds one input event per line, times in source seconds and positions in source
+  pixels of the screen track (the recorder subtracts the capture origin and applies the display
+  scale; positions outside the frame mean the pointer is off the captured area):
   `{"t":1.2,"type":"move","x":10,"y":20}`, `click` (+ `button`), `scroll` (+ `dx`, `dy`),
   `shape` (+ `shape`: `arrow`, `text`, `pointer`, `wait`, `crosshair`, `move`, `not-allowed`) and
   `keys` (+ `count`).
@@ -158,7 +160,11 @@ webcam and mic.
 
 - Maps output time to scene and source time, honoring `speed`.
 - Zoom state: rect interpolated from full frame to target and back with an ease-in-out curve
-  (default 0.6 s in, 0.6 s out). Overlapping zooms: the one with the later `at` wins.
+  (default 0.6 s in, 0.6 s out). Overlapping zooms fold in `at` order, each easing from the rect
+  already on screen, so the one with the later `at` wins without jumping to the full frame. Zoom
+  targets are fitted to the screen's aspect ratio and kept inside the screen.
+- A clip that is still visible after its end (outgoing side of a crossfade) holds its last output
+  frame, which lies inside `[from, to)`, so masks stay on.
 - Active masks and texts for the current source time.
 - Badge text for scenes with `speed > 1`.
 - Cursor at the source time: position interpolated between logged samples, the latest shape, and

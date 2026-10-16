@@ -14,6 +14,7 @@ Status: phase 1 in progress. Spec: `docs/superpowers/specs/2026-10-16-cuttle-des
 | `@cuttle/project` | `cuttle.json` schema, defaults and readable validation errors |
 | `@cuttle/timeline` | What is on screen at any output time: scenes, speed, zooms, masks, texts, cursor, crossfades |
 | `@cuttle/engine` | WebGL2 compositor: backgrounds, window frames, zoom, masks, cursors, webcam, texts, stills, cards, crossfades |
+| `@cuttle/export` | MP4 export in a hidden Electron window: decode, render, encode H.264, mux; mic cut to the scenes with ffmpeg (AAC) |
 
 ## Development
 
@@ -23,7 +24,11 @@ pnpm exec playwright install chromium   # once: headless Chromium for the engine
 pnpm test                                # unit tests (Node) and engine golden images (Chromium)
 pnpm typecheck
 pnpm engine:electron                     # the engine goldens in a hidden Electron window
+pnpm export:check                        # export a testsrc fixture to 16:9, 1:1, 9:16 and check it with ffprobe
+pnpm export:run <projectDir> --format 9:16 -o out.mp4   # export a project (until the CLI exists)
 ```
+
+Export needs ffmpeg on PATH (or its path in `CUTTLE_FFMPEG`); `export:check` also needs ffprobe.
 
 Engine golden images live in `packages/engine/test/__golden__/`, one PNG per platform. A new
 scenario writes its PNG on the first run and fails once so you can look at it.

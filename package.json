@@ -7,7 +7,10 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "engine:electron": "vite build --config packages/engine/electron/vite.config.ts && electron packages/engine/electron/main.mjs",
-    "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.node.json && tsc -p packages/engine/tsconfig.json"
+    "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.node.json && tsc -p packages/engine/tsconfig.json && tsc -p packages/export/tsconfig.json && tsc -p packages/export/tsconfig.node.json",
+    "export:build": "vite build --config packages/export/electron/vite.main.config.ts && vite build --config packages/export/electron/vite.page.config.ts",
+    "export:run": "pnpm export:build && electron packages/export/dist/cli.mjs",
+    "export:check": "pnpm export:build && electron packages/export/dist/check.mjs"
   },
   "devDependencies": {
     "@types/node": "^22.20.5",

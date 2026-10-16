@@ -1,0 +1,10 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2022", "DOM", "DOM.Iterable"]
+  },
+  // The export page and the pure modules it shares with the main process. The main process and its
+  // Node tests are in tsconfig.node.json.
+  "include": ["src", "test/*.test.ts"],
+  "exclude": ["src/index.ts", "src/main"]
+}

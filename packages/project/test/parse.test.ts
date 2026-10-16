@@ -61,6 +61,10 @@ describe('parseProjectJson', () => {
     const r = parseProjectJson('{"version":1,"sources":{"screen":"s.mp4"}}');
     expect(r.ok).toBe(true);
   });
+
+  it('accepts a byte order mark, as Windows editors write one', () => {
+    expect(parseProjectJson(`${String.fromCharCode(0xfeff)}{"version":1,"sources":{"screen":"s.mp4"}}`).ok).toBe(true);
+  });
 });
 
 describe('defaultProject', () => {

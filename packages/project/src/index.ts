@@ -1,0 +1,25 @@
+export {
+  BACKGROUND_PRESETS,
+  CURSOR_SHAPES,
+  CURSOR_STYLES,
+  FRAME_STYLES,
+  TEXT_STYLES,
+  InputEventSchema,
+  ProjectSchema,
+  RectSchema,
+  type CardScene,
+  type ClipScene,
+  type CursorShape,
+  type CursorStyle,
+  type CuttleProject,
+  type CuttleProjectInput,
+  type InputEvent,
+  type Mask,
+  type Rect,
+  type Scene,
+  type StillScene,
+  type TextOverlay,
+  type Zoom,
+} from './schema';
+export { CURRENT_VERSION, formatPath, parseProject, parseProjectJson, type ParseResult, type ProjectIssue } from './parse';
+export { defaultProject } from './defaults';

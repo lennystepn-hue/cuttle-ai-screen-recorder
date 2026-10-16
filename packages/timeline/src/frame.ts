@@ -51,16 +51,31 @@ export function createTimeline(project: CuttleProject, opts: TimelineOptions): T
     return Math.min(maxHalf, (a.end - a.start) / 2, (b.end - b.start) / 2);
   }
 
+  /**
+   * The last output frame (frame i at i / fps) that shows the clip inside its source range
+   * [from, to). Uses the same strict comparisons as `spanAt`: span ends are rounded to the
+   * microsecond, so a frame can fall inside the span while its source time is exactly `to`.
+   */
+  function lastFrameShown(span: SceneSpan, inside: (local: number) => boolean): number {
+    const fps = project.output.fps;
+    let frame = Math.ceil(span.end * fps);
+    while (frame > 0 && frame / fps >= span.end) frame--;
+    while (frame / fps > span.start && !inside(frame / fps - span.start)) frame--;
+    return frame / fps;
+  }
+
   function sceneFrame(span: SceneSpan, t: number, opacity: number): SceneFrame {
     const length = span.end - span.start;
     const local = clamp(t - span.start, 0, length);
     const base = { index: span.index, local, progress: length === 0 ? 1 : local / length, opacity };
     const scene = span.scene;
     if (scene.type !== 'clip') return { ...base, kind: scene.type, masks: [], texts: [] };
-    // Past the end, hold the last output frame shown before it (frame i at i / fps): its source
-    // time lies inside [from, to), and a clip's source time never goes back during a crossfade.
-    const lastShown = (Math.ceil(span.end * project.output.fps - 1e-6) - 1) / project.output.fps;
-    const sourceLocal = t >= span.end ? clamp(lastShown - span.start, 0, length) : local;
+    // Past the end (or on a frame whose source time would be `to`), hold the last frame shown:
+    // its source time lies inside [from, to), so masks that end with the clip stay on, and a
+    // clip's source time never goes back during a crossfade.
+    const inside = (l: number) => scene.from + l * scene.speed < scene.to;
+    const pastEnd = t >= span.end || !inside(local);
+    const sourceLocal = pastEnd ? clamp(lastFrameShown(span, inside) - span.start, 0, length) : local;
     const sourceTime = sourceTimeAt(scene, sourceLocal);
     let cursor = project.look.cursor.enabled && opts.cursor ? cursorAt(opts.cursor, sourceTime, scene.speed) : undefined;
     if (cursor && project.look.cursor.clickEffect === 'none') cursor = { ...cursor, clicks: [] };

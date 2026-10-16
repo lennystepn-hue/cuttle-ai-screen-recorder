@@ -194,6 +194,37 @@ describe('crossfades', () => {
     expect(times).toEqual([29 / 30, 1, 1, 1, 1]);
   });
 
+  /** Source times of scene 0's layer on every output frame, and whether a mask was on in each. */
+  function walkClip(scenes: unknown[], fps: number, masks: unknown[] = []) {
+    const parsed = parseProject({ version: 1, output: { fps }, sources: { screen: 's.mp4' }, scenes, masks });
+    if (!parsed.ok) throw new Error(JSON.stringify(parsed.issues));
+    const t = createTimeline(parsed.project, { screenSize });
+    const frames: { time: number; masked: boolean }[] = [];
+    for (let i = 0; i < Math.ceil(t.duration * fps); i++) {
+      const layer = t.frameAt(i / fps).layers.find((l) => l.index === 0);
+      if (layer?.sourceTime !== undefined) frames.push({ time: layer.sourceTime, masked: layer.masks.length > 0 });
+    }
+    return frames;
+  }
+
+  it('never shows a sped-up clip at its end time, where a mask that ends with the clip is off', () => {
+    // 2 s at 3× is 0.6666… s, rounded up to the microsecond: frame 20 at 0.6666… s still falls inside the span.
+    for (const speed of [3, 6, 1.5]) {
+      const frames = walkClip(
+        [{ type: 'clip', from: 0, to: 2, speed }, { type: 'card', title: 'End', duration: 1 }],
+        30,
+        [{ from: 0, to: 2, rect: [0, 0, 50, 50] }],
+      );
+      expect(frames.every((frame) => frame.time < 2 && frame.masked), `speed ${speed}`).toBe(true);
+    }
+  });
+
+  it('never goes back in source time at frame rates that do not divide a second evenly', () => {
+    // At 29 fps the clip's end lands 1e-6 above frame 54 · 1/29, which is still drawn inside the clip.
+    const frames = walkClip([{ type: 'clip', from: 10, to: 11.862069 }, { type: 'card', title: 'End', duration: 1 }], 29);
+    for (let i = 1; i < frames.length; i++) expect(frames[i]!.time, `frame ${i}`).toBeGreaterThanOrEqual(frames[i - 1]!.time);
+  });
+
   it('caps the crossfade by the shortest neighbouring scene', () => {
     const short = createTimeline(
       project(

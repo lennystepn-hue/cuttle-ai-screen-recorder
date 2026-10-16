@@ -80,6 +80,11 @@ describe('createRenderer', () => {
 });
 
 describe('render', () => {
+  it('names the scene whose screen frame is missing', () => {
+    const project = parse({ scenes: [{ type: 'clip', from: 0, to: 1 }] });
+    expect(() => render(project, { t: 0, layers: [layer(0, 1, 'clip')] })).toThrow('render: no screen frame for scene 0');
+  });
+
   it('crossfades: a top layer at opacity 0 changes nothing, at 1 it replaces the bottom one', () => {
     const a = render(CARDS, { t: 0, layers: [layer(0, 1)] }).pixels.data;
     const b = render(CARDS, { t: 0, layers: [layer(1, 1)] }).pixels.data;

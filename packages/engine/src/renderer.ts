@@ -1,11 +1,14 @@
-import type { CardScene, CuttleProject } from '@cuttle/project';
+import type { CardScene, CuttleProject, FrameStyle, Rect } from '@cuttle/project';
 import type { RenderState, SceneFrame } from '@cuttle/timeline';
 import type { EngineAssets } from './assets';
 import { createRenderTarget, deleteRenderTarget, type RenderTarget } from './gl/target';
-import { createTexture } from './gl/texture';
-import { unitFor, type Size } from './layout';
+import { createTexture, uploadTexture } from './gl/texture';
+import { unitFor, uvRect, windowLayout, type Size, type WindowLayout } from './layout';
 import { BackgroundPass } from './passes/background';
+import { ContentPass } from './passes/content';
 import { SpritePass } from './passes/sprite';
+import { WindowPass } from './passes/window';
+import { FRAME_CHROME, type FrameChrome } from './presets/frames';
 import { CARD_SUBTITLE_STYLE, CARD_TITLE_STYLE } from './presets/labels';
 import { SpriteCache } from './sprites';
 
@@ -72,6 +75,8 @@ export function createRenderer(canvas: HTMLCanvasElement | OffscreenCanvas, proj
   const gl: WebGL2RenderingContext = context;
   const look = project.look;
   const unit = unitFor(output);
+  const full: Rect = [0, 0, screenSize.width, screenSize.height];
+  const screenAspect = screenSize.width / screenSize.height;
 
   // GL resources: everything created through own() and texture() is freed by dispose().
   const owned: { dispose(): void }[] = [];
@@ -89,8 +94,26 @@ export function createRenderer(canvas: HTMLCanvasElement | OffscreenCanvas, proj
   const sprites = own(new SpriteCache(gl));
   const spritePass = own(new SpritePass(gl, output));
   const background = own(new BackgroundPass(gl, output, look.background, options.backgroundImage));
+  const windowPass = own(new WindowPass(gl, output, sprites, spritePass));
+  const content = own(new ContentPass(gl, output));
+  const screenTexture = texture(true);
   let layerTarget: RenderTarget | undefined;
   let disposed = false;
+
+  function frame(style: FrameStyle | null): { chrome: FrameChrome | null; layout: WindowLayout } {
+    const chrome = style ? FRAME_CHROME[style] : null;
+    return { chrome, layout: windowLayout(output, screenAspect, chrome ? { titleBar: chrome.titleBar, radius: look.frame.radius } : null) };
+  }
+
+  function drawClip(layer: SceneFrame, sources: FrameSources): void {
+    const { chrome, layout } = frame(look.frame.enabled ? look.frame.style : null);
+    if (chrome) windowPass.draw(layout, chrome, look.frame.shadow, look.frame.title);
+    const screen = sources.screens.get(layer.index);
+    if (!screen) throw new Error(`render: no screen frame for scene ${layer.index}`);
+    uploadTexture(gl, screenTexture, screen, true);
+    const zoom = layer.zoom ?? full;
+    content.draw(screenTexture, uvRect(zoom, screenSize), layout);
+  }
 
   function drawCard(scene: CardScene): void {
     const maxWidth = output.width * CARD_MAX_WIDTH;
@@ -110,6 +133,7 @@ export function createRenderer(canvas: HTMLCanvasElement | OffscreenCanvas, proj
     if (!scene) throw new Error(`render: the project has no scene ${layer.index}`);
     background.draw(t);
     if (scene.type === 'card') drawCard(scene);
+    else if (scene.type === 'clip') drawClip(layer, sources);
     else throw new Error(`render: ${scene.type} scenes are not supported yet`);
   }
 

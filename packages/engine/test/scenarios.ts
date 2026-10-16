@@ -26,6 +26,9 @@ function project(look: Look = {}, rest: Partial<CuttleProjectInput> = {}): Cuttl
   };
 }
 
+const SLATE = { preset: 'solid', color: '#3B4252' } as const;
+const TITLE = 'claude · ~/treg-demo';
+
 export const SCENARIOS: Scenario[] = [
   // Backgrounds, behind an end card
   ...(['sunset-sky', 'aurora', 'mesh'] as const).map((preset) => ({
@@ -49,4 +52,10 @@ export const SCENARIOS: Scenario[] = [
     t: 1,
   },
 
+  // Window frames
+  { name: 'frame-mac-dark', project: project({ background: SLATE, frame: { style: 'mac-dark', title: TITLE } }), t: 1 },
+  { name: 'frame-mac-light', project: project({ background: SLATE, frame: { style: 'mac-light', title: TITLE } }), t: 1 },
+  { name: 'frame-browser-light', project: project({ background: SLATE, frame: { style: 'browser-light', title: 'treg.to' } }), t: 1 },
+  { name: 'frame-none', project: project({ background: SLATE, frame: { style: 'none' } }), t: 1 },
+  { name: 'frame-disabled', project: project({ background: SLATE, frame: { enabled: false } }), t: 1 },
 ];

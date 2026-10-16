@@ -1,10 +1,12 @@
-import { BACKGROUND_PRESETS, parseProject, type CuttleProject, type CuttleProjectInput } from '@cuttle/project';
+import { BACKGROUND_PRESETS, parseProject, type CuttleProject, type CuttleProjectInput, type MaskStyle, type Rect } from '@cuttle/project';
 import type { RenderState, SceneFrame } from '@cuttle/timeline';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { loadEngineAssets, type EngineAssets } from '../src/assets';
+import { maskRectToOutput, windowLayout } from '../src/layout';
+import { FRAME_CHROME } from '../src/presets/frames';
 import { createRenderer, type FrameSources } from '../src/renderer';
 import { SCREEN, fixtures } from './fixtures';
-import { pixelAt, readPixels } from './gl-util';
+import { pixelAt, readPixels, type Pixels } from './gl-util';
 
 let assets: EngineAssets;
 
@@ -105,5 +107,73 @@ describe('render', () => {
     canvas.getContext('webgl2')!.getExtension('WEBGL_lose_context')!.loseContext();
     expect(() => renderer.render({ t: 0, layers: [layer(0, 1)] }, NO_SOURCES)).toThrow('render: the WebGL context was lost');
     renderer.dispose();
+  });
+});
+
+describe('masks hide what is under them', () => {
+  const OUTPUT = { width: 960, height: 540 };
+  /** About 4.6 output px per source px: bilinear magnification spreads every texel well past its edge. */
+  const STRONG_ZOOM: Rect = [560, 360, 160, 100];
+  const SMALL: Rect = [600, 400, 80, 20];
+  /** A line of large text: 8 % of the screen height. */
+  const LARGE: Rect = [400, 300, 480, 64];
+  /** Blurred detail keeps at most 10 % of the hidden contrast (white on #1E1E1E); the plan's first blur kept 16 %, readable. */
+  const BLUR_TOLERANCE = Math.floor(0.1 * (255 - 0x1e));
+
+  /** A dark screen; inside `secret`, white bars stand in for text and touch all four edges of it. */
+  function screen(secret?: Rect, period = 3, offset = 0, bar = 2): OffscreenCanvas {
+    const canvas = new OffscreenCanvas(SCREEN.width, SCREEN.height);
+    const g = canvas.getContext('2d')!;
+    g.fillStyle = '#1E1E1E';
+    g.fillRect(0, 0, SCREEN.width, SCREEN.height);
+    if (secret) {
+      const [x, y, w, h] = secret;
+      g.fillStyle = '#FFFFFF';
+      for (let left = x + offset; left < x + w; left += period) g.fillRect(left, y, Math.min(bar, x + w - left), h);
+      g.fillRect(x, y, w, 1);
+      g.fillRect(x, y + h - 1, w, 1);
+    }
+    return canvas;
+  }
+
+  function renderMask(style: MaskStyle, mask: Rect, source: OffscreenCanvas, zoom?: Rect) {
+    const project = parse({ output: OUTPUT, scenes: [{ type: 'clip', from: 0, to: 1 }], masks: [{ from: 0, to: 1, rect: mask, style }] });
+    const frame: SceneFrame = { ...layer(0, 1, 'clip'), zoom, masks: project.masks };
+    const pixels = render(project, { t: 0, layers: [frame] }, { screens: new Map([[0, source]]), webcams: new Map(), stills: new Map() }).pixels;
+    const { content } = windowLayout(OUTPUT, SCREEN.width / SCREEN.height, { titleBar: FRAME_CHROME['mac-dark'].titleBar, radius: 14 });
+    return { pixels, rect: maskRectToOutput(mask, zoom ?? [0, 0, SCREEN.width, SCREEN.height], content) };
+  }
+
+  /** The largest colour difference between `a` and `b`, inside or outside `rect`. */
+  function maxDifference(a: Pixels, b: Pixels, rect: Rect, where: 'inside' | 'outside'): number {
+    let max = 0;
+    for (let y = 0; y < a.height; y++) {
+      for (let x = 0; x < a.width; x++) {
+        const inside = x >= rect[0] && x < rect[0] + rect[2] && y >= rect[1] && y < rect[1] + rect[3];
+        if (inside !== (where === 'inside')) continue;
+        const i = (y * a.width + x) * 4;
+        for (let c = 0; c < 3; c++) max = Math.max(max, Math.abs(a.data[i + c]! - b.data[i + c]!));
+      }
+    }
+    return max;
+  }
+
+  it('fill: nothing of the hidden content shows anywhere, even under a strong zoom', () => {
+    const shown = renderMask('fill', SMALL, screen(SMALL), STRONG_ZOOM);
+    const empty = renderMask('fill', SMALL, screen(), STRONG_ZOOM);
+    expect(maxDifference(shown.pixels, empty.pixels, shown.rect, 'inside')).toBe(0);
+    expect(maxDifference(shown.pixels, empty.pixels, shown.rect, 'outside')).toBe(0);
+  });
+
+  it('blur: nothing of the hidden content shows outside the mask, even under a strong zoom', () => {
+    const shown = renderMask('blur', SMALL, screen(SMALL), STRONG_ZOOM);
+    const empty = renderMask('blur', SMALL, screen(), STRONG_ZOOM);
+    expect(maxDifference(shown.pixels, empty.pixels, shown.rect, 'outside')).toBe(0);
+  });
+
+  it('blur: two different large texts with the same amount of ink look the same', () => {
+    const a = renderMask('blur', LARGE, screen(LARGE, 24, 0, 8));
+    const b = renderMask('blur', LARGE, screen(LARGE, 24, 12, 8));
+    expect(maxDifference(a.pixels, b.pixels, a.rect, 'inside')).toBeLessThanOrEqual(BLUR_TOLERANCE);
   });
 });

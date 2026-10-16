@@ -83,6 +83,15 @@ describe('source to output mapping', () => {
     expect(maskRectToOutput([401, 251, 3, 3], full, content)).toEqual([299, 174, 4, 4]); // 300.5..302 → 299..303
   });
 
+  it('grows mask rects by the filter spread of a texel under strong magnification', () => {
+    const zoom: [number, number, number, number] = [0, 0, 100, 100];
+    const square: [number, number, number, number] = [0, 0, 800, 800]; // 8 output px per source px
+    // 80..160 output px, plus half a texel (4 px) of bilinear spread, of which the extra pixel covers 1.5
+    expect(maskRectToOutput([10, 10, 10, 10], zoom, square)).toEqual([76, 76, 88, 88]);
+    // fractional edges hide every texel they touch
+    expect(maskRectToOutput([10.5, 10.2, 9, 9.5], zoom, square)).toEqual([76, 76, 88, 88]);
+  });
+
   it('turns image px into texture coordinates', () => {
     expect(uvRect([0, 0, 1600, 1000], { width: 1600, height: 1000 })).toEqual([0, 0, 1, 1]);
     expect(uvRect([400, 250, 800, 500], { width: 1600, height: 1000 })).toEqual([0.25, 0.25, 0.5, 0.5]);

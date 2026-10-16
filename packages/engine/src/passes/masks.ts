@@ -60,7 +60,8 @@ void main() {
   for (int j = -2; j <= 2; j++) {
     for (int i = -2; i <= 2; i++) {
       float w = exp(-float(i * i + j * j) / 4.0);
-      sum += textureLod(u_tex, uv + vec2(float(i), float(j)) * stride, u_lod).rgb * w;
+      // One mip level coarser than the tap spacing, so neighbouring taps overlap into a smooth smear.
+      sum += textureLod(u_tex, uv + vec2(float(i), float(j)) * stride, u_lod + 1.0).rgb * w;
       total += w;
     }
   }
@@ -68,9 +69,13 @@ void main() {
   o_color = vec4(sum / total * a, a);
 }`;
 
-/** Blur strength: one mip level per doubling; a tap is about 1/90 of the screen height, at least 4 px. */
-export function blurLod(screen: Size): number {
-  return Math.max(2, Math.log2(screen.height / 90));
+/**
+ * Blur strength: one mip level per doubling. Taps are about 1/90 of the screen height apart, at
+ * least 4 px, and at least a quarter of the mask's short side: no text under a mask is taller than
+ * the mask, so the five taps across it always smear a whole glyph.
+ */
+export function blurLod(screen: Size, mask: Rect): number {
+  return Math.max(2, Math.log2(screen.height / 90), Math.log2(Math.min(mask[2], mask[3]) / 4));
 }
 
 /** Masks over the screen: `fill` with the surrounding colour, `blur` with a heavy blur. Clipped to the content. */
@@ -103,7 +108,7 @@ export class MaskPass {
         if (mask.style === 'fill') {
           shader.vec4('u_mask', uvRect(mask.rect, screenSize));
         } else {
-          shader.vec4('u_crop', uvRect(zoom, screenSize)).vec4('u_content', layout.content).float('u_lod', blurLod(screenSize));
+          shader.vec4('u_crop', uvRect(zoom, screenSize)).vec4('u_content', layout.content).float('u_lod', blurLod(screenSize, mask.rect));
         }
         drawRect(this.gl, shader, rect, this.output);
       }

@@ -66,14 +66,22 @@ export function sourceRectToOutput(rect: Rect, zoom: Rect, content: Rect): Rect 
 }
 
 /**
- * Where a mask goes in output px: its mapped rect grown to whole pixels plus one on every side,
- * so the filtered edge of what it hides cannot peek out as a hairline.
+ * Where a mask goes in output px, so the filtered edge of what it hides cannot peek out as a
+ * hairline: the mask covers every source pixel it touches, and its mapped rect grows to whole
+ * pixels plus one on every side, more under strong zoom, where bilinear magnification spreads
+ * each source pixel half a pixel (in source px) past its edge.
  */
 export function maskRectToOutput(rect: Rect, zoom: Rect, content: Rect): Rect {
-  const [x, y, w, h] = sourceRectToOutput(rect, zoom, content);
-  const left = Math.floor(x) - 1;
-  const top = Math.floor(y) - 1;
-  return [left, top, Math.ceil(x + w) + 1 - left, Math.ceil(y + h) + 1 - top];
+  const sx = Math.floor(rect[0]);
+  const sy = Math.floor(rect[1]);
+  const covered: Rect = [sx, sy, Math.ceil(rect[0] + rect[2]) - sx, Math.ceil(rect[1] + rect[3]) - sy];
+  const [x, y, w, h] = sourceRectToOutput(covered, zoom, content);
+  // The extra pixel below covers 1.5 output px of spread, enough up to 3 output px per source px.
+  const spreadX = Math.max(0, (0.5 * content[2]) / zoom[2] - 1.5);
+  const spreadY = Math.max(0, (0.5 * content[3]) / zoom[3] - 1.5);
+  const left = Math.floor(x - spreadX) - 1;
+  const top = Math.floor(y - spreadY) - 1;
+  return [left, top, Math.ceil(x + w + spreadX) + 1 - left, Math.ceil(y + h + spreadY) + 1 - top];
 }
 
 /** A rect in image px as texture coordinates `[u, v, w, h]`, with v = 0 at the image's top row. */

@@ -27,4 +27,5 @@ pnpm engine:electron                     # the engine goldens in a hidden Electr
 
 Engine golden images live in `packages/engine/test/__golden__/`, one PNG per platform. A new
 scenario writes its PNG on the first run and fails once so you can look at it.
-`pnpm exec vitest run -u` rewrites goldens after an intended change of look.
+`pnpm exec vitest run -u` rewrites goldens after an intended change of look; that run fails once
+for every rewritten PNG, so look at each one and run the tests again.

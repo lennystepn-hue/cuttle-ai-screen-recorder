@@ -96,12 +96,16 @@ Interfaces the later milestones introduce (their detailed plans must keep these 
 // visible at once, so every per-layer image is looked up by scene index.
 export interface FrameSources {
   screens: Map<number, TexImageSource>;    // scene index → decoded frame at that layer's sourceTime
-  webcams: Map<number, TexImageSource>;    // scene index → webcam frame at that layer's sourceTime
+  webcams: Map<number, TexImageSource>;    // scene index → webcam frame at that layer's sourceTime; none (or an
+                                           //   empty one) means no bubble
   stills: Map<number, ImageBitmap>;        // scene index → image for still scenes (premultiplied, not flipped,
                                            //   at most MAX_TEXTURE_SIZE per side)
 }
-// render throws on a missing screen frame or still, a lost WebGL context and an oversized still
+// render throws on a missing or empty (0×0) screen frame, a missing, closed or oversized still,
+// and a lost WebGL context
 export interface Renderer { render(state: RenderState, sources: FrameSources): void; dispose(): void }
+export type CursorImage = `system:${CursorShape}` | 'arrow-white' | 'arrow-black';
+export const FONT_FAMILY = 'Cuttle Inter';                  // also exported: type Size { width; height }
 export interface EngineAssets { cursors: ReadonlyMap<CursorImage, ImageBitmap> }
 export function loadEngineAssets(): Promise<EngineAssets>;  // Inter fonts + cursor art; needs a window, load once
 export interface RendererOptions {
@@ -135,7 +139,10 @@ export function record(opts: RecordOptions): { stop(): Promise<Take>; done: Prom
   relative imports, `moduleResolution: Bundler`). Plain Node and the Electron main process cannot
   import them without a bundler (or tsx), so M3–M5 need one. M2 needs the DOM lib: move to
   per-package tsconfigs instead of adding DOM to the root config, which would leak DOM globals into
-  the pure packages.
+  the pure packages. Since M2 every package has its tsconfig listed explicitly: a new package needs
+  its own entry in the root `typecheck` script, or it is silently not typechecked. Code that
+  imports `@cuttle/engine` must be bundled with Vite (or another bundler that understands `?url`
+  imports; the engine imports its fonts that way).
 - **M2:** done; see "Decisions made while planning" and "Changes during execution" in
   `2026-10-16-cuttle-m2-engine.md`.
 - **M3:** Electron's WebCodecs H.264 encoder availability (`VideoEncoder.isConfigSupported` with
@@ -154,9 +161,11 @@ export function record(opts: RecordOptions): { stop(): Promise<Take>; done: Prom
   `backgroundThrottling: false` changed nothing.
   From the M2 reviews: create one renderer per export or preview session (each `createRenderer`
   compiles every program) and drop the canvas or call `loseContext()` when it ends; `render` throws
-  on a lost context, but check `gl.isContextLost()` before encoding each frame as well. Pass only
-  decoded frames: a 0×0 source (a video element without data) draws the previous frame or black
-  without an error, and a missing webcam frame draws no bubble. Still images larger than
+  on a lost context, but check `gl.isContextLost()` before encoding each frame as well. It also
+  throws on an empty (0×0) screen frame, e.g. a closed `VideoFrame`; a missing or empty webcam
+  frame only drops the bubble, so supply one wherever the webcam track covers the source time.
+  No golden covers a clip inside the crossfade target yet (clip→clip with masks and a cursor);
+  add one when the export first crossfades real clips. Still images larger than
   `MAX_TEXTURE_SIZE` (8192 under SwiftShader) are refused: upload only the visible band
   (`UNPACK_SKIP_ROWS` with a sized `texImage2D`, checked in a probe) or downscale at decode time.
 - **M4:** Mapping from Electron `screen.getAllDisplays()` to ffmpeg `ddagrab output_idx` (on the

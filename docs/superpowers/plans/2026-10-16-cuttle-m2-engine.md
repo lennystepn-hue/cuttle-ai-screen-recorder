@@ -4265,3 +4265,101 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
   into a fixed-size texture is the first optimization if needed.
 - **Fonts.** Inter's latin subset is bundled; other scripts and emoji fall back to system fonts,
   which may differ between machines.
+
+## Changes during execution
+
+The code blocks above are the original plan. Code review changed these points; the repo is the
+source of truth. The full suite has 184 tests in 17 files instead of 174: the ten extra tests come
+from the fixes below. `pnpm engine:electron` matches all 38 goldens with 0 differing pixels.
+
+- **Task 1:** `zod` is a root devDependency, so `optimizeDeps.include: ['zod']` resolves. Before,
+  Vite printed "Failed to resolve dependency: zod" and pre-bundled nothing. After the final review
+  `vitest` and `playwright` are pinned exactly (`5.0.5`, `1.64.1`), like
+  `@vitest/browser-playwright` and `vite`: the goldens depend on Playwright's Chromium build, and
+  the browser provider must match vitest's version.
+- **Task 5:** label sprites keep a margin of at least `ceil(0.15 × font px)`, not only the shadow
+  margin, so overhanging glyph ink is not cut off. Window titles have no shadow, so the dots of
+  Ä/Ö/Ü and the hook of a leading j were clipped. One more sprite test. pnpm reformatted
+  `packages/engine/package.json` when it added the font package. After the final review
+  `assets.ts` references `env.d.ts` (`/// <reference path>`), so packages that import the engine
+  typecheck its `?url` imports; before, they failed with TS2307.
+- **Task 6:** `render` throws `render: the WebGL context was lost` on a lost context. A lost
+  context draws nothing and reports no error, so an export would have ended in black frames. One
+  more renderer test. After the final review `render` also throws on an empty (0×0) screen frame,
+  such as a closed `VideoFrame`, which showed black or the previous frame; an empty webcam frame
+  counts as missing (no bubble). One more renderer test. `index.ts` also exports `type CursorImage`,
+  which `EngineAssets` uses.
+- **Task 8:** the review found two leaks of masked content.
+  - `blur`: the taps read one mip level coarser (`u_lod + 1.0`), and `blurLod(screen, mask)` also
+    keeps the taps at least a quarter of the mask's short side apart. The planned blur left text
+    taller than about 5 % of the capture readable. `mask-blur.win32.png` was regenerated.
+  - `maskRectToOutput` covers every source pixel the mask touches and grows by the bilinear spread
+    `max(0, 0.5·M − 1.5)` per axis (M = output px per source px). Above M = 3 the planned one-pixel
+    margin let the hidden edge texel show as a hairline.
+  - Tests: one layout test at M = 8, and `describe('masks hide what is under them')` in
+    `renderer.browser.test.ts`: a fill mask changes no pixel at M ≈ 4.6, a blur mask changes none
+    outside the mask, and two large texts with the same ink differ by at most 10 % of the hidden
+    contrast under blur (the planned blur kept 16 %).
+  - Accepted: at a rounded window corner up to 25 % of the hidden content blends into the
+    anti-aliased rim (not readable), and the fill colour of a mask flush with a screen edge can
+    follow the hidden content (a flat colour).
+- **Task 9:** the pointer, the ripples and `dot`/`ring` are clipped to the window's rounded corners,
+  not only scissored to the content rect; they painted over the backdrop at the bottom-right
+  corner. Cursor images use a cursor-local shader instead of `SpritePass`, so `CursorPass` takes no
+  `SpritePass` (its doc comment and the file-structure line above still say it draws cursor
+  images; it does not). No golden changed. Two tests in `describe('the cursor')`: corner clipping,
+  and nothing drawn while off the captured area.
+- **Task 12:** `drawStill` throws for a closed image and for one larger than `MAX_TEXTURE_SIZE`.
+  WebGL only set an error code and kept the old texture, so the scene showed black or the previous
+  still. `FrameSources.stills` documents the limit, and `dispose` drops the last still. One more
+  renderer test.
+- **Task 14:** `main.mjs` compares with the vitest rule (threshold 0.05, no differing pixel)
+  instead of threshold 0.1 and 0.2 % of the pixels: that allowed 460 px on a 640×360 golden, more
+  than the 186 px between two different cursor goldens, so wrong cursor art would have passed.
+  Electron's output is byte-identical anyway. Every step times out after 30 s, a crashed renderer
+  (`render-process-gone`) fails the run instead of hanging it, and the run fails when the page lists
+  no scenarios or a golden has no scenario. Checked by swapping a cursor golden (396 px, FAIL) and
+  adding an orphan golden (FAIL), both with exit code 1.
+- **Task 15:** the roadmap's interface block notes the still size limit, what `render` throws and
+  the extra exports, its "All milestones" bullet says new packages need a `typecheck` entry and
+  engine importers need Vite, and its M3 bullet carries the review notes below. The spec's look
+  rules also say that the blur grows with the mask, that masks cover touched pixels plus the zoom
+  spread, that the cursor is clipped to the window corners, that the `system` art is Windows-like
+  until phase 3, and that stills ignore `look.frame.enabled`; `color` tints every ripple, and the
+  procedural backgrounds always drift. The README says a `vitest -u` run fails once per rewritten
+  golden.
+
+### Open decisions for the owner
+
+- **Texts over the webcam bubble.** With the defaults (webcam bottom-left) a bottom `lower-third`
+  covers the lower third of the bubble in every format (1920×1080: bubble [40, 846, 194, 194],
+  panel from y = 957). The same happens with a top text and a top-left webcam, a long caption and a
+  bottom webcam, and the badge and a top-right webcam. Either `placeOverlay`/`placeBadge` move
+  clear of the webcam rect (additive, no golden changes), or the overlap stays and the skill picks
+  the opposite corner.
+- **Transparent stills and backgrounds.** `ContentPass` drops the texel alpha, so transparent parts
+  of a still (macOS window screenshots with their shadow margin, logos) show black; the `image`
+  background does the same. Proposal: composite stills over a white matte in `ContentPass`. Screen
+  frames are opaque, so no golden changes.
+
+### Notes for later milestones (from the reviews)
+
+- **M3:** one renderer per export or preview session, `loseContext()` when it ends, and
+  `isContextLost()` before encoding each frame. A missing or empty webcam frame drops the bubble,
+  so supply one wherever the webcam track covers the source time. Stills above `MAX_TEXTURE_SIZE`
+  need a band upload (`UNPACK_SKIP_ROWS`) or a downscale at decode time. Still-to-still crossfades
+  re-upload both bitmaps every frame; a two-texture cache would help. No golden puts a clip into
+  the crossfade target yet (clip→clip with masks and a cursor); add one with the first real
+  crossfade export. M3 reuses `main.mjs`: add an `uncaughtException` handler there (Electron's
+  default opens a modal dialog), deny popups and navigation, and set a CSP on the page.
+- Cursor art is rasterized at 128 px and gets soft at 4K with a strong zoom; a bigger raster
+  changes every cursor golden.
+- Texts at the same position at the same time overlap; project validation or the skill should
+  prevent that.
+- Still scenes always keep padding, rounded corners and the shadow (`scene.frame` defaults to
+  `none`, and `look.frame.enabled` does not apply to them), and their window takes the screen's
+  aspect, not the image's.
+- `webcamCrop`, `rippleAt` and `blurLod` have no unit tests (only goldens exercise them, and only
+  the landscape branch of `webcamCrop`); no test checks that backgrounds drift over time.
+- When `createRenderer` throws (e.g. no `backgroundImage` for the `image` preset), the GL objects
+  it created so far are not deleted; moving that check before `getContext` would avoid it.

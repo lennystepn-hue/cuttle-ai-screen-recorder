@@ -116,7 +116,7 @@ Rules:
 - `version` drives migrations; old files are upgraded on load, never silently rewritten.
 - `look.cursor.style` is `system` (the real OS pointer, including shape changes such as text
   cursor and hand) or one of five designed cursors: `arrow-white`, `arrow-black`, `dot`, `ring`,
-  `spotlight`. `color` tints `dot`, `ring` and `spotlight`. `clickEffect` is `ripple` or `none`.
+  `spotlight`. `color` tints `dot`, `ring`, `spotlight` and every style's click ripple. `clickEffect` is `ripple` or `none`.
   `enabled: false` hides the cursor.
 - `events.jsonl` holds one input event per line, times in source seconds and positions in source
   pixels of the screen track (the recorder subtracts the capture origin and applies the display
@@ -172,7 +172,7 @@ webcam and mic.
 
 `engine` (WebGL2) draws, back to front:
 
-1. Background: preset shader, gradient, solid color or image, optional slow drift.
+1. Background: preset shader, gradient, solid color or image; the procedural presets drift slowly.
 2. Window frame: title bar with title, traffic lights, rounded corners and soft shadow (SDF based).
 3. Screen video, cropped by the zoom rect, with masks drawn as fill (sampled background color) or
    blur.
@@ -195,7 +195,8 @@ Look rules (fixed in M2):
 - `look.frame.enabled: false` shows the screen alone, filling the output (letterboxed) with square
   corners and no shadow. `style: "none"` keeps the padding, the rounded corners and the shadow,
   without a title bar. Still scenes use their own `frame` style with `look.frame.radius` and
-  `shadow`, and no title.
+  `shadow`, and no title; `look.frame.enabled` does not apply to them, and their window has the
+  screen's aspect, not the image's.
 - Only `system` follows the pointer shape; its art is Windows-like for now (macOS lookalikes come in
   phase 3), and the designed cursors keep their look. The cursor is 32 source px tall on a
   1080-row screen (proportionally bigger on taller screens), times `size`, scaled with the zoom

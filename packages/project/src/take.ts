@@ -35,7 +35,7 @@ export type TakeFileParseResult = { ok: true; take: TakeFile } | { ok: false; is
 export function parseTakeJson(text: string): TakeFileParseResult {
   let raw: unknown;
   try {
-    raw = JSON.parse(text);
+    raw = JSON.parse(text.replace(/^﻿/, '')); // a BOM, as Windows editors write one
   } catch (error) {
     return { ok: false, issues: [{ path: '(root)', message: `Invalid JSON: ${(error as Error).message}` }] };
   }

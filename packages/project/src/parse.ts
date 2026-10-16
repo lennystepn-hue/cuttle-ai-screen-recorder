@@ -46,7 +46,7 @@ export function parseProject(raw: unknown): ParseResult {
 export function parseProjectJson(text: string): ParseResult {
   let raw: unknown;
   try {
-    raw = JSON.parse(text);
+    raw = JSON.parse(text.replace(/^﻿/, '')); // a BOM, as Windows editors write one
   } catch (error) {
     return { ok: false, issues: [{ path: '(root)', message: `Invalid JSON: ${(error as Error).message}` }] };
   }

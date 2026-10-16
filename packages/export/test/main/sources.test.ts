@@ -95,6 +95,50 @@ describe('loadSources', () => {
     await expect(loadSources(events)).rejects.toMatchObject({ code: 'invalid-project', message: expect.stringContaining('line 1.t') });
   });
 
+  it('lists at most 20 issues, so a broken events.jsonl does not make a huge message', async () => {
+    const broken = '{"t":-1,"type":"keys","count":1}\n'.repeat(30);
+    const dir = await projectDir({ sources: SOURCES, scenes: SCENES }, { ...MEDIA, 'take/events.jsonl': broken });
+    const message = await loadSources(dir).then(
+      () => 'no error',
+      (error: Error) => error.message,
+    );
+    expect(message).toContain('line 20.t');
+    expect(message).not.toContain('line 21.t');
+    expect(message).toContain('… and 10 more');
+  });
+
+  it('matches take.json entries with the file system rules, and only for this screen recording', async () => {
+    const upper = { ...TAKE, tracks: { ...TAKE.tracks, mic: { file: 'MIC.m4a', start: 99.8 } } };
+    const caseDir = await projectDir({ sources: SOURCES, scenes: SCENES }, { ...MEDIA, 'take/take.json': JSON.stringify(upper) });
+    const caseInsensitive = process.platform === 'win32' || process.platform === 'darwin';
+    expect((await loadSources(caseDir)).mic?.offset).toBeCloseTo(caseInsensitive ? -0.2 : 0, 9);
+    const otherTake = { ...TAKE, tracks: { ...TAKE.tracks, screen: { file: 'older-screen.mp4', start: 100 } } };
+    const otherDir = await projectDir(
+      { sources: SOURCES, look: { webcam: { enabled: true } }, scenes: SCENES },
+      { ...MEDIA, 'take/take.json': JSON.stringify(otherTake) },
+    );
+    const other = await loadSources(otherDir);
+    expect([other.webcam?.offset, other.mic?.offset]).toEqual([0, 0]);
+  });
+
+  it('refuses a folder where a file belongs', async () => {
+    const noEvents = Object.fromEntries(Object.entries(MEDIA).filter(([path]) => path !== 'take/events.jsonl'));
+    const dir = await projectDir({ sources: SOURCES, scenes: SCENES }, noEvents);
+    await mkdir(join(dir, 'take', 'events.jsonl'));
+    await expect(loadSources(dir)).rejects.toMatchObject({ code: 'missing-file', message: expect.stringContaining('is a folder, not a file') });
+  });
+
+  it('lists every file the export reads, so the output cannot replace one of them', async () => {
+    const dir = await projectDir(
+      { sources: SOURCES, look: { webcam: { enabled: true } }, scenes: SCENES },
+      { ...MEDIA, 'take/take.json': JSON.stringify(TAKE) },
+    );
+    const { inputs } = await loadSources(dir);
+    for (const file of ['cuttle.json', 'take/take.json', 'take/screen.mp4', 'take/webcam.mp4', 'take/mic.m4a', 'take/events.jsonl', 'page.png']) {
+      expect(inputs, file).toContain(join(dir, file));
+    }
+  });
+
   it('refuses a folder without cuttle.json and a project without scenes', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'cuttle-sources-'));
     dirs.push(dir);

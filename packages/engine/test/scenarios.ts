@@ -58,4 +58,27 @@ export const SCENARIOS: Scenario[] = [
   { name: 'frame-browser-light', project: project({ background: SLATE, frame: { style: 'browser-light', title: 'treg.to' } }), t: 1 },
   { name: 'frame-none', project: project({ background: SLATE, frame: { style: 'none' } }), t: 1 },
   { name: 'frame-disabled', project: project({ background: SLATE, frame: { enabled: false } }), t: 1 },
+
+  // Masks and zoom
+  {
+    name: 'mask-fill',
+    project: project({ frame: { title: TITLE } }, { masks: [{ from: 0, to: 10, rect: [270, 170, 700, 22], style: 'fill' }] }),
+    t: 1,
+  },
+  {
+    name: 'mask-blur',
+    project: project({ frame: { title: TITLE } }, { masks: [{ from: 0, to: 10, rect: [900, 520, 340, 200], style: 'blur' }] }),
+    t: 1,
+  },
+  {
+    name: 'zoom',
+    project: project(
+      { frame: { title: TITLE } },
+      {
+        zooms: [{ at: 0, duration: 10, rect: [800, 450, 480, 300] }],
+        masks: [{ from: 0, to: 10, rect: [930, 620, 260, 54], style: 'fill' }],
+      },
+    ),
+    t: 5,
+  },
 ];

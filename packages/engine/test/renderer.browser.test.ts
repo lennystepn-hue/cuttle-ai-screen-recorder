@@ -107,6 +107,13 @@ describe('render', () => {
     expect(() => render(project, { t: 0, layers: [layer(0, 1, 'still')] })).toThrow('render: no image for still scene 0');
   });
 
+  it('shows the transparent parts of a still on white, like a blank page', async () => {
+    const project = parse({ scenes: [{ type: 'still', image: 'p.png', duration: 1 }] });
+    const transparent = await createImageBitmap(new ImageData(16, 10), { premultiplyAlpha: 'premultiply' });
+    const sources: FrameSources = { screens: new Map(), webcams: new Map(), stills: new Map([[0, transparent]]) };
+    expect(pixelAt(render(project, { t: 0, layers: [layer(0, 1, 'still')] }, sources).pixels, 32, 18)).toEqual([255, 255, 255, 255]);
+  });
+
   it('refuses a still image that is closed or bigger than the GPU can hold, instead of drawing black', async () => {
     const project = parse({ scenes: [{ type: 'still', image: 'p.png', duration: 1 }] });
     const probe = new OffscreenCanvas(1, 1).getContext('webgl2')!;

@@ -136,6 +136,22 @@ describe('placeOverlay and placeBadge', () => {
   it('puts the badge into the content top-right corner', () => {
     expect(placeBadge([100, 50, 800, 500], { width: 120, height: 40 }, 1)).toEqual([100 + 800 - 16 - 120, 66, 120, 40]);
   });
+
+  it('moves a top or bottom text clear of the webcam bubble, half a margin away', () => {
+    const bottomLeft = webcamRect(HD, 'bottom-left', 0.18); // the default bubble: [40, 846, 194, 194]
+    expect(placeOverlay(HD, sprite, 'bottom', 'left', bottomLeft)).toEqual([56, 846 - 28 - 60, 300, 60]);
+    expect(placeOverlay(HD, sprite, 'bottom', 'center', bottomLeft)).toEqual([810, 964, 300, 60]); // not in the way
+    expect(placeOverlay(HD, sprite, 'top', 'left', webcamRect(HD, 'top-left', 0.18))).toEqual([56, 40 + 194 + 28, 300, 60]);
+    expect(placeOverlay(HD, sprite, 'center', 'left', webcamRect(HD, 'top-left', 0.5))).toEqual([56, 510, 300, 60]); // centre stays
+  });
+
+  it('moves the badge left of a webcam bubble in its corner', () => {
+    const topRight = webcamRect(HD, 'top-right', 0.18); // [1686, 40, 194, 194]
+    expect(placeBadge([146, 100, 1628, 916], { width: 108, height: 37 }, 1, topRight)).toEqual([1686 - 16 - 108, 116, 108, 37]);
+    expect(placeBadge([146, 100, 1628, 916], { width: 108, height: 37 }, 1, webcamRect(HD, 'bottom-right', 0.18))).toEqual([
+      1650, 116, 108, 37,
+    ]);
+  });
 });
 
 describe('stillCrop', () => {

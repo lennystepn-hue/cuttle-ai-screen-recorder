@@ -3,7 +3,7 @@ import type { ActiveText, RenderState, SceneFrame } from '@cuttle/timeline';
 import type { EngineAssets } from './assets';
 import { createRenderTarget, deleteRenderTarget, type RenderTarget } from './gl/target';
 import { createTexture, sourceSize, uploadTexture } from './gl/texture';
-import { placeBadge, placeOverlay, stillCrop, unitFor, uvRect, windowLayout, type Size, type WindowLayout } from './layout';
+import { placeBadge, placeOverlay, stillCrop, unitFor, uvRect, webcamRect, windowLayout, type Size, type WindowLayout } from './layout';
 import { BackgroundPass } from './passes/background';
 import { ContentPass } from './passes/content';
 import { CursorPass } from './passes/cursor';
@@ -55,6 +55,9 @@ function hasPixels(source: TexImageSource): boolean {
   return width > 0 && height > 0;
 }
 
+/** What transparent parts of a still image show: white, like a blank page. */
+const STILL_MATTE: [number, number, number] = [1, 1, 1];
+
 /** Share of the output width that card titles may use. */
 const CARD_MAX_WIDTH = 0.84;
 /** Gap between a card's title and subtitle boxes, in units. */
@@ -91,6 +94,9 @@ export function createRenderer(canvas: HTMLCanvasElement | OffscreenCanvas, proj
   const look = project.look;
   const unit = unitFor(output);
   const maxTextureSize = gl.getParameter(gl.MAX_TEXTURE_SIZE) as number;
+  // Texts and the badge keep clear of the webcam bubble. Taken from the look, not from whether a
+  // webcam frame arrived, so they do not jump when the webcam track ends early.
+  const webcamArea = look.webcam.enabled ? webcamRect(output, look.webcam.corner, look.webcam.size) : undefined;
   const full: Rect = [0, 0, screenSize.width, screenSize.height];
   const screenAspect = screenSize.width / screenSize.height;
 
@@ -132,7 +138,7 @@ export function createRenderer(canvas: HTMLCanvasElement | OffscreenCanvas, proj
       if (opacity <= 0) continue;
       const style = TEXT_LABELS[overlay.style];
       const sprite = sprites.label(overlay.text, style, unit, output.width * TEXT_MAX_WIDTH);
-      const [x, y] = placeOverlay(output, sprite.box, overlay.position, style.align);
+      const [x, y] = placeOverlay(output, sprite.box, overlay.position, style.align, webcamArea);
       spritePass.drawSprite(sprite, x, y, opacity);
     }
   }
@@ -158,7 +164,7 @@ export function createRenderer(canvas: HTMLCanvasElement | OffscreenCanvas, proj
     drawTexts(layer.texts);
     if (layer.badge) {
       const sprite = sprites.label(layer.badge, BADGE_STYLE, unit, layout.content[2] * BADGE_MAX_WIDTH);
-      const [x, y] = placeBadge(layout.content, sprite.box, unit);
+      const [x, y] = placeBadge(layout.content, sprite.box, unit, webcamArea);
       spritePass.drawSprite(sprite, x, y, 1);
     }
   }
@@ -181,7 +187,7 @@ export function createRenderer(canvas: HTMLCanvasElement | OffscreenCanvas, proj
     }
     const size = { width: image.width, height: image.height };
     const crop = stillCrop(size, { width: layout.content[2], height: layout.content[3] }, scene.motion, layer.progress);
-    content.draw(stillTexture, uvRect(crop, size), layout);
+    content.draw(stillTexture, uvRect(crop, size), layout, STILL_MATTE);
   }
 
   function drawCard(scene: CardScene): void {

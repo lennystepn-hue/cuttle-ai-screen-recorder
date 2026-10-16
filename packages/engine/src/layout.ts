@@ -113,31 +113,40 @@ export function webcamRect(output: Size, corner: Look['webcam']['corner'], size:
 /** Space between a text overlay and the output edge, in units. */
 export const OVERLAY_MARGIN = 56;
 
-/** Where a text overlay sprite goes in the output: `position` picks the row, `align` the column. */
-export function placeOverlay(output: Size, sprite: Size, position: TextPosition, align: 'center' | 'left'): Rect {
+function overlaps(a: Rect, b: Rect): boolean {
+  return a[0] < b[0] + b[2] && b[0] < a[0] + a[2] && a[1] < b[1] + b[3] && b[1] < a[1] + a[3];
+}
+
+/**
+ * Where a text overlay sprite goes in the output: `position` picks the row, `align` the column.
+ * A top or bottom text that would cover `avoid` (the webcam bubble) moves vertically clear of it,
+ * half a margin away; a centred row stays.
+ */
+export function placeOverlay(output: Size, sprite: Size, position: TextPosition, align: 'center' | 'left', avoid?: Rect): Rect {
   const margin = Math.round(OVERLAY_MARGIN * unitFor(output));
   const x = align === 'left' ? margin : Math.round((output.width - sprite.width) / 2);
-  const y =
+  let y =
     position === 'top'
       ? margin
       : position === 'bottom'
         ? output.height - margin - sprite.height
         : Math.round((output.height - sprite.height) / 2);
+  if (avoid && position !== 'center' && overlaps([x, y, sprite.width, sprite.height], avoid)) {
+    const gap = Math.round(margin / 2);
+    y = position === 'bottom' ? avoid[1] - gap - sprite.height : avoid[1] + avoid[3] + gap;
+  }
   return [x, y, sprite.width, sprite.height];
 }
 
 /** Space between the speed badge and the content's top-right corner, in units. */
 export const BADGE_MARGIN = 16;
 
-/** The speed badge sits in the top-right corner of the content. */
-export function placeBadge(content: Rect, sprite: Size, unit: number): Rect {
+/** The speed badge sits in the top-right corner of the content, or left of `avoid` (the webcam bubble) when it would cover it. */
+export function placeBadge(content: Rect, sprite: Size, unit: number, avoid?: Rect): Rect {
   const margin = Math.round(BADGE_MARGIN * unit);
-  return [
-    Math.round(content[0] + content[2] - margin - sprite.width),
-    Math.round(content[1] + margin),
-    sprite.width,
-    sprite.height,
-  ];
+  const badge: Rect = [Math.round(content[0] + content[2] - margin - sprite.width), Math.round(content[1] + margin), sprite.width, sprite.height];
+  if (avoid && overlaps(badge, avoid)) badge[0] = Math.round(avoid[0] - margin - sprite.width);
+  return badge;
 }
 
 /** How far a `kenburns` still zooms in by the end of its scene. */

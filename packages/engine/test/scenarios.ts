@@ -142,6 +142,16 @@ export const SCENARIOS: Scenario[] = [
   textScenario('lower-third', 'bottom'),
   textScenario('caption', 'bottom'),
   { name: 'badge', project: project({ frame: { title: TITLE } }, { scenes: [{ type: 'clip', from: 0, to: 120, speed: 12 }] }), t: 5 },
+  // A bottom lower third moves up, clear of the webcam bubble in its default corner
+  {
+    name: 'text-lower-third-webcam',
+    project: project(
+      { frame: { title: TITLE }, webcam: { enabled: true } },
+      { texts: [{ at: 0, duration: 10, text: 'One prompt, one call', style: 'lower-third', position: 'bottom' }] },
+    ),
+    t: 5,
+    webcam: true,
+  },
 
   // Still scenes
   {

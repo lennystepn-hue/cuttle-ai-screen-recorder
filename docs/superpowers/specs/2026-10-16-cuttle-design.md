@@ -196,7 +196,7 @@ Look rules (fixed in M2):
   corners and no shadow. `style: "none"` keeps the padding, the rounded corners and the shadow,
   without a title bar. Still scenes use their own `frame` style with `look.frame.radius` and
   `shadow`, and no title; `look.frame.enabled` does not apply to them, and their window has the
-  screen's aspect, not the image's.
+  screen's aspect, not the image's. Transparent parts of a still show white, like a blank page.
 - Only `system` follows the pointer shape; its art is Windows-like for now (macOS lookalikes come in
   phase 3), and the designed cursors keep their look. The cursor is 32 source px tall on a
   1080-row screen (proportionally bigger on taller screens), times `size`, scaled with the zoom
@@ -206,8 +206,9 @@ Look rules (fixed in M2):
   plus at least one extra output pixel on every side, more under strong zoom, so no hairline of
   the hidden content shows. `fill` is the safer choice for tokens and keys.
 - Texts: `position` picks top, centre or bottom of the output; `lower-third` is left-aligned, the
-  other styles centred. The speed badge sits in the screen's top-right corner. The webcam
-  bubble is not mirrored.
+  other styles centred. The speed badge sits in the screen's top-right corner. Texts and the
+  badge never cover the webcam bubble: a top or bottom text that would moves vertically clear of
+  it, and the badge moves to its left. The webcam bubble is not mirrored.
 - Procedural backgrounds drift slowly with output time.
 
 ## Export (`packages/export`)

@@ -4269,8 +4269,9 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ## Changes during execution
 
 The code blocks above are the original plan. Code review changed these points; the repo is the
-source of truth. The full suite has 184 tests in 17 files instead of 174: the ten extra tests come
-from the fixes below. `pnpm engine:electron` matches all 38 goldens with 0 differing pixels.
+source of truth. The full suite has 188 tests in 17 files instead of 174: the extra tests come from
+the fixes and decisions below. There are 39 goldens instead of 38, and `pnpm engine:electron`
+matches all of them with 0 differing pixels.
 
 - **Task 1:** `zod` is a root devDependency, so `optimizeDeps.include: ['zod']` resolves. Before,
   Vite printed "Failed to resolve dependency: zod" and pre-bundled nothing. After the final review
@@ -4329,18 +4330,22 @@ from the fixes below. `pnpm engine:electron` matches all 38 goldens with 0 diffe
   procedural backgrounds always drift. The README says a `vitest -u` run fails once per rewritten
   golden.
 
-### Open decisions for the owner
+### Look decisions taken after the reviews
 
-- **Texts over the webcam bubble.** With the defaults (webcam bottom-left) a bottom `lower-third`
-  covers the lower third of the bubble in every format (1920×1080: bubble [40, 846, 194, 194],
-  panel from y = 957). The same happens with a top text and a top-left webcam, a long caption and a
-  bottom webcam, and the badge and a top-right webcam. Either `placeOverlay`/`placeBadge` move
-  clear of the webcam rect (additive, no golden changes), or the overlap stays and the skill picks
-  the opposite corner.
-- **Transparent stills and backgrounds.** `ContentPass` drops the texel alpha, so transparent parts
-  of a still (macOS window screenshots with their shadow margin, logos) show black; the `image`
-  background does the same. Proposal: composite stills over a white matte in `ContentPass`. Screen
-  frames are opaque, so no golden changes.
+The reviews left two look questions open; the owner asked to settle them as seemed best (commit
+9e53b12). The spec's look rules say both.
+
+- **Texts and the badge keep clear of the webcam bubble.** With the defaults (webcam bottom-left) a
+  bottom `lower-third` covered the lower third of the bubble in every format. `placeOverlay` and
+  `placeBadge` take the bubble's rect (from the look, so texts do not jump when the webcam track
+  ends early): a top or bottom text that would cover it moves vertically clear of it, half an
+  overlay margin away, and the badge moves to its left. Centre texts stay. Two layout tests and the
+  golden `text-lower-third-webcam`; no existing golden changed.
+- **Transparent stills sit on white.** `ContentPass` dropped the texel alpha, so transparent parts of
+  a still (macOS window screenshots with their shadow margin, logos) showed black. It now
+  composites the premultiplied texel over a matte: white for stills, black for screen frames,
+  which are opaque, so their pixels do not change. One renderer test. The `image` background still
+  drops alpha (a transparent background image shows black there).
 
 ### Notes for later milestones (from the reviews)
 

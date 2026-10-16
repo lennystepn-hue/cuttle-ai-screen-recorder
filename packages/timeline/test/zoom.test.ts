@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Rect, Zoom } from '@cuttle/project';
-import { zoomRectAt } from '../src/zoom';
+import { fitZoomRect, zoomRectAt } from '../src/zoom';
 
 const full: Rect = [0, 0, 2560, 1440];
 const zoom = (at: number, duration: number, rect: Rect, extra: Partial<Zoom> = {}): Zoom => ({
@@ -42,5 +42,61 @@ describe('zoomRectAt', () => {
   it('lets the zoom with the later start win when zooms overlap', () => {
     const later: Rect = [100, 100, 640, 360];
     expect(zoomRectAt([zoom(12, 4, half), zoom(13, 2, later)], 14, 1, full)).toEqual(later);
+  });
+
+  it('is active for at <= t < at + duration (half-open end)', () => {
+    const z = [zoom(12, 4, half)];
+    expect(zoomRectAt(z, 12, 1, full)).toEqual(full);
+    expect(zoomRectAt(z, 16, 1, full)).toEqual(full);
+    const atRampEnd = zoomRectAt(z, 12.6, 1, full);
+    half.forEach((value, i) => expect(atRampEnd[i]).toBeCloseTo(value, 6));
+  });
+
+  it('eases a later zoom from the rect produced so far instead of from the full frame', () => {
+    const inner: Rect = [0, 0, 640, 360];
+    const zooms = [zoom(12, 4, half), zoom(13, 2, inner)];
+    const widthAt = (t: number): number => zoomRectAt(zooms, t, 1, full)[2];
+    // 0.001 s apart: the rect may drift a little but must not jump
+    const neighbours: [number, number][] = [[12.999, 13], [13, 13.001], [14.999, 15], [15, 15.001]];
+    for (const [a, b] of neighbours) {
+      expect(Math.abs(widthAt(b) - widthAt(a))).toBeLessThanOrEqual(20);
+    }
+    expect(widthAt(13.3)).toBeGreaterThan(widthAt(14));
+    expect(widthAt(13)).toBeCloseTo(1280, 6);
+    expect(widthAt(14)).toBeCloseTo(640, 6);
+  });
+
+  it('never returns the caller\'s full array', () => {
+    const result = zoomRectAt([], 1, 1, full);
+    expect(result).toEqual(full);
+    expect(result).not.toBe(full);
+  });
+
+  it('aspect-fits the target rect of each zoom', () => {
+    const tall: Rect = [1000, 500, 200, 400];
+    const result = zoomRectAt([zoom(12, 4, tall)], 14, 1, full);
+    expect(result[2] / result[3]).toBeCloseTo(16 / 9, 6);
+  });
+});
+
+describe('fitZoomRect', () => {
+  const expectRect = (actual: Rect, expected: Rect): void => {
+    expected.forEach((value, i) => expect(actual[i]).toBeCloseTo(value, 6));
+  };
+
+  it('keeps a rect that already has the aspect of the frame', () => {
+    expect(fitZoomRect(half, full)).toEqual(half);
+  });
+
+  it('grows a tall rect around its centre to the frame aspect', () => {
+    expectRect(fitZoomRect([1000, 500, 200, 400], full), [744.4444444, 500, 711.1111111, 400]);
+  });
+
+  it('shifts a rect hanging off the frame edge back inside', () => {
+    expectRect(fitZoomRect([2400, 100, 640, 360], full), [1920, 100, 640, 360]);
+  });
+
+  it('turns an oversized rect into the full frame', () => {
+    expectRect(fitZoomRect([-100, -100, 4000, 1000], full), full);
   });
 });

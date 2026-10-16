@@ -9,10 +9,12 @@ export interface ActiveText {
   opacity: number;
 }
 
+/** Enabled masks whose `[from, to)` range, in source seconds, contains `sourceTime`. */
 export function activeMasks(masks: readonly Mask[], sourceTime: number): Mask[] {
   return masks.filter((mask) => mask.enabled && sourceTime >= mask.from && sourceTime < mask.to);
 }
 
+/** Enabled texts whose `[at, at+duration)` range, in source seconds, contains `sourceTime`; fade is 0.25 output seconds × `speed`, so opacity may be 0 on the first frame. */
 export function activeTexts(texts: readonly TextOverlay[], sourceTime: number, speed: number): ActiveText[] {
   const active: ActiveText[] = [];
   for (const overlay of texts) {
@@ -25,11 +27,9 @@ export function activeTexts(texts: readonly TextOverlay[], sourceTime: number, s
   return active;
 }
 
-function formatSpeed(speed: number): string {
-  return Number.isInteger(speed) ? String(speed) : String(Math.round(speed * 10) / 10);
-}
-
+/** Badge text for a clip scene: an explicit badge wins, `''` hides it, otherwise "<speed>× speed" when the rounded speed is above 1. */
 export function badgeFor(scene: ClipScene): string | undefined {
   if (scene.badge !== undefined) return scene.badge === '' ? undefined : scene.badge;
-  return scene.speed > 1 ? `${formatSpeed(scene.speed)}× speed` : undefined;
+  const shown = Math.round(scene.speed * 10) / 10;
+  return shown > 1 ? `${shown}× speed` : undefined;
 }

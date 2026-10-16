@@ -44,6 +44,11 @@ describe('badgeFor', () => {
     expect(badgeFor(clip(1.5))).toBe('1.5× speed');
   });
 
+  it('rounds the speed once and hides the badge when it rounds to 1', () => {
+    expect(badgeFor(clip(1.04))).toBeUndefined();
+    expect(badgeFor(clip(1.25))).toBe('1.3× speed');
+  });
+
   it('uses an explicit badge and hides it when empty', () => {
     expect(badgeFor(clip(12, 'fast-forward'))).toBe('fast-forward');
     expect(badgeFor(clip(12, ''))).toBeUndefined();

@@ -24,7 +24,10 @@ export interface FrameSources {
   screens: Map<number, TexImageSource>;
   /** Scene index → webcam frame at that layer's `sourceTime`. */
   webcams: Map<number, TexImageSource>;
-  /** Scene index → image of a still scene; created with `premultiplyAlpha: 'premultiply'`, not flipped. */
+  /**
+   * Scene index → image of a still scene; created with `premultiplyAlpha: 'premultiply'`, not flipped,
+   * and no larger than `MAX_TEXTURE_SIZE` on either side (render throws otherwise).
+   */
   stills: Map<number, ImageBitmap>;
 }
 
@@ -82,6 +85,7 @@ export function createRenderer(canvas: HTMLCanvasElement | OffscreenCanvas, proj
   const gl: WebGL2RenderingContext = context;
   const look = project.look;
   const unit = unitFor(output);
+  const maxTextureSize = gl.getParameter(gl.MAX_TEXTURE_SIZE) as number;
   const full: Rect = [0, 0, screenSize.width, screenSize.height];
   const screenAspect = screenSize.width / screenSize.height;
 
@@ -156,6 +160,13 @@ export function createRenderer(canvas: HTMLCanvasElement | OffscreenCanvas, proj
     if (chrome) windowPass.draw(layout, chrome, look.frame.shadow, '');
     const image = sources.stills.get(layer.index);
     if (!image) throw new Error(`render: no image for still scene ${layer.index}`);
+    // WebGL only flags these with an error code and keeps the old texture: black or a stale image.
+    if (!(image.width > 0 && image.height > 0)) throw new Error(`render: the image of still scene ${layer.index} is empty or closed`);
+    if (Math.max(image.width, image.height) > maxTextureSize) {
+      throw new Error(
+        `render: the image of still scene ${layer.index} is ${image.width}×${image.height} px, more than this GPU's limit of ${maxTextureSize} px`,
+      );
+    }
     if (image !== uploadedStill) {
       uploadTexture(gl, stillTexture, image, true);
       uploadedStill = image;
@@ -219,6 +230,7 @@ export function createRenderer(canvas: HTMLCanvasElement | OffscreenCanvas, proj
       for (const created of textures) gl.deleteTexture(created);
       if (layerTarget) deleteRenderTarget(gl, layerTarget);
       gl.deleteVertexArray(vao);
+      uploadedStill = undefined;
     },
   };
 }

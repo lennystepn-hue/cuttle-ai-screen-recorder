@@ -92,6 +92,23 @@ describe('render', () => {
     expect(() => render(project, { t: 0, layers: [layer(0, 1, 'still')] })).toThrow('render: no image for still scene 0');
   });
 
+  it('refuses a still image that is closed or bigger than the GPU can hold, instead of drawing black', async () => {
+    const project = parse({ scenes: [{ type: 'still', image: 'p.png', duration: 1 }] });
+    const probe = new OffscreenCanvas(1, 1).getContext('webgl2')!;
+    const max = probe.getParameter(probe.MAX_TEXTURE_SIZE) as number;
+    probe.getExtension('WEBGL_lose_context')?.loseContext();
+    const still = (image: ImageBitmap): FrameSources => ({ screens: new Map(), webcams: new Map(), stills: new Map([[0, image]]) });
+    const tall = await createImageBitmap(new ImageData(1, max + 1));
+    expect(() => render(project, { t: 0, layers: [layer(0, 1, 'still')] }, still(tall))).toThrow(
+      `render: the image of still scene 0 is 1×${max + 1} px, more than this GPU's limit of ${max} px`,
+    );
+    const closed = await createImageBitmap(new ImageData(2, 2));
+    closed.close();
+    expect(() => render(project, { t: 0, layers: [layer(0, 1, 'still')] }, still(closed))).toThrow(
+      'render: the image of still scene 0 is empty or closed',
+    );
+  });
+
   it('crossfades: a top layer at opacity 0 changes nothing, at 1 it replaces the bottom one', () => {
     const a = render(CARDS, { t: 0, layers: [layer(0, 1)] }).pixels.data;
     const b = render(CARDS, { t: 0, layers: [layer(1, 1)] }).pixels.data;

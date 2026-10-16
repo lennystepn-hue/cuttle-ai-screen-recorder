@@ -41,3 +41,4 @@ export {
 } from './schema';
 export { formatPath, parseProject, parseProjectJson, type ParseResult, type ProjectIssue } from './parse';
 export { defaultProject } from './defaults';
+export { parseEventsJsonl } from './events';

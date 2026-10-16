@@ -1,9 +1,9 @@
 import type { CardScene, CuttleProject, FrameStyle, Rect } from '@cuttle/project';
-import type { RenderState, SceneFrame } from '@cuttle/timeline';
+import type { ActiveText, RenderState, SceneFrame } from '@cuttle/timeline';
 import type { EngineAssets } from './assets';
 import { createRenderTarget, deleteRenderTarget, type RenderTarget } from './gl/target';
 import { createTexture, sourceSize, uploadTexture } from './gl/texture';
-import { unitFor, uvRect, windowLayout, type Size, type WindowLayout } from './layout';
+import { placeBadge, placeOverlay, unitFor, uvRect, windowLayout, type Size, type WindowLayout } from './layout';
 import { BackgroundPass } from './passes/background';
 import { ContentPass } from './passes/content';
 import { CursorPass } from './passes/cursor';
@@ -12,7 +12,7 @@ import { SpritePass } from './passes/sprite';
 import { WebcamPass } from './passes/webcam';
 import { WindowPass } from './passes/window';
 import { FRAME_CHROME, type FrameChrome } from './presets/frames';
-import { CARD_SUBTITLE_STYLE, CARD_TITLE_STYLE } from './presets/labels';
+import { BADGE_STYLE, CARD_SUBTITLE_STYLE, CARD_TITLE_STYLE, TEXT_LABELS } from './presets/labels';
 import { SpriteCache } from './sprites';
 
 /**
@@ -51,6 +51,10 @@ export interface RendererOptions {
 const CARD_MAX_WIDTH = 0.84;
 /** Gap between a card's title and subtitle boxes, in units. */
 const CARD_GAP = 12;
+/** Share of the output width that text overlays may use. */
+const TEXT_MAX_WIDTH = 0.8;
+/** Share of the content width that the speed badge may use. */
+const BADGE_MAX_WIDTH = 0.5;
 
 /**
  * A WebGL2 compositor for `cuttle.json` frames. Sizes the canvas to `project.output`. Layers are
@@ -112,6 +116,16 @@ export function createRenderer(canvas: HTMLCanvasElement | OffscreenCanvas, proj
     return { chrome, layout: windowLayout(output, screenAspect, chrome ? { titleBar: chrome.titleBar, radius: look.frame.radius } : null) };
   }
 
+  function drawTexts(texts: readonly ActiveText[]): void {
+    for (const { overlay, opacity } of texts) {
+      if (opacity <= 0) continue;
+      const style = TEXT_LABELS[overlay.style];
+      const sprite = sprites.label(overlay.text, style, unit, output.width * TEXT_MAX_WIDTH);
+      const [x, y] = placeOverlay(output, sprite.box, overlay.position, style.align);
+      spritePass.drawSprite(sprite, x, y, opacity);
+    }
+  }
+
   function drawClip(layer: SceneFrame, sources: FrameSources): void {
     const { chrome, layout } = frame(look.frame.enabled ? look.frame.style : null);
     if (chrome) windowPass.draw(layout, chrome, look.frame.shadow, look.frame.title);
@@ -126,6 +140,12 @@ export function createRenderer(canvas: HTMLCanvasElement | OffscreenCanvas, proj
     if (camera) {
       uploadTexture(gl, webcamTexture, camera, true);
       webcam.draw(webcamTexture, sourceSize(camera), look.webcam);
+    }
+    drawTexts(layer.texts);
+    if (layer.badge) {
+      const sprite = sprites.label(layer.badge, BADGE_STYLE, unit, layout.content[2] * BADGE_MAX_WIDTH);
+      const [x, y] = placeBadge(layout.content, sprite.box, unit);
+      spritePass.drawSprite(sprite, x, y, 1);
     }
   }
 

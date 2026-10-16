@@ -58,6 +58,14 @@ function shapeScenario(shape: 'text' | 'pointer' | 'wait' | 'crosshair' | 'move'
   };
 }
 
+function textScenario(style: 'pill' | 'lower-third' | 'caption', position: 'top' | 'bottom'): Scenario {
+  return {
+    name: `text-${style}`,
+    project: project({ frame: { title: TITLE } }, { texts: [{ at: 0, duration: 10, text: 'One prompt, one call', style, position }] }),
+    t: 5,
+  };
+}
+
 export const SCENARIOS: Scenario[] = [
   // Backgrounds, behind an end card
   ...(['sunset-sky', 'aurora', 'mesh'] as const).map((preset) => ({
@@ -128,4 +136,10 @@ export const SCENARIOS: Scenario[] = [
     t: 1,
     webcam: true,
   },
+
+  // Texts and the speed badge
+  textScenario('pill', 'top'),
+  textScenario('lower-third', 'bottom'),
+  textScenario('caption', 'bottom'),
+  { name: 'badge', project: project({ frame: { title: TITLE } }, { scenes: [{ type: 'clip', from: 0, to: 120, speed: 12 }] }), t: 5 },
 ];

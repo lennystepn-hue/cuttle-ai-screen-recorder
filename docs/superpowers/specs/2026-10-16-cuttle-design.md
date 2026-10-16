@@ -40,8 +40,8 @@ of those steps a feature.
 ## Phases
 
 1. **Engine, CLI, skill**: `project`, `timeline`, `engine`, `export`, `recorder`, `apps/cli`,
-   `skill/`. Webcam bubble, mic audio and text overlays included. Input events are recorded but not
-   yet used for zooms.
+   `skill/`. Webcam bubble, mic audio, text overlays and the cursor (real system pointer or one of
+   five designed styles, with click effect) included. Input events are not yet used for zooms.
 2. **Desktop app**: Electron app with source picker overlay, capture-excluded recording HUD, editor
    with timeline and contextual inspector. Gets its own spec.
 3. **Auto-zoom on clicks, smoothed cursor, polish, macOS validation**. Gets its own spec.
@@ -81,7 +81,7 @@ The project file is the only interface between the app, the CLI and Claude.
   "look": {
     "background": { "preset": "sunset-sky" },
     "frame": { "enabled": true, "style": "mac-dark", "title": "claude · ~/treg-demo", "radius": 14, "shadow": true },
-    "cursor": { "enabled": false },
+    "cursor": { "enabled": true, "style": "system", "size": 1, "color": "#D97757", "clickEffect": "ripple" },
     "webcam": { "enabled": false, "shape": "circle", "corner": "bottom-left", "size": 0.18 },
     "audio": { "enabled": true, "muteSpedUp": true },
     "transition": { "enabled": true, "duration": 0.3 }
@@ -114,6 +114,14 @@ Rules:
 - Scenes play in array order, with a crossfade between scenes (`look.transition`, default on, 0.3 s).
 - Unknown fields are rejected with a message naming the path, so Claude can fix the file.
 - `version` drives migrations; old files are upgraded on load, never silently rewritten.
+- `look.cursor.style` is `system` (the real OS pointer, including shape changes such as text
+  cursor and hand) or one of five designed cursors: `arrow-white`, `arrow-black`, `dot`, `ring`,
+  `spotlight`. `color` tints `dot`, `ring` and `spotlight`. `clickEffect` is `ripple` or `none`.
+  `enabled: false` hides the cursor.
+- `events.jsonl` holds one input event per line, times in source seconds:
+  `{"t":1.2,"type":"move","x":10,"y":20}`, `click` (+ `button`), `scroll` (+ `dx`, `dy`),
+  `shape` (+ `shape`: `arrow`, `text`, `pointer`, `wait`, `crosshair`, `move`, `not-allowed`) and
+  `keys` (+ `count`).
 
 ## Recorder (`packages/recorder`)
 
@@ -129,8 +137,9 @@ webcam and mic.
 
 - Video tracks are written as fragmented MP4 (H.264, 4:2:0, high quality CRF) so a killed process
   leaves a readable file.
-- `events.jsonl`: mouse position (~60 Hz), clicks, scroll, and key-press counts. Key contents are
-  never stored.
+- `events.jsonl`: mouse position (~60 Hz), clicks, scroll, cursor shape changes and key-press
+  counts. Key contents are never stored. Cursor shape comes from `GetCursorInfo` on Windows; on
+  macOS it is best effort and falls back to `arrow`.
 - `take.json`: per-track start times on one monotonic clock, used for sync.
 - Stop triggers, combinable: hotkey, max duration, `--until-file <path>`, `--until-idle <s>`
   (screen unchanged for N seconds), `--until-claude [<cwd>]` (latest Claude Code transcript for that
@@ -139,8 +148,9 @@ webcam and mic.
 - Markers: a hotkey adds manual markers. In Claude mode, markers come from the transcript: prompt
   submitted, each tool call, final answer.
 - Countdown (default 3 s) before capture starts.
-- The cursor is not baked in; phase 3 renders a smoothed cursor from `events.jsonl`. Until then
-  `--draw-mouse` bakes the real cursor in when wanted.
+- The cursor is not baked into the video, so its style can change after recording; the engine
+  draws it from `events.jsonl`. `--draw-mouse` bakes the real cursor in instead (then set
+  `look.cursor.enabled` to `false`, or the video shows two cursors).
 
 ## Timeline and engine
 
@@ -151,6 +161,8 @@ webcam and mic.
   (default 0.6 s in, 0.6 s out). Overlapping zooms: the one with the later `at` wins.
 - Active masks and texts for the current source time.
 - Badge text for scenes with `speed > 1`.
+- Cursor at the source time: position interpolated between logged samples, the latest shape, and
+  click effects that run for 0.4 output seconds. Smoothing is phase 3.
 
 `engine` (WebGL2) draws, back to front:
 
@@ -158,13 +170,16 @@ webcam and mic.
 2. Window frame: title bar with title, traffic lights, rounded corners and soft shadow (SDF based).
 3. Screen video, cropped by the zoom rect, with masks drawn as fill (sampled background color) or
    blur.
-4. Cursor (phase 3).
+4. Cursor in the chosen style, scaled with the zoom, with its click effect.
 5. Webcam bubble: circle mask, border, shadow.
 6. Texts and the speed badge.
 7. Crossfade between scenes.
 
 Preset set for v1: backgrounds `sunset-sky`, `aurora`, `mesh`, `solid`, `image`; frames `mac-dark`,
-`mac-light`, `browser-light`, `none`; text styles `pill`, `lower-third`, `caption`. Presets are data
+`mac-light`, `browser-light`, `none`; text styles `pill`, `lower-third`, `caption`; cursors
+`system` (lookalikes of the standard Windows and macOS pointers per shape, drawn for Cuttle as
+SVG rather than copied from the OS), `arrow-white`,
+`arrow-black`, `dot`, `ring`, `spotlight` (a soft light circle that slightly dims the rest). Presets are data
 plus a shader, so new ones are added without touching the engine core.
 
 ## Export (`packages/export`)
@@ -227,7 +242,8 @@ It also records the lessons from the treg demo:
   `NSWindow.sharingType = .none`). 3-2-1 countdown overlay.
 - Editor after stop: large preview in the center, timeline at the bottom with tracks for scenes,
   speed, zooms, masks and texts (drag handles), and a right-hand inspector that only shows the
-  selected item's settings. Looks as visual swatches. Export dialog with format presets.
+  selected item's settings. Looks as visual swatches, including the six cursor styles shown live
+  on the preview. Export dialog with format presets.
 - Design language: dark, quiet, glass surfaces, spring motion, keyboard shortcuts; strong defaults
   so most takes need no settings.
 - Opens projects that Claude produced.

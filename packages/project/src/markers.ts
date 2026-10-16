@@ -17,7 +17,7 @@ export const MarkerSchema = z.strictObject({
   label: z.string().min(1).optional(),
 });
 
-/** markers.json, written by the recorder next to the take's tracks, markers sorted by `t`. */
+/** markers.json, written by the recorder next to the take's tracks (it writes them sorted by `t`). */
 export const MarkersFileSchema = z.strictObject({
   version: z.literal(MARKERS_VERSION),
   markers: z.array(MarkerSchema),

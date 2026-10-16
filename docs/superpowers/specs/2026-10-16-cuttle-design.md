@@ -119,8 +119,9 @@ Rules:
   `spotlight`. `color` tints `dot`, `ring`, `spotlight` and every style's click ripple. `clickEffect` is `ripple` or `none`.
   `enabled: false` hides the cursor.
 - `events.jsonl` holds one input event per line, times in source seconds and positions in source
-  pixels of the screen track (the recorder subtracts the capture origin and applies the display
-  scale; positions outside the frame mean the pointer is off the captured area):
+  pixels of the screen track (the recorder subtracts the capture origin and, where the system
+  reports points instead of pixels, applies the display scale; positions outside the frame mean the
+  pointer is off the captured area):
   `{"t":1.2,"type":"move","x":10,"y":20}`, `click` (+ `button`), `scroll` (+ `dx`, `dy`),
   `shape` (+ `shape`: `arrow`, `text`, `pointer`, `wait`, `crosshair`, `move`, `not-allowed`) and
   `keys` (+ `count`).
@@ -145,15 +146,15 @@ webcam and mic.
 - `events.jsonl`: mouse position (~60 Hz), clicks, scroll, cursor shape changes and key-press
   counts per half second. Key contents and the timing of single presses are never stored. Cursor
   shape comes from `GetCursorInfo` on Windows; on macOS it is best effort and falls back to `arrow`.
-- `take.json`: per-track start times on one monotonic clock, used for sync: `{ "version": 1,
+- `take.json`: per-track start times on one clock, used for sync: `{ "version": 1,
   "tracks": { "screen": { "file": "screen.mp4", "start": 1000.0 }, "webcam": { … }, "mic": { … } } }`,
   `start` = when the track's first frame or sample was captured (schema in `@cuttle/project`). The
   recorder uses the wall clock (Unix seconds, from ffmpeg's packet stamps).
 - Stop triggers, combinable: hotkey (Ctrl+Shift+Alt+S), max duration, `--until-file <path>` (must
-  not exist yet), `--until-idle <s>` (screen unchanged for N seconds after it changed),
-  `--until-claude [<cwd>]` (the first Claude Code session in that folder that submits a prompt after
-  the recording started shows an assistant message with `stop_reason: end_turn`; then a 2 s tail;
-  other sessions and subagents are ignored).
+  not exist yet), `--until-idle <s>` (screen unchanged and no input for N seconds, after the screen
+  changed), `--until-claude [<cwd>]` (the first Claude Code session in that folder that submits a
+  prompt after `cuttle record` was started, countdown included, shows an assistant message with
+  `stop_reason: end_turn`; then a 2 s tail; other sessions and subagents are ignored).
 - Markers: a hotkey (Ctrl+Shift+Alt+M) adds manual markers. In Claude mode, markers come from the
   transcript: prompt submitted, each tool call (with the tool's name), final answer. `markers.json`:
   `{ "version": 1, "markers": [{ "t": 1.27, "kind": "tool", "label": "Bash" }] }`, `t` in source

@@ -26,7 +26,7 @@ pnpm test                                # unit tests (Node) and engine golden i
 pnpm typecheck
 pnpm engine:electron                     # the engine goldens in a hidden Electron window
 pnpm export:check                        # export a testsrc fixture to 16:9, 1:1, 9:16 and check it with ffprobe
-pnpm recorder:real                       # record 3 s of the primary monitor for real, check the take, delete it
+pnpm recorder:real                       # record 3 s of the primary monitor and first mic for real, check, delete
 pnpm export:run <projectDir> --format 9:16 -o out.mp4   # export a project (until the CLI exists)
 ```
 

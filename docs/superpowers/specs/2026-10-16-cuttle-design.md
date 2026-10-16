@@ -221,16 +221,21 @@ Look rules (fixed in M2):
 - Runs in a hidden, sandboxed Electron window (CLI and app). The main process serves the project's
   files to it over IPC by byte range, so recordings never sit in memory.
 - Demux, decode and mux with Mediabunny: decode with WebCodecs `VideoDecoder` (in software, one
-  decoder per scene and track, started a second before the scene shows), render each output frame
+  decoder per scene and track when it can, any decoder otherwise, started a second before the scene
+  shows), render each output frame
   with the engine, encode with `VideoEncoder` (H.264 High at the smallest fitting level, about
   10 Mbit/s at 1080p30, a key frame every 2 s; hardware when available, software otherwise).
 - Webcam and mic are lined up with the screen by the start times in `take.json`.
 - Audio: ffmpeg cuts the mic track to the scene list, mutes sped-up scenes (`muteSpedUp`; otherwise
-  `atempo`), fades out and in at cuts over half the crossfade (at least 10 ms), and muxes it into
-  the final file. AAC 48 kHz stereo; a silent track when there is no mic or audio is off.
+  `atempo`), fades out and in at cuts over half the crossfade (at least 10 ms, always inside the
+  clip's own sound), and muxes it into the final file. AAC 48 kHz stereo; a silent track when there
+  is no mic or audio is off.
 - Output presets: 16:9 1920×1080 (default), 1:1 1080×1080, 9:16 1080×1920. The window frame and
   content scale to fit; masks and zooms keep their source coordinates.
 - Target: 1080p30 export in at most 2× the video's duration on the user's PC.
+- The output path may not be one of the project's files. An export can be cancelled (the CLI maps
+  Ctrl+C to it); one that renders no frame for 60 s fails as stalled. Either way nothing is left at
+  the output path or in the temp folder.
 
 ## CLI (`apps/cli`)
 

@@ -3786,3 +3786,71 @@ Expected: `git status` prints nothing (everything is committed; `out/` and `dist
 - **M5 integration:** bundle the CLI's Electron entry the same way and ship `export-page/` next to it (or pass `pageDir`); keep the `window-all-closed` and `uncaughtException` handlers and the argv handling from `electron/cli.ts`; `--json` prints `ExportResult`. How the `cuttle` command starts Electron is M5's question.
 - **Encoder default.** Hardware first per the spec, although Windows' software encoder was faster and smaller on the reference PC (with lower PSNR). Revisit with a second Windows GPU and a Mac; `--encoder software` is the escape hatch.
 - **Audio at crossfades** dips (fade out, fade in) instead of overlapping, so no mic from outside a scene's range plays. An overlap would need that audio.
+
+## Changes during execution
+
+The code blocks above are the original plan. Its tasks were executed by replaying the plan
+mechanically (twice, on fresh clones) and bringing those commits in; three code reviews (tasks 1–4,
+5–10, 11–14) then found the defects below. The repo is the source of truth. The full suite has 249
+tests in 27 files instead of 231 in 26; `pnpm export:check` also checks three failure paths.
+Final numbers: `pnpm test` twice green, `pnpm typecheck` clean, `pnpm engine:electron` 40/40
+goldens with 0 px, `pnpm export:check` 3/3 formats (300 frames, 10.000000 s) and 3/3 failure paths,
+60 s benchmark 17.6 s (0.29×), speed-up benchmark 5.9 s (0.41×), mic beeps at 0.800, 1.800,
+2.800, 7.300 and 8.300 s.
+
+- **Task 3 (privacy):** the planned hold could put the held frame exactly at a clip's `to`, where a
+  mask that ends with the clip is off, for the whole outgoing half of the crossfade. Span ends are
+  rounded to the microsecond, so on sped-up clips (3×, 6×, 1.5×, …) a frame could fall inside the
+  span with its source time at `to`. And at frame rates such as 29 fps the planned 1e-6 tolerance
+  picked an earlier frame than the one drawn, so the source time went back and `planFrames` threw
+  on valid projects. `frame.ts` now finds the last frame shown with the same strict comparisons as
+  `spanAt` (`lastFrameShown`), and a frame whose source time would be `to` counts as past the end.
+  Two tests: masks stay on through the held frame at 3×, 6× and 1.5×; no going back at 29 fps.
+- **Tasks 1–2:** `parseProjectJson` and `parseTakeJson` accept a UTF-8 BOM (a file saved by a
+  Windows editor failed with "Unexpected token"). Issue lists in error messages are capped at 20
+  plus "… and N more".
+- **Task 4:** the `crossfade-clips` comment says the incoming clip has its cursor (at 900, 600).
+- **Task 8 (audio):** the fade-out ends where a clip's sound ends (`AudioSegment.mic.content`), not
+  in the padding up to the frame grid: the last clip ended with a hard cut (a click) whenever the
+  video ended between two frames. Sped-up clips read 2048 × speed samples past `to` and are cut
+  back to their length after `atempo`, which returns several hundred samples fewer. Graphs longer
+  than 16 000 characters go into a file (`-/filter_complex`, ffmpeg 7+): Windows ends a command
+  line at 32 767 characters (about 170 audible clips). Tests: two ffmpeg-backed ones in
+  `test/main/audio-ffmpeg.test.ts` (skipped without ffmpeg) and string tests.
+- **Task 9:** `FileHost` refuses every call after `close()` (a late write reopened the output with
+  `'w'` and truncated it), checks byte ranges (safe integers, at most 64 MiB) and write positions,
+  and reads whole files only for the job's images. `runFfmpeg` takes an `AbortSignal` (the child is
+  killed); the new `ExportErrorCode` `cancelled` maps to exit 130 like Ctrl+C.
+- **Task 10:** take.json entries match their files by the file system's case rules (Windows,
+  macOS), a take.json whose screen entry names another file is ignored, and only a missing
+  take.json counts as absent (a lock or permission error is reported instead of dropping the sync
+  silently). A folder where a file belongs is reported (EISDIR escaped before). `loadSources`
+  returns `inputs`, every file the export reads.
+- **Task 11:** the decoder is chosen per track: `prefer-software` when `VideoDecoder` supports it
+  there, `no-preference` otherwise, `invalid-media` before rendering when neither does. A screen
+  track only a hardware decoder handles (HEVC from a phone) passed validation and failed mid-render
+  with exit 3; checked with an HEVC screen track (300 frames, same picture). Unexpected page errors
+  print name and message (a DOMException printed as "[object DOMException]").
+- **Task 13:** `exportProject` refuses an output that is one of the project's files (same path by
+  the case rules, or the same file on disk by device and inode), which replaced the screen recording
+  with exit 0. An export window closed from outside fails the export (`closed` rejects `gone`)
+  instead of leaving it pending forever; a window whose page does not load is destroyed.
+  `ExportOptions.signal` cancels an export (window destroyed, ffmpeg killed, everything cleaned up);
+  the dev CLI turns SIGINT, SIGTERM and SIGBREAK into it (a second one exits at once). A watchdog
+  fails an export after 60 s without a rendered frame (a stalled hardware encoder never errors). A
+  mic that ffmpeg cannot read fails before rendering (`invalid-media`). The output folder, the temp
+  folder and cleanup are inside the error handling; cleanup retries Windows locks and never masks
+  the real error; work folders and partial files of killed exports are removed after a day.
+- **Task 14:** `pnpm export:check` also checks three failure paths: the output is the project file
+  (`invalid-project`), cancelled after 10 frames (`cancelled`), the export window closed from
+  outside after 10 frames (`render`); each must fail within seconds and leave no output, no partial
+  file, no work folder and an unchanged cuttle.json.
+- **Task 15:** the roadmap's export interface has `signal` and `cancelled`; its M5 notes add signal
+  handling, argv in a packaged Electron, a bootstrap entry for the `uncaughtException` handler,
+  ffmpeg 7+ for very long projects and a phase-2 note (project paths are not confined to the
+  project folder). The spec's Export section says the decoder fallback, the fade rule, the output
+  rule, cancelling and the stall timeout.
+
+Not changed (reviews, Minor): the window title can be covered by a top text moved below a top-left
+webcam (M2); test gaps for `rippleAt`, `blurLod` and `webcamCrop` (M2); `FileHost` reads are not
+rate-limited; a packaged Electron's argv and the bootstrap entry are left to M5.

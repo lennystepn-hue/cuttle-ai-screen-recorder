@@ -128,6 +128,7 @@ export interface ExportOptions {
   onProgress?: (done: number, total: number) => void;        // frames
   encoder?: 'auto' | 'hardware' | 'software';                // auto: hardware first, software fallback
   pageDir?: string;                                          // default: export-page/ next to the bundle
+  signal?: AbortSignal;                                      // cancels: window closed, ffmpeg killed, nothing at out
 }
 export interface ExportResult {
   out: string; frames: number; seconds: number;              // seconds = frames / fps
@@ -136,9 +137,9 @@ export interface ExportResult {
            audioMs: number; totalMs: number };
 }
 export function exportProject(opts: ExportOptions): Promise<ExportResult>;
-export class ExportError extends Error {                     // CLI exit codes: 1, 1, 1, 2, 3
-  code: 'invalid-project' | 'missing-file' | 'invalid-media' | 'ffmpeg-missing' | 'render';
-}
+export class ExportError extends Error {                     // CLI exit codes: 1, 1, 1, 2, 3, 130
+  code: 'invalid-project' | 'missing-file' | 'invalid-media' | 'ffmpeg-missing' | 'render' | 'cancelled';
+}                                                            // also refused: an out path that is a project file
 export const EXPORT_FORMATS: Record<'16:9' | '1:1' | '9:16', { width: number; height: number }>; // 1920×1080, 1080×1080, 1080×1920
 
 // @cuttle/recorder (M4)
@@ -195,8 +196,16 @@ export function record(opts: RecordOptions): { stop(): Promise<Take>; done: Prom
   copy the page build (`vite.page.config.ts`) to `export-page/` next to it, or pass `pageDir`;
   register a no-op `window-all-closed` (closing the export window must not quit) and an
   `uncaughtException` handler; drop Chromium switches from `process.argv` (see
-  `packages/export/electron/cli.ts`); map `ExportError.code` to exit codes 1/1/1/2/3; `--json`
-  prints `ExportResult`.
+  `packages/export/electron/cli.ts`); map `ExportError.code` to exit codes 1/1/1/2/3/130; `--json`
+  prints `ExportResult`. From the M3 reviews: turn Ctrl+C and a kill (SIGINT, SIGTERM, SIGBREAK)
+  into `ExportOptions.signal` so the export cleans up (Claude Code's Bash tool kills long commands
+  at its timeout: run renders in the background); a packaged Electron keeps Chromium switches in
+  `process.argv` without `process.defaultApp`, so strip them there too; install the
+  `uncaughtException` handler in a tiny bootstrap entry that then imports the CLI, because a
+  failure while the bundle's static imports load would otherwise show Electron's modal dialog;
+  projects with more than ~170 audible clips need ffmpeg 7 or later (the graph goes into a file).
+  Phase 2 note: `loadSources` does not confine paths to the project folder; a shared project could
+  pull in any local file, so the app should ask before opening one.
 - **M6:** current Claude skill frontmatter (`name`, `description`) and the user-level skill folder.
 
 ## Lessons from the manual run (carry into M4–M6)

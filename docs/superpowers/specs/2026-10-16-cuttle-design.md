@@ -137,20 +137,29 @@ webcam and mic.
 | Mic | ffmpeg `dshow` | ffmpeg `avfoundation` |
 | Input events | `uiohook-napi` | `uiohook-napi` |
 
+- Phase 1 records on Windows; macOS follows (until then `record()` says `unsupported-platform`). A
+  `test` backend (ffmpeg test sources, synthetic input) runs everywhere and carries the tests.
 - Video tracks are written as fragmented MP4 (H.264, 4:2:0, high quality CRF, BT.709 matrix and
-  tags, a key frame every 2 s) so a killed process leaves a readable file.
+  tags, a key frame every 2 s, every packet flushed) so a killed process leaves a readable file up
+  to its last 2 s; the mic (AAC) is cut into 1 s fragments.
 - `events.jsonl`: mouse position (~60 Hz), clicks, scroll, cursor shape changes and key-press
-  counts. Key contents are never stored. Cursor shape comes from `GetCursorInfo` on Windows; on
-  macOS it is best effort and falls back to `arrow`.
+  counts per half second. Key contents and the timing of single presses are never stored. Cursor
+  shape comes from `GetCursorInfo` on Windows; on macOS it is best effort and falls back to `arrow`.
 - `take.json`: per-track start times on one monotonic clock, used for sync: `{ "version": 1,
   "tracks": { "screen": { "file": "screen.mp4", "start": 1000.0 }, "webcam": { … }, "mic": { … } } }`,
-  `start` = when the track's first frame or sample was captured (schema in `@cuttle/project`).
-- Stop triggers, combinable: hotkey, max duration, `--until-file <path>`, `--until-idle <s>`
-  (screen unchanged for N seconds), `--until-claude [<cwd>]` (latest Claude Code transcript for that
-  folder shows an assistant message with `stop_reason: end_turn` after the recording started; then a
-  short tail).
-- Markers: a hotkey adds manual markers. In Claude mode, markers come from the transcript: prompt
-  submitted, each tool call, final answer.
+  `start` = when the track's first frame or sample was captured (schema in `@cuttle/project`). The
+  recorder uses the wall clock (Unix seconds, from ffmpeg's packet stamps).
+- Stop triggers, combinable: hotkey (Ctrl+Shift+Alt+S), max duration, `--until-file <path>` (must
+  not exist yet), `--until-idle <s>` (screen unchanged for N seconds after it changed),
+  `--until-claude [<cwd>]` (the first Claude Code session in that folder that submits a prompt after
+  the recording started shows an assistant message with `stop_reason: end_turn`; then a 2 s tail;
+  other sessions and subagents are ignored).
+- Markers: a hotkey (Ctrl+Shift+Alt+M) adds manual markers. In Claude mode, markers come from the
+  transcript: prompt submitted, each tool call (with the tool's name), final answer. `markers.json`:
+  `{ "version": 1, "markers": [{ "t": 1.27, "kind": "tool", "label": "Bash" }] }`, `t` in source
+  seconds, `kind` one of `manual`, `prompt`, `tool`, `answer` (schema in `@cuttle/project`).
+- A microphone that delivers digital silence (muted, or blocked for desktop apps) is reported as a
+  warning one second into the take.
 - Countdown (default 3 s) before capture starts.
 - The cursor is not baked into the video, so its style can change after recording; the engine
   draws it from `events.jsonl`. `--draw-mouse` bakes the real cursor in instead (then set

@@ -3,7 +3,7 @@ import { createTexture, uploadTexture } from './gl/texture';
 import type { Size } from './layout';
 import type { LabelStyle } from './presets/labels';
 
-/** A label drawn into a texture. `width`/`height` cover the whole canvas, shadow `margin` included; `box` is the visible box. */
+/** A label drawn into a texture. `width`/`height` cover the whole canvas, `margin` (for the shadow and overhanging glyphs) included; `box` is the visible box. */
 export interface Sprite {
   texture: WebGLTexture;
   width: number;
@@ -35,7 +35,9 @@ export function drawLabel(text: string, style: LabelStyle, unit: number, maxWidt
   const shown = fitText(measure, text, Math.max(0, maxWidth - 2 * padX - accent));
   const boxWidth = Math.max(1, Math.ceil(measure.measureText(shown).width) + 2 * padX + accent);
   const boxHeight = Math.round(fontPx * 1.3) + 2 * padY;
-  const margin = style.shadow ? Math.ceil((style.shadow.blur + Math.abs(style.shadow.y)) * unit) : 0;
+  const shadowMargin = style.shadow ? Math.ceil((style.shadow.blur + Math.abs(style.shadow.y)) * unit) : 0;
+  // Glyph ink can reach past the advance width and the 1.3 em box (the hook of a j, the dots of Ä).
+  const margin = Math.max(shadowMargin, Math.ceil(fontPx * 0.15));
 
   const canvas = new OffscreenCanvas(boxWidth + 2 * margin, boxHeight + 2 * margin);
   const ctx = canvas.getContext('2d')!;

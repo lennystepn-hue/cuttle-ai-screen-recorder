@@ -1,6 +1,6 @@
 import { beforeAll, describe, expect, it } from 'vitest';
 import { loadEngineAssets } from '../src/assets';
-import { BADGE_STYLE, TEXT_LABELS } from '../src/presets/labels';
+import { BADGE_STYLE, TEXT_LABELS, windowTitleStyle } from '../src/presets/labels';
 import { SpriteCache, cssFont, drawLabel, fitText } from '../src/sprites';
 
 beforeAll(async () => {
@@ -29,6 +29,16 @@ describe('drawLabel', () => {
   it('never gets wider than maxWidth', () => {
     const { canvas, margin } = drawLabel('x'.repeat(200), BADGE_STYLE, 1, 300);
     expect(canvas.width - 2 * margin).toBeLessThanOrEqual(300);
+  });
+
+  it('keeps glyph ink that reaches past the box, like umlaut dots and the hook of a j', () => {
+    for (const text of ['Übersicht – Änderungen', 'jira.example.com']) {
+      const { canvas } = drawLabel(text, windowTitleStyle('#000000'), 1, 1000);
+      const { data, width, height } = canvas.getContext('2d')!.getImageData(0, 0, canvas.width, canvas.height);
+      const alphaAt = (x: number, y: number) => data[(y * width + x) * 4 + 3];
+      for (let x = 0; x < width; x++) expect([alphaAt(x, 0), alphaAt(x, height - 1)], text).toEqual([0, 0]);
+      for (let y = 0; y < height; y++) expect([alphaAt(0, y), alphaAt(width - 1, y)], text).toEqual([0, 0]);
+    }
   });
 });
 

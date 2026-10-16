@@ -1,6 +1,4 @@
-import { ProjectSchema, type CuttleProject } from './schema';
-
-export const CURRENT_VERSION = 1;
+import { CURRENT_VERSION, ProjectSchema, type CuttleProject } from './schema';
 
 export interface ProjectIssue {
   path: string;
@@ -26,7 +24,7 @@ function versionOf(raw: unknown): unknown {
 // before validating, and never write the upgraded file back without the user asking.
 export function parseProject(raw: unknown): ParseResult {
   const version = versionOf(raw);
-  if (typeof version === 'number' && version > CURRENT_VERSION) {
+  if (typeof version === 'number' && Number.isInteger(version) && version > CURRENT_VERSION) {
     return {
       ok: false,
       issues: [

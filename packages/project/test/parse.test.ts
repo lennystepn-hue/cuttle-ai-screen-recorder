@@ -30,6 +30,16 @@ describe('parseProject', () => {
     }
   });
 
+  it('does not tell the user to update Cuttle for a fractional version', () => {
+    const r = parseProject({ version: 1.5, sources: { screen: 's.mp4' } });
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      const issue = r.issues.find((i) => i.path === 'version');
+      expect(issue).toBeDefined();
+      expect(issue?.message).not.toContain('Update Cuttle');
+    }
+  });
+
   it('reports a missing version', () => {
     const r = parseProject({ sources: { screen: 's.mp4' } });
     expect(r.ok).toBe(false);

@@ -4,7 +4,10 @@ import { createCursorTrack, createTimeline } from '../src/index';
 
 const screenSize = { width: 2560, height: 1440 };
 
-function project(look: Record<string, unknown> = { transition: { enabled: false } }): CuttleProject {
+function project(
+  look: Record<string, unknown> = { transition: { enabled: false } },
+  overrides: Record<string, unknown> = {},
+): CuttleProject {
   const result = parseProject({
     version: 1,
     sources: { screen: 's.mp4' },
@@ -17,6 +20,7 @@ function project(look: Record<string, unknown> = { transition: { enabled: false 
     zooms: [{ at: 12, duration: 4, rect: [0, 0, 1280, 720] }],
     masks: [{ from: 0, to: 15, rect: [0, 0, 50, 50] }],
     texts: [{ at: 11, duration: 2, text: 'Hi' }],
+    ...overrides,
   });
   if (!result.ok) throw new Error(JSON.stringify(result.issues));
   return result.project;
@@ -65,8 +69,16 @@ describe('createTimeline', () => {
     expect(end.layers[0]).toMatchObject({ index: 2, progress: 1 });
   });
 
-  it('treats a non-finite time as the start', () => {
+  it('treats NaN as the start', () => {
     expect(timeline.frameAt(NaN)).toEqual(timeline.frameAt(0));
+    expect(timeline.frameAt(Infinity).t).toBe(22);
+    expect(timeline.frameAt(-Infinity).t).toBe(0);
+  });
+
+  it('rejects a screen size that is not positive and finite', () => {
+    const message = 'createTimeline: screenSize must have a positive, finite width and height';
+    expect(() => createTimeline(project(), { screenSize: { width: 0, height: 1440 } })).toThrow(message);
+    expect(() => createTimeline(project(), { screenSize: { width: NaN, height: 1440 } })).toThrow(message);
   });
 
   it('returns no layers for a project without scenes', () => {
@@ -93,6 +105,23 @@ describe('createTimeline', () => {
     });
     expect(hidden.frameAt(4).layers[0]?.cursor).toBeUndefined();
   });
+
+  it('drops the click effects but keeps position and shape when clickEffect is none', () => {
+    const cursor = createCursorTrack([
+      { t: 13, type: 'move', x: 0, y: 0 },
+      { t: 13.9, type: 'click', x: 100, y: 100, button: 'left' },
+      { t: 15, type: 'move', x: 200, y: 100 },
+    ]);
+    // output 4 s is source 14 s, 0.1 s into the 0.4 s click effect
+    const ripple = createTimeline(project(), { screenSize, cursor }).frameAt(4).layers[0]?.cursor;
+    expect(ripple?.clicks).toHaveLength(1);
+
+    const none = createTimeline(project({ transition: { enabled: false }, cursor: { clickEffect: 'none' } }), {
+      screenSize,
+      cursor,
+    }).frameAt(4).layers[0]?.cursor;
+    expect(none).toEqual({ x: ripple?.x, y: ripple?.y, shape: ripple?.shape, clicks: [] });
+  });
 });
 
 describe('crossfades', () => {
@@ -112,7 +141,62 @@ describe('crossfades', () => {
     const after = timeline.frameAt(10.1).layers;
     expect(after.map((l) => l.index)).toEqual([0, 1]);
     expect(after[0]?.opacity).toBeCloseTo(0.25, 6);
-    expect(after[0]?.sourceTime).toBe(20);
+    expect(after[0]?.sourceTime).toBeCloseTo(20 - 1 / 30, 9);
     expect(after[1]?.opacity).toBeCloseTo(0.75, 6);
+  });
+
+  it('keeps masks that end at the clip end active on the outgoing layer', () => {
+    const masked = createTimeline(
+      project(
+        { transition: { enabled: true, duration: 0.4 } },
+        {
+          masks: [
+            { from: 0, to: 15, rect: [0, 0, 50, 50] },
+            { from: 10, to: 20, rect: [0, 0, 50, 50] },
+          ],
+        },
+      ),
+      { screenSize },
+    );
+    for (const t of [9.9, 10.1]) {
+      const outgoing = masked.frameAt(t).layers[0];
+      expect(outgoing?.index).toBe(0);
+      expect(outgoing?.masks.map((mask) => [mask.from, mask.to])).toEqual([[10, 20]]);
+    }
+  });
+
+  it('holds a trailing clip inside its source range at the very end', () => {
+    const clipLast = parseProject({
+      version: 1,
+      sources: { screen: 's.mp4' },
+      scenes: [{ type: 'clip', from: 0, to: 5 }],
+    });
+    if (!clipLast.ok) throw new Error('fixture');
+    const t = createTimeline(clipLast.project, { screenSize });
+    const sourceTime = t.frameAt(t.duration).layers[0]?.sourceTime;
+    expect(sourceTime).toBeLessThan(5);
+    expect(sourceTime).toBeCloseTo(5 - 1 / 30, 9);
+  });
+
+  it('caps the crossfade by the shortest neighbouring scene', () => {
+    const short = createTimeline(
+      project(
+        { transition: { enabled: true, duration: 2 } },
+        { scenes: [{ type: 'clip', from: 0, to: 10 }, { type: 'card', title: 'End', duration: 0.2 }] },
+      ),
+      { screenSize },
+    );
+    // half = min(1, 5, 0.1) = 0.1
+    expect(short.frameAt(10 - 0.05).layers).toHaveLength(2);
+    expect(short.frameAt(10 - 0.15).layers).toHaveLength(1);
+  });
+
+  it('fades into a card without clip fields on the incoming layer', () => {
+    const [outgoing, incoming] = timeline.frameAt(19.9).layers;
+    expect(outgoing).toMatchObject({ index: 1, kind: 'clip' });
+    expect(incoming).toMatchObject({ index: 2, kind: 'card', masks: [], texts: [] });
+    expect(incoming?.sourceTime).toBeUndefined();
+    expect(incoming?.zoom).toBeUndefined();
+    expect((outgoing?.opacity ?? 0) + (incoming?.opacity ?? 0)).toBeCloseTo(1, 9);
   });
 });

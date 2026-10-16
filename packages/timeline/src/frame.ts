@@ -11,6 +11,7 @@ export interface SceneFrame {
   local: number;
   progress: number;
   opacity: number;
+  /** Clip scenes: source seconds, always inside the clip's [from, to). */
   sourceTime?: number;
   zoom?: Rect;
   masks: Mask[];
@@ -36,6 +37,10 @@ export interface TimelineOptions {
 }
 
 export function createTimeline(project: CuttleProject, opts: TimelineOptions): Timeline {
+  const { width, height } = opts.screenSize;
+  if (!(Number.isFinite(width) && width > 0 && Number.isFinite(height) && height > 0)) {
+    throw new Error('createTimeline: screenSize must have a positive, finite width and height');
+  }
   const spans = sceneSpans(project.scenes);
   const duration = totalDuration(spans);
   const full: Rect = [0, 0, opts.screenSize.width, opts.screenSize.height];
@@ -52,7 +57,11 @@ export function createTimeline(project: CuttleProject, opts: TimelineOptions): T
     const base = { index: span.index, local, progress: length === 0 ? 1 : local / length, opacity };
     const scene = span.scene;
     if (scene.type !== 'clip') return { ...base, kind: scene.type, masks: [], texts: [] };
-    const sourceTime = sourceTimeAt(scene, local);
+    // Past the end, hold the clip's last output frame, which lies inside [from, to).
+    const sourceLocal = t >= span.end ? Math.max(0, length - 1 / project.output.fps) : local;
+    const sourceTime = sourceTimeAt(scene, sourceLocal);
+    let cursor = project.look.cursor.enabled && opts.cursor ? cursorAt(opts.cursor, sourceTime, scene.speed) : undefined;
+    if (cursor && project.look.cursor.clickEffect === 'none') cursor = { ...cursor, clicks: [] };
     return {
       ...base,
       kind: 'clip',
@@ -61,12 +70,12 @@ export function createTimeline(project: CuttleProject, opts: TimelineOptions): T
       masks: activeMasks(project.masks, sourceTime),
       texts: activeTexts(project.texts, sourceTime, scene.speed),
       badge: badgeFor(scene),
-      cursor: project.look.cursor.enabled && opts.cursor ? cursorAt(opts.cursor, sourceTime, scene.speed) : undefined,
+      cursor,
     };
   }
 
   function frameAt(t: number): RenderState {
-    const time = Number.isFinite(t) ? clamp(t, 0, duration) : 0;
+    const time = Number.isNaN(t) ? 0 : clamp(t, 0, duration);
     const span = spanAt(spans, time);
     if (!span) return { t: time, layers: [] };
 

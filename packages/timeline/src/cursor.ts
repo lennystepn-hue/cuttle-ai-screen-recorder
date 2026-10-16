@@ -61,10 +61,10 @@ export function cursorAt(track: CursorTrack, sourceTime: number, speed: number):
     shape = change.shape;
   }
 
-  const window = CLICK_EFFECT_SECONDS * speed;
+  const effectLength = CLICK_EFFECT_SECONDS * speed;
   const clicks = track.clicks
-    .filter((click) => sourceTime >= click.t && sourceTime < click.t + window)
-    .map((click) => ({ x: click.x, y: click.y, progress: clamp01((sourceTime - click.t) / window) }));
+    .filter((click) => sourceTime >= click.t && sourceTime < click.t + effectLength)
+    .map((click) => ({ x: click.x, y: click.y, progress: clamp01((sourceTime - click.t) / effectLength) }));
 
   return { x, y, shape, clicks };
 }

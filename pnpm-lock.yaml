@@ -15,6 +15,12 @@ importers:
         specifier: ^5.0.5
         version: 5.0.5(vite@8.3.4)
 
+  packages/project:
+    dependencies:
+      zod:
+        specifier: ^4.6.7
+        version: 4.6.7
+
 packages:
 
   '@jridgewell/resolve-uri@3.1.2':
@@ -523,6 +529,9 @@ packages:
     engines: {node: '>=20.11'}
     hasBin: true
 
+  zod@4.6.7:
+    resolution: {integrity: sha512-g8W2D2kU6a8untc053fX1uVBKzM7yqAxW/3zwk83+6RyF2+SKOuV+c0wBDhUwzV1PaGapmZH+rmcUzPf+3CGwg==}
+
 snapshots:
 
   '@jridgewell/resolve-uri@3.1.2': {}
@@ -838,3 +847,5 @@ snapshots:
       - msw
 
   why-is-node-running@3.2.1: {}
+
+  zod@4.6.7: {}

@@ -43,3 +43,14 @@ export { formatPath, parseProject, parseProjectJson, type ParseResult, type Proj
 export { defaultProject } from './defaults';
 export { parseEventsJsonl } from './events';
 export { TAKE_VERSION, TakeFileSchema, parseTakeJson, trackOffset, type TakeFile, type TakeFileParseResult, type TakeFileTrack } from './take';
+export {
+  MARKERS_VERSION,
+  MARKER_KINDS,
+  MarkerSchema,
+  MarkersFileSchema,
+  parseMarkersJson,
+  type Marker,
+  type MarkerKind,
+  type MarkersFile,
+  type MarkersParseResult,
+} from './markers';

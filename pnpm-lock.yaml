@@ -44,6 +44,9 @@ importers:
       '@cuttle/timeline':
         specifier: workspace:*
         version: link:../timeline
+      '@fontsource/inter':
+        specifier: ^5.3.0
+        version: 5.3.0
 
   packages/project:
     dependencies:
@@ -61,6 +64,9 @@ packages:
 
   '@blazediff/core@1.10.0':
     resolution: {integrity: sha512-AOQff0zgR7cGsZL+4E7hVkmujoPUpm0J9xzWGWZj5wCjd3gmxESXAPfKyuzs93VdpQNFhHlBhfOjrcZ+XTERtQ==}
+
+  '@fontsource/inter@5.3.0':
+    resolution: {integrity: sha512-RofMylZmjlJEfELXeNHFWBRcSs75rGU/6bV2S2jfnvv/3rPXPGe0LgUJTklcHZ9lM4OZmAVFhcJPnACfb91A3g==}
 
   '@jridgewell/resolve-uri@3.1.2':
     resolution: {integrity: sha512-bRISgCIjP20/tbWSPWMEi54QVPRZExkuD9lJL+UIxUKtwVJA8wW1Trb1jMs1RFXo1CBTNZ/5hpC9QvmKWdopKw==}
@@ -546,6 +552,8 @@ packages:
 snapshots:
 
   '@blazediff/core@1.10.0': {}
+
+  '@fontsource/inter@5.3.0': {}
 
   '@jridgewell/resolve-uri@3.1.2': {}
 

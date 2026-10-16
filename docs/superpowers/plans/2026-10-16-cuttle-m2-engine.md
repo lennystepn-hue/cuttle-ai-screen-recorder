@@ -4269,7 +4269,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ## Changes during execution
 
 The code blocks above are the original plan. Code review changed these points; the repo is the
-source of truth. The full suite has 188 tests in 17 files instead of 174: the extra tests come from
+source of truth. The full suite has 190 tests in 17 files instead of 174: the extra tests come from
 the fixes and decisions below. There are 39 goldens instead of 38, and `pnpm engine:electron`
 matches all of them with 0 differing pixels.
 
@@ -4332,20 +4332,27 @@ matches all of them with 0 differing pixels.
 
 ### Look decisions taken after the reviews
 
-The reviews left two look questions open; the owner asked to settle them as seemed best (commit
-9e53b12). The spec's look rules say both.
+The reviews left two look questions open; the owner asked to settle them as seemed best (commits
+9e53b12 and, after its review, 58df880). The spec's look rules say both.
 
 - **Texts and the badge keep clear of the webcam bubble.** With the defaults (webcam bottom-left) a
-  bottom `lower-third` covered the lower third of the bubble in every format. `placeOverlay` and
-  `placeBadge` take the bubble's rect (from the look, so texts do not jump when the webcam track
-  ends early): a top or bottom text that would cover it moves vertically clear of it, half an
-  overlay margin away, and the badge moves to its left. Centre texts stay. Two layout tests and the
-  golden `text-lower-third-webcam`; no existing golden changed.
+  bottom `lower-third` covered the lower third of the bubble in every format. The renderer takes
+  the bubble's rect from the look and the project's sources (`look.webcam.enabled` and
+  `sources.webcam`), not from whether a frame arrived, so texts do not jump when the webcam track
+  ends early. `placeBadge` moves the badge left of the bubble, or below it when that would leave
+  the content. The badge is placed before the texts, and `placeOverlay` moves a top or bottom text
+  past every obstacle it would cover (bubble and badge), half an overlay margin away, nearest to
+  its edge first; the review of the first version found a moved top text landing on the badge.
+  Centre texts stay, and texts are placed independently of each other. Layout tests include an
+  invariant across 16:9, 1:1 and 9:16, every corner and bubble sizes up to 0.5 (never off the
+  output, never on the bubble or the badge); golden `text-lower-third-webcam`; no existing golden
+  changed.
 - **Transparent stills sit on white.** `ContentPass` dropped the texel alpha, so transparent parts of
   a still (macOS window screenshots with their shadow margin, logos) showed black. It now
   composites the premultiplied texel over a matte: white for stills, black for screen frames,
-  which are opaque, so their pixels do not change. One renderer test. The `image` background still
-  drops alpha (a transparent background image shows black there).
+  which are opaque, so their pixels do not change. One renderer test, which also checks a
+  half-transparent pixel (premultiplied maths). The `image` background still drops alpha (a
+  transparent background image shows black there).
 
 ### Notes for later milestones (from the reviews)
 
@@ -4359,8 +4366,9 @@ The reviews left two look questions open; the owner asked to settle them as seem
   default opens a modal dialog), deny popups and navigation, and set a CSP on the page.
 - Cursor art is rasterized at 128 px and gets soft at 4K with a strong zoom; a bigger raster
   changes every cursor golden.
-- Texts at the same position at the same time overlap; project validation or the skill should
-  prevent that.
+- Texts at the same position at the same time overlap (texts are placed independently); project
+  validation or the skill should prevent that. A top text moved below a top-left bubble can cross
+  the window's title bar.
 - Still scenes always keep padding, rounded corners and the shadow (`scene.frame` defaults to
   `none`, and `look.frame.enabled` does not apply to them), and their window takes the screen's
   aspect, not the image's.

@@ -206,9 +206,11 @@ Look rules (fixed in M2):
   plus at least one extra output pixel on every side, more under strong zoom, so no hairline of
   the hidden content shows. `fill` is the safer choice for tokens and keys.
 - Texts: `position` picks top, centre or bottom of the output; `lower-third` is left-aligned, the
-  other styles centred. The speed badge sits in the screen's top-right corner. Texts and the
-  badge never cover the webcam bubble: a top or bottom text that would moves vertically clear of
-  it, and the badge moves to its left. The webcam bubble is not mirrored.
+  other styles centred. The speed badge sits in the screen's top-right corner. When the project
+  has a webcam, top and bottom texts and the badge keep clear of its bubble: the badge moves to
+  the bubble's left (below it if there is no room), and a top or bottom text moves vertically past
+  the bubble and the badge. Centre texts stay put and can cover a very large bubble; texts are
+  placed independently of each other. The webcam bubble is not mirrored.
 - Procedural backgrounds drift slowly with output time.
 
 ## Export (`packages/export`)

@@ -3791,8 +3791,8 @@ Expected: `git status` prints nothing (everything is committed; `out/` and `dist
 
 The code blocks above are the original plan. Its tasks were executed by replaying the plan
 mechanically (twice, on fresh clones) and bringing those commits in; three code reviews (tasks 1–4,
-5–10, 11–14) then found the defects below. The repo is the source of truth. The full suite has 249
-tests in 27 files instead of 231 in 26; `pnpm export:check` also checks three failure paths.
+5–10, 11–14) and a re-review of their fixes then found the defects below. The repo is the source
+of truth. The full suite has 251 tests in 27 files instead of 231 in 26; `pnpm export:check` also checks three failure paths.
 Final numbers: `pnpm test` twice green, `pnpm typecheck` clean, `pnpm engine:electron` 40/40
 goldens with 0 px, `pnpm export:check` 3/3 formats (300 frames, 10.000000 s) and 3/3 failure paths,
 60 s benchmark 17.6 s (0.29×), speed-up benchmark 5.9 s (0.41×), mic beeps at 0.800, 1.800,
@@ -3812,11 +3812,15 @@ goldens with 0 px, `pnpm export:check` 3/3 formats (300 frames, 10.000000 s) and
 - **Task 4:** the `crossfade-clips` comment says the incoming clip has its cursor (at 900, 600).
 - **Task 8 (audio):** the fade-out ends where a clip's sound ends (`AudioSegment.mic.content`), not
   in the padding up to the frame grid: the last clip ended with a hard cut (a click) whenever the
-  video ended between two frames. Sped-up clips read 2048 × speed samples past `to` and are cut
-  back to their length after `atempo`, which returns several hundred samples fewer. Graphs longer
-  than 16 000 characters go into a file (`-/filter_complex`, ffmpeg 7+): Windows ends a command
-  line at 32 767 characters (about 170 audible clips). Tests: two ffmpeg-backed ones in
-  `test/main/audio-ffmpeg.test.ts` (skipped without ffmpeg) and string tests.
+  video ended between two frames. `atempo` returns several hundred samples fewer than
+  (to − from) / speed, so sped-up and slowed-down clips get 200 000 samples of silence (`apad`)
+  before it and are cut back to their length after it; a first fix read real mic audio past `to`
+  instead, which put up to half a second from after the cut into the export (found by the
+  re-review). Graphs longer than 30 000 characters go into a file (`-/filter_complex`, ffmpeg 7+):
+  Windows ends a command line at 32 767 characters (about 150 audible clips fit inline). Tests:
+  three ffmpeg-backed ones in `test/main/audio-ffmpeg.test.ts` (skipped without ffmpeg: the ramp to
+  silence at the end, a sped-up clip reaching its fade, nothing from after the cut at 1.5×, 2×,
+  0.5× and 0.25×) and string tests.
 - **Task 9:** `FileHost` refuses every call after `close()` (a late write reopened the output with
   `'w'` and truncated it), checks byte ranges (safe integers, at most 64 MiB) and write positions,
   and reads whole files only for the job's images. `runFfmpeg` takes an `AbortSignal` (the child is
@@ -3825,7 +3829,9 @@ goldens with 0 px, `pnpm export:check` 3/3 formats (300 frames, 10.000000 s) and
   macOS), a take.json whose screen entry names another file is ignored, and only a missing
   take.json counts as absent (a lock or permission error is reported instead of dropping the sync
   silently). A folder where a file belongs is reported (EISDIR escaped before). `loadSources`
-  returns `inputs`, every file the export reads.
+  returns `inputs`, every file the project names, also sources the look switches off (the
+  re-review overwrote a disabled webcam recording), and `warnings` (a take.json that describes
+  another screen recording).
 - **Task 11:** the decoder is chosen per track: `prefer-software` when `VideoDecoder` supports it
   there, `no-preference` otherwise, `invalid-media` before rendering when neither does. A screen
   track only a hardware decoder handles (HEVC from a phone) passed validation and failed mid-render
@@ -3837,7 +3843,8 @@ goldens with 0 px, `pnpm export:check` 3/3 formats (300 frames, 10.000000 s) and
   instead of leaving it pending forever; a window whose page does not load is destroyed.
   `ExportOptions.signal` cancels an export (window destroyed, ffmpeg killed, everything cleaned up);
   the dev CLI turns SIGINT, SIGTERM and SIGBREAK into it (a second one exits at once). A watchdog
-  fails an export after 60 s without a rendered frame (a stalled hardware encoder never errors). A
+  fails an export after 60 s without progress (a stalled hardware encoder never errors); rendered
+  frames and the page's file reads and writes count, and the gap after the computer slept does not. A
   mic that ffmpeg cannot read fails before rendering (`invalid-media`). The output folder, the temp
   folder and cleanup are inside the error handling; cleanup retries Windows locks and never masks
   the real error; work folders and partial files of killed exports are removed after a day.
@@ -3853,4 +3860,8 @@ goldens with 0 px, `pnpm export:check` 3/3 formats (300 frames, 10.000000 s) and
 
 Not changed (reviews, Minor): the window title can be covered by a top text moved below a top-left
 webcam (M2); test gaps for `rippleAt`, `blurLod` and `webcamCrop` (M2); `FileHost` reads are not
-rate-limited; a packaged Electron's argv and the bootstrap entry are left to M5.
+rate-limited; a packaged Electron's argv and the bootstrap entry are left to M5. To try in M5: a
+real Ctrl+C on Windows during the audio pass (the console also signals ffmpeg, which may exit
+before the abort is seen, giving `render` instead of `cancelled`; cleanup still runs). Unchecked:
+on ReFS (Dev Drive) the file index behind `ino` may not be unique, which could refuse a legitimate
+re-export; on macOS `samePath` does not normalise NFC and NFD names.

@@ -1,3 +1,6 @@
+/// <reference path="./env.d.ts" />
+// The reference makes the `?url` imports typecheck in every package that imports the engine; they
+// still need a bundler that understands `?url` (Vite).
 import inter400 from '@fontsource/inter/files/inter-latin-400-normal.woff2?url';
 import inter600 from '@fontsource/inter/files/inter-latin-600-normal.woff2?url';
 import { CURSOR_ART, CURSOR_TEXTURE_PX, type CursorImage } from './presets/cursors';

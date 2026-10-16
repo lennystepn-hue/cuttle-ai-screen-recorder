@@ -22,7 +22,7 @@ import { SpriteCache } from './sprites';
 export interface FrameSources {
   /** Scene index → decoded screen frame at that layer's `sourceTime`. */
   screens: Map<number, TexImageSource>;
-  /** Scene index → webcam frame at that layer's `sourceTime`. */
+  /** Scene index → webcam frame at that layer's `sourceTime`; a scene without one (or with an empty one) shows no bubble. */
   webcams: Map<number, TexImageSource>;
   /**
    * Scene index → image of a still scene; created with `premultiplyAlpha: 'premultiply'`, not flipped,
@@ -48,6 +48,11 @@ export interface RendererOptions {
   screenSize: Size;
   /** Required when `look.background.preset` is `image`. */
   backgroundImage?: ImageBitmap;
+}
+
+function hasPixels(source: TexImageSource): boolean {
+  const { width, height } = sourceSize(source);
+  return width > 0 && height > 0;
 }
 
 /** Share of the output width that card titles may use. */
@@ -137,13 +142,16 @@ export function createRenderer(canvas: HTMLCanvasElement | OffscreenCanvas, proj
     if (chrome) windowPass.draw(layout, chrome, look.frame.shadow, look.frame.title);
     const screen = sources.screens.get(layer.index);
     if (!screen) throw new Error(`render: no screen frame for scene ${layer.index}`);
+    // A 0×0 source uploads nothing and leaves the old texture: black or a stale frame, no GL error thrown.
+    if (!hasPixels(screen)) throw new Error(`render: the screen frame of scene ${layer.index} is empty (not decoded yet, or closed)`);
     uploadTexture(gl, screenTexture, screen, true);
     const zoom = layer.zoom ?? full;
     content.draw(screenTexture, uvRect(zoom, screenSize), layout);
     masks.draw(layer.masks, screenTexture, screenSize, zoom, layout);
     if (layer.cursor) cursor.draw(layer.cursor, look.cursor, screenSize, zoom, layout);
+    // An empty webcam frame counts as missing: no bubble, as when the webcam track is shorter.
     const camera = look.webcam.enabled ? sources.webcams.get(layer.index) : undefined;
-    if (camera) {
+    if (camera && hasPixels(camera)) {
       uploadTexture(gl, webcamTexture, camera, true);
       webcam.draw(webcamTexture, sourceSize(camera), look.webcam);
     }

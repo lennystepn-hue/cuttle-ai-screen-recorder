@@ -13,7 +13,7 @@ void main() {
   o_color = texture(u_tex, uv) * u_opacity;
 }`;
 
-/** Draws a premultiplied texture into a rect: sprites, cursor images and offscreen layers. */
+/** Draws a premultiplied texture into a rect: label sprites and offscreen layers. */
 export class SpritePass {
   private readonly shader: Shader;
 

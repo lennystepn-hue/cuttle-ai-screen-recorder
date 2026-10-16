@@ -87,6 +87,21 @@ describe('render', () => {
     expect(() => render(project, { t: 0, layers: [layer(0, 1, 'clip')] })).toThrow('render: no screen frame for scene 0');
   });
 
+  it('refuses an empty screen frame and shows no bubble for an empty webcam frame, instead of drawing black', async () => {
+    const project = parse({ look: { webcam: { enabled: true } }, scenes: [{ type: 'clip', from: 0, to: 1 }] });
+    const closed = new VideoFrame(await createImageBitmap(new ImageData(2, 2)), { timestamp: 0 });
+    closed.close(); // what a decoder hands over by mistake: displayWidth and displayHeight are 0
+    const frame = (screen: TexImageSource, webcam?: TexImageSource): FrameSources => ({
+      screens: new Map([[0, screen]]),
+      webcams: new Map(webcam ? [[0, webcam]] : []),
+      stills: new Map(),
+    });
+    const state: RenderState = { t: 0, layers: [layer(0, 1, 'clip')] };
+    expect(() => render(project, state, frame(closed))).toThrow('render: the screen frame of scene 0 is empty (not decoded yet, or closed)');
+    const screen = fakeScreen();
+    expect(render(project, state, frame(screen, closed)).pixels.data).toEqual(render(project, state, frame(screen)).pixels.data);
+  });
+
   it('names the still scene whose image is missing', () => {
     const project = parse({ scenes: [{ type: 'still', image: 'p.png', duration: 1 }] });
     expect(() => render(project, { t: 0, layers: [layer(0, 1, 'still')] })).toThrow('render: no image for still scene 0');

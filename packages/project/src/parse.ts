@@ -46,7 +46,8 @@ export function parseProject(raw: unknown): ParseResult {
 export function parseProjectJson(text: string): ParseResult {
   let raw: unknown;
   try {
-    raw = JSON.parse(text.replace(/^﻿/, '')); // a BOM, as Windows editors write one
+    // A UTF-8 byte order mark (U+FEFF), as Windows editors and PowerShell 5.1 write one, is not JSON.
+    raw = JSON.parse(text.charCodeAt(0) === 0xfeff ? text.slice(1) : text);
   } catch (error) {
     return { ok: false, issues: [{ path: '(root)', message: `Invalid JSON: ${(error as Error).message}` }] };
   }

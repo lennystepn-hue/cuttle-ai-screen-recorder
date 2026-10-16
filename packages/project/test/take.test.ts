@@ -35,6 +35,6 @@ describe('parseTakeJson', () => {
   });
 
   it('accepts a byte order mark, as Windows editors write one', () => {
-    expect(parseTakeJson(`﻿${JSON.stringify(take)}`).ok).toBe(true);
+    expect(parseTakeJson(String.fromCharCode(0xfeff) + JSON.stringify(take)).ok).toBe(true);
   });
 });

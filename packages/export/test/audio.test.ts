@@ -86,10 +86,10 @@ describe('audioFilterGraph', () => {
     expect(graph).toContain('atrim=end_sample=48960,asetpts=N/SR/TB,afade=t=in:ss=0:ns=7200,afade=t=out:ss=47520:ns=480[s3]');
   });
 
-  it('reads a little past a sped-up clip, because atempo returns fewer samples, then cuts to the clip', () => {
+  it('feeds atempo silence past a sped-up clip, because it returns fewer samples, then cuts to the clip', () => {
     const graph = audioFilterGraph(plan({ scenes, look: { audio: { muteSpedUp: false } } }));
     expect(graph).toContain(
-      '[m1]atrim=start_sample=144000:end_sample=536192,asetpts=N/SR/TB,atempo=4,atrim=end_sample=96000,asetpts=N/SR/TB,apad,',
+      '[m1]atrim=start_sample=144000:end_sample=528000,asetpts=N/SR/TB,apad=pad_len=200000,atempo=4,atrim=end_sample=96000,asetpts=N/SR/TB,apad,',
     );
   });
 

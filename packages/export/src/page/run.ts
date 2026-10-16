@@ -125,10 +125,12 @@ export async function run(): Promise<PageResult> {
   try {
     return await exportVideo(await host().job());
   } catch (error) {
-    // Unexpected errors keep their stack on stderr (the main process forwards page errors as text,
-    // so name and message are spelled out: a DOMException would print as "[object DOMException]").
-    if (!(error instanceof PageError)) console.error(error instanceof Error ? `${error.name}: ${error.message}
-${error.stack ?? ''}` : String(error));
+    // Unexpected errors keep their stack on stderr. The main process forwards page errors as text, so
+    // spell them out (a DOMException would print as "[object DOMException]"); a V8 stack starts with
+    // "Name: message", a DOMException may have none.
+    if (!(error instanceof PageError)) {
+      console.error(error instanceof Error ? (error.stack ?? `${error.name}: ${error.message}`) : String(error));
+    }
     return {
       ok: false,
       code: error instanceof PageError ? error.code : 'render',

@@ -119,6 +119,8 @@ describe('loadSources', () => {
     );
     const other = await loadSources(otherDir);
     expect([other.webcam?.offset, other.mic?.offset]).toEqual([0, 0]);
+    expect(other.warnings).toEqual([expect.stringContaining('describes another screen recording (older-screen.mp4)')]);
+    expect((await loadSources(caseDir)).warnings).toEqual([]);
   });
 
   it('refuses a folder where a file belongs', async () => {
@@ -135,6 +137,15 @@ describe('loadSources', () => {
     );
     const { inputs } = await loadSources(dir);
     for (const file of ['cuttle.json', 'take/take.json', 'take/screen.mp4', 'take/webcam.mp4', 'take/mic.m4a', 'take/events.jsonl', 'page.png']) {
+      expect(inputs, file).toContain(join(dir, file));
+    }
+  });
+
+  it('also lists the sources the look switches off: the output must not replace those either', async () => {
+    const off = { webcam: { enabled: false }, audio: { enabled: false }, cursor: { enabled: false }, background: { preset: 'sunset-sky', image: 'bg.png' } };
+    const dir = await projectDir({ sources: SOURCES, look: off, scenes: SCENES }, MEDIA);
+    const { inputs } = await loadSources(dir);
+    for (const file of ['take/webcam.mp4', 'take/mic.m4a', 'take/events.jsonl', 'bg.png', 'take/take.json']) {
       expect(inputs, file).toContain(join(dir, file));
     }
   });

@@ -17,8 +17,10 @@ export interface ProjectSources {
   events?: InputEvent[];
   stills: Record<number, string>;
   backgroundImage?: string;
-  /** Every file the export reads (cuttle.json and take.json included): the output must not replace one. */
+  /** Every file the project names (cuttle.json and take.json included): the output must not replace one. */
   inputs: string[];
+  /** Things the export goes on without, but the user should know (e.g. a take.json that does not apply). */
+  warnings: string[];
 }
 
 /** At most this many issues are listed; a file broken on every line would otherwise make a huge message. */
@@ -53,7 +55,7 @@ async function existing(projectDir: string, relative: string, what: string, medi
   return path;
 }
 
-async function readTake(screen: string): Promise<{ path: string; take: TakeFile } | undefined> {
+async function readTake(screen: string): Promise<{ path: string; take?: TakeFile; warning?: string } | undefined> {
   const path = join(dirname(screen), TAKE_FILE);
   let text: string;
   try {
@@ -67,7 +69,10 @@ async function readTake(screen: string): Promise<{ path: string; take: TakeFile 
   const result = parseTakeJson(text);
   if (!result.ok) throw new ExportError('invalid-project', `${path} is invalid:\n${issuesText(result.issues)}`);
   // A take.json of another recording (its screen entry names a different file) says nothing about these tracks.
-  if (!samePath(resolve(dirname(screen), result.take.tracks.screen.file), screen)) return undefined;
+  const described = result.take.tracks.screen.file;
+  if (!samePath(resolve(dirname(screen), described), screen)) {
+    return { path, warning: `${path} describes another screen recording (${described}); webcam and mic are taken as lined up` };
+  }
   return { path, take: result.take };
 }
 
@@ -99,25 +104,25 @@ export async function loadSources(projectDir: string): Promise<ProjectSources> {
   const screen = await existing(projectDir, sources.screen, 'screen recording (sources.screen)');
   const takeFile = await readTake(screen);
   const take = takeFile?.take;
-  const result: ProjectSources = { project, screen, stills: {}, inputs: [resolve(projectPath), screen] };
-  if (takeFile) result.inputs.push(takeFile.path);
+  // Every file the project names, including sources the look switches off: the output must not
+  // replace a recording just because this export does not read it.
+  const named = [sources.webcam, sources.mic, sources.events, sources.markers, look.background.image].filter((path) => path !== undefined);
+  const inputs = [resolve(projectPath), screen, join(dirname(screen), TAKE_FILE), ...named.map((path) => resolve(projectDir, path))];
+  const result: ProjectSources = { project, screen, stills: {}, inputs, warnings: takeFile?.warning ? [takeFile.warning] : [] };
 
   if (look.webcam.enabled && sources.webcam) {
     const path = await existing(projectDir, sources.webcam, 'webcam recording (sources.webcam)');
     result.webcam = { path, offset: offsetFor(take, 'webcam', path, screen) };
-    result.inputs.push(path);
   }
   if (look.audio.enabled && sources.mic) {
     const path = await existing(projectDir, sources.mic, 'mic recording (sources.mic)');
     result.mic = { path, offset: offsetFor(take, 'mic', path, screen) };
-    result.inputs.push(path);
   }
   if (look.cursor.enabled && sources.events) {
     const path = await existing(projectDir, sources.events, 'input events (sources.events)', false);
     const events = parseEventsJsonl(await readFile(path, 'utf8'));
     if (events.issues.length > 0) throw new ExportError('invalid-project', `${path} is invalid:\n${issuesText(events.issues)}`);
     result.events = events.events;
-    result.inputs.push(path);
   }
   for (const [index, scene] of project.scenes.entries()) {
     if (scene.type !== 'still') continue;
@@ -126,7 +131,6 @@ export async function loadSources(projectDir: string): Promise<ProjectSources> {
   }
   if (look.background.preset === 'image' && look.background.image) {
     result.backgroundImage = await existing(projectDir, look.background.image, 'background image (look.background.image)');
-    result.inputs.push(result.backgroundImage);
   }
   return result;
 }

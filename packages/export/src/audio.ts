@@ -8,10 +8,11 @@ export const AUDIO_BITRATE = '160k';
 /** Shortest fade at a cut, so hard cuts do not click. */
 const MIN_FADE_SECONDS = 0.01;
 /**
- * Output samples read past a sped-up clip's end: `atempo` returns several hundred samples fewer
- * than (to − from) / speed, and the clip's sound must reach its fade-out, not stop short of it.
+ * Silence (input samples) appended before `atempo`: it returns several hundred samples fewer than
+ * (to − from) / speed and needs input past the end to flush, so the clip's sound reaches its
+ * fade-out. Silence, not the mic after `to`: that would play sound from after the cut.
  */
-const ATEMPO_OVERREAD = 2048;
+const ATEMPO_FLUSH = 200_000;
 
 /** One scene's stretch of the exported audio, in samples at `AUDIO_SAMPLE_RATE`. */
 export interface AudioSegment {
@@ -110,10 +111,9 @@ export function audioFilterGraph(segments: readonly AudioSegment[], micOffset = 
     if (segment.mic) {
       const { from, to, speed, content } = segment.mic;
       const tempo = atempoChain(speed);
-      // atempo comes up short, so read a little past the clip and cut its output to the clip's length.
-      const end = tempo.length > 0 ? to + Math.ceil(ATEMPO_OVERREAD * speed) : to;
-      chain.push(`[m${micIndex++}]atrim=start_sample=${from}:end_sample=${end}`, 'asetpts=N/SR/TB');
-      if (tempo.length > 0) chain.push(...tempo, `atrim=end_sample=${content}`, 'asetpts=N/SR/TB');
+      chain.push(`[m${micIndex++}]atrim=start_sample=${from}:end_sample=${to}`, 'asetpts=N/SR/TB');
+      // atempo comes up short: feed it silence past the clip, then cut its output to the clip's length.
+      if (tempo.length > 0) chain.push(`apad=pad_len=${ATEMPO_FLUSH}`, ...tempo, `atrim=end_sample=${content}`, 'asetpts=N/SR/TB');
       chain.push(
         // Pads a mic that ends early (or started late) and the last clip up to the frame grid;
         // without input frames apad's timestamps are unset, so they are rebuilt after the trim or
@@ -138,10 +138,11 @@ export function audioFilterGraph(segments: readonly AudioSegment[], micOffset = 
 }
 
 /**
- * Longest graph passed on the command line. Windows limits a command line to 32 767 characters
- * (about 170 audible clips); longer graphs go into a file read with `-/filter_complex` (ffmpeg 7+).
+ * Longest graph passed on the command line. Windows limits a command line to 32 767 characters,
+ * which leaves room for about 150 audible clips next to the file paths; longer graphs go into a
+ * file read with `-/filter_complex`, which needs ffmpeg 7 or later.
  */
-export const INLINE_GRAPH_LIMIT = 16_000;
+export const INLINE_GRAPH_LIMIT = 30_000;
 
 export interface MuxArgsOptions {
   /** The video-only MP4 from the frame loop. */

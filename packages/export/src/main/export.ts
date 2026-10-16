@@ -74,22 +74,33 @@ function whenCancelled(signal: AbortSignal | undefined): { promise: Promise<neve
   return { promise, dispose: () => signal.removeEventListener('abort', onAbort) };
 }
 
-/** Rejects when no frame was rendered for `STALL_SECONDS` (a hung encoder never reports an error). */
-function watchdog(): { progress(done: number): void; stalled: Promise<never>; stop(): void } {
+/**
+ * Rejects when the page shows no sign of life for `STALL_SECONDS` (a hung encoder never reports an
+ * error). Rendered frames and file reads and writes count: a long decode before a scene's first frame
+ * keeps reading. A tick far later than its second means the computer slept, which is no stall.
+ */
+function watchdog(): { progress(done: number): void; alive(): void; stalled: Promise<never>; stop(): void } {
   let last = performance.now();
+  let tick = last;
   let frame = 0;
   let fail = (_error: Error): void => {};
   const stalled = new Promise<never>((_, reject) => (fail = reject));
   stalled.catch(() => {});
   const timer = setInterval(() => {
-    if (performance.now() - last > STALL_SECONDS * 1000) {
-      fail(new ExportError('render', `the export stalled: no frame rendered for ${STALL_SECONDS} s (after frame ${frame})`));
+    const now = performance.now();
+    if (now - tick > 5000) last = now; // slept
+    tick = now;
+    if (now - last > STALL_SECONDS * 1000) {
+      fail(new ExportError('render', `the export stalled: no progress for ${STALL_SECONDS} s (after frame ${frame})`));
     }
   }, 1000);
   return {
     progress(done) {
       last = performance.now();
       frame = done;
+    },
+    alive() {
+      last = performance.now();
     },
     stalled,
     stop: () => clearInterval(timer),
@@ -172,6 +183,7 @@ export async function exportProject(opts: ExportOptions): Promise<ExportResult> 
   const projectDir = resolve(opts.projectDir);
   const out = resolve(opts.out);
   const sources = await loadSources(projectDir);
+  for (const warning of sources.warnings) console.warn(`warning: ${warning}`);
   await checkOutput(out, sources.inputs);
   await checkFfmpeg();
   if (sources.mic) await checkMic(sources.mic.path, signal);
@@ -210,9 +222,15 @@ export async function exportProject(opts: ExportOptions): Promise<ExportResult> 
     const ipc = window.win.webContents.ipc;
     ipc.handle(CHANNELS.job, () => job);
     ipc.handle(CHANNELS.size, (_event, path: string) => host.size(path));
-    ipc.handle(CHANNELS.read, (_event, path: string, start: number, end: number) => host.read(path, start, end));
+    ipc.handle(CHANNELS.read, (_event, path: string, start: number, end: number) => {
+      guard.alive();
+      return host.read(path, start, end);
+    });
     ipc.handle(CHANNELS.readFile, (_event, path: string) => host.readFile(path));
-    ipc.handle(CHANNELS.write, (_event, data: Uint8Array, position: number) => host.write(data, position));
+    ipc.handle(CHANNELS.write, (_event, data: Uint8Array, position: number) => {
+      guard.alive();
+      return host.write(data, position);
+    });
     ipc.on(CHANNELS.progress, (_event, done: number, total: number) => {
       guard.progress(done);
       opts.onProgress?.(done, total);

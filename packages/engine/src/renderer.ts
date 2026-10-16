@@ -6,6 +6,7 @@ import { createTexture, uploadTexture } from './gl/texture';
 import { unitFor, uvRect, windowLayout, type Size, type WindowLayout } from './layout';
 import { BackgroundPass } from './passes/background';
 import { ContentPass } from './passes/content';
+import { CursorPass } from './passes/cursor';
 import { MaskPass } from './passes/masks';
 import { SpritePass } from './passes/sprite';
 import { WindowPass } from './passes/window';
@@ -99,6 +100,7 @@ export function createRenderer(canvas: HTMLCanvasElement | OffscreenCanvas, proj
   const content = own(new ContentPass(gl, output));
   const screenTexture = texture(true);
   const masks = own(new MaskPass(gl, output));
+  const cursor = own(new CursorPass(gl, output, options.assets, spritePass));
   let layerTarget: RenderTarget | undefined;
   let disposed = false;
 
@@ -116,6 +118,7 @@ export function createRenderer(canvas: HTMLCanvasElement | OffscreenCanvas, proj
     const zoom = layer.zoom ?? full;
     content.draw(screenTexture, uvRect(zoom, screenSize), layout);
     masks.draw(layer.masks, screenTexture, screenSize, zoom, layout);
+    if (layer.cursor) cursor.draw(layer.cursor, look.cursor, screenSize, zoom, layout);
   }
 
   function drawCard(scene: CardScene): void {

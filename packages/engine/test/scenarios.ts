@@ -29,6 +29,35 @@ function project(look: Look = {}, rest: Partial<CuttleProjectInput> = {}): Cuttl
 const SLATE = { preset: 'solid', color: '#3B4252' } as const;
 const TITLE = 'claude · ~/treg-demo';
 
+/** Cursor resting at the screen centre, clicked 0.1 s before t = 5 (ripple at 25 %). */
+const CLICK: InputEvent[] = [
+  { t: 0, type: 'move', x: 640, y: 400 },
+  { t: 4.9, type: 'click', x: 640, y: 400, button: 'left' },
+];
+/** Zoom on the cursor so its art is big enough to judge. */
+const CURSOR_ZOOM = [{ at: 0, duration: 10, rect: [520, 325, 240, 150] as [number, number, number, number] }];
+
+function cursorScenario(style: 'system' | 'arrow-white' | 'arrow-black' | 'dot' | 'ring' | 'spotlight'): Scenario {
+  return {
+    name: `cursor-${style}`,
+    project: project({ background: SLATE, frame: { title: TITLE }, cursor: { style } }, { zooms: CURSOR_ZOOM }),
+    t: 5,
+    events: CLICK,
+  };
+}
+
+function shapeScenario(shape: 'text' | 'pointer' | 'wait' | 'crosshair' | 'move' | 'not-allowed'): Scenario {
+  return {
+    name: `cursor-system-${shape}`,
+    project: project({ background: SLATE, frame: { title: TITLE } }, { zooms: CURSOR_ZOOM }),
+    t: 5,
+    events: [
+      { t: 0, type: 'move', x: 640, y: 400 },
+      { t: 0, type: 'shape', shape },
+    ],
+  };
+}
+
 export const SCENARIOS: Scenario[] = [
   // Backgrounds, behind an end card
   ...(['sunset-sky', 'aurora', 'mesh'] as const).map((preset) => ({
@@ -81,4 +110,8 @@ export const SCENARIOS: Scenario[] = [
     ),
     t: 5,
   },
+
+  // Cursors: six styles with a click ripple, then the system shapes
+  ...(['system', 'arrow-white', 'arrow-black', 'dot', 'ring', 'spotlight'] as const).map(cursorScenario),
+  ...(['text', 'pointer', 'wait', 'crosshair', 'move', 'not-allowed'] as const).map(shapeScenario),
 ];

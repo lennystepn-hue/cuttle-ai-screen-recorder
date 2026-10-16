@@ -178,6 +178,22 @@ describe('crossfades', () => {
     expect(sourceTime).toBeCloseTo(5 - 1 / 30, 9);
   });
 
+  it('holds the last frame shown when the clip ends between two frames', () => {
+    const offGrid = parseProject({
+      version: 1,
+      sources: { screen: 's.mp4' },
+      scenes: [
+        { type: 'clip', from: 0, to: 1.01 },
+        { type: 'card', title: 'End', duration: 1 },
+      ],
+    });
+    if (!offGrid.ok) throw new Error('fixture');
+    const t = createTimeline(offGrid.project, { screenSize });
+    // At 30 fps, frame 30 (t = 1.0) is the last one inside [0, 1.01); frames 31 to 34 crossfade.
+    const times = [29, 30, 31, 32, 34].map((frame) => t.frameAt(frame / 30).layers.find((l) => l.index === 0)?.sourceTime);
+    expect(times).toEqual([29 / 30, 1, 1, 1, 1]);
+  });
+
   it('caps the crossfade by the shortest neighbouring scene', () => {
     const short = createTimeline(
       project(

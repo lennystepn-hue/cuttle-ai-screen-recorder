@@ -57,8 +57,10 @@ export function createTimeline(project: CuttleProject, opts: TimelineOptions): T
     const base = { index: span.index, local, progress: length === 0 ? 1 : local / length, opacity };
     const scene = span.scene;
     if (scene.type !== 'clip') return { ...base, kind: scene.type, masks: [], texts: [] };
-    // Past the end, hold the clip's last output frame, which lies inside [from, to).
-    const sourceLocal = t >= span.end ? Math.max(0, length - 1 / project.output.fps) : local;
+    // Past the end, hold the last output frame shown before it (frame i at i / fps): its source
+    // time lies inside [from, to), and a clip's source time never goes back during a crossfade.
+    const lastShown = (Math.ceil(span.end * project.output.fps - 1e-6) - 1) / project.output.fps;
+    const sourceLocal = t >= span.end ? clamp(lastShown - span.start, 0, length) : local;
     const sourceTime = sourceTimeAt(scene, sourceLocal);
     let cursor = project.look.cursor.enabled && opts.cursor ? cursorAt(opts.cursor, sourceTime, scene.speed) : undefined;
     if (cursor && project.look.cursor.clickEffect === 'none') cursor = { ...cursor, clicks: [] };

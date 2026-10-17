@@ -323,6 +323,25 @@ describe('cuttle suggest and recover', () => {
     expect(existsSync(join(dir, 'cuttle.json.bak'))).toBe(true);
   }, 30_000);
 
+  it('zooms on clicks where the work happens at 1×, and leaves them out with --no-click-zooms', async () => {
+    const dir = temp();
+    cpSync(fixture, dir, { recursive: true });
+    // typing from 3 to 12 s (no waiting to speed up) and two clicks at one spot
+    const events = [
+      ...Array.from({ length: 31 }, (_, i) => ({ t: 3 + i * 0.3, type: 'keys', count: 1 })),
+      { t: 6, type: 'click', x: 400, y: 300, button: 'left' },
+      { t: 6.6, type: 'click', x: 430, y: 320, button: 'left' },
+    ].sort((a, b) => a.t - b.t);
+    writeFileSync(join(dir, 'takes/1/events.jsonl'), events.map((event) => `${JSON.stringify(event)}\n`).join(''));
+    const { code, json } = await cli('--json', '-C', dir, 'suggest', '--dry-run');
+    expect(code).toBe(0);
+    const zooms = (json as { zooms: { label: string; at: number; duration: number; rect: number[] }[] }).zooms;
+    expect(zooms.find((zoom) => zoom.label === 'Clicks')).toMatchObject({ at: 5.3, duration: 2.5, rect: [127, 148, 576, 324] });
+    expect((json as { notes: string[] }).notes).toContain('1 zoom(s) on clicks');
+    const without = await cli('--json', '-C', dir, 'suggest', '--dry-run', '--no-click-zooms');
+    expect((without.json as { zooms: { label: string }[] }).zooms.map((zoom) => zoom.label)).not.toContain('Clicks');
+  }, 30_000);
+
   it('leaves cuttle.json alone with --dry-run', async () => {
     const dir = temp();
     cpSync(fixture, dir, { recursive: true });

@@ -3,5 +3,6 @@ export { CONTINUOUS_CUT_SECONDS, crossfadeHalf, isContinuousCut, sceneDuration, 
 export { occurrences, rampAmount, type Occurrence } from './occurrences';
 export { ZOOM_RAMP_SECONDS, fitZoomRect, zoomRectAt } from './zoom';
 export { TEXT_FADE_SECONDS, activeMasks, activeTexts, badgeFor, type ActiveText } from './overlays';
-export { CLICK_EFFECT_SECONDS, createCursorTrack, cursorAt, type CursorFrame, type CursorTrack } from './cursor';
+export { CLICK_EFFECT_SECONDS, createCursorTrack, cursorAt, smoothedPath, type CursorFrame, type CursorTrack } from './cursor';
 export { createTimeline, type RenderState, type SceneFrame, type Timeline, type TimelineOptions } from './frame';
+export { clickZooms, zoomRectFor, type ClickZoom, type ClipSpan } from './click-zooms';

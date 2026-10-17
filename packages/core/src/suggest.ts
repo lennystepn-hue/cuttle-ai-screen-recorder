@@ -1,6 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { newId, parseEventsJsonl, parseMarkersJson, parseTakeJson, usedIds, type InputEvent, type Marker, type Rect } from '@cuttle/project';
+import { clickZooms } from '@cuttle/timeline';
 import { CoreError } from './errors';
 import { readProjectFile, writeProjectFile } from './project-file';
 import { analyseScreen, grabGray } from './suggest/media';
@@ -13,8 +14,10 @@ export interface SuggestOptions {
   claude?: string | true;
   /** Print the suggestion without writing cuttle.json. */
   dryRun?: boolean;
-  /** Zoom on Claude's final answer (default true). */
+  /** Zooms at all: on Claude's final answer and on the clicks (default true). */
   zoom?: boolean;
+  /** Zooms that follow the clicks (default true; `zoom: false` turns them off too). */
+  clickZooms?: boolean;
   /** Status for people while it runs. */
   onStatus?: (text: string) => void;
 }
@@ -120,6 +123,19 @@ export async function suggestProject(projectDir: string, args: SuggestOptions = 
     } else {
       notes.push(region ? 'no zoom: most of the screen changed with the answer (add one by hand)' : 'no zoom: nothing changed around the answer');
     }
+  }
+  if (args.zoom !== false && args.clickZooms !== false && events.length > 0) {
+    const followed = clickZooms(
+      events,
+      clips.map((clip) => ({ from: clip.from, to: clip.to, speed: clip.speed ?? 1 })),
+      screenInfo,
+      zooms,
+    );
+    for (const zoom of followed) {
+      zooms.push({ id: newId('zooms', taken), label: zoom.clicks === 1 ? 'Click' : 'Clicks', at: zoom.at, duration: zoom.duration, rect: zoom.rect });
+    }
+    zooms.sort((a, b) => a.at - b.at);
+    if (followed.length > 0) notes.push(`${followed.length} zoom(s) on clicks`);
   }
 
   let backup: string | undefined;

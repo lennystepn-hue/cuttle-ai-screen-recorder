@@ -12,7 +12,7 @@ export async function suggestCommand(projectDir: string, args: Omit<SuggestOptio
     const seconds = clips.reduce((sum, scene) => sum + (scene.to - scene.from) / (scene.speed ?? 1), 0);
     return [
       ...result.notes.map((note) => `- ${note}`),
-      `${clips.length} clip(s), about ${seconds.toFixed(1)} s${result.zooms.length > 0 ? `, ${result.zooms.length} zoom` : ''}`,
+      `${clips.length} clip(s), about ${seconds.toFixed(1)} s${result.zooms.length > 0 ? `, ${result.zooms.length} zoom${result.zooms.length === 1 ? '' : 's'}` : ''}`,
       result.written ? `written to ${result.project} (previous version: ${result.backup})` : '(dry run: cuttle.json unchanged)',
       'next: cuttle preview',
     ].join('\n');

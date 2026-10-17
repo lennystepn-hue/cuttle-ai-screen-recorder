@@ -98,10 +98,10 @@ cuttle -C "<project>" --json preview
 `suggest` trims the quiet start and end, cuts idle stretches, speeds up waiting (Claude at work)
 and zooms on Claude's answer. Its `notes` say what it did, in source seconds. It replaces every clip
 and zoom (masks, texts, stills and cards stay), so run it once, before your hand edits. Its clips
-and zoom have ids and labels ("Claude at work", "Answer"): keep them when you edit, and give
-items you add an unused id and a label (project.md). For a take
-recorded without `--until-claude`, add `--claude "<demo folder>"` to read the markers from Claude
-Code's transcript.
+and zoom have ids, and labels where Claude's markers say what they show ("Claude at work",
+"Answer"): keep them when you edit, and give items you add an unused id and a label (project.md).
+For a take recorded without `--until-claude`, add `--claude "<demo folder>"` to read the markers
+from Claude Code's transcript.
 
 `preview` writes 12 stills and `preview/sheet.png`. **Look at the sheet** (Read the PNG). Each
 still in the JSON has its output second `t` and the `source` second it shows. For details, run

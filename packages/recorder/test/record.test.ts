@@ -39,12 +39,24 @@ describe.concurrent('record (test backend)', () => {
   it('records a 3 s take with every track', async () => {
     const projectDir = project();
     const events: RecorderEvent[] = [];
-    const recording = record({ ...test, projectDir, webcam: 'Test Camera', mic: 'Test Microphone', stop: { maxSeconds: 3 }, onEvent: (event) => events.push(event) });
     let markedAt = 0;
-    setTimeout(() => {
-      markedAt = Date.now() / 1000;
-      recording.marker('one second');
-    }, 1000);
+    const recording = record({
+      ...test,
+      projectDir,
+      webcam: 'Test Camera',
+      mic: 'Test Microphone',
+      stop: { maxSeconds: 3 },
+      onEvent: (event) => {
+        events.push(event);
+        // From the recording event on, the screen has started: a marker before it would be dropped.
+        if (event.type === 'recording') {
+          setTimeout(() => {
+            markedAt = Date.now() / 1000;
+            recording.marker('one second');
+          }, 1000);
+        }
+      },
+    });
     const take = await recording.done;
 
     expect(take).toEqual({
@@ -127,10 +139,10 @@ describe.concurrent('record (test backend)', () => {
       projectDir: project(),
       stop: { maxSeconds: 1.5 },
       onEvent: (event) => {
+        if (event.type === 'recording') setTimeout(() => recording.marker(), 300);
         if (event.type === 'marker') throw new Error('listener bug');
       },
     });
-    setTimeout(() => recording.marker(), 500);
     const take = await recording.done;
     expect(take.stopReason).toBe('max-seconds');
     expect(take.warnings).toEqual(['onEvent failed on "marker": listener bug']);

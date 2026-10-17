@@ -68,8 +68,8 @@ errors, and every command names the path of a problem, counting from 0
 | `transition` | `enabled` (`true`: a crossfade between scenes), `duration` (`0.3` s, up to 2) |
 
 Two clips where the second starts where the first ends (within 1 ms), as `suggest`'s speed-ups and
-any split make, are one continuous piece: no crossfade and no dip in the sound between them, and
-zooms and texts run on across the cut.
+any split make, are one continuous piece: no crossfade, zooms and texts run on across the cut, and
+the sound runs on where the speed stays the same (a speed change gets a 10 ms fade against clicks).
 
 `frame.enabled: false` shows the screen alone, filling the output. A take recorded with
 `--draw-mouse` has the real pointer in the video; `record` then sets `cursor.enabled` to `false`, so

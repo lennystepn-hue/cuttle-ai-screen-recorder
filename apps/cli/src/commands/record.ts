@@ -1,10 +1,11 @@
 import { rm } from 'node:fs/promises';
+import { hostname } from 'node:os';
 import { resolve } from 'node:path';
 import { HOTKEYS, listDevices, record, type Backend, type CaptureSource, type Take } from '@cuttle/recorder';
 import type { Rect } from '@cuttle/project';
 import { CliError } from '../errors';
 import type { Output } from '../output';
-import { newProjectFile, projectExists, readProjectFile, useTake, writeProjectFile } from '@cuttle/core';
+import { editorLockOf, newProjectFile, projectExists, readProjectFile, useTake, writeProjectFile } from '@cuttle/core';
 
 export interface RecordArgs {
   monitor?: number;
@@ -21,6 +22,8 @@ export interface RecordArgs {
   max?: number;
   countdown?: number;
   drawMouse?: boolean;
+  /** Record even when the project is open in the Cuttle app. */
+  force?: boolean;
   backend: Backend;
 }
 
@@ -36,6 +39,12 @@ export interface RecordResult {
  * it. Ctrl+C (`signal`) stops the recording like the stop hotkey; the take is kept.
  */
 export async function recordCommand(projectDir: string, args: RecordArgs, output: Output, signal: AbortSignal): Promise<RecordResult> {
+  // The app records an open project itself (its editor hidden, so it is not in the take).
+  const open = args.force ? undefined : await editorLockOf(projectDir);
+  if (open) {
+    const where = open.host === hostname() ? '' : ` on ${open.host}`;
+    throw new CliError('project-open', `the project is open in the Cuttle app${where}: record there with "Record again", or close it first (--force records anyway)`);
+  }
   const devices = await listDevices({ backend: args.backend });
   const source = captureSource(args, devices.monitors.find((monitor) => monitor.primary)?.index ?? devices.monitors[0]?.index ?? 0);
   const webcam = deviceName('camera', args.webcam, devices.cameras);

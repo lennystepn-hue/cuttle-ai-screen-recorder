@@ -3,8 +3,24 @@ import type { Event, Request } from './ipc';
 
 export const WINDOW_CHANNELS = {
   editor: {
-    requests: ['project:info', 'project:reveal', 'media:state', 'media:retry', 'export:targets', 'export:start', 'export:cancel', 'project:record', 'project:takes', 'project:cut'],
-    events: ['media:state', 'export:progress', 'export:end', 'project:status'],
+    requests: [
+      'project:info',
+      'project:reveal',
+      'media:state',
+      'media:retry',
+      'export:targets',
+      'export:start',
+      'export:cancel',
+      'project:record',
+      'project:takes',
+      'project:cut',
+      'project:save',
+      'project:import-image',
+      'project:draft',
+      'project:reload',
+      'project:closed',
+    ],
+    events: ['media:state', 'export:progress', 'export:end', 'project:status', 'project:file', 'project:closing'],
   },
   pill: {
     requests: ['pill:recent', 'pill:open', 'pill:hide', 'pill:menu', 'pill:record'],
@@ -27,4 +43,4 @@ export const WINDOW_CHANNELS = {
 export type WindowKind = keyof typeof WINDOW_CHANNELS;
 
 /** Events that are news, not a state: the preload does not replay them to a listener that comes late. */
-export const STREAM_EVENTS: ReadonlySet<string> = new Set<Event>(['export:progress', 'export:end']);
+export const STREAM_EVENTS: ReadonlySet<string> = new Set<Event>(['export:progress', 'export:end', 'project:closing']);

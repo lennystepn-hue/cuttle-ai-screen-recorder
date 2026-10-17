@@ -7,6 +7,8 @@ export type OverlayKind = 'zoom' | 'mask' | 'caption';
 
 export interface SceneBlock {
   index: number;
+  /** The scene's id (`#<index>` for one without). */
+  id: string;
   kind: 'clip' | 'still' | 'card';
   /** Output seconds. */
   start: number;
@@ -22,9 +24,13 @@ export interface OverlayBlock {
   kind: OverlayKind;
   /** Index in the project's `zooms`, `masks` or `texts`. */
   item: number;
+  /** The item's id (`#<index>` for one without). */
+  id: string;
   /** One occurrence, in output seconds. */
   start: number;
   end: number;
+  /** The scene (index) where the occurrence starts: its speed turns a drag into source seconds. */
+  span: number;
   enabled: boolean;
   title: string;
   /** The row inside its lane: blocks that overlap in time go to separate rows. */
@@ -40,6 +46,8 @@ export interface OverlayLane {
   rows: number;
   /** Items no clip shows. */
   cutOut: number;
+  /** Those items, to list them (their id, and their name as the lane shows it). */
+  cutOutItems: { id: string; title: string }[];
 }
 
 export interface MarkerPin {
@@ -61,20 +69,21 @@ const baseName = (path: string) => path.split(/[\\/]/).at(-1) ?? path;
 
 function sceneBlock(span: SceneSpan): SceneBlock {
   const { scene, index, start, end } = span;
+  const id = scene.id ?? `#${index}`;
   if (scene.type === 'clip') {
     const source = scene.to - scene.from;
     const detail = scene.speed === 1 ? formatDuration(source) : `${formatDuration(source)} → ${formatDuration(end - start)}`;
     // The speed shows once, in front of the title (`12× Claude at work`): an unlabelled sped-up clip has no title.
-    return { index, kind: 'clip', start, end, title: scene.label ?? (scene.speed === 1 ? 'Clip' : ''), detail, speed: scene.speed };
+    return { index, id, kind: 'clip', start, end, title: scene.label ?? (scene.speed === 1 ? 'Clip' : ''), detail, speed: scene.speed };
   }
   if (scene.type === 'still') {
     const motion = scene.motion === 'none' ? '' : ` · ${scene.motion === 'kenburns' ? 'Ken Burns' : 'scroll'}`;
-    return { index, kind: 'still', start, end, title: scene.label ?? baseName(scene.image), detail: `${formatDuration(scene.duration)}${motion}` };
+    return { index, id, kind: 'still', start, end, title: scene.label ?? baseName(scene.image), detail: `${formatDuration(scene.duration)}${motion}` };
   }
-  return { index, kind: 'card', start, end, title: scene.label ?? scene.title, detail: formatDuration(scene.duration) };
+  return { index, id, kind: 'card', start, end, title: scene.label ?? scene.title, detail: formatDuration(scene.duration) };
 }
 
-function lane<T extends { enabled: boolean; label?: string }>(
+function lane<T extends { enabled: boolean; label?: string; id?: string }>(
   kind: OverlayKind,
   items: readonly T[],
   spans: readonly SceneSpan[],
@@ -82,13 +91,24 @@ function lane<T extends { enabled: boolean; label?: string }>(
   title: (item: T) => string,
 ): OverlayLane {
   const blocks: OverlayBlock[] = [];
-  let cutOut = 0;
+  const cutOutItems: OverlayLane['cutOutItems'] = [];
   items.forEach((item, index) => {
     const [from, to] = range(item);
-    const shown = [...new Set(occurrences(spans, from, to).filter((occurrence) => occurrence !== undefined))];
-    if (shown.length === 0) cutOut++;
+    const each = occurrences(spans, from, to);
+    const shown = [...new Set(each.filter((occurrence) => occurrence !== undefined))];
+    if (shown.length === 0) cutOutItems.push({ id: item.id ?? `#${index}`, title: item.label ?? title(item) });
     for (const occurrence of shown) {
-      blocks.push({ kind, item: index, start: occurrence.start, end: occurrence.end, enabled: item.enabled, title: item.label ?? title(item), row: 0 });
+      blocks.push({
+        kind,
+        item: index,
+        id: item.id ?? `#${index}`,
+        start: occurrence.start,
+        end: occurrence.end,
+        span: each.indexOf(occurrence),
+        enabled: item.enabled,
+        title: item.label ?? title(item),
+        row: 0,
+      });
     }
   });
   // Greedy interval packing: each block goes to the first row that is free at its start.
@@ -100,7 +120,7 @@ function lane<T extends { enabled: boolean; label?: string }>(
     ends[row] = Math.max(ends[row] ?? 0, block.end);
     block.row = row;
   }
-  return { blocks, cutOut, rows: Math.max(1, ends.length) };
+  return { blocks, cutOut: cutOutItems.length, cutOutItems, rows: Math.max(1, ends.length) };
 }
 
 /** The output seconds at which the clips show source second `t` (none when it is cut out). */

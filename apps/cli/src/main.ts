@@ -123,6 +123,7 @@ export async function runCli(argv: readonly string[], streams?: Streams): Promis
     .option('--max <seconds>', 'stop after this long', positive)
     .option('--countdown <seconds>', 'seconds before the recording starts (default 3)', seconds)
     .option('--draw-mouse', 'bake the real pointer into the video')
+    .option('--force', 'record even when the project is open in the Cuttle app')
     .addOption(new Option('--backend <name>', 'capture backend').choices(['auto', 'test']).default('auto').hideHelp())
     .action(
       action((output, project, options: Parameters<typeof recordCommand>[1]) =>

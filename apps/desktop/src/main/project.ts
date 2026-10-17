@@ -1,7 +1,7 @@
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { hostname } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
-import { readProjectFile, samePath, type ProjectFile } from '@cuttle/core';
+import { EDITOR_LOCK, readProjectFile, samePath, type ProjectFile } from '@cuttle/core';
 import { parseTakeJson, trackOffset, type CuttleProject } from '@cuttle/project';
 import type { ProjectInfo } from '../shared/ipc';
 
@@ -37,8 +37,6 @@ export function openProjectFile(dir: string): Promise<ProjectFile> {
   return readProjectFile(dir);
 }
 
-const LOCK = 'editor.lock';
-
 /** The project is open in Cuttle on another computer (a synced or shared folder). */
 export class LockedError extends Error {
   constructor(readonly host: string) {
@@ -55,7 +53,7 @@ export class LockedError extends Error {
  * Returns the release.
  */
 export async function lockProject(dir: string, options: { force?: boolean } = {}): Promise<() => Promise<void>> {
-  const path = join(dir, CACHE_DIR, LOCK);
+  const path = join(dir, EDITOR_LOCK);
   // A lock that does not parse (a power cut during its write leaves it empty) is stale too.
   const held = await readFile(path, 'utf8').then(
     (text) => {

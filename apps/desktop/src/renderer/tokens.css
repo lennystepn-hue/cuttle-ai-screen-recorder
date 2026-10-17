@@ -14,7 +14,8 @@
   /* text */
   --text: #ececf1;
   --muted: #9a9aa5;
-  --faint: #74747e;
+  /* 5:1 on the panel: it still carries words (reasons, placeholders, the ruler) */
+  --faint: #85858f;
 
   /* bars of the mic's waveform and the input activity: quiet, but visible on the panel */
   --bars: #5c5c68;

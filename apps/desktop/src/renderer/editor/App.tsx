@@ -1,11 +1,34 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type ComponentType, type PointerEvent as ReactPointerEvent } from 'react';
+import type { Rect } from '@cuttle/project';
 import { formatDuration, formatSource, formatTime, plainIssue } from '../../shared/format';
 import type { MediaState } from '../../shared/ipc';
 import { bridge } from '../bridge';
-import { ChevronIcon, CloseIcon, ExportIcon, FolderIcon, Mark, PauseIcon, PlayIcon, RecordIcon, WarningIcon } from '../icons';
+import {
+  ChevronIcon,
+  CloseIcon,
+  ExportIcon,
+  FolderIcon,
+  KeysIcon,
+  Mark,
+  MaskIcon,
+  PauseIcon,
+  PlayIcon,
+  RecordIcon,
+  RedoIcon,
+  SelectIcon,
+  TextIcon,
+  UndoIcon,
+  WarningIcon,
+  ZoomIcon,
+} from '../icons';
+import { captionCommand, captionPositionsAt, chooseTool, cycleSpeed, freeCaptionPosition, deleteSelection, duplicateSelection, overlayBlocked, reveal, split, type CaptionPosition } from './actions';
+import { CommandMenu, closeMenu, openMenu } from './CommandMenu';
+import { cancelGesture } from './gesture';
+import { dismissDraft, dismissToast, edit, preview, redo, retrySave, undo, useDraft } from './doc';
 import { ExportSheet } from './ExportSheet';
 import { Inspector } from './Inspector';
-import { currentPlayer, openExport, openSession, retryMedia, select, setFormat, shownProject, store } from './session';
+import { SourceView } from './SourceView';
+import { currentPlayer, documentProject, openExport, openSession, retryMedia, select, setFormat, setTool, shownProject, sourceViewShown, store, type Tool } from './session';
 import { useStore } from './store';
 import { FORMATS, ownFormat, targetName } from './targets';
 import { Timeline } from './Timeline';
@@ -13,20 +36,24 @@ import { Timeline } from './Timeline';
 export function App() {
   const canvas = useRef<HTMLCanvasElement>(null);
   const phase = useStore(store, (state) => state.phase);
+  const tool = useStore(store, (state) => state.tool);
 
   useEffect(() => {
     if (canvas.current) void openSession(canvas.current);
   }, []);
   useShortcuts();
+  useMouseFocus();
 
   if (phase === 'failed') return <Failed />;
   return (
-    <div className="app" data-phase={phase}>
+    <div className="app" data-phase={phase} data-tool={tool}>
       <TitleBar />
+      <Tools />
       <Stage canvas={canvas} />
       <Timeline />
       <Inspector />
       <ExportSheet />
+      <CommandMenu />
       {phase === 'loading' && (
         <div className="loading">
           <div className="spinner" role="status" aria-label="Opening the project" />
@@ -52,7 +79,7 @@ function Failed() {
               <FolderIcon size={14} />
               Show the folder
             </button>
-            <button className="primary" onClick={() => location.reload()}>
+            <button className="primary" onClick={() => void bridge.invoke('project:reload')}>
               Try again
             </button>
           </div>
@@ -67,6 +94,7 @@ function TitleBar() {
   const info = useStore(store, (state) => state.info);
   const media = useStore(store, (state) => state.media);
   const status = useStore(store, (state) => state.status);
+  useStore(store, (state) => state.doc?.project);
   const duration = currentPlayer()?.duration ?? 0;
   const recorded = media ? media.screen.end - media.screen.start : 0;
   return (
@@ -76,10 +104,11 @@ function TitleBar() {
         <b>{info?.name ?? 'Cuttle'}</b>
         {media && (
           <span>
-            {formatDuration(recorded)} recorded · {formatDuration(duration)} video · view only
+            {formatDuration(recorded)} recorded · {formatDuration(duration)} video
           </span>
         )}
       </div>
+      {phase === 'ready' && <SaveState />}
       <div className="grow" />
       {status?.state === 'failed' ? (
         <button className="chip-status warn" onClick={() => void bridge.invoke('project:cut')} title={`${status.text}. Click to try again.`} data-testid="project-status">
@@ -99,6 +128,7 @@ function TitleBar() {
           <MediaChip />
           <ExportChip />
           <FormatSwitch />
+          <History />
           <div className="seg" role="group" aria-label="Takes">
             <button onClick={() => void bridge.invoke('project:record')} title="Record a new take for this project; this one stays restorable" data-testid="record-again">
               <RecordIcon size={10} style={{ color: 'var(--recording)', display: 'inline-block', marginRight: 6, verticalAlign: -1 }} />
@@ -115,6 +145,53 @@ function TitleBar() {
         </>
       )}
     </header>
+  );
+}
+
+/** Undo and Redo: their tooltips say what they undo and redo (off while cuttle.json has a mistake). */
+function History() {
+  const undoLabel = useStore(store, (state) => (state.doc?.issues ? undefined : state.doc?.undoLabel));
+  const redoLabel = useStore(store, (state) => (state.doc?.issues ? undefined : state.doc?.redoLabel));
+  return (
+    <div className="seg icons" role="group" aria-label="History">
+      <button onClick={undo} disabled={!undoLabel} title={undoLabel ? `Undo ${undoLabel} (Ctrl+Z)` : 'Nothing to undo'} aria-label={undoLabel ? `Undo ${undoLabel}` : 'Undo'} data-testid="undo">
+        <UndoIcon size={14} />
+      </button>
+      <button onClick={redo} disabled={!redoLabel} title={redoLabel ? `Redo ${redoLabel} (Ctrl+Shift+Z)` : 'Nothing to redo'} aria-label={redoLabel ? `Redo ${redoLabel}` : 'Redo'} data-testid="redo">
+        <RedoIcon size={14} />
+      </button>
+    </div>
+  );
+}
+
+/** "Saved", "Saving…" (only when it takes a moment), or why it is not, with a retry. */
+function SaveState() {
+  const saving = useStore(store, (state) => state.doc?.saving ?? false);
+  const problem = useStore(store, (state) => state.doc?.problem);
+  const issues = useStore(store, (state) => state.doc?.issues);
+  const [slow, setSlow] = useState(false);
+  useEffect(() => {
+    if (!saving) return setSlow(false);
+    const timer = setTimeout(() => setSlow(true), 400);
+    return () => clearTimeout(timer);
+  }, [saving]);
+  if (problem)
+    return (
+      <button className="chip-status warn" onClick={retrySave} title={`${problem}\nClick to try again.`} data-testid="save-state">
+        <WarningIcon size={14} />
+        Not saved · Try again
+      </button>
+    );
+  if (issues)
+    return (
+      <span className="save-state warn" title="cuttle.json has a mistake; see the note over the video" data-testid="save-state">
+        Editing waits
+      </span>
+    );
+  return (
+    <span className="save-state" title="Every edit is written to cuttle.json at once; Claude and the CLI see it too" data-testid="save-state">
+      {slow ? 'Saving…' : 'Saved'}
+    </span>
   );
 }
 
@@ -164,7 +241,7 @@ function ExportChip() {
   const unseen = useStore(store, (state) => state.exportUnseen);
   const progress = useStore(store, (state) => state.exportProgress);
   const end = useStore(store, (state) => state.exportEnd);
-  const output = useStore(store, (state) => state.media?.project.output);
+  const output = useStore(store, (state) => state.doc?.project.output);
   if (open) return null;
   if (exporting) {
     const percent = progress ? Math.round((progress.done / Math.max(1, progress.total)) * 100) : 0;
@@ -197,7 +274,7 @@ function ExportChip() {
 /** The preview's output format: the project's own size first (marked inside its preset when it is one), then the presets. */
 function FormatSwitch() {
   const format = useStore(store, (state) => state.format);
-  const output = useStore(store, (state) => state.media?.project.output);
+  const output = useStore(store, (state) => state.doc?.project.output);
   const own = ownFormat(output);
   return (
     <div className="seg" role="group" aria-label="Preview format">
@@ -220,11 +297,57 @@ function FormatSwitch() {
   );
 }
 
+const TOOLS: { tool: Tool; Icon: ComponentType<{ size?: number }>; name: string; keys: string; hint: string }[] = [
+  { tool: 'select', Icon: SelectIcon, name: 'Select', keys: 'V', hint: 'click a caption on the video, or anything on the timeline' },
+  { tool: 'zoom', Icon: ZoomIcon, name: 'Zoom', keys: 'Z', hint: 'drag over what the video should show close up' },
+  { tool: 'mask', Icon: MaskIcon, name: 'Mask', keys: 'M', hint: 'drag over what the video should hide (a password, an address…)' },
+  { tool: 'caption', Icon: TextIcon, name: 'Caption', keys: 'T', hint: 'type a caption on the video at the playhead' },
+];
+
+/** The tools, beside the video: they decide what a drag or click on the video does. */
+function Tools() {
+  const tool = useStore(store, (state) => state.tool);
+  const ready = useStore(store, (state) => state.phase === 'ready' && !state.doc?.issues);
+  // where the playhead is decides whether a zoom, mask or caption can go there
+  useStore(store, (state) => Math.round(state.player.t * 30));
+  useStore(store, (state) => state.doc?.project);
+  const blocked = ready ? overlayBlocked() : undefined;
+  return (
+    <nav className="tools" role="toolbar" aria-label="Tools" aria-orientation="vertical">
+      {TOOLS.map(({ tool: name, Icon, name: label, keys, hint }) => {
+        // the tool in use stays pressable, to turn it off
+        const off = !ready || (name !== 'select' && blocked !== undefined && tool !== name);
+        return (
+          <button
+            key={name}
+            aria-pressed={tool === name}
+            disabled={off}
+            onClick={() => setTool(tool === name && name !== 'select' ? 'select' : name)}
+            title={`${label} (${keys}): ${off && blocked ? blocked : hint}`}
+            aria-label={label}
+            data-testid={`tool-${name}`}
+          >
+            <Icon size={17} />
+            <kbd>{keys}</kbd>
+          </button>
+        );
+      })}
+      <div className="grow" />
+      <button onClick={openMenu} disabled={!ready} title="Every command and its keys (Ctrl+K)" aria-label="Commands" data-testid="open-menu">
+        <KeysIcon size={17} />
+      </button>
+    </nav>
+  );
+}
+
 function Stage({ canvas }: { canvas: React.RefObject<HTMLCanvasElement | null> }) {
   const viewport = useRef<HTMLDivElement>(null);
   const error = useStore(store, (state) => state.player.error);
   const media = useStore(store, (state) => state.media);
   const format = useStore(store, (state) => state.format);
+  const issues = useStore(store, (state) => state.doc?.issues);
+  const sourceView = useStore(store, sourceViewShown);
+  useStore(store, (state) => state.doc?.preview ?? state.doc?.project);
   const [size, setSize] = useState({ width: 0, height: 0 });
   const [dismissed, setDismissed] = useState<string>();
   const project = shownProject();
@@ -249,23 +372,258 @@ function Stage({ canvas }: { canvas: React.RefObject<HTMLCanvasElement | null> }
   const more = error ? 0 : Math.max(0, (media?.warnings.length ?? 0) - 1);
   return (
     <main className="stage">
-      {warning && warning !== dismissed && (
-        <div className={`stage-note${error ? ' warn' : ''}`} title={error ? warning : media?.warnings.join('\n')} role="status">
-          <WarningIcon size={14} />
-          <span>
-            {warning}
-            {more > 0 && ` (and ${more} more)`}
-          </span>
-          <button onClick={() => setDismissed(warning)} aria-label="Dismiss" title="Dismiss">
-            <CloseIcon size={11} />
-          </button>
-        </div>
+      {issues ? (
+        <IssuesBanner issues={issues} />
+      ) : (
+        warning &&
+        warning !== dismissed &&
+        // the source view says what it shows in the same place
+        !sourceView && (
+          <div className={`stage-note${error ? ' warn' : ''}`} title={error ? warning : media?.warnings.join('\n')} role="status">
+            <WarningIcon size={14} />
+            <span>
+              {warning}
+              {more > 0 && ` (and ${more} more)`}
+            </span>
+            <button onClick={() => setDismissed(warning)} aria-label="Dismiss" title="Dismiss">
+              <CloseIcon size={11} />
+            </button>
+          </div>
+        )
       )}
       <div className="viewport" ref={viewport}>
-        <canvas ref={canvas} data-testid="output" style={{ width: size.width || undefined, height: size.height || undefined }} />
+        <VideoFrame canvas={canvas} size={size} output={output} />
+        <SourceView />
       </div>
+      <DraftNote />
+      <ToastNote />
       <Transport />
     </main>
+  );
+}
+
+const bandOf = (y: number): CaptionPosition => (y < 1 / 3 ? 'top' : y > 2 / 3 ? 'bottom' : 'center');
+
+/**
+ * The video, with what the tools do on it: Select picks a caption by clicking it (a double click
+ * edits its text), Caption types a new one where it is clicked.
+ */
+function VideoFrame({ canvas, size, output }: { canvas: React.RefObject<HTMLCanvasElement | null>; size: { width: number; height: number }; output: { width: number; height: number } }) {
+  const tool = useStore(store, (state) => state.tool);
+  const selection = useStore(store, (state) => state.selection);
+  // every frame the player draws (a seek to the same second after an edit too): the captions' boxes are its
+  const drawnFrame = useStore(store, (state) => state.player);
+  const [hover, setHover] = useState<string>();
+  const [position, setPosition] = useState<CaptionPosition>('bottom');
+  const scale = size.width > 0 ? size.width / output.width : 0;
+  // a new caption goes where none is shown at the playhead (they would cover each other)
+  useEffect(() => {
+    if (tool === 'caption') setPosition(freeCaptionPosition());
+  }, [tool]);
+
+  /** The caption drawn under the pointer, by the boxes the last frame drew them in. */
+  const captionAt = (event: { clientX: number; clientY: number }) => {
+    const bounds = canvas.current?.getBoundingClientRect();
+    if (!bounds || scale === 0) return undefined;
+    const x = (event.clientX - bounds.left) / scale;
+    const y = (event.clientY - bounds.top) / scale;
+    const drawn = currentPlayer()?.drawnTexts() ?? [];
+    return drawn.findLast(({ rect }) => x >= rect[0] && x < rect[0] + rect[2] && y >= rect[1] && y < rect[1] + rect[3]);
+  };
+
+  const press = (event: ReactPointerEvent<HTMLCanvasElement>) => {
+    if (event.button !== 0) return;
+    if (tool === 'caption') {
+      const bounds = event.currentTarget.getBoundingClientRect();
+      setPosition(bandOf((event.clientY - bounds.top) / bounds.height));
+      return;
+    }
+    const hit = captionAt(event);
+    if (hit?.overlay.id) select({ kind: 'caption', id: hit.overlay.id });
+    else if (selection?.kind === 'caption') select(undefined);
+  };
+
+  // The boxes of the captions on the frame now: the selected one outlined, the one under the pointer too.
+  void drawnFrame;
+  const drawn = scale > 0 && tool === 'select' ? (currentPlayer()?.drawnTexts() ?? []) : [];
+  const outlined = drawn.filter(({ overlay }) => overlay.id && (overlay.id === hover || (selection?.kind === 'caption' && selection.id === overlay.id)));
+  const toStage = (rect: Rect) => ({ left: rect[0] * scale - 3, top: rect[1] * scale - 3, width: rect[2] * scale + 6, height: rect[3] * scale + 6 });
+
+  return (
+    <>
+      <div className="frame" style={{ width: size.width || undefined, height: size.height || undefined }}>
+        <canvas
+          ref={canvas}
+          data-testid="output"
+          className={hover && tool === 'select' ? 'over-caption' : undefined}
+          style={{ width: size.width || undefined, height: size.height || undefined }}
+          onPointerDown={press}
+          onPointerMove={(event) => tool === 'select' && setHover(captionAt(event)?.overlay.id)}
+          onPointerLeave={() => setHover(undefined)}
+          onDoubleClick={(event) => {
+            if (tool !== 'select' || !captionAt(event)) return;
+            requestAnimationFrame(() => document.querySelector<HTMLTextAreaElement>('[data-testid="caption-text"]')?.focus());
+          }}
+        />
+        {outlined.map(({ overlay, rect }) => (
+          <div key={overlay.id} className={`caption-box${selection?.id === overlay.id ? ' selected' : ''}`} style={toStage(rect)} />
+        ))}
+      </div>
+      {tool === 'caption' && <CaptionBar position={position} onPosition={setPosition} />}
+    </>
+  );
+}
+
+const POSITIONS: { position: CaptionPosition; name: string }[] = [
+  { position: 'top', name: 'Top' },
+  { position: 'center', name: 'Middle' },
+  { position: 'bottom', name: 'Bottom' },
+];
+
+/**
+ * The caption tool: type the caption on the video; the video shows it as it will be while typing.
+ * Enter adds it at the playhead (and selects it), Esc goes back without one.
+ */
+function CaptionBar({ position, onPosition }: { position: CaptionPosition; onPosition: (position: CaptionPosition) => void }) {
+  const t = useStore(store, (state) => Math.round(state.player.t * 30));
+  const [text, setText] = useState('');
+  const input = useRef<HTMLInputElement>(null);
+  void t;
+  const blocked = overlayBlocked();
+  const used = captionPositionsAt();
+
+  useEffect(() => {
+    if (!blocked) input.current?.focus();
+  }, [blocked]);
+  // While typing, the video shows the caption (not saved, not in the history).
+  useEffect(() => {
+    const command = text.trim() ? captionCommand(text, position) : undefined;
+    preview(command && [command]);
+  }, [text, position, blocked]);
+  useEffect(() => () => preview(undefined), []);
+
+  const add = () => {
+    const command = captionCommand(text.trim(), position);
+    if (!text.trim() || !command) return;
+    // the document as saved: the preview while typing has the new caption (with the id it gets) already
+    const before = new Set(documentProject()?.texts.map((item) => item.id));
+    if (!edit([command], 'Add caption')) return;
+    const added = store.get().doc?.project.texts.find((item) => !before.has(item.id));
+    setText('');
+    setTool('select');
+    if (added?.id) select({ kind: 'caption', id: added.id });
+  };
+
+  return (
+    // away from where the caption goes, so the caption shows while it is typed
+    <div className={`caption-bar ${position === 'top' ? 'near-bottom' : 'near-top'}`} onPointerDown={(event) => event.stopPropagation()}>
+      <input
+        ref={input}
+        value={text}
+        disabled={!!blocked}
+        placeholder={blocked ?? 'Type the caption; Enter adds it at the playhead'}
+        onChange={(event) => setText(event.target.value)}
+        onKeyDown={(event) => {
+          event.stopPropagation();
+          if (event.key === 'Enter') {
+            event.preventDefault();
+            add();
+          }
+          if (event.key === 'Escape') setTool('select');
+        }}
+        aria-label="Caption"
+        data-testid="caption-input"
+      />
+      <div className="seg" role="group" aria-label="Where the caption goes">
+        {POSITIONS.map((item) => (
+          <button
+            key={item.position}
+            type="button"
+            aria-pressed={position === item.position}
+            className={used.has(item.position) ? 'used' : undefined}
+            title={used.has(item.position) ? `${item.name}: a caption shows there now` : item.name}
+            onClick={() => onPosition(item.position)}
+          >
+            {item.name}
+          </button>
+        ))}
+      </div>
+      <button type="button" className="ghost small add" onClick={add} disabled={!text.trim() || !!blocked}>
+        Add
+      </button>
+    </div>
+  );
+}
+
+/** cuttle.json on disk does not parse: editing waits, and says what to fix. */
+function IssuesBanner({ issues }: { issues: string[] }) {
+  return (
+    <div className="banner" role="alert" data-testid="issues">
+      <WarningIcon size={16} />
+      <div>
+        <b>cuttle.json has a mistake, so editing here waits.</b>
+        <p>Fix it in a text editor or ask Claude: the editor takes the fixed file by itself. The video shows the last version that worked.</p>
+        <ul>
+          {issues.slice(0, 3).map((issue) => (
+            <li key={issue}>{plainIssue(issue)}</li>
+          ))}
+          {issues.length > 3 && <li>and {issues.length - 3} more</li>}
+        </ul>
+      </div>
+      <button className="ghost small" onClick={() => void bridge.invoke('project:reveal')}>
+        <FolderIcon size={13} />
+        Show the folder
+      </button>
+    </div>
+  );
+}
+
+/** A version a save conflict set aside (cuttle.json.draft): offered back until it is answered. */
+function DraftNote() {
+  const note = useStore(store, (state) => state.doc?.draftNote);
+  if (!note) return null;
+  return (
+    <div className="draft-note" role="alert" data-testid="draft-note">
+      <WarningIcon size={14} />
+      <span title={note}>{note}</span>
+      <button className="toast-undo" onClick={useDraft} title="Put your version back (one step to undo)" data-testid="draft-use">
+        Use mine
+      </button>
+      <button className="toast-close" onClick={dismissDraft} aria-label="Keep the newer version" title="Keep the newer version (cuttle.json.draft stays in the folder)">
+        <CloseIcon size={11} />
+      </button>
+    </div>
+  );
+}
+
+/** What just happened (an outside change, a cut by suggest, an edit that was not possible), with Undo where it applies. */
+function ToastNote() {
+  const toast = useStore(store, (state) => state.doc?.toast);
+  const [held, setHeld] = useState(false);
+  useEffect(() => {
+    if (!toast || held) return;
+    const timer = setTimeout(dismissToast, toast.tone === 'warning' ? 9000 : 6000);
+    return () => clearTimeout(timer);
+  }, [toast?.id, held]);
+  if (!toast) return null;
+  return (
+    <div className={`toast${toast.tone === 'warning' ? ' warn' : ''}`} role="status" aria-live="polite" onPointerEnter={() => setHeld(true)} onPointerLeave={() => setHeld(false)} data-testid="toast" key={toast.id}>
+      {toast.tone === 'warning' && <WarningIcon size={14} />}
+      <span title={toast.text}>{toast.text}</span>
+      {toast.show && (
+        <button className="toast-undo" onClick={() => reveal(toast.show!.list, toast.show!.id)} data-testid="toast-show">
+          Show
+        </button>
+      )}
+      {toast.undo && (
+        <button className="toast-undo" onClick={undo} data-testid="toast-undo">
+          Undo
+        </button>
+      )}
+      <button className="toast-close" onClick={dismissToast} aria-label="Dismiss" title="Dismiss">
+        <CloseIcon size={11} />
+      </button>
+    </div>
   );
 }
 
@@ -273,6 +631,9 @@ function Transport() {
   const playing = useStore(store, (state) => state.player.playing);
   const t = useStore(store, (state) => state.player.t);
   const source = useStore(store, (state) => state.player.source);
+  const format = useStore(store, (state) => state.format);
+  const output = useStore(store, (state) => state.doc?.project.output);
+  const own = ownFormat(output);
   const duration = currentPlayer()?.duration ?? 0;
   return (
     <div className="transport">
@@ -283,6 +644,11 @@ function Transport() {
         <b>{formatTime(t)}</b> / {formatTime(duration)}
         {source !== undefined && <em>{formatSource(source)}</em>}
       </span>
+      {format !== undefined && format !== own && output && (
+        <span className="preview-note" title="The preview shows another format; the export sheet picks what is exported">
+          Preview {format} · the project is {own ?? `${output.width}×${output.height}`}
+        </span>
+      )}
     </div>
   );
 }
@@ -291,40 +657,73 @@ function Transport() {
 const REPEATING = new Set(['ArrowLeft', 'ArrowRight']);
 
 /**
- * The editor's keys: Space (K pauses, L plays, J a second back), arrows (Shift: a second), Home/End,
- * Shift+Z (fit the timeline), Esc (clear the selection), Ctrl+E. Typing in a field, and Space or
- * Enter on a focused button outside the timeline, keep their own meaning.
+ * The editor's keys (the command menu lists them): Space (K pauses, L plays, J a second back),
+ * arrows (Shift: a second), Home/End, S split, Delete, Ctrl+D, R/Shift+R speed, V/Z/M/T tools, Shift+Z
+ * fit, Ctrl+Z/Ctrl+Shift+Z/Ctrl+Y, Ctrl+K or ? the menu, Ctrl+E export, Esc back out. Typing in a
+ * field, and Space or Enter on a focused button outside the timeline, keep their own meaning.
  */
 function useShortcuts(): void {
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       const target = event.target instanceof HTMLElement ? event.target : undefined;
-      if (target?.closest('input, select, textarea, [contenteditable]:not([contenteditable="false"])')) return;
-      if ((event.ctrlKey || event.metaKey) && !event.altKey && event.key.toLowerCase() === 'e') {
+      const key = event.key.length === 1 ? event.key.toLowerCase() : event.key;
+      const command = (event.ctrlKey || event.metaKey) && !event.altKey;
+      const { phase, exportOpen, menuOpen } = store.get();
+      if (phase !== 'ready') return;
+      // Ctrl+K opens the menu from anywhere, a field too (the menu closes itself on it)
+      if (command && key === 'k' && !menuOpen) {
+        event.preventDefault();
+        if (!event.repeat) openMenu();
+        return;
+      }
+      if (menuOpen || target?.closest('input, select, textarea, [contenteditable]:not([contenteditable="false"])')) return;
+      if (command && key === 'e') {
         event.preventDefault();
         if (!event.repeat) openExport();
         return;
       }
-      if (event.ctrlKey || event.metaKey || event.altKey || store.get().exportOpen) return;
+      if (exportOpen) return;
+      if (command) {
+        const edits: Record<string, () => void> = {
+          z: () => (event.shiftKey ? redo() : undo()),
+          y: redo,
+          d: duplicateSelection,
+        };
+        const action = edits[key];
+        if (!action) return;
+        event.preventDefault();
+        action();
+        return;
+      }
+      if (event.ctrlKey || event.metaKey || event.altKey) return;
       if ((event.key === ' ' || event.key === 'Enter') && target?.closest('button, [role="tab"]') && !target.closest('.timeline')) return;
       const player = currentPlayer();
       if (!player) return;
       const { t } = player.current();
       const frame = 1 / player.fps;
       const keys: Record<string, () => void> = {
-        ' ': () => player.toggle(),
+        // playing ends a drag under way (what it drags moves under it)
+        ' ': () => (cancelGesture(), player.toggle()),
         k: () => player.pause(),
-        l: () => player.play(),
+        l: () => (cancelGesture(), player.play()),
         j: () => void player.seek(t - 1),
         ArrowLeft: () => void player.seek(t - (event.shiftKey ? 1 : frame)),
         ArrowRight: () => void player.seek(t + (event.shiftKey ? 1 : frame)),
         Home: () => void player.seek(0),
         End: () => void player.seek(player.duration),
-        Escape: () => select(undefined),
+        Escape: backOut,
+        s: split,
+        Delete: deleteSelection,
+        Backspace: deleteSelection,
+        // R: the next speed, Shift+R: the one before
+        r: () => cycleSpeed(event.shiftKey ? -1 : 1),
+        v: () => setTool('select'),
         // Shift+Z: the whole video in the timeline
-        z: () => event.shiftKey && store.set({ pxPerSecond: 0 }),
+        z: () => (event.shiftKey ? store.set({ pxPerSecond: 0 }) : chooseTool('zoom')),
+        m: () => chooseTool('mask'),
+        t: () => chooseTool('caption'),
+        '?': openMenu,
       };
-      const key = event.key.length === 1 ? event.key.toLowerCase() : event.key;
       const action = keys[key];
       if (!action) return;
       event.preventDefault();
@@ -334,4 +733,50 @@ function useShortcuts(): void {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, []);
+}
+
+/**
+ * A click leaves the keys to the editor: a button pressed with the mouse takes no focus (Space and
+ * the arrows go on playing and stepping; a field the person typed in is left, which saves it), and a
+ * menu chosen with the mouse lets go of the focus once chosen (its arrows would change it). Keyboard
+ * focus (Tab) is kept as it is.
+ */
+function useMouseFocus(): void {
+  useEffect(() => {
+    let menuByMouse = false;
+    const down = (event: MouseEvent) => {
+      const target = event.target instanceof Element ? event.target : undefined;
+      menuByMouse = Boolean(target?.closest('select'));
+      if (event.button !== 0 || !target?.closest('button')) return;
+      event.preventDefault();
+      // the caption bar and the menu keep their field's focus
+      if (target.closest('.caption-bar, .command-menu')) return;
+      const active = document.activeElement;
+      if (active instanceof HTMLElement && active !== document.body) active.blur();
+    };
+    const change = (event: Event) => {
+      if (menuByMouse && event.target instanceof HTMLSelectElement) event.target.blur();
+      menuByMouse = false;
+    };
+    const key = () => (menuByMouse = false);
+    window.addEventListener('mousedown', down, true);
+    window.addEventListener('change', change, true);
+    window.addEventListener('keydown', key, true);
+    return () => {
+      window.removeEventListener('mousedown', down, true);
+      window.removeEventListener('change', change, true);
+      window.removeEventListener('keydown', key, true);
+    };
+  }, []);
+}
+
+/** Esc: out of the source view (the tool and a zoom or mask selected), else out of a tool, else the selection. */
+function backOut(): void {
+  // first a drag under way: it ends without an edit
+  if (cancelGesture()) return;
+  const { tool, selection } = store.get();
+  closeMenu();
+  const inSource = tool === 'zoom' || tool === 'mask' || selection?.kind === 'zoom' || selection?.kind === 'mask';
+  if (tool !== 'select') setTool('select');
+  if (inSource || tool === 'select') select(undefined);
 }

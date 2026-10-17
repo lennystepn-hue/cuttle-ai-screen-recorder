@@ -1,7 +1,7 @@
 // The editor's output view: the export's engine drawing the export's timeline into a canvas, played
 // with the mic as the clock (video follows the audio and drops frames rather than drifting) and
 // scrubbed one frame at a time.
-import { createRenderer, type EngineAssets, type FrameSources, type Renderer } from '@cuttle/engine';
+import { createRenderer, type DrawnText, type EngineAssets, type FrameSources, type Renderer } from '@cuttle/engine';
 import { planStills } from '@cuttle/export/frame-plan';
 import type { CuttleProject } from '@cuttle/project';
 import { createTimeline, type RenderState, type Timeline } from '@cuttle/timeline';
@@ -53,7 +53,7 @@ export class Player {
   private screen: VideoSource;
   private keyFrames: KeyFrames | undefined;
   private screenGrabber: FrameGrabber;
-  private readonly webcamGrabber: FrameGrabber | undefined;
+  private webcamGrabber: FrameGrabber | undefined;
   private seekToken = 0;
   private playToken = 0;
   private context: AudioContext | undefined;
@@ -87,6 +87,21 @@ export class Player {
     return this.timeline.spans;
   }
 
+  /** How many clips show at output time `t` (more than one inside a crossfade). */
+  clipsAt(t: number): number {
+    return this.timeline.frameAt(Math.max(0, Math.min(t, this.duration - 1e-6))).layers.filter((layer) => layer.kind === 'clip').length;
+  }
+
+  /** The video track playback and scrubbing read now (the proxy once it is made), for the source view. */
+  get screenSource(): VideoSource {
+    return this.screen;
+  }
+
+  /** The captions the frame on the canvas shows, with their boxes in output pixels (to click one on the video). */
+  drawnTexts(): readonly DrawnText[] {
+    return this.renderer.drawnTexts();
+  }
+
   current(): PlayerState {
     return this.state;
   }
@@ -101,6 +116,7 @@ export class Player {
   }
 
   private makeRenderer(): Renderer {
+    this.drawnBackground = this.media.backgroundImage;
     return createRenderer(this.canvas, this.project, {
       assets: this.assets,
       screenSize: this.media.screen.size,
@@ -113,16 +129,41 @@ export class Player {
     this.onChange(this.state);
   }
 
-  /** Shows another version of the project (another output format); keeps the playhead. */
-  setProject(project: CuttleProject): void {
+  /**
+   * Shows another version of the project (an edit, another output format) and keeps the playhead:
+   * the timeline anew, the renderer only when the look, the output or an image it draws changed.
+   * `media` may have gained images, the webcam or the mic for it (`ensureMedia`).
+   */
+  update(project: CuttleProject, options: { redrawOnly?: boolean } = {}): void {
+    if (project === this.project && !options.redrawOnly) return;
     const playing = this.state.playing;
     this.pause();
-    this.renderer.dispose();
+    const look = (value: CuttleProject) => JSON.stringify([value.look, value.output]);
+    const background = this.media.backgroundImage;
+    const renew = look(project) !== look(this.project) || background !== this.drawnBackground;
     this.project = project;
     this.timeline = this.makeTimeline();
-    this.renderer = this.makeRenderer();
+    if (renew) {
+      this.renderer.dispose();
+      this.renderer = this.makeRenderer();
+    } else this.renderer.setScenes(project.scenes);
+    if (this.media.webcam && !this.webcamGrabber) this.webcamGrabber = new FrameGrabber(this.media.webcam);
     void this.seek(Math.min(this.state.t, this.timeline.duration));
     if (playing) this.play();
+  }
+
+  /** The background image the renderer was made with. */
+  private drawnBackground: ImageBitmap | undefined;
+
+  /** The still images of the timeline's scenes, by scene index (`media` keeps them by path). */
+  private stillsByIndex(): Map<number, ImageBitmap> {
+    const stills = new Map<number, ImageBitmap>();
+    this.timeline.spans.forEach((span, index) => {
+      if (span.scene.type !== 'still') return;
+      const image = this.media.stills.get(span.scene.image);
+      if (image) stills.set(index, image);
+    });
+    return stills;
   }
 
   /**
@@ -169,10 +210,11 @@ export class Player {
     const state = this.timeline.frameAt(frame / this.fps);
     const held: HeldFrame[] = [];
     const sources: FrameSources = { screens: new Map(), webcams: new Map(), stills: new Map() };
+    const stills = this.stillsByIndex();
     try {
       for (const layer of state.layers) {
         if (layer.kind === 'still') {
-          const image = this.media.stills.get(layer.index);
+          const image = stills.get(layer.index);
           if (image) sources.stills.set(layer.index, image);
           continue;
         }
@@ -260,7 +302,7 @@ export class Player {
     };
     const open = (frame: number) => {
       const frames = Array.from({ length: last - frame + 1 }, (_, i) => frame + i);
-      return new PlaybackFrames(planStills(this.timeline, fps, frames), video, this.media.stills, LOOKAHEAD_FRAMES);
+      return new PlaybackFrames(planStills(this.timeline, fps, frames), video, this.stillsByIndex(), LOOKAHEAD_FRAMES);
     };
     let frames: PlaybackFrames | undefined;
     let shown = startFrame - 1;

@@ -11,3 +11,6 @@ export const TEST_BACKEND = CHECK && process.env.CUTTLE_RECORDER_BACKEND === 'te
 
 /** The countdown's seconds instead of the setting's (CUTTLE_COUNTDOWN=0 skips it). */
 export const COUNTDOWN = CHECK && process.env.CUTTLE_COUNTDOWN !== undefined ? Number(process.env.CUTTLE_COUNTDOWN) : undefined;
+
+/** The image the editor's image chooser picks without showing a dialog (CUTTLE_CHECK_IMAGE=<file>). */
+export const CHECK_IMAGE = CHECK ? process.env.CUTTLE_CHECK_IMAGE || undefined : undefined;

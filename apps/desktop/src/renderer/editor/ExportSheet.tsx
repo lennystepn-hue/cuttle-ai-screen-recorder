@@ -5,10 +5,11 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { EXPORT_FORMATS } from '@cuttle/export/formats';
 import { formatBytes, formatDuration, formatTime } from '../../shared/format';
 import type { ExportTarget } from '../../shared/ipc';
+import { sceneSpans } from '@cuttle/timeline';
 import { exportChecks } from '../../shared/timeline-model';
 import { bridge } from '../bridge';
 import { CheckIcon, CloseIcon, FolderIcon } from '../icons';
-import { cancelExport, closeExport, currentPlayer, startExport, store } from './session';
+import { cancelExport, closeExport, startExport, store } from './session';
 import { useStore } from './store';
 import { FORMATS, ownFormat, targetName } from './targets';
 
@@ -30,8 +31,8 @@ export function ExportSheet() {
   const end = useStore(store, (state) => state.exportEnd);
   const started = useStore(store, (state) => state.exportStarted);
   const format = useStore(store, (state) => state.format);
-  const media = useStore(store, (state) => state.media);
-  const output = media?.project.output;
+  const project = useStore(store, (state) => state.doc?.project);
+  const output = project?.output;
   const own = ownFormat(output);
   // The project's own size first; a preset of the same size would write the same video again.
   const targets = useMemo<ExportTarget[]>(() => ['project', ...FORMATS.filter((name) => name !== own)], [own]);
@@ -92,7 +93,7 @@ export function ExportSheet() {
     return () => window.removeEventListener('keydown', onKey);
   }, [open]);
 
-  const checks = useMemo(() => (media ? exportChecks(media.project, currentPlayer()?.spans ?? []) : []), [media]);
+  const checks = useMemo(() => (project ? exportChecks(project, sceneSpans(project.scenes)) : []), [project]);
 
   if (!open) return null;
 

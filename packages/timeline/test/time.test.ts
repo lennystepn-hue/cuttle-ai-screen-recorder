@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { ClipScene, Scene } from '@cuttle/project';
-import { isContinuousCut, sceneDuration, sceneSpans, sourceTimeAt, spanAt, totalDuration } from '../src/time';
+import { crossfadeHalf, isContinuousCut, sceneDuration, sceneSpans, sourceTimeAt, spanAt, totalDuration } from '../src/time';
 
 const clip = (from: number, to: number, speed = 1): ClipScene => ({ type: 'clip', from, to, speed });
 const scenes: Scene[] = [clip(10, 20), clip(20, 140, 12), { type: 'card', title: 'End', duration: 2 }];
@@ -73,5 +73,16 @@ describe('isContinuousCut', () => {
     expect(isContinuousCut(clip(10, 20), clip(20.002, 30))).toBe(false);
     expect(isContinuousCut(clip(10, 20), clip(0, 10))).toBe(false);
     expect(isContinuousCut(clip(10, 20), { type: 'card', title: 'End', duration: 2 })).toBe(false);
+  });
+});
+
+describe('crossfadeHalf', () => {
+  const spans = sceneSpans([clip(0, 10), clip(10, 12), clip(20, 21), { type: 'card', title: 'End', duration: 0.2 }]);
+  const on = { enabled: true, duration: 0.4 };
+  it('is half the transition, capped by half of either span, and none at a continuous cut or when off', () => {
+    expect(crossfadeHalf(spans[0]!, spans[1]!, on)).toBe(0);
+    expect(crossfadeHalf(spans[1]!, spans[2]!, on)).toBe(0.2);
+    expect(crossfadeHalf(spans[2]!, spans[3]!, on)).toBeCloseTo(0.1, 9);
+    expect(crossfadeHalf(spans[1]!, spans[2]!, { enabled: false, duration: 0.4 })).toBe(0);
   });
 });

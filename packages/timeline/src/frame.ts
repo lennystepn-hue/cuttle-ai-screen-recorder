@@ -3,7 +3,7 @@ import { cursorAt, type CursorFrame, type CursorTrack } from './cursor';
 import { clamp } from './easing';
 import { occurrences, rampAmount, type Occurrence } from './occurrences';
 import { TEXT_FADE_SECONDS, activeMasks, activeTexts, badgeFor, type ActiveText } from './overlays';
-import { isContinuousCut, sceneSpans, sourceTimeAt, spanAt, totalDuration, type SceneSpan } from './time';
+import { crossfadeHalf, isContinuousCut, sceneSpans, sourceTimeAt, spanAt, totalDuration, type SceneSpan } from './time';
 import { ZOOM_RAMP_SECONDS, zoomRectAt } from './zoom';
 
 export interface SceneFrame {
@@ -45,18 +45,12 @@ export function createTimeline(project: CuttleProject, opts: TimelineOptions): T
   const spans = sceneSpans(project.scenes);
   const duration = totalDuration(spans);
   const full: Rect = [0, 0, opts.screenSize.width, opts.screenSize.height];
-  const transition = project.look.transition;
-  const maxHalf = transition.enabled ? transition.duration / 2 : 0;
 
   // Where each zoom and text shows in output time, per span: their ramps run in output seconds.
   const zoomShown = new Map(project.zooms.map((zoom) => [zoom, occurrences(spans, zoom.at, zoom.at + zoom.duration)]));
   const textShown = new Map(project.texts.map((text) => [text, occurrences(spans, text.at, text.at + text.duration)]));
 
-  /** Half the crossfade between two spans; a continuous cut has none. */
-  function halfBetween(a: SceneSpan, b: SceneSpan): number {
-    if (isContinuousCut(a.scene, b.scene)) return 0;
-    return Math.min(maxHalf, (a.end - a.start) / 2, (b.end - b.start) / 2);
-  }
+  const halfBetween = (a: SceneSpan, b: SceneSpan): number => crossfadeHalf(a, b, project.look.transition);
 
   /**
    * The last output frame (frame i at i / fps) that shows the clip inside its source range
@@ -106,8 +100,16 @@ export function createTimeline(project: CuttleProject, opts: TimelineOptions): T
 
   function frameAt(t: number): RenderState {
     const time = Number.isNaN(t) ? 0 : clamp(t, 0, duration);
-    const span = spanAt(spans, time);
+    let span = spanAt(spans, time);
     if (!span) return { t: time, layers: [] };
+    // Span ends are rounded to the microsecond, so a frame can fall inside a clip while its source
+    // time is already the clip's end. At a continuous cut that frame is the next clip's first, not a
+    // held one.
+    const following = spans[span.index + 1];
+    const scene = span.scene;
+    if (following && isContinuousCut(scene, following.scene) && scene.type === 'clip' && !(scene.from + (time - span.start) * scene.speed < scene.to)) {
+      span = following;
+    }
 
     const next = spans[span.index + 1];
     if (next) {

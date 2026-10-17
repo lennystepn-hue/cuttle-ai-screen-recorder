@@ -1,6 +1,6 @@
 import type { Ease } from '@cuttle/project';
 import { ease } from './easing';
-import { isContinuousCut, type SceneSpan } from './time';
+import { CONTINUOUS_CUT_SECONDS, isContinuousCut, type SceneSpan } from './time';
 
 /**
  * One stretch of output time that shows an overlay (a zoom or a text, whose range is in source
@@ -18,7 +18,8 @@ export interface Occurrence {
 
 /**
  * The occurrence of the overlay with source range `[start, end)` in each span: `undefined` where
- * the span does not show it; spans joined by a continuous cut share one object.
+ * the span does not show it; spans joined by a continuous cut share one object. An overlay end that
+ * lies within a continuous cut's tolerance of a clip's end counts as shown there (it ramps).
  */
 export function occurrences(spans: readonly SceneSpan[], start: number, end: number): (Occurrence | undefined)[] {
   const result: (Occurrence | undefined)[] = [];
@@ -32,13 +33,14 @@ export function occurrences(spans: readonly SceneSpan[], start: number, end: num
     }
     const outEnd = Math.min(span.end, span.start + (to - scene.from) / scene.speed);
     const previous = result[i - 1];
+    const rampOut = end <= scene.to + CONTINUOUS_CUT_SECONDS;
     if (previous && isContinuousCut(spans[i - 1]!.scene, scene)) {
       previous.end = outEnd;
-      previous.rampOut = end <= scene.to;
+      previous.rampOut = rampOut;
       result.push(previous);
       return;
     }
-    result.push({ start: span.start + (from - scene.from) / scene.speed, end: outEnd, rampIn: start >= scene.from, rampOut: end <= scene.to });
+    result.push({ start: span.start + (from - scene.from) / scene.speed, end: outEnd, rampIn: start >= scene.from - CONTINUOUS_CUT_SECONDS, rampOut });
   });
   return result;
 }
@@ -52,6 +54,7 @@ export function rampAmount(occurrence: Occurrence, t: number, ramp: number, curv
   const ramps = Number(occurrence.rampIn) + Number(occurrence.rampOut);
   if (ramps === 0) return 1;
   const length = Math.min(ramp, (occurrence.end - occurrence.start) / ramps);
+  if (!(length > 0)) return 0;
   const rampIn = occurrence.rampIn ? ease(curve, (t - occurrence.start) / length) : 1;
   const rampOut = occurrence.rampOut ? ease(curve, (occurrence.end - t) / length) : 1;
   return Math.min(rampIn, rampOut);

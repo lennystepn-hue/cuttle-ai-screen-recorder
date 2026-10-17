@@ -64,3 +64,16 @@ describe('rampAmount', () => {
     expect(rampAmount({ start: 5, end: 7, rampIn: false, rampOut: false }, 7, 0.6, 'smooth')).toBe(1);
   });
 });
+
+describe('occurrences at a continuous cut within its tolerance', () => {
+  it('ramps an overlay whose start or end falls inside a sub-millisecond gap', () => {
+    // 0–4.9996, then 5.0004–10: one piece of footage with a gap below 1 ms
+    const spans = sceneSpans([clip(0, 4.9996), clip(5.0004, 10)]);
+    expect(occurrences(spans, 3, 5)[0]).toMatchObject({ rampIn: true, rampOut: true });
+    expect(occurrences(spans, 5, 7)[1]).toMatchObject({ rampIn: true, rampOut: true });
+  });
+
+  it('is not shown at all where its occurrence has no length', () => {
+    expect(rampAmount({ start: 5, end: 5, rampIn: true, rampOut: true }, 5, 0.6, 'smooth')).toBe(0);
+  });
+});

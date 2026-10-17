@@ -274,6 +274,21 @@ describe('continuous cuts', () => {
     for (let i = 1; i < times.length; i++) expect(times[i], `frame ${i}`).toBeGreaterThan(times[i - 1]!);
   });
 
+  it('shows each frame of a split clip as the whole clip does, at any frame rate', () => {
+    // Span ends are rounded to the microsecond: a split at a frame time used to hold the frame before it.
+    for (const fps of [24, 25, 29, 30, 60]) {
+      const at = (scenes: unknown[]) => createTimeline(project(look, { output: { fps }, scenes, zooms: [], masks: [], texts: [] }), { screenSize });
+      const whole = at([{ type: 'clip', from: 0, to: 10 }]);
+      for (let splitFrame = 1; splitFrame < 3 * fps; splitFrame++) {
+        const split = at([{ type: 'clip', from: 0, to: splitFrame / fps }, { type: 'clip', from: splitFrame / fps, to: 10 }]);
+        for (const frame of [splitFrame - 1, splitFrame, splitFrame + 1]) {
+          const t = frame / fps;
+          expect(split.frameAt(t).layers[0]?.sourceTime, `${fps} fps, split at frame ${splitFrame}, frame ${frame}`).toBeCloseTo(whole.frameAt(t).layers[0]!.sourceTime!, 6);
+        }
+      }
+    }
+  });
+
   it('still crossfades where the source jumps', () => {
     const jump = createTimeline(project(look, { scenes: [{ type: 'clip', from: 0, to: 5 }, { type: 'clip', from: 5.5, to: 10 }] }), { screenSize });
     expect(jump.frameAt(5).layers).toHaveLength(2);

@@ -61,7 +61,10 @@ once the mic was transcribed (`cuttle transcribe`, or `suggest` with a speech mo
 transcript.json: `{ "language", "model", "words": [{ "t", "end", "text" }], "sounds": [{ "t", "end" }] }`,
 in source seconds; `sounds` are stretches the mic heard without a word (a cough, a dropped filler).
 `cleanMic` is the mic cleaned up with it (less noise, even loudness), played instead of the mic
-while `look.audio.cleanup` is on.
+while `look.audio.cleanup` is on. `screenText` is the screen's text, read where the picture
+changed (`suggest`, on Windows): one JSON line per frame read,
+`{ "t", "lines": [{ "text", "rect", "words": [{ "text", "rect" }] }] }`. Read it to find what the
+screen showed where; never edit it.
 
 `look` (every field is optional):
 
@@ -102,7 +105,9 @@ path, change every rect by the same amount; without `moves` it holds still.
 `masks` hide private things: `from` and `to` (source seconds), `rect`, `style` (`fill`: the colour
 around it, safest for tokens and keys; `blur`) and `enabled` (`true`). Make the rect generous: a
 few pixels too small leaves letters readable. Masks cover clips only, not still scenes (a captured
-page).
+page). A mask over text that scrolls has `moves` (`[{ "at", "rect" }]`, as a zoom's): its places
+are `rect` at `from`, then each move's; between two places it covers both. `privacy.words` are
+words masked wherever the screen shows them (`suggest --mask` adds to them).
 
 `texts`: `at` and `duration` (source seconds), `text`, `style` (`pill`, `lower-third`, `caption`),
 `position` (`top`, `center`, `bottom`) and `enabled` (`true`). A `top` text sits over the window's

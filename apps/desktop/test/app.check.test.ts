@@ -952,6 +952,10 @@ describe.runIf(enabled)('the Cuttle app', () => {
     await drag('[data-testid=webcam-handle-se]', [30, 30]);
     await savedWhen(() => (webcam().size ?? 0.18) > 0.18);
     expect(webcam().position).toEqual(before);
+    // a double click opens the camera's part of the Look tab
+    await editor.locator('[data-testid=webcam-box]').evaluate((box) => box.dispatchEvent(new MouseEvent('dblclick', { bubbles: true })));
+    await editor.waitForSelector('[data-testid=look-camera] [data-testid=webcam-shape-circle]');
+    await shot('20-webcam');
     // dragged back near where it came from: it snaps into its corner, the position goes
     await drag('[data-testid=webcam-box]', [-240, 120]);
     await savedWhen(() => webcam().position === undefined && webcam().corner === 'bottom-left');
@@ -1275,6 +1279,12 @@ describe.runIf(enabled)('the Cuttle app', () => {
     const saved = () => JSON.parse(readFileSync(join(root, 'user-data', 'settings.json'), 'utf8')) as { countdown: number; motion: string; launchAtLogin: boolean };
     await click(settings, '[data-testid=countdown] button:nth-child(3)');
     await expect.poll(() => saved().countdown).toBe(5);
+    // one page at a time: Recording first, the rest in the sidebar
+    expect(await settings.locator('[data-testid=launch-at-login]').count()).toBe(0);
+    await shotOf('24-settings', '/settings.html');
+    await click(settings, '[data-testid=settings-page-general]');
+    await settings.waitForSelector('[data-testid=settings-page-general][aria-current=page]');
+    expect(await settings.locator('[data-testid=countdown]').count()).toBe(0);
     // less motion: the editor's transitions are off at once
     await click(settings, '[data-testid=motion] button:nth-child(2)');
     await expect.poll(() => editor.evaluate(() => document.documentElement.dataset.motion)).toBe('reduce');
@@ -1289,6 +1299,8 @@ describe.runIf(enabled)('the Cuttle app', () => {
     await click(settings, '[data-testid=launch-at-login]');
     await expect.poll(() => saved().launchAtLogin).toBe(false);
     // demo is open in its editor: Rename is off there, and the main process refuses it too
+    await click(settings, '[data-testid=settings-page-projects]');
+    await settings.waitForSelector('.recent li');
     const demoRename = await settings.evaluate(() => {
       const row = [...document.querySelectorAll('.recent li')].find((item) => item.querySelector('b')?.textContent === 'demo')!;
       const button = row.querySelector('[data-testid=recent-rename]') as HTMLButtonElement;
@@ -1301,12 +1313,18 @@ describe.runIf(enabled)('the Cuttle app', () => {
     );
     expect(refused.problem).toContain('open in Cuttle');
     expect(existsSync(project)).toBe(true);
+    // the editor asks for a page (its Speech settings button): the open window turns to it
+    await editor.evaluate(() => (window as unknown as { cuttle: { invoke(channel: string, argument: unknown): Promise<void> } }).cuttle.invoke('app:settings', 'speech'));
+    await settings.waitForSelector('[data-testid=settings-page-speech][aria-current=page]');
+    await settings.waitForSelector('[data-testid=speech-line]');
     await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find((window) => window.webContents.getURL().includes('/settings.html'))?.close());
   }, 60_000);
 
   it('downloads a speech model in the settings (checked, cancelled, failed), and transcribes a spoken take from the Auto tab: its filler words and pauses cut as one step', async () => {
     await launchAgain(['--settings']);
-    const settings = await waitForPage(app, async (page) => page.url().includes('/settings.html') && (await page.locator('[data-testid=speech-line]').count()) === 1);
+    const settings = await waitForPage(app, async (page) => page.url().includes('/settings.html') && (await page.locator('[data-testid=settings-page-speech]').count()) === 1);
+    await click(settings, '[data-testid=settings-page-speech]');
+    await settings.waitForSelector('[data-testid=speech-line]');
     const saved = () => JSON.parse(readFileSync(join(root, 'user-data', 'settings.json'), 'utf8')) as { speech?: { model: string; language: string } };
     const line = () => settings.locator('[data-testid=speech-line] .row-hint').textContent();
     const choose = async (label: string) => {

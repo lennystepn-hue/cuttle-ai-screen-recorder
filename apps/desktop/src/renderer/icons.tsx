@@ -94,6 +94,10 @@ export const BackgroundIcon = icon(<path d="M2.5 3.5h11v9h-11zM2.5 10l3.2-3 2.6 
 export const WindowIcon = icon(<path d="M2 3.5h12v9H2zM2 6h12M3.8 4.8h.1M5.3 4.8h.1" />);
 export const CameraIcon = icon(<path d="M8 8.2a2.3 2.3 0 1 0 0-4.6 2.3 2.3 0 0 0 0 4.6zM3.6 13.5c.6-2.3 2.3-3.5 4.4-3.5s3.8 1.2 4.4 3.5" />);
 export const SubtitlesIcon = icon(<path d="M2 3.5h12v9H2zM4.5 10h3M9 10h2.5M4.5 7.5h7" />);
+export const TerminalIcon = icon(<path d="M2 3h12v10H2zM4.5 6.5 6.5 8l-2 1.5M8 10h3" />);
+export const GearIcon = icon(
+  <path d="M8 10a2 2 0 1 0 0-4 2 2 0 0 0 0 4zM8 1.8v1.6M8 12.6v1.6M3.6 3.6l1.1 1.1M11.3 11.3l1.1 1.1M1.8 8h1.6M12.6 8h1.6M3.6 12.4l1.1-1.1M11.3 4.7l1.1-1.1" />,
+);
 export const SoundIcon = icon(<path d="M2.5 6v4h2.5L8.5 13V3L5 6zM11 5.5a3.5 3.5 0 0 1 0 5M12.8 3.8a6 6 0 0 1 0 8.4" />);
 
 /** Cuttle's mark: an orange tile with a dark arrow. */

@@ -307,7 +307,7 @@ export function SpeechNote() {
           {working ? 'Busy…' : 'Transcribe'}
         </button>
         {problem?.settings && (
-          <button type="button" className="ghost small" onClick={() => void bridge.invoke('app:settings')} data-testid="speech-settings">
+          <button type="button" className="ghost small" onClick={() => void bridge.invoke('app:settings', 'speech')} data-testid="speech-settings">
             Settings
           </button>
         )}

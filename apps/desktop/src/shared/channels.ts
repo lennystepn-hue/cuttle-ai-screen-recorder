@@ -62,7 +62,7 @@ export const WINDOW_CHANNELS = {
       'speech:cancel',
       'speech:remove',
     ],
-    events: ['settings:changed', 'speech:status', 'app:motion'],
+    events: ['settings:changed', 'settings:page', 'speech:status', 'app:motion'],
   },
 } as const satisfies Record<string, { requests: readonly Request[]; events: readonly Event[] }>;
 

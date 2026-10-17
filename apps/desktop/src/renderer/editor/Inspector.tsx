@@ -962,7 +962,7 @@ function LookPanel() {
     camera: !sources.webcam
       ? 'No webcam in this take'
       : webcam.enabled
-        ? `${WEBCAM_SHAPE_NAMES[webcam.shape]} · ${webcam.position ? 'placed on the video' : CORNER_NAMES[webcam.corner].toLowerCase()} · ${Math.round(webcam.size * 100)} %`
+        ? `${WEBCAM_SHAPE_NAMES[webcam.shape]} · ${webcam.position ? 'moved' : CORNER_NAMES[webcam.corner].toLowerCase()} · ${Math.round(webcam.size * 100)} %`
         : 'Off',
     subtitles: captions.enabled ? CAPTION_STYLE_NAMES[captions.style] : sources.transcript ? 'Off' : 'Not transcribed yet',
     sound: current.audio.enabled ? (sources.cleanMic && current.audio.cleanup ? 'Mic · clean voice' : 'Mic') : 'Muted',
@@ -1168,7 +1168,7 @@ function CameraFields({ webcam }: { webcam: CuttleProject['look']['webcam'] }) {
           </button>
         ))}
       </div>
-      <Row label="Place" plain note={webcam.position ? 'placed on the video; a corner puts it back' : 'or drag it on the video'}>
+      <Row label="Place" plain note={webcam.position ? 'moved; a corner puts it back' : 'or drag it on the video'}>
         <div className="corner-picker" role="group" aria-label="Camera corner">
           {WEBCAM_CORNERS.map((corner) => (
             <button

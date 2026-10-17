@@ -217,7 +217,7 @@ async function editorWindow(dir: string, key: string, file: ProjectFile, release
     'project:cut': () => void recut(dir),
     'project:transcribe': () => transcribeProject(dir, true),
     'project:undo-restart': (discarded) => void undoRestart(dir, discarded),
-    'app:settings': () => void openSettings(),
+    'app:settings': (page) => void openSettings({ page }),
     'project:save': ({ raw, base }) => editor.watch.save(raw, base),
     'project:draft': ({ raw }) => writeFile(join(dir, DRAFT_FILE), `${JSON.stringify(raw, null, 2)}\n`),
     // contents.reload() from here is not a navigation the page started (guard() refuses those)

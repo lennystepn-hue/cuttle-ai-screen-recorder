@@ -43,7 +43,9 @@ export function makePrivateFixture(dir: string): void {
   const take = join(dir, 'takes', '1');
   mkdirSync(take, { recursive: true });
   // the drive's colon escaped for the option and again for the graph
-  const text = (value: string, y: number) => `drawtext=fontfile=C\\\\:/Windows/Fonts/consola.ttf:fontsize=28:fontcolor=white:x=80:y=${y}:text='${value}'`;
+  // a monospaced font of the system's (on Windows the drive's colon escaped for the option and again for the graph)
+  const font = process.platform === 'win32' ? 'C\\\\:/Windows/Fonts/consola.ttf' : '/System/Library/Fonts/Menlo.ttc';
+  const text = (value: string, y: number) => `drawtext=fontfile=${font}:fontsize=28:fontcolor=white:x=80:y=${y}:text='${value}'`;
   const graph = ['color=c=0x1e1e1e:s=1280x720:r=30:d=8', text('Signed in as lena.mueller@example.com', 80), text('npm run build', 300)].join(',');
   ffmpeg(['-f', 'lavfi', '-i', graph, '-c:v', 'libx264', '-preset', 'ultrafast', '-g', '30', '-pix_fmt', 'yuv420p', join(take, 'screen.mp4')]);
   const toast = (t: number, open: boolean) => ({ t, type: 'window', id: 7, kind: 'notification', rect: [880, 600, 380, 110], open });

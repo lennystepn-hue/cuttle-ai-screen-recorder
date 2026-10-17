@@ -1,12 +1,15 @@
-// The settings' privacy part: whether a new take's screen is read (Windows' own OCR, on this
+// The settings' privacy part: whether a new take's screen is read (the system's own OCR, on this
 // computer) to mask the private things it shows, and the words always masked.
 import { useState } from 'react';
 import { PRIVACY_WORD_MAX, PRIVACY_WORDS_MAX, type RequestArgument, type SettingsView } from '../../shared/ipc';
 import { CloseIcon } from '../icons';
 import { Row } from './Settings';
 
-/** Only Windows reads the screen's text for now. */
-const READS_SCREEN = navigator.userAgent.includes('Windows');
+const MAC = navigator.userAgent.includes('Macintosh');
+/** Windows (its own OCR) and macOS (Vision) read the screen's text. */
+const READS_SCREEN = MAC || navigator.userAgent.includes('Windows');
+/** The OCR, as people know it. */
+const OCR = MAC ? 'macOS’s own text recognition' : 'Windows’ own OCR';
 
 export function PrivacySettings({ view, change }: { view: SettingsView | undefined; change: (next: RequestArgument<'settings:set'>) => void }) {
   const [draft, setDraft] = useState('');
@@ -24,8 +27,8 @@ export function PrivacySettings({ view, change }: { view: SettingsView | undefin
         label="Read the screen after a take"
         hint={
           READS_SCREEN
-            ? 'Cuttle reads the text of each new take with Windows’ own OCR, on this computer, and masks email addresses, keys and other private things it finds. Notifications are masked either way.'
-            : 'Cuttle reads the screen’s text with Windows’ own OCR, which this system does not have yet. Notifications are masked either way.'
+            ? `Cuttle reads the text of each new take with ${OCR}, on this computer, and masks email addresses, keys and other private things it finds. Notifications are masked either way.`
+            : 'Cuttle reads the screen’s text with the system’s own OCR, which this system does not have. Notifications are masked either way.'
         }
       >
         <button

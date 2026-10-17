@@ -1233,6 +1233,9 @@ describe.runIf(enabled)('the Cuttle app', () => {
     // the hint fits the HUD whole
     expect(await hud.evaluate(() => [...document.querySelectorAll('[data-testid=hud-note], [data-testid=hud-note] *')].every((element) => element.scrollWidth <= element.clientWidth + 1))).toBe(true);
     await shotOf('31-hud-retake', '/hud.html');
+    // the take goes on past the slip (the cut ends 0.15 s after it, at most at the take's end): a busy
+    // runner gets here within that otherwise
+    await wait(1000);
     await click(hud, '[data-testid=hud-stop]');
     const dir = await newProject(before);
     const written = (await projectWhen(dir, (file) => file.scenes[0]?.id !== undefined)) as unknown as { cuts?: { to: number; auto?: string; label?: string }[] };
@@ -1528,7 +1531,8 @@ describe.runIf(enabled)('the Cuttle app', () => {
     await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find((window) => window.getTitle() === 'subtitled · Cuttle')?.close());
   }, 180_000);
 
-  it.runIf(process.platform === 'win32')('reads the screen after a take when the settings say so, and from the Auto tab: what it shows that is private and the notifications masked as one step', async () => {
+  // the system's own OCR: Windows', macOS's Vision
+  it.runIf(process.platform === 'win32' || process.platform === 'darwin')('reads the screen after a take when the settings say so, and from the Auto tab: what it shows that is private and the notifications masked as one step', async () => {
     // the settings: reading is off in this check; switched on, each new take is read after its cut
     await launchAgain(['--settings']);
     const settings = await waitForPage(app, async (page) => page.url().includes('/settings.html') && (await page.locator('[data-testid=settings-page-privacy]').count()) === 1);

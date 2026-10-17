@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { CURSOR_SIGNATURES, cursorSignature, displayOf, eventWallTime, pixelMapper } from '../src/darwin';
+import { CURSOR_SIGNATURES, cursorSignature, displayOf, eventWallTime, LEVEL, macPopups, NOTIFICATION_CENTER, pageOf, pixelMapper, type ListedWindow } from '../src/darwin';
 
 // A 1440×900 point Retina display (2880×1800 pixels) with a 1920×1080 display at 1× to its right,
 // and one at 2× above it.
@@ -64,5 +64,50 @@ describe('cursor signatures', () => {
     expect(shapes.get(cursorSignature({ x: 5, y: 5 }, { width: 28, height: 40 }))).toBe('arrow');
     expect(shapes.get(cursorSignature({ x: 12, y: 11 }, { width: 23, height: 22 }))).toBe('text');
     expect(new Set(CURSOR_SIGNATURES.map(([signature]) => signature)).size).toBe(CURSOR_SIGNATURES.length);
+  });
+});
+
+// windows as the probes on macOS 27 listed them (points, front to back)
+const listed = (id: number, pid: number, layer: number, [x, y, width, height]: [number, number, number, number], bundle = 'com.apple.TextEdit'): ListedWindow => ({ id, pid, layer, points: { x, y, width, height }, bundle });
+
+describe('macPopups', () => {
+  it('takes modal panels (an alert, a save panel) for dialogs and pop-up menus for menus', () => {
+    const windows = [listed(1, 50, LEVEL.modalPanel, [510, 199, 420, 132], 'com.apple.ScriptEditor.id.osascript'), listed(2, 60, LEVEL.popUpMenu, [300, 100, 220, 180]), listed(3, 70, LEVEL.normal, [0, 30, 1440, 808])];
+    expect(macPopups(windows).map(({ window, kind }) => [window.id, kind])).toEqual([
+      [1, 'dialog'],
+      [2, 'menu'],
+    ]);
+  });
+
+  it('takes a sheet for a dialog: smaller, centred inside the window of its app right behind it', () => {
+    // TextEdit's save sheet over its document
+    const sheet = listed(3053, 86403, 0, [261, 228, 404, 218]);
+    const document = listed(3049, 86403, 0, [170, 93, 586, 488]);
+    expect(macPopups([sheet, document]).map(({ window, kind }) => [window.id, kind])).toEqual([[3053, 'dialog']]);
+    // not centred (a palette), another app's, or as large as the window: none
+    expect(macPopups([listed(4, 86403, 0, [180, 100, 200, 200]), document])).toEqual([]);
+    expect(macPopups([{ ...sheet, pid: 1 }, document])).toEqual([]);
+    expect(macPopups([listed(5, 86403, 0, [171, 94, 584, 486]), document])).toEqual([]);
+  });
+
+  it('takes the Notification Center over the screen for a notification, not its widgets on the desktop', () => {
+    const banner = listed(16, 853, 21, [0, 0, 1440, 900], NOTIFICATION_CENTER);
+    const widget = listed(19, 853, -2147483601, [188, 38, 180, 180], NOTIFICATION_CENTER);
+    expect(macPopups([banner, widget]).map(({ window, kind }) => [window.id, kind])).toEqual([[16, 'notification']]);
+  });
+});
+
+describe('pageOf', () => {
+  const window = { x: 0, y: 30, width: 1440, height: 808 };
+  it("takes a web area (Safari's, Firefox's), inside the window", () => {
+    expect(pageOf(window, { webArea: { x: 0, y: 110, width: 1440, height: 760 } }, false)).toEqual({ x: 0, y: 110, width: 1440, height: 728 });
+  });
+
+  it("takes what lies below a Chromium browser's toolbar, and nothing for other apps", () => {
+    // Opera: its toolbar at 56,74 1380×36
+    const toolbar = { x: 56, y: 74, width: 1380, height: 36 };
+    expect(pageOf(window, { toolbar }, true)).toEqual({ x: 0, y: 110, width: 1440, height: 728 });
+    expect(pageOf(window, { toolbar }, false)).toBeUndefined();
+    expect(pageOf(window, {}, true)).toBeUndefined();
   });
 });

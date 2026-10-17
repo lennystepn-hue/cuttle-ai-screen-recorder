@@ -20,6 +20,7 @@ import { cutIfPending, recut, startPicking, takesBusy, undoRestart } from './rec
 import { deletableTakes, sizeText, trashName } from '../shared/takes';
 import { addRecent, loadSettings, motionSetting, updateSettings } from './settings';
 import { openSettings } from './settings-window';
+import { fitProjectLength } from './length';
 import { maskPrivacy } from './privacy';
 import { transcribeProject } from './speech';
 
@@ -218,6 +219,7 @@ async function editorWindow(dir: string, key: string, file: ProjectFile, release
     'project:cut': () => void recut(dir),
     'project:transcribe': () => transcribeProject(dir, true),
     'project:read-screen': () => maskPrivacy(dir, true),
+    'project:fit-length': ({ seconds }) => fitProjectLength(dir, seconds),
     'project:undo-restart': (discarded) => void undoRestart(dir, discarded),
     'app:settings': (page) => void openSettings({ page }),
     'project:save': ({ raw, base }) => editor.watch.save(raw, base),
@@ -307,6 +309,15 @@ export async function expectPrivacy(dir: string, expecting: boolean): Promise<vo
   // the cut's write may still wait for the watcher's look: it keeps its own origin
   if (expecting) await editor.watch.settle();
   editor.watch.origin = expecting ? 'privacy' : 'outside';
+}
+
+/** The next outside change of the project comes from the app's own length fit ("Cuttle's length fit"). */
+export async function expectLength(dir: string, expecting: boolean): Promise<void> {
+  const editor = await editorOf(dir);
+  if (!editor) return;
+  // a change still waiting for the watcher's look keeps its own origin
+  if (expecting) await editor.watch.settle();
+  editor.watch.origin = expecting ? 'length' : 'outside';
 }
 
 /** The window of a project's open editor, if there is one. */

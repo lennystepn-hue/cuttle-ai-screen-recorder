@@ -16,6 +16,7 @@ export const WINDOW_CHANNELS = {
       'project:cut',
       'project:transcribe',
       'project:read-screen',
+      'project:fit-length',
       'project:save',
       'project:import-image',
       'project:draft',

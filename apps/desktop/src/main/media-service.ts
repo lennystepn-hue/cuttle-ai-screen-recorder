@@ -3,7 +3,7 @@ import { join, relative, resolve, sep } from 'node:path';
 import { utilityProcess, type UtilityProcess } from 'electron';
 import type { CuttleProject } from '@cuttle/project';
 import type { MediaState } from '../shared/ipc';
-import type { MediaJob, ThumbnailsMeta, WorkerReply } from '../shared/media-jobs';
+import type { JobResult, MediaJob, ThumbnailsMeta, WorkerReply } from '../shared/media-jobs';
 import { PEAKS_RATE } from '../shared/media-jobs';
 import { CACHE_DIR } from './project';
 import { bundlePath } from './protocols';
@@ -36,7 +36,7 @@ const OUTPUT: Record<Kind, string> = { proxy: 'proxy.mp4', thumbnails: 'thumbnai
 interface Job {
   job: MediaJob;
   onProgress: (progress: number) => void;
-  resolve: (meta?: ThumbnailsMeta) => void;
+  resolve: (meta?: JobResult) => void;
   reject: (error: Error) => void;
 }
 
@@ -91,10 +91,11 @@ class Worker {
     this.start().postMessage({ id: next.id, ...next.job.job });
   }
 
-  run(media: MediaJob, onProgress: (progress: number) => void): { promise: Promise<ThumbnailsMeta | undefined>; cancel(): void } {
+  /** Queues a job; `T`: what it answers (the thumbnails' layout, a length fit's report). */
+  run<T extends JobResult = ThumbnailsMeta>(media: MediaJob, onProgress: (progress: number) => void): { promise: Promise<T | undefined>; cancel(): void } {
     const id = this.next++;
-    const promise = new Promise<ThumbnailsMeta | undefined>((resolve, reject) => {
-      const job = { job: media, onProgress, resolve, reject };
+    const promise = new Promise<T | undefined>((resolve, reject) => {
+      const job = { job: media, onProgress, resolve: resolve as (meta?: JobResult) => void, reject };
       this.pending.set(id, job);
       this.queue.push({ id, job });
     });

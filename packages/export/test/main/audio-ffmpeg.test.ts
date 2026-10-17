@@ -60,7 +60,17 @@ describe.runIf(hasFfmpeg)('export audio through ffmpeg', () => {
         { audio: { muteSpedUp: false }, transition: { enabled: false } },
         loudAfterCut,
       );
+
       expect(peak(audio, 0, audio.length), `speed ${speed}`).toBeLessThan(0.01);
     }
+  });
+
+  it('plays a split clip exactly like the whole clip: no dip at a continuous cut', () => {
+    const whole = render([{ type: 'clip', from: 1, to: 5 }], 4);
+    const split = render([{ type: 'clip', from: 1, to: 2.5 }, { type: 'clip', from: 2.5, to: 5 }], 4);
+    expect(split.length).toBe(whole.length);
+    let worst = 0;
+    for (let i = 0; i < whole.length; i++) worst = Math.max(worst, Math.abs(split[i]! - whole[i]!));
+    expect(worst).toBeLessThan(1e-4);
   });
 });

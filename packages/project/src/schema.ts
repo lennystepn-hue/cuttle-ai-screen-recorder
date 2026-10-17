@@ -105,6 +105,10 @@ const AudioSchema = z.strictObject({
   muteSpedUp: z.boolean().default(true),
   /** Play the cleaned-up mic (`sources.cleanMic`: less noise, even loudness) where there is one. */
   cleanup: z.boolean().default(true),
+  /** A key click for each key typed (the take's `keys` counts), where its clip is heard. */
+  typing: z.boolean().default(true),
+  /** The clicks' volume, 0 to 1. */
+  typingVolume: z.number().min(0).max(1).default(0.5),
 });
 
 const TransitionSchema = z.strictObject({

@@ -751,9 +751,12 @@ describe.runIf(process.platform === 'win32' || process.platform === 'darwin')('c
       type Rect = [number, number, number, number];
       type Mask = { label: string; from: number; to: number; rect: Rect; moves?: { at: number; rect: Rect }[]; auto?: string; style?: string };
       const first = (await cli('--json', '-C', dir, 'suggest', '--no-crop', '--mask', 'Lena Müller')).json as { privacy: { read: boolean; masks: number }; notes: string[] };
-      expect(first.privacy).toEqual({ read: true, masks: 3, notifications: 0 });
-      expect(first.notes.some((note) => /^read the screen's text in \d+ frames \(.+\), into takes\/1\/screen-text\.jsonl$/.test(note))).toBe(true);
       const file = JSON.parse(readFileSync(join(dir, 'cuttle.json'), 'utf8')) as { masks: Mask[]; sources: { screenText?: string }; privacy?: { words: string[] } };
+      // what the OCR read and masked, said when the count is off (another machine's OCR may read differently)
+      const read = () =>
+        [...file.masks.map((mask) => `${mask.label} ${mask.from}–${mask.to} ${mask.rect.join(',')} moves ${mask.moves?.length ?? 0}`), ...readFileSync(join(dir, 'takes', '1', 'screen-text.jsonl'), 'utf8').split('\n').filter(Boolean).slice(0, 6)].join('\n');
+      expect(first.privacy, read()).toEqual({ read: true, masks: 3, notifications: 0 });
+      expect(first.notes.some((note) => /^read the screen's text in \d+ frames \(.+\), into takes\/1\/screen-text\.jsonl$/.test(note))).toBe(true);
       expect(file.sources.screenText).toBe('takes/1/screen-text.jsonl');
       expect(file.privacy).toEqual({ words: ['Lena Müller'] });
       const byLabel = (label: string) => file.masks.find((mask) => mask.label === label)!;

@@ -429,8 +429,8 @@ describe('motion', () => {
     // source 18 to 24: 18–20 at 1× (output 9–11), then 20–24 at 4× (output 11–12)
     const timeline = motion({ overlays: [{ src: 'motion/callouts/index.html', at: 18, duration: 6 }] });
     expect(timeline.frameAt(8.5).layers[0]!.overlays).toEqual([]);
-    expect(timeline.frameAt(10).layers[0]!.overlays).toEqual([{ index: 0, key: '0@9', local: 1, duration: 3 }]);
-    expect(timeline.frameAt(11.5).layers[0]).toMatchObject({ sceneIndex: 2, overlays: [{ index: 0, key: '0@9', local: 2.5, duration: 3 }] });
+    expect(timeline.frameAt(10).layers[0]!.overlays).toEqual([{ index: 0, key: '0@9', start: 9, local: 1, duration: 3 }]);
+    expect(timeline.frameAt(11.5).layers[0]).toMatchObject({ sceneIndex: 2, overlays: [{ index: 0, key: '0@9', start: 9, local: 2.5, duration: 3 }] });
     expect(timeline.frameAt(12.25).layers[0]!.overlays).toEqual([]);
   });
 
@@ -442,8 +442,8 @@ describe('motion', () => {
       ],
       overlays: [{ src: 'a.html', at: 16, duration: 2 }],
     });
-    expect(twice.frameAt(7).layers[0]!.overlays).toEqual([{ index: 0, key: '0@6', local: 1, duration: 2 }]);
-    expect(twice.frameAt(12).layers[0]!.overlays).toEqual([{ index: 0, key: '0@11', local: 1, duration: 2 }]);
+    expect(twice.frameAt(7).layers[0]!.overlays).toEqual([{ index: 0, key: '0@6', start: 6, local: 1, duration: 2 }]);
+    expect(twice.frameAt(12).layers[0]!.overlays).toEqual([{ index: 0, key: '0@11', start: 11, local: 1, duration: 2 }]);
     const off = motion({ overlays: [{ src: 'a.html', at: 12, duration: 2, enabled: false }] });
     expect(off.frameAt(3).layers[0]!.overlays).toEqual([]);
   });

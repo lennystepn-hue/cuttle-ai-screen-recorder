@@ -27,6 +27,11 @@ function project(look: Look = {}, rest: Partial<CuttleProjectInput> = {}): Cuttl
 }
 
 const SLATE = { preset: 'solid', color: '#3B4252' } as const;
+/** One piece of footage: 0–5 s at 1×, then 5–25 s at 4× (output 5–10 s). */
+const SPEED_CHANGE: CuttleProjectInput['scenes'] = [
+  { type: 'clip', from: 0, to: 5 },
+  { type: 'clip', from: 5, to: 25, speed: 4 },
+];
 const TITLE = 'claude · ~/treg-demo';
 
 /** Cursor resting at the screen centre, clicked 0.1 s before t = 5 (ripple at 25 %). */
@@ -205,6 +210,23 @@ export const SCENARIOS: Scenario[] = [
     ],
   },
 
+  // A speed change inside one piece of footage (1× up to 5 s, then 4×) is a continuous cut: one
+  // layer, no crossfade. The zoom (source 4.7–8.7) and the caption (4–5.4) ramp in output seconds
+  // across it: the zoom is halfway in at the cut, the caption 40 % into its fade-out.
+  {
+    name: 'speed-change-zoom',
+    project: project({ frame: { title: TITLE } }, { scenes: SPEED_CHANGE, zooms: [{ at: 4.7, duration: 4, rect: [800, 450, 480, 300] }] }),
+    t: 5,
+  },
+  {
+    name: 'speed-change-caption',
+    project: project(
+      { frame: { title: TITLE } },
+      { scenes: SPEED_CHANGE, texts: [{ at: 4, duration: 1.4, text: 'Claude at work', style: 'caption', position: 'bottom' }] },
+    ),
+    t: 5,
+  },
+
   // Other output formats: everything scales with the short side
   ...(
     [
@@ -221,3 +243,19 @@ export const SCENARIOS: Scenario[] = [
     webcam: true,
   })),
 ];
+
+/**
+ * The same clip whole and split at 5 s, with a zoom ramping across the split, rendered at output
+ * times around the split: a continuous cut must look exactly like no cut.
+ */
+export const SPLIT_CHECKS: { whole: Scenario; split: Scenario }[] = [4.9, 5, 5.1].map((t) => {
+  const zooms = [{ at: 4.5, duration: 1, rect: [800, 450, 480, 300] as [number, number, number, number] }];
+  return {
+    whole: { name: `whole-${t}`, project: project({ frame: { title: TITLE } }, { zooms }), t },
+    split: {
+      name: `split-${t}`,
+      project: project({ frame: { title: TITLE } }, { scenes: [{ type: 'clip', from: 0, to: 5 }, { type: 'clip', from: 5, to: 10 }], zooms }),
+      t,
+    },
+  };
+});

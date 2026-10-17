@@ -68,7 +68,7 @@ async function help(command: string): Promise<string> {
 
 /** `--flag` as a whole option in a help text (not `--until` inside `--until-file`). */
 const hasFlag = (text: string, flag: string) => new RegExp(`${flag}(?![\\w-])`).test(text);
-const COMMANDS = ['devices', 'record', 'suggest', 'transcribe', 'models', 'preview', 'frame', 'capture-page', 'render', 'recover'];
+const COMMANDS = ['devices', 'record', 'suggest', 'transcribe', 'models', 'transcript', 'preview', 'frame', 'capture-page', 'render', 'recover'];
 
 describe('the cuttle commands in the skill', () => {
   // Code blocks and inline code: what Claude runs.

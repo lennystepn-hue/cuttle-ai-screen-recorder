@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, readdir, rename, rm, stat, writeFile } from 'node:fs/pr
 import { tmpdir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { sceneSpans } from '@cuttle/timeline';
+import { applyCaptionFixes, captionCues, captionWords, sceneSpans, toSrt, toVtt } from '@cuttle/timeline';
 import { app } from 'electron';
 import { INLINE_GRAPH_LIMIT, audioFilterGraph, muxArgs, planAudio } from '../audio';
 import { ExportError } from '../errors';
@@ -28,7 +28,17 @@ export interface ExportOptions {
   pageDir?: string;
   /** Cancels the export: the window closes, ffmpeg stops, nothing reaches `out`; rejects with `cancelled`. */
   signal?: AbortSignal;
+  /** Burn the captions into the video (default: the project's `captions.enabled`). */
+  captions?: boolean;
+  /** Subtitle files written next to `out` (`<name>.srt`, `<name>.vtt`); the project needs a transcript. */
+  subtitles?: readonly SubtitleFormat[];
 }
+
+export const SUBTITLE_FORMATS = ['srt', 'vtt'] as const;
+export type SubtitleFormat = (typeof SUBTITLE_FORMATS)[number];
+
+/** The subtitle file of `out` in `format`: its name with the format's extension. */
+export const subtitlePath = (out: string, format: SubtitleFormat) => join(dirname(out), `${basename(out).replace(/\.[^.]*$/, '')}.${format}`);
 
 export interface ExportStats {
   gpu: string;
@@ -45,6 +55,8 @@ export interface ExportResult {
   frames: number;
   /** Length of the exported video in seconds (frames / fps). */
   seconds: number;
+  /** The subtitle files written next to it. */
+  subtitles?: string[];
   stats: ExportStats;
 }
 
@@ -185,6 +197,11 @@ export async function exportProject(opts: ExportOptions): Promise<ExportResult> 
   const sources = await loadSources(projectDir);
   for (const warning of sources.warnings) console.warn(`warning: ${warning}`);
   await checkOutput(out, sources.inputs);
+  const subtitles = [...new Set(opts.subtitles ?? [])];
+  if (subtitles.length > 0 && !sources.transcript) {
+    throw new ExportError('missing-file', 'subtitle files need the take\'s transcript (sources.transcript): run "cuttle transcribe" first');
+  }
+  for (const format of subtitles) await checkOutput(subtitlePath(out, format), sources.inputs);
   await checkFfmpeg();
   if (sources.mic) await checkMic(sources.mic.path, signal);
   throwIfCancelled();
@@ -196,6 +213,8 @@ export async function exportProject(opts: ExportOptions): Promise<ExportResult> 
     screen: sources.screen,
     webcam: sources.webcam,
     events: sources.events,
+    ...(sources.transcript && { transcript: sources.transcript }),
+    ...(opts.captions !== undefined && { captions: opts.captions }),
     stills: sources.stills,
     backgroundImage: sources.backgroundImage,
     encoder: opts.encoder ?? 'auto',
@@ -256,10 +275,22 @@ export async function exportProject(opts: ExportOptions): Promise<ExportResult> 
     } catch (error) {
       throw new ExportError('render', `could not replace ${out} (is it open in a player?): ${(error as Error).message}`, { cause: error });
     }
+    const written: string[] = [];
+    if (subtitles.length > 0 && sources.transcript) {
+      // as subtitles, whatever the burned-in style: two lines a cue, on the video's timeline
+      const spans = sceneSpans(project.scenes, project.cuts);
+      const cues = captionCues(captionWords(applyCaptionFixes(sources.transcript, project.captions.fixes), spans), 'subtitle');
+      for (const format of subtitles) {
+        const path = subtitlePath(out, format);
+        await writeFile(path, format === 'srt' ? toSrt(cues) : toVtt(cues));
+        written.push(path);
+      }
+    }
     return {
       out,
       frames: page.frames,
       seconds,
+      ...(written.length > 0 && { subtitles: written }),
       stats: {
         gpu: page.gpu,
         codec: page.codec,

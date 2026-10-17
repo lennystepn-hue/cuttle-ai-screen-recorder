@@ -1,6 +1,6 @@
 import { readFile, stat } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
-import { parseEventsJsonl, parseProjectJson, parseTakeJson, trackOffset, type CuttleProject, type InputEvent, type TakeFile } from '@cuttle/project';
+import { parseEventsJsonl, parseProjectJson, parseTakeJson, parseTranscriptJson, trackOffset, type CuttleProject, type InputEvent, type TakeFile, type TranscriptWord } from '@cuttle/project';
 import { ExportError } from '../errors';
 
 /** cuttle.json inside the project folder. */
@@ -15,6 +15,8 @@ export interface ProjectSources {
   webcam?: { path: string; offset: number };
   mic?: { path: string; offset: number };
   events?: InputEvent[];
+  /** The take's transcript (source seconds), for captions and subtitle files. */
+  transcript?: TranscriptWord[];
   stills: Record<number, string>;
   backgroundImage?: string;
   /** Every file the project names (cuttle.json and take.json included): the output must not replace one. */
@@ -106,7 +108,7 @@ export async function loadSources(projectDir: string): Promise<ProjectSources> {
   const take = takeFile?.take;
   // Every file the project names, including sources the look switches off: the output must not
   // replace a recording just because this export does not read it.
-  const named = [sources.webcam, sources.mic, sources.events, sources.markers, look.background.image].filter((path) => path !== undefined);
+  const named = [sources.webcam, sources.mic, sources.cleanMic, sources.events, sources.markers, sources.transcript, look.background.image].filter((path) => path !== undefined);
   const inputs = [resolve(projectPath), screen, join(dirname(screen), TAKE_FILE), ...named.map((path) => resolve(projectDir, path))];
   const result: ProjectSources = { project, screen, stills: {}, inputs, warnings: takeFile?.warning ? [takeFile.warning] : [] };
 
@@ -116,13 +118,23 @@ export async function loadSources(projectDir: string): Promise<ProjectSources> {
   }
   if (look.audio.enabled && sources.mic) {
     const path = await existing(projectDir, sources.mic, 'mic recording (sources.mic)');
-    result.mic = { path, offset: offsetFor(take, 'mic', path, screen) };
+    // the cleaned-up mic plays in its place, in step with it (take.json describes the mic itself)
+    const clean = look.audio.cleanup && sources.cleanMic ? await existing(projectDir, sources.cleanMic, 'cleaned-up mic (sources.cleanMic)') : undefined;
+    result.mic = { path: clean ?? path, offset: offsetFor(take, 'mic', path, screen) };
   }
   if (look.cursor.enabled && sources.events) {
     const path = await existing(projectDir, sources.events, 'input events (sources.events)', false);
     const events = parseEventsJsonl(await readFile(path, 'utf8'));
     if (events.issues.length > 0) throw new ExportError('invalid-project', `${path} is invalid:\n${issuesText(events.issues)}`);
     result.events = events.events;
+  }
+  if (sources.transcript) {
+    // without it the video has no captions: worth a warning, not a failed export
+    const path = resolve(projectDir, sources.transcript);
+    const text = await readFile(path, 'utf8').catch(() => undefined);
+    const parsed = text === undefined ? undefined : parseTranscriptJson(text);
+    if (parsed?.ok) result.transcript = parsed.transcript.words;
+    else result.warnings.push(`${sources.transcript} ${parsed ? 'is invalid' : 'cannot be read'}: no captions`);
   }
   for (const [index, scene] of project.scenes.entries()) {
     if (scene.type !== 'still') continue;

@@ -76,6 +76,21 @@ describe('loadSources', () => {
     expect(sources.webcam?.offset).toBeCloseTo(0.5, 9);
   });
 
+  it('reads the transcript for the captions, and goes on without one it cannot read', async () => {
+    const transcript = { version: 1, language: 'de', model: 'small', words: [{ t: 0.2, end: 0.6, text: 'Hallo' }] };
+    const dir = await projectDir({ sources: { ...SOURCES, transcript: 'take/transcript.json' }, scenes: SCENES }, { ...MEDIA, 'take/transcript.json': JSON.stringify(transcript) });
+    const sources = await loadSources(dir);
+    expect(sources.transcript).toEqual(transcript.words);
+    // the transcript is one of the project's files: no output may replace it
+    expect(sources.inputs).toContain(join(dir, 'take', 'transcript.json'));
+    const broken = await projectDir({ sources: { ...SOURCES, transcript: 'take/transcript.json' }, scenes: SCENES }, { ...MEDIA, 'take/transcript.json': '{' });
+    const without = await loadSources(broken);
+    expect(without.transcript).toBeUndefined();
+    expect(without.warnings).toEqual(['take/transcript.json is invalid: no captions']);
+    const gone = await projectDir({ sources: { ...SOURCES, transcript: 'take/transcript.json' }, scenes: SCENES }, MEDIA);
+    expect((await loadSources(gone)).warnings).toEqual(['take/transcript.json cannot be read: no captions']);
+  });
+
   it('names a missing or empty media file, but accepts empty events', async () => {
     const noWebcam = Object.fromEntries(Object.entries(MEDIA).filter(([path]) => path !== 'take/webcam.mp4'));
     const missing = await projectDir({ sources: SOURCES, look: { webcam: { enabled: true } }, scenes: SCENES }, noWebcam);

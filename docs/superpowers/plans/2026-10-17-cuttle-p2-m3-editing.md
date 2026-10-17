@@ -8601,4 +8601,101 @@ These need a person, a mouse and a real screen; the checks above drive the app w
 2. Press Z and draw a zoom on the screen frame, drag its corner, play: the video shows the zoom. Press M, draw a mask over something private, set it to blur in the inspector.
 3. Press T, type a caption (it shows as it will look), Enter. Click it on the video, double-click it to edit its text.
 4. Ask Claude Code to add a mask to the project's `cuttle.json` while the editor is open: the note says "1 mask added" with Show and Undo.
-5. Ctrl+K, type "speed", run "Speed 4×" on a clip.
+5. Ctrl+K, type "speed", run "Faster" on a clip (R does the same; Shift+R goes back).
+6. Close the window while typing a clip's label: the label is in `cuttle.json` afterwards.
+
+## Changes during execution
+
+The code blocks above are the original plan. Its tasks were replayed mechanically on a fresh clone,
+byte-identical to the prototype, and those commits were pushed. Two reviews followed. The code review
+probed the document functions directly, the renderer's document wired to the real watcher, and the
+hidden app (`--cuttle-check`, the `test` recorder backend). The experience review photographed the
+editor at 1100 to 1920 px, in 16:9 and 9:16, with every tool and the menu. Both found the problems
+below, and all are fixed in the commits after the plan's. The repo is the source of truth.
+
+**The document, the saves and outside changes**
+
+- **An edit that met an outside write made the outside version invisible.** The save conflicted and
+  was replayed onto the new version, which was right. But that version never became a step, so Undo
+  wrote back a file from before it and Claude's change was gone without a word. Now a conflict pushes
+  "the outside change" as its own step and puts each unsaved gesture on top of it as its own step,
+  with its commands kept per gesture. Redo is cleared and a note says "Changed outside the app while
+  you edited: … Your edit is on top of it." with Show. The main process no longer hides that version
+  from its watcher.
+- **A version this window had written once was ignored for good when it came back.** That covers
+  Claude reverting its own edit byte for byte, a `git checkout`, or `cuttle.json.bak` copied back. The
+  watcher now ignores only the version it last read or wrote (`current`). The renderer ignores the
+  versions it has just replayed onto (`replayedOnto`). The watcher's looks and the saves run one at
+  a time. Otherwise a look that read the file during a save would report the version before that
+  save as someone else's. Fast undos did exactly that in `app:check` (`project-watch.test.ts`).
+- **Another take written from outside was never opened.** The page's `location.reload()` was
+  cancelled by the window's navigation guard, so the editor stayed on the old take. The page now asks
+  the main process for a reload (`project:reload`), after keeping its edits in `cuttle.json.draft`.
+- **Ids are pinned on replay.** An item added while Claude added one could get Claude's id on replay,
+  and the next Delete then deleted Claude's item. `pinIds` keeps the id a gesture created. A replay
+  drops a gesture whose pinned id is taken, and the later commands on it too. Deleting an item that
+  is already gone counts as done, so no draft is offered when both sides deleted the same thing.
+- **"Use mine" is its own note** (`draftNote`). It lasts until it is used or closed. Other notes and
+  later edits no longer remove it. Only the first draft of a session is kept.
+- **Export and closing respect "Not saved".** An export first writes what is unsaved, and refuses with
+  "your latest edits are not saved (…)" when that fails. Closing the window is a handshake:
+  `project:closing` → the page blurs the field being typed in, writes, or keeps a draft →
+  `project:closed`. After 4 s the window closes anyway. A quit that waited for this goes on quitting.
+- **Esc, Space and L cancel a drag under way**, with no edit and no preview (`gesture.ts`, tagged by
+  the view that owns it). The source view going away cancels only its own drag.
+- After five conflicts in a row, the save gives up with "cuttle.json keeps changing outside the app"
+  instead of saying "Saved". A drag released while the file does not parse leaves no preview behind.
+- Trimming stops an edge one frame before the other. A speed that would leave less than a frame is
+  refused ("the clip is too short for 64×") instead of reaching into source the clip did not show.
+- A colour well previews while the picker moves and is one step when the picker closes, instead of
+  one step and one save per move. `importImage` compares bytes, not name and size. `project:save` and
+  `project:draft` are capped at 4 MB. A lock from this computer without a numeric pid counts as stale.
+  A lock whose pid now belongs to another program still needs `--force`.
+
+**The editor**
+
+- **The source view is inset** (a 52 px band for its chip, a 14 px margin), so masks at the top of
+  the screen and handles on its edges are reachable. While a zoom is drawn, the rest dims and the
+  factor shows. The chip's hint follows the state.
+- **The caption bar sits under the frame.** It wraps in 9:16 and marks the positions that are taken.
+- **Keys keep working after the mouse.** A click on a button no longer keeps the focus. The command
+  menu gives the focus back where it was. A select gives it back after a change.
+- **The menu ranks by name, then keywords.** Undo and Redo are never preselected, so "zoom" + Enter
+  no longer undoes. Enter on a list of only blocked commands says why. The six speed entries are now
+  Faster (R), Slower (Shift+R) and Normal speed.
+- **The inspector:**
+  - The head has Duplicate and Delete.
+  - Numbers take a decimal point. The arrow keys step them (Shift ×10), and Esc puts the value back.
+  - Its fields are disabled while the file is broken, and the banner says where the mistake is
+    ("near line 12").
+  - It follows a drag under way.
+  - Labels are "Shows at", "Show" and "(s into the take)". A still has one name everywhere.
+  - Webcam size is in %. The Look tab puts each switch on its label's row.
+  - The empty hint is a short list for the tool in use.
+- Copy and colour:
+  - The accent is kept for selection and focus; "on" toggles are light.
+  - "src" became "s into the take".
+  - Blocked actions say "Zooms, masks and captions go on clips, not on a card or page."
+  - Faint text is #85858f, and the rail's letters are 10 px.
+  - Blocks show a grab cursor, and the ruler shows the default one.
+  - The timeline refits when the window grows. Its status hides below 1250 px.
+  - A 9:16 preview says on stage that it is a preview.
+  - Notes sit in the transport row, not over the video.
+- `app:check` gained the regressions:
+  - an outside change met by a split (undo order);
+  - a byte-for-byte revert;
+  - another take written from outside (the page reloads);
+  - a read-only `cuttle.json` (Not saved, the export refuses, Try again);
+  - Esc while drawing;
+  - a label typed and not left when the window closes;
+  - no page error in the whole run.
+
+  With them, `app:check` runs 27 checks in about 70 s.
+- `pnpm test`: 511 tests in 55 files. 35 are skipped. One check in `record.test.ts` asks for the mic
+  to start within 0.2 s of the screen. Under the full suite's load it measured 0.29 s once; alone it
+  passes. The recorder is unchanged here, and P2-M4 looks at it.
+
+Left as they were:
+
+- The title bar's 16:9 / 1:1 / 9:16 stays a preview (see "Kept as it was").
+- A moved scene shows only its insert mark, not a ghost following the pointer.

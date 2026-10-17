@@ -113,8 +113,9 @@ export function atempoChain(speed: number): string[] {
  * labelled `[aout]`: 48 kHz stereo, exactly the sum of the segments' samples long. `micOffset` is
  * how many seconds after the screen track the mic started (negative: before); the mic is shifted
  * once so its time 0 is the screen track's time 0. Without mic segments the graph is silence only.
+ * `typingInput`: the typing sounds' track (on the output timeline already), mixed in at its level.
  */
-export function audioFilterGraph(segments: readonly AudioSegment[], micOffset = 0, micInput = 1): string {
+export function audioFilterGraph(segments: readonly AudioSegment[], micOffset = 0, micInput = 1, typingInput?: number): string {
   const filters: string[] = [];
   const micSegments = segments.filter((segment) => segment.mic !== undefined).length;
   if (micSegments > 0) {
@@ -154,7 +155,17 @@ export function audioFilterGraph(segments: readonly AudioSegment[], micOffset = 
     filters.push(`${chain.join(',')}[s${i}]`);
   });
   const inputs = segments.map((_, i) => `[s${i}]`).join('');
-  filters.push(`${inputs}concat=n=${segments.length}:v=0:a=1,pan=stereo|c0=c0|c1=c0[aout]`);
+  if (typingInput === undefined) {
+    filters.push(`${inputs}concat=n=${segments.length}:v=0:a=1,pan=stereo|c0=c0|c1=c0[aout]`);
+    return filters.join(';');
+  }
+  const total = segments.reduce((sum, segment) => sum + segment.samples, 0);
+  filters.push(
+    `${inputs}concat=n=${segments.length}:v=0:a=1[base]`,
+    [`[${typingInput}:a]aresample=${AUDIO_SAMPLE_RATE}`, 'aformat=sample_fmts=fltp:channel_layouts=mono', 'apad', `atrim=end_sample=${total}`, 'asetpts=N/SR/TB[keys]'].join(','),
+    // added as they are: amix would otherwise halve both
+    '[base][keys]amix=inputs=2:duration=first:normalize=0,pan=stereo|c0=c0|c1=c0[aout]',
+  );
   return filters.join(';');
 }
 
@@ -170,6 +181,8 @@ export interface MuxArgsOptions {
   video: string;
   /** The mic file, when the graph uses it. */
   mic?: string;
+  /** The typing sounds' track, when the graph mixes it in (the input after the mic). */
+  typing?: string;
   graph: string;
   /** A file holding `graph`, used instead of the inline graph when given. */
   graphFile?: string;
@@ -177,7 +190,7 @@ export interface MuxArgsOptions {
 }
 
 /** ffmpeg arguments that add the audio to the video without re-encoding it: AAC 48 kHz, moov at the front. */
-export function muxArgs({ video, mic, graph, graphFile, out }: MuxArgsOptions): string[] {
+export function muxArgs({ video, mic, typing, graph, graphFile, out }: MuxArgsOptions): string[] {
   return [
     '-hide_banner',
     '-nostdin',
@@ -187,6 +200,7 @@ export function muxArgs({ video, mic, graph, graphFile, out }: MuxArgsOptions): 
     '-i',
     video,
     ...(mic ? ['-i', mic] : []),
+    ...(typing ? ['-i', typing] : []),
     ...(graphFile ? ['-/filter_complex', graphFile] : ['-filter_complex', graph]),
     '-map',
     '0:v:0',

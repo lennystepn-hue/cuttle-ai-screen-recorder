@@ -91,6 +91,16 @@ describe('loadSources', () => {
     expect((await loadSources(gone)).warnings).toEqual(['take/transcript.json cannot be read: no captions']);
   });
 
+  it('reads the key counts for the typing sounds, also with the cursor off, and none with the sounds off', async () => {
+    const typed = '{"t":0,"type":"move","x":1,"y":2}\n{"t":1,"type":"keys","count":3}\n';
+    const dir = await projectDir({ sources: SOURCES, scenes: SCENES, look: { cursor: { enabled: false } } }, { ...MEDIA, 'take/events.jsonl': typed });
+    const sources = await loadSources(dir);
+    expect(sources.events).toBeUndefined();
+    expect(sources.keys).toEqual([{ t: 1, type: 'keys', count: 3 }]);
+    const off = await projectDir({ sources: SOURCES, scenes: SCENES, look: { cursor: { enabled: false }, audio: { typing: false } } }, { ...MEDIA, 'take/events.jsonl': typed });
+    expect((await loadSources(off)).keys).toBeUndefined();
+  });
+
   it('names a missing or empty media file, but accepts empty events', async () => {
     const noWebcam = Object.fromEntries(Object.entries(MEDIA).filter(([path]) => path !== 'take/webcam.mp4'));
     const missing = await projectDir({ sources: SOURCES, look: { webcam: { enabled: true } }, scenes: SCENES }, noWebcam);

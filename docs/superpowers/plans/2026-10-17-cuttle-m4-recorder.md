@@ -3152,4 +3152,82 @@ Expected: `git status` prints nothing, then `no temp folders left`.
 
 ## Changes during execution
 
-(Filled in after the plan has been executed.)
+The code blocks above are the original plan. Its tasks were executed by replaying the plan
+mechanically (twice, on fresh clones; byte-identical to the prototype) and bringing those commits
+in; two code reviews (tasks 1–6 and 7–10) and a re-review of their fixes then found the defects
+below. The repo is the source of truth. The recorder and project packages have 116 tests (plus the
+skipped real-capture test) instead of 99; the full `pnpm test` passes 328 tests in 38 files (one
+skipped) twice in a row; `pnpm recorder:real` passes and records 3.1 s for `maxSeconds: 3`
+instead of 3.6 s.
+
+- **Task 6 (untilClaude), found by both reviews:** a prompt submitted during the countdown was
+  lost: the watcher started after the tracks and read existing transcripts from their end, so it
+  never locked onto the session and the take ran to `maxSeconds`. The watcher now starts in
+  `record()` itself (`since` is its first statement, before the device listing), signals wait in a
+  buffer until the take runs, and a transcript that changed at or after `since` is read from up to
+  4 MiB before its end. Not prompts: background task notices (`<task-notification>`, 80 such lines
+  in the owner's transcripts), bash mode, the interrupt note and compaction summaries; a slash
+  command is held back until Claude answers it (`SessionReader`: `/model` and `/clear` only write
+  output); `refusal` ends a turn; prompts carry their line `uuid` against duplicates after a
+  rewrite; a throwing listener no longer drops the following lines; short reads and rewritten files
+  are handled.
+- **Task 5 (events):** the held-back move was dropped when the next move came after a pause, so
+  the pointer crept towards the next position (41 px over 5 s in the reviewer's case); it is now
+  written before a move that starts a later 1/60 s slot after a gap. Input that arrives before the
+  screen's start keeps the newest 2000 events (the oldest go).
+- **Task 8 (record):**
+  - Events, markers and `maxSeconds` count from the screen track's start, no longer from the last
+    track.
+  - Start-up can be stopped. Each track must start within 20 s (`capture` names it).
+  - A stop before the screen starts, also while the devices are listed with countdown 0, rejects
+    with `cancelled` and removes the take folder.
+  - A track that had not started when the stop came is left out of take.json, the files and the
+    `Take` alike (one snapshot), with a warning.
+  - A window is resolved again after the countdown.
+  - `untilIdleSeconds` also waits until the input has rested that long, so someone pointing at a
+    still chart is not cut off. The synthetic test input now stops after 1.5 s; the idle test
+    expects 2.2–3.5 s.
+  - A throwing `onEvent`, or a failed markers.json or events.jsonl write, becomes a warning, never
+    an exception in the hook or a failed take.
+  - Captures stop before the events file closes. Cleanup steps never replace the real error, and
+    removing files retries Windows locks.
+  - Late Claude answers start no timer after the take.
+  - Foreign errors (file system, native modules) become `RecorderError('capture')`, and a capture
+    error names the take folder.
+  - The DirectShow listing runs only for a webcam or mic, with a 10 s timeout.
+- **Task 7 (Windows):**
+  - uiohook listeners are removed by name, and the hook is shared by a counter.
+  - A held hotkey triggers once until its key is released. Key and wheel mapping are pure functions
+    with tests (`keyHandler`, `wheelInput`).
+  - COM calls use `koffi.sizeof('void *')` for the vtable slot, check `GetDesc`'s result and release
+    every object in `finally`.
+  - A failed load is retried.
+  - The pointer comes from `GetPhysicalCursorPos`.
+  - The recorder's own windows, console and console title (Windows Terminal) are not listed.
+- **Task 4 (sources):** regions that are not finite numbers are refused, a monitor with an odd
+  size is cropped to even numbers, and two windows with exactly the requested title are an error.
+- **Tests:** every `record()` test has a 20 s timeout. The untilClaude tests run outside the
+  concurrent block (they set `CLAUDE_CONFIG_DIR`). New tests cover:
+  - a prompt during a 1 s countdown;
+  - a stop before anything started;
+  - a throwing `onEvent`;
+  - the resting pointer and the pending overflow;
+  - `freeze_end`;
+  - odd monitors, NaN regions and duplicate titles;
+  - the non-prompt lines, `refusal`, uuids and `SessionReader`;
+  - the key and wheel mapping.
+- **Docs:** the spec says "one clock" (wall clock, not monotonic) and the idle and until-claude
+  rules as implemented; the events.jsonl comment and the spec say the display scale applies where
+  the system reports points; markers.ts says the recorder writes markers sorted.
+
+Not changed (reviews, Minor):
+- `cuttle.json`-style BOM and JSON boilerplate repeated in parse, take and markers.
+- The test backend's devices are told apart by name.
+- A device name with a colon may not open in DirectShow (unverified).
+- Untested paths:
+  - a stop while the screen or a webcam is still starting;
+  - the 20 s start timeout;
+  - a cleanup step that throws.
+
+  The test backend's sources start at once, and a slow fake device was not worth a test-only
+  source.

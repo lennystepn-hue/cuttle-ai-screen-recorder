@@ -185,7 +185,8 @@ export const HOTKEYS: Record<'stop' | 'marker', string>; // Ctrl+Shift+Alt+S, Ct
 - **M2:** done; see "Decisions made while planning" and "Changes during execution" in
   `2026-10-16-cuttle-m2-engine.md`.
 - **M3:** done; see "Decisions made while planning" in `2026-10-16-cuttle-m3-export.md`.
-- **M4:** done; see "Decisions made while planning" in `2026-10-17-cuttle-m4-recorder.md`.
+- **M4:** done; see "Decisions made while planning" and "Changes during execution" in
+  `2026-10-17-cuttle-m4-recorder.md`.
 - **M5:** commander version; how the CLI starts the bundled Electron for `render`, `preview` and
   `capture-page`; `pnpm link --global` on Windows. From M3: bundle the Electron entry with Vite like
   `packages/export/electron/vite.main.config.ts` (`ssr.noExternal: true`, `electron` external) and

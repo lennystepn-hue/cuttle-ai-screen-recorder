@@ -4,7 +4,10 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./frame-plan": "./src/frame-plan.ts",
+    "./track-reader": "./src/page/track-reader.ts",
+    "./formats": "./src/formats.ts"
   },
   "dependencies": {
     "@cuttle/engine": "workspace:*",

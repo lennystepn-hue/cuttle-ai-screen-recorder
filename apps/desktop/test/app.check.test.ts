@@ -1231,6 +1231,9 @@ describe.runIf(enabled)('the Cuttle app', () => {
     // the hint fits the HUD whole
     expect(await hud.evaluate(() => [...document.querySelectorAll('[data-testid=hud-note], [data-testid=hud-note] *')].every((element) => element.scrollWidth <= element.clientWidth + 1))).toBe(true);
     await shotOf('31-hud-retake', '/hud.html');
+    // the take goes on past the slip (the cut ends 0.15 s after it, at most at the take's end): a busy
+    // runner gets here within that otherwise
+    await wait(1000);
     await click(hud, '[data-testid=hud-stop]');
     const dir = await newProject(before);
     const written = (await projectWhen(dir, (file) => file.scenes[0]?.id !== undefined)) as unknown as { cuts?: { to: number; auto?: string; label?: string }[] };

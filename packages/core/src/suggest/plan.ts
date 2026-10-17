@@ -1,6 +1,6 @@
 // Scenes from what happened in a take: trim the quiet start and end, cut idle stretches, speed up
 // waiting. Pure: the inputs come from events.jsonl, markers.json and an ffmpeg pass over the screen.
-import type { InputEvent, Marker } from '@cuttle/project';
+import { isFact, type InputEvent, type Marker } from '@cuttle/project';
 import { gaps, length, union, type Span } from './spans';
 
 /** The rules, in seconds of the take. */
@@ -70,7 +70,7 @@ export function suggestClips(input: SuggestInput): Suggestion {
   const prompt = input.markers.find((marker) => marker.kind === 'prompt')?.t;
   const inputSpans = union(
     input.events
-      .filter((event) => event.type !== 'shape' && event.type !== 'caret')
+      .filter((event) => !isFact(event))
       .map((event) => ({ from: Math.max(0, event.t - RULES.inputPad), to: Math.min(duration, event.t + RULES.inputPad) })),
   );
   // Claude's turn, from its first prompt or tool call to the answer, is never cut: it only waits on a

@@ -104,10 +104,12 @@ cuttle -C "<project>" --json preview
 ```
 
 `suggest` trims the quiet start and end, cuts idle stretches, speeds up waiting (Claude at work),
-zooms on Claude's answer, zooms in where someone types and follows the text along ("Typing": the
-camera moves on as the text leaves the middle of the view; `--no-typing-zooms` leaves those out),
-and zooms where clicks happen at normal speed ("Click", "Clicks"; `--no-click-zooms` leaves those
-out, `--no-zoom` every zoom). Its `notes` say what it did, in
+and crops each clip to the content: a browser's page without its tabs and bars, without the
+taskbar (from the window's content area the recorder saw, else from the screen's still edges;
+`--no-crop` leaves it out). It zooms on Claude's answer, on a dialog while it is open ("Dialog";
+`--no-dialog-zooms`), in where someone types, following the text along ("Typing": the camera
+moves on as the text leaves the middle of the view; `--no-typing-zooms`), and where clicks
+happen at normal speed ("Click", "Clicks"; `--no-click-zooms`; `--no-zoom` leaves out every zoom). Its `notes` say what it did, in
 source seconds. It replaces every clip and the zooms it made before (tagged `auto`; masks, texts,
 cuts, stills, cards and zooms made by hand stay), so run it once, before your hand edits. Its clips and zooms have ids, and labels where Claude's markers say
 what they show ("Claude at work", "Answer"): keep them when you edit, and give items you add an

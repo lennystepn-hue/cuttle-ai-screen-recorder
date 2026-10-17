@@ -1,4 +1,4 @@
-import type { CursorShape, Marker, Rect } from '@cuttle/project';
+import type { CursorShape, Marker, Rect, WindowKind } from '@cuttle/project';
 
 /** A rectangle on the desktop, in physical pixels (negative left of and above the primary monitor). */
 export interface Bounds {
@@ -149,6 +149,10 @@ export type RawInput =
   | { type: 'shape'; time: number; shape: CursorShape }
   | { type: 'key'; time: number }
   /** The system caret (where text is typed), where the app keeps one. */
-  | { type: 'caret'; time: number; x: number; y: number; width: number; height: number };
+  | { type: 'caret'; time: number; x: number; y: number; width: number; height: number }
+  /** The content area of the window shown (null: it has none). */
+  | { type: 'area'; time: number; rect: Bounds | null }
+  /** A dialog or menu opened or closed. */
+  | { type: 'window'; time: number; id: number; kind: WindowKind; rect: Bounds; open: boolean };
 
 export type HotkeyAction = 'stop' | 'marker' | 'pause' | 'retake';

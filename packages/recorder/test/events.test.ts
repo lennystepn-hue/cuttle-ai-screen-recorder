@@ -110,6 +110,19 @@ describe('EventsWriter', () => {
     expect(read()).toEqual([{ t: 1.5, type: 'caret', rect: [800, 400, 2, 19] }]);
   });
 
+  it('writes the content area and the windows over the screen in the screen track', () => {
+    const { events, read } = writer();
+    events.setStart(1000, []);
+    events.push({ type: 'area', time: 1001, rect: { x: 165, y: 197, width: 2495, height: 1233 } });
+    events.push({ type: 'window', time: 1002, id: 4242, kind: 'dialog', rect: { x: 700, y: 400, width: 600, height: 300 }, open: true });
+    events.push({ type: 'area', time: 1003, rect: null });
+    expect(read()).toEqual([
+      { t: 1, type: 'area', rect: [65, 147, 2495, 1233] },
+      { t: 2, type: 'window', id: 4242, kind: 'dialog', rect: [600, 350, 600, 300], open: true },
+      { t: 3, type: 'area', rect: null },
+    ]);
+  });
+
   it('ignores input after close (the hook can deliver one more event)', () => {
     const { events, read } = writer();
     events.setStart(1000, []);

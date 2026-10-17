@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseEventsJsonl } from '../src/index';
+import { isFact, parseEventsJsonl, type InputEvent } from '../src/index';
 
 describe('parseEventsJsonl', () => {
   it('parses one event per line and skips blank lines', () => {
@@ -28,6 +28,17 @@ describe('parseEventsJsonl', () => {
   it('reads where text is typed: the caret', () => {
     expect(parseEventsJsonl('{"t":1.5,"type":"caret","rect":[812,440,2,19]}\n').events).toEqual([{ t: 1.5, type: 'caret', rect: [812, 440, 2, 19] }]);
     expect(parseEventsJsonl('{"t":1.5,"type":"caret","x":812,"y":440}\n').issues.map((issue) => issue.path)).toEqual(['line 1.rect', 'line 1']);
+  });
+
+  it('reads the content area (or none) and the windows over the screen, facts like the shape and the caret', () => {
+    const text = ['{"t":0.2,"type":"area","rect":[65,147,2495,1233]}', '{"t":4,"type":"area","rect":null}', '{"t":5,"type":"window","id":4242,"kind":"dialog","rect":[600,350,600,300],"open":true}'].join('\n');
+    const { events, issues } = parseEventsJsonl(text);
+    expect(issues).toEqual([]);
+    expect(events.map((event) => event.type)).toEqual(['area', 'area', 'window']);
+    expect(parseEventsJsonl('{"t":5,"type":"window","id":1,"kind":"tooltip","rect":[0,0,9,9],"open":true}').issues.map((issue) => issue.path)).toEqual(['line 1.kind']);
+    const others: InputEvent[] = [{ t: 1, type: 'shape', shape: 'text' }, { t: 1, type: 'caret', rect: [1, 1, 2, 9] }];
+    expect([...events, ...others].every(isFact)).toBe(true);
+    expect(isFact({ t: 1, type: 'keys', count: 2 })).toBe(false);
   });
 
   it('accepts Windows line endings and a last line without a newline', () => {

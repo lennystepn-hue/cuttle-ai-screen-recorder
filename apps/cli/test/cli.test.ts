@@ -372,6 +372,7 @@ describe('cuttle suggest and recover', () => {
         ],
         "privacy": {
           "masks": 0,
+          "notifications": 0,
           "read": false,
         },
         "project": "<project>/cuttle.json",
@@ -749,7 +750,7 @@ describe.runIf(process.platform === 'win32')('cuttle suggest reads the screen (W
       type Rect = [number, number, number, number];
       type Mask = { label: string; from: number; to: number; rect: Rect; moves?: { at: number; rect: Rect }[]; auto?: string; style?: string };
       const first = (await cli('--json', '-C', dir, 'suggest', '--no-crop', '--mask', 'Lena Müller')).json as { privacy: { read: boolean; masks: number }; notes: string[] };
-      expect(first.privacy).toEqual({ read: true, masks: 3 });
+      expect(first.privacy).toEqual({ read: true, masks: 3, notifications: 0 });
       expect(first.notes.some((note) => /^read the screen's text in \d+ frames \(.+\), into takes\/1\/screen-text\.jsonl$/.test(note))).toBe(true);
       const file = JSON.parse(readFileSync(join(dir, 'cuttle.json'), 'utf8')) as { masks: Mask[]; sources: { screenText?: string }; privacy?: { words: string[] } };
       expect(file.sources.screenText).toBe('takes/1/screen-text.jsonl');
@@ -769,11 +770,32 @@ describe.runIf(process.platform === 'win32')('cuttle suggest reads the screen (W
       const again = (await cli('--json', '-C', dir, 'suggest', '--no-crop')).json as { privacy: { masks: number }; notes: string[] };
       expect(again.privacy.masks).toBe(3);
       expect(again.notes.some((note) => note.startsWith("read the screen's text"))).toBe(false);
-      expect((await cli('--json', '-C', dir, 'suggest', '--no-crop', '--no-privacy', '--dry-run')).json).toMatchObject({ privacy: { read: false, masks: 0 } });
+      expect((await cli('--json', '-C', dir, 'suggest', '--no-crop', '--no-privacy', '--dry-run')).json).toMatchObject({ privacy: { read: false, masks: 0, notifications: 0 } });
     } finally {
       if (off !== undefined) process.env.CUTTLE_OCR = off;
     }
   }, 120_000);
+});
+
+describe('cuttle suggest masks notifications', () => {
+  it('masks a notification while it was open, and a rerun leaves the mask as it is', async () => {
+    const dir = temp();
+    mkdirSync(join(dir, 'takes', '1'), { recursive: true });
+    const made = spawnSync('ffmpeg', ['-hide_banner', '-v', 'error', '-f', 'lavfi', '-i', 'color=c=0x1e1e1e:s=1280x720:r=30:d=6', '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', '-y', join(dir, 'takes', '1', 'screen.mp4')]);
+    expect(made.status, String(made.stderr)).toBe(0);
+    // a toast in the bottom right corner from 2 to 4 s
+    const toast = (t: number, open: boolean) => ({ t, type: 'window', id: 7, kind: 'notification', rect: [880, 600, 380, 110], open });
+    writeFileSync(join(dir, 'takes', '1', 'events.jsonl'), [toast(2, true), toast(4, false)].map((event) => `${JSON.stringify(event)}\n`).join(''));
+    writeFileSync(join(dir, 'cuttle.json'), JSON.stringify({ version: 1, sources: { screen: 'takes/1/screen.mp4', events: 'takes/1/events.jsonl' } }));
+    const first = (await cli('--json', '-C', dir, 'suggest', '--no-crop')).json as { privacy: unknown; notes: string[] };
+    expect(first.privacy).toEqual({ read: false, masks: 0, notifications: 1 });
+    expect(first.notes).toContain('masked 1 notification while it was open');
+    const masks = () => (JSON.parse(readFileSync(join(dir, 'cuttle.json'), 'utf8')) as { masks: unknown[] }).masks;
+    const before = masks();
+    expect(before).toEqual([{ id: expect.any(String), label: 'Notification', from: 1.7, to: 4.3, rect: [874, 594, 392, 122], style: 'fill', auto: 'notification' }]);
+    await cli('--json', '-C', dir, 'suggest', '--no-crop');
+    expect(masks()).toEqual(before);
+  });
 });
 
 describe('cuttle frame', () => {

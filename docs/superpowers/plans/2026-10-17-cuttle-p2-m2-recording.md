@@ -4724,3 +4724,84 @@ These need a person and a real screen; the checks above never show a window or c
 3. The editor opens on the take with "Cutting the take…", then shows the cut. The take shows neither the picker, the countdown, the HUD nor the pointer going to Stop.
 4. "Record again", record a region, then "Back to take 1" in the takes menu.
 5. On a second display with another scale, if there is one: pick a window there and check the take's size.
+
+## Changes during execution
+
+The code blocks above are the original plan. Its tasks were replayed mechanically on two fresh clones
+(the second byte-identical to the prototype) and those commits were pushed. Two reviews followed: one
+of the code, which probed the hidden app (the `test` backend for every recording; only listings of
+this machine), and one of the experience, which photographed the pickers, the countdown and the HUD
+over fake desktops at several sizes and scales. They found the problems below; all are fixed in the
+commits after the plan's. The repo is the source of truth.
+
+**Main process**
+
+- **Displays at 150 % could not be recorded.** A display was matched to the recorder's monitor by
+  exact physical bounds, and `dipToScreenRect` rounds a size of 1706.67 DIP up to 2561 px, so a
+  2560×1440 display at 150 % said "The recorder does not know this display". The monitor is now the
+  one containing the display's centre (`monitorAt`), and a region is clamped to the display's pixels
+  (`toDisplayPixels`), so one drawn to the right edge is not refused.
+- **The overlays stopped at the taskbar.** Electron fits a new window into the work area; the
+  pickers and the countdown are given their bounds again after creation.
+- **A picker closed with Alt+F4 (or a crashed page) left "New recording" dead** until a restart; the
+  pick now ends on `closed` and `render-process-gone`.
+- **"Record again" while `suggest` still cut the last take** put the reloaded editor into the new
+  take. A project is busy from the pick until its cut is in the editor ("Record again once the cut is
+  in the editor"); an editor closed during the cut is not opened again.
+- **Quitting during a recording lost the take.** The quit waits until the take is stopped and written
+  into its project (the cut is left for the next open); Windows ending the session stops it too.
+- **Failures that showed nothing:** a projects folder that cannot be created, `recoverTake` or the
+  project write failing after "Record again" (the editor stayed hidden), a device listing that hangs
+  (now 10 s, then a message). Every path says what happened and shows the editor again.
+- **The check depended on the real pointer:** `app:check` clicked the picker of the display under
+  the mouse; it now records the display the test backend's first monitor maps to.
+- Smaller: an empty dated folder is no longer left by a cancel; folders are named in local time; the
+  pill comes back after a cancelled pick it hid; the picker opens on the fast window listing and the
+  cameras and mics follow (`picker:devices`); a failed cut shows "The take could not be cut · Try
+  again" instead of a spinner forever; the hidden editor's player is paused while its project records
+  again; window ids keep the handle's 32 bits (sign-extended handles stay exact); the focus goes back
+  to the picked window as the pickers close, while Cuttle may still hand it on; a camera chosen with no
+  countdown gets 0.6 s for the picker's preview to let go of it; one deleted transcript no longer
+  fails `recentClaudeFolders`; the bridge no longer replays an export's progress or end (news, not
+  states) to a late listener.
+
+**Picker, countdown and HUD**
+
+- **The bar covered the target's bottom** (a terminal's prompt line, most often). The bar goes below
+  the target when it fits in the work area, else above it and its label, else inside near its top,
+  centred on the target (`barPlacement`); the key line under it is gone, its keys moved into the
+  hint.
+- **Labels and the camera bubble ran off screen or covered small regions.** The label is clamped to
+  the display and goes inside the target when there is no room above (`labelPlacement`); the bubble
+  is sized to the target (`bubbleSize`, 48 to 120 DIP) and sits inside its bottom left; the hint moves
+  to the other top corner when it would cover the target or the label.
+- **The hint was unreadable over light windows:** it sits on the overlay's backing now.
+- **A failure mid-take showed twenty lines of ffmpeg output.** One plain sentence ("The camera stopped
+  sending video (unplugged, or taken by another app).") with the details apart (`recordingFailure`).
+- **HUD:** a fixed width, so Stop never moves; warnings in a few plain words with an amber icon and
+  the whole message in the tooltip (`hudWarning`: "Mic is silent: muted?"); the marker button
+  flashes and counts; the HUD goes outside the target (top centre, else bottom centre, else another
+  display; `hudPosition`).
+- **Picker keys:** Esc and Enter work after a menu was used (menus give the focus back); Enter on a
+  focused button records once; C, M and O toggle the camera, the mic and the stop; F6 reaches the bar.
+- **A blocking problem** (ffmpeg missing, an unknown display) turns Record off and offers "Try
+  again"; a warning (little disk space) leaves it on. Record says why it is off. "Stop on" looks like
+  a menu; Claude's folder is a button, amber when it is missing. The bar fits narrow displays (mode
+  icons only below 1200 DIP).
+- **The countdown** fits small targets (the ring shrinks, the caption hides below 220 DIP), reads over
+  white pages (a darker disc with a dark outline) and stays clear of the taskbar.
+- Copy: "When I stop", "Screen still for 10 s", "1650 × 1050 px", keys written as "Ctrl+Shift+Alt+S"
+  everywhere; "Window 2 of 3 here (Tab)"; "Point here to record this display" on the other displays;
+  "Camera busy or blocked" instead of "No preview"; turning the camera on skips virtual ones.
+
+Left for later: overlays made hidden at start for a picker under 150 ms (it opens in about a third of
+a second here); a camera busy retry inside the recorder (the 0.6 s wait covers the picker's own
+preview).
+
+**Tests.** `app:check` also closes a picker with Alt+F4 and picks again, records with a camera that
+fails (recovery), and quits during a recording (the take is in its project after the app exited).
+Unit tests cover the display matching, the clamped region, the HUD's place, the warnings and failures
+in plain words, and the picker's layout.
+
+After the fixes: `pnpm typecheck`; the node tests (374 passed, 23 skipped outside their modes);
+`pnpm app:check` (15 passed); `pnpm app:build` (3 passed).

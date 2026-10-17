@@ -12,6 +12,8 @@
     "export:check": "pnpm export:build && electron packages/export/dist/check.mjs",
     "recorder:real": "vitest run --mode real --silent=false packages/recorder/test/real.test.ts",
     "cli:build": "vite build --config apps/cli/vite.config.ts && vite build --config packages/export/electron/vite.page.config.ts --outDir ../../../apps/cli/dist/export-page",
+    "cli:install": "pnpm cli:build && node apps/cli/scripts/install.mjs",
+    "cli:uninstall": "node apps/cli/scripts/install.mjs --uninstall",
     "cli:check": "pnpm cli:build && vitest run --mode cli apps/cli/test/electron.check.test.ts",
     "cuttle": "node apps/cli/dist/cuttle.mjs"
   },

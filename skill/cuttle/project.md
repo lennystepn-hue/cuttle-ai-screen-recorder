@@ -86,7 +86,7 @@ there are not two cursors.
 
 | Type | Fields |
 |---|---|
-| `clip` | `from`, `to` (source seconds, `to` > `from`), `speed` (`1`, up to 64; above 1 a badge like "12× speed" shows), `badge` (custom badge text, `""` for none), `crop` (`{ "rect": [x, y, w, h], "enabled": true }`: the part of the screen the clip shows, e.g. a browser's page without its tabs; the window takes its shape and zooms stay inside it) |
+| `clip` | `from`, `to` (source seconds, `to` > `from`), `speed` (`1`, up to 64; above 1 a badge like "12× speed" shows), `badge` (custom badge text, `""` for none), `crop` (`{ "rect": [x, y, w, h], "enabled": true }`: the part of the screen the clip shows, e.g. a browser's page without its tabs; the window takes its shape and zooms stay inside it; `suggest` makes it, tagged `auto: "crop"`, and cuts a clip where the content area changes for good) |
 | `still` | `image` (a path, e.g. from `cuttle capture-page`), `duration` (output seconds), `motion` (`none`, `kenburns`, `scroll`: top to bottom of a tall image), `frame` (`none`, `mac-dark`, `mac-light`, `browser-light`) |
 | `card` | `title`, `subtitle` (optional), `duration` (output seconds): a title or end card on the background |
 
@@ -144,8 +144,11 @@ it is yours and the next `suggest` keeps it (switching it on or off keeps the ta
 - `takes/<n>/markers.json` lists the prompt, each tool call and Claude's answer in source seconds,
   and each press of the mistake key (kind `retake`).
 - `takes/<n>/events.jsonl` has the input: `move`, `click` and `scroll` with `x` and `y`, `keys`
-  (presses per half second, never which keys) and the pointer's `shape`; on Windows also `caret`
-  with a `rect` (where text is typed, while it is, where the app keeps a system caret).
+  (presses per half second, never which keys) and the pointer's `shape`. On Windows it also has
+  facts about the screen: `caret` with a `rect` (where text is typed, while it is, where the app
+  keeps a system caret), `area` with the `rect` of the content area of the window in front (a
+  browser's page; `null` for none), and `window` when a `dialog` or `menu` opens or closes
+  (`id`, `kind`, `rect`, `open`). No titles or text are logged.
 - `cuttle --json suggest` prints notes with source seconds (`sped up 112.9 s without input 12×
   (7.5–120.4 s)`).
 - To get from output to source seconds by hand, walk the scenes. A clip lasts

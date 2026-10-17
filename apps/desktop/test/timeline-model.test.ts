@@ -165,6 +165,13 @@ describe('activity and waveform columns', () => {
     // click at 8.2 s is cut out
     expect(activityColumns(events, spans, 0, 5, 5)).toEqual([0, 1 / 3.25, 0, 1, 0]);
     expect(activityColumns([], spans, 0, 5, 5)).toEqual([0, 0, 0, 0, 0]);
+    // facts about the screen are no input
+    const facts: InputEvent[] = [
+      { t: 1, type: 'caret', rect: [10, 10, 2, 18] },
+      { t: 1, type: 'area', rect: [0, 80, 1280, 640] },
+      { t: 1, type: 'window', id: 3, kind: 'dialog', rect: [400, 300, 400, 200], open: true },
+    ];
+    expect(activityColumns(facts, spans, 0, 5, 5)).toEqual([0, 0, 0, 0, 0]);
   });
 
   it('takes the loudest peak of the source each column plays and leaves muted clips silent', () => {

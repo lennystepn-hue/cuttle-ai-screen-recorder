@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { caretWatch, keyHandler, wheelInput } from '../src/input';
+import { caretWatch, keyHandler, wheelInput, windowWatch } from '../src/input';
 import type { HotkeyAction, RawInput } from '../src/types';
 
 // Key codes as uiohook reports them: Ctrl 29, Shift 42, Alt 56, S 31, M 50, A 30.
@@ -69,6 +69,67 @@ describe('caretWatch', () => {
     const tick = caretWatch(() => undefined, (input) => seen.push(input));
     for (let i = 1; i <= 30; i++) tick(100 + i / 30, 100);
     expect(seen).toEqual([]);
+  });
+});
+
+describe('windowWatch', () => {
+  /** A desktop whose foreground window, content area and popups the test sets. */
+  function desktop() {
+    const state = {
+      front: { id: 1, bounds: { x: 0, y: 0, width: 1000, height: 800 } } as { id: number; bounds: { x: number; y: number; width: number; height: number } } | undefined,
+      area: { x: 10, y: 100, width: 980, height: 690 } as { x: number; y: number; width: number; height: number } | undefined,
+      popups: [] as { id: number; kind: 'dialog' | 'menu'; bounds: { x: number; y: number; width: number; height: number } }[],
+      areaReads: 0,
+    };
+    const win = {
+      foreground: () => state.front,
+      contentArea: () => (state.areaReads++, state.area),
+      popups: () => state.popups,
+    };
+    return { state, win };
+  }
+
+  it('passes on the content area at once, when the window moves, and then once a second when it changed', () => {
+    const { state, win } = desktop();
+    const seen: RawInput[] = [];
+    const tick = windowWatch(win, (input) => seen.push(input));
+    let time = 0;
+    const run = (reads: number) => {
+      for (let i = 0; i < reads; i++) tick((time += 1 / 30));
+    };
+    run(1);
+    expect(seen).toEqual([{ type: 'area', time: 1 / 30, rect: { x: 10, y: 100, width: 980, height: 690 } }]);
+    // a second later, 1 px off: no change
+    state.area = { x: 11, y: 100, width: 980, height: 690 };
+    run(30);
+    expect(seen).toHaveLength(1);
+    // the window moves: the area is read at the next look at the windows
+    state.front = { id: 1, bounds: { x: 200, y: 0, width: 1000, height: 800 } };
+    state.area = { x: 210, y: 100, width: 980, height: 690 };
+    run(8);
+    expect(seen.at(-1)).toMatchObject({ type: 'area', rect: { x: 210 } });
+    // a window without one: null
+    state.front = { id: 2, bounds: { x: 0, y: 0, width: 500, height: 400 } };
+    state.area = undefined;
+    run(8);
+    expect(seen.at(-1)).toMatchObject({ type: 'area', rect: null });
+    expect(state.areaReads).toBeLessThan(8);
+  });
+
+  it('passes on each dialog or menu as it opens and closes', () => {
+    const { state, win } = desktop();
+    const seen: RawInput[] = [];
+    const tick = windowWatch(win, (input) => seen.push(input));
+    const dialog = { id: 7, kind: 'dialog' as const, bounds: { x: 300, y: 200, width: 400, height: 300 } };
+    tick(1);
+    state.popups = [dialog];
+    for (let i = 0; i < 8; i++) tick(2);
+    state.popups = [];
+    for (let i = 0; i < 8; i++) tick(3);
+    expect(seen.filter((input) => input.type === 'window')).toEqual([
+      { type: 'window', time: 2, id: 7, kind: 'dialog', rect: dialog.bounds, open: true },
+      { type: 'window', time: 3, id: 7, kind: 'dialog', rect: dialog.bounds, open: false },
+    ]);
   });
 });
 

@@ -156,7 +156,7 @@ const cancelled = (what: string) => new RecorderError('cancelled', `the recordin
 
 /** Whether a pointer event lies in one of the dead zones (keys and shapes have no position). */
 export function inDeadZone(input: RawInput, zones: readonly Bounds[]): boolean {
-  if (input.type === 'key' || input.type === 'shape') return false;
+  if (input.type === 'key' || input.type === 'shape' || input.type === 'area' || input.type === 'window') return false;
   return zones.some((zone) => input.x >= zone.x && input.x < zone.x + zone.width && input.y >= zone.y && input.y < zone.y + zone.height);
 }
 
@@ -406,7 +406,8 @@ async function recordTake({ options, control, platform, area, cameraMode, projec
         // Nothing while paused, nothing after a stop was asked for, nothing over the app's own
         // controls: no take shows the pointer travelling to Stop or its click.
         if (!capturing || control.reason !== undefined || inDeadZone(raw, control.deadZones)) return;
-        lastInput = raw.time;
+        // the facts about the screen (the content area, a window opening) are no one's input
+        if (raw.type !== 'area' && raw.type !== 'window') lastInput = raw.time;
         writer.push(raw);
       },
       (action) => (action === 'stop' ? control.request('hotkey') : action === 'pause' ? control.toggle() : action === 'retake' ? control.retake() : control.marker()),

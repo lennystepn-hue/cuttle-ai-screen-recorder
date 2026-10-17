@@ -83,6 +83,12 @@ export class EventsWriter {
       case 'caret':
         this.flushMove();
         return this.emit({ t: at, type: 'caret', rect: [x, y, input.width, input.height] });
+      case 'area':
+        this.flushMove();
+        return this.emit({ t: at, type: 'area', rect: input.rect && this.rect(input.rect) });
+      case 'window':
+        this.flushMove();
+        return this.emit({ t: at, type: 'window', id: input.id, kind: input.kind, rect: this.rect(input.rect), open: input.open });
       case 'key': {
         const window = Math.floor(t / KEY_WINDOW);
         if (this.keys?.window === window) {
@@ -112,6 +118,11 @@ export class EventsWriter {
     if (this.keys === undefined) return;
     this.emit({ t: round(this.keys.window * KEY_WINDOW), type: 'keys', count: this.keys.count });
     this.keys = undefined;
+  }
+
+  /** A desktop rect in the screen track's pixels. */
+  private rect(bounds: { x: number; y: number; width: number; height: number }): [number, number, number, number] {
+    return [bounds.x - this.origin.x, bounds.y - this.origin.y, bounds.width, bounds.height];
   }
 
   private emit(event: InputEvent): void {

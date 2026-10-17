@@ -1,6 +1,6 @@
 // The speech edits: filler words and long pauses cut out where the picture rests. Pure: the inputs
 // are the transcript, the screen's still stretches and the input events, in source seconds.
-import { SHORT_SPELLINGS, fillerLexicon, newId, normWord, type InputEvent, type TranscriptWord } from '@cuttle/project';
+import { SHORT_SPELLINGS, fillerLexicon, isFact, newId, normWord, type InputEvent, type TranscriptWord } from '@cuttle/project';
 import { gaps, union, type Span } from '../suggest/spans';
 
 export const SPEECH_EDIT_RULES = {
@@ -51,8 +51,8 @@ export function inputSpans(events: readonly InputEvent[], rules = SPEECH_EDIT_RU
   const spans: Span[] = [];
   let anchor: { x: number; y: number } | undefined;
   for (const event of events) {
-    // the pointer's shape and the caret are facts about the screen, not input
-    if (event.type === 'shape' || event.type === 'caret') continue;
+    // the pointer's shape, the caret, the content area and windows are facts about the screen, not input
+    if (isFact(event)) continue;
     if (event.type === 'move') {
       if (anchor && Math.hypot(event.x - anchor.x, event.y - anchor.y) <= rules.pointerSlack) continue;
       const first = anchor === undefined;

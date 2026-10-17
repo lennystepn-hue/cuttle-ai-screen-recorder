@@ -6,13 +6,16 @@ export function ffmpegPath(): string {
   return process.env.CUTTLE_FFMPEG || 'ffmpeg';
 }
 
-/** Runs ffmpeg and returns stdout (bytes) and stderr (text); a non-zero exit is a CoreError with the end of the log. */
-export function runFfmpeg(args: readonly string[]): Promise<{ stdout: Buffer; stderr: string }> {
+/**
+ * Runs ffmpeg and returns stdout (bytes) and stderr (text); a non-zero exit is a CoreError with the
+ * end of the log. With `onStdout`, stdout goes there as it comes (the result's is then empty).
+ */
+export function runFfmpeg(args: readonly string[], onStdout?: (chunk: Buffer) => void): Promise<{ stdout: Buffer; stderr: string }> {
   return new Promise((resolve, reject) => {
     const child = spawn(ffmpegPath(), ['-hide_banner', '-nostdin', ...args], { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
     const out: Buffer[] = [];
     let stderr = '';
-    child.stdout.on('data', (chunk: Buffer) => out.push(chunk));
+    child.stdout.on('data', (chunk: Buffer) => (onStdout ? onStdout(chunk) : out.push(chunk)));
     child.stderr.setEncoding('utf8');
     child.stderr.on('data', (chunk: string) => (stderr += chunk));
     child.on('error', (error: NodeJS.ErrnoException) =>

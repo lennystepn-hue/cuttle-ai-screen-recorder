@@ -2,12 +2,15 @@
 // `--open <folder>` (also from a second launch) opens a project. The end-to-end check passes
 // --cuttle-check with CUTTLE_HIDDEN=1 (no window is shown); CUTTLE_USER_DATA moves the settings.
 import { resolve } from 'node:path';
-import { app, Menu, session } from 'electron';
+import { app, globalShortcut, Menu, session } from 'electron';
+import { HIDDEN } from './check';
 import { mediaWorker } from './media-service';
+import { recorderHost } from './recorder-host';
+import { startPicking } from './recording';
 import { assetPath, registerSchemes } from './protocols';
 import { loadSettings, onSettingsChange } from './settings';
 import { createTray, updateTray, type TrayActions } from './tray';
-import { HIDDEN, chooseAndOpen, createPill, lockDown, openEditorOrSay, showPill } from './windows';
+import { chooseAndOpen, createPill, lockDown, openEditorOrSay, showPill } from './windows';
 
 app.setName('Cuttle');
 if (process.env.CUTTLE_USER_DATA) app.setPath('userData', resolve(process.env.CUTTLE_USER_DATA));
@@ -26,6 +29,7 @@ if (!app.requestSingleInstanceLock()) {
   Menu.setApplicationMenu(null);
 
   const actions: TrayActions = {
+    record: () => void startPicking(),
     showPill: () => void showPill(),
     open: (dir) => void (dir ? openEditorOrSay(dir) : chooseAndOpen()),
     quit: () => app.quit(),
@@ -39,7 +43,11 @@ if (!app.requestSingleInstanceLock()) {
 
   // The app lives in the tray: closing the last editor does not quit it.
   app.on('window-all-closed', () => {});
-  app.on('will-quit', () => mediaWorker.stop());
+  app.on('will-quit', () => {
+    globalShortcut.unregisterAll();
+    mediaWorker.stop();
+    recorderHost.quit();
+  });
 
   void app.whenReady().then(async () => {
     // The default session (the export's hidden window uses it) grants nothing either.
@@ -47,6 +55,8 @@ if (!app.requestSingleInstanceLock()) {
     const settings = await loadSettings();
     if (!HIDDEN) createTray(assetPath(process.platform === 'win32' ? 'tray.png' : 'tray@2x.png'), settings.recent, actions);
     await createPill();
+    // A new recording from anywhere (the recorder's own keys stop it and set markers).
+    if (!HIDDEN) globalShortcut.register('Control+Shift+Alt+R', () => void startPicking());
     const dir = openArgument(process.argv, process.cwd());
     if (dir) await openEditorOrSay(dir);
     else await showPill();

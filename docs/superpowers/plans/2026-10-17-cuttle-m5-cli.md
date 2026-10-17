@@ -4003,7 +4003,12 @@ and the Electron checks).
     of fixed height never scrolls, so sections revealed on scroll (IntersectionObserver) and lazy
     images stayed blank: the page is now scrolled through a viewport at a time (150 ms each), back
     to the top, and measured again before the capture. The check's page has such a section (it
-    stays white without the scrolling).
+    stays white without the scrolling). A second re-check found pages with `scroll-behavior:
+    smooth`, where `scrollTo` animates: the steps were too short and the capture caught the page
+    halfway back up (a fixed header 354 px down). The steps now scroll with `behavior: 'instant'`
+    and the capture waits until `scrollY` is 0; the check's page is a 7580 px landing page with
+    smooth scrolling and a fixed header. The deadline grows with the number of steps (a short
+    `--height` makes many).
   - Pages load in an in-memory session that refuses every permission and every download.
   - One deadline (the wait plus 20 s) covers everything after loading; `--width` and `--height`
     take 1 to 16384.

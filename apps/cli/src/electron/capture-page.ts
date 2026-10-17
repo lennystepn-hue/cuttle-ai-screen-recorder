@@ -75,7 +75,9 @@ export async function capturePage(options: CaptureOptions, signal: AbortSignal):
     await guard(win.loadURL(url), signal, LOAD_TIMEOUT_MS, `${options.target} did not load within ${LOAD_TIMEOUT_MS / 1000} s`).catch((error: Error) => {
       throw error instanceof CaptureError ? error : new CaptureError('invalid-media', `cannot load ${options.target}: ${error.message}`);
     });
-    const deadline = options.waitMs + CAPTURE_TIMEOUT_MS;
+    // A whole page is scrolled through first: a step per viewport, so a short viewport needs longer.
+    const scrolling = options.fullPage ? Math.ceil(MAX_PAGE_HEIGHT / options.height) * (SCROLL_STEP_MS + 100) : 0;
+    const deadline = options.waitMs + CAPTURE_TIMEOUT_MS + scrolling;
     const shot = await guard(screenshot(win, options), signal, deadline, `the capture of ${options.target} did not finish within ${deadline / 1000} s`);
     await mkdir(dirname(options.out), { recursive: true });
     await writeFile(options.out, shot.png);
@@ -105,12 +107,20 @@ async function screenshot(win: BrowserWindow, options: CaptureOptions): Promise<
   if (options.fullPage) {
     // Scroll through the page once, a viewport at a time: lazy images and sections that appear on
     // scroll (IntersectionObserver) load as for a reader. Then back to the top, and measure again.
-    const scrollTo = (y: number) => debug.sendCommand('Runtime.evaluate', { expression: `window.scrollTo(0, ${y})` });
+    // `instant` overrides a page's `scroll-behavior: smooth`, which would animate every jump.
+    const evaluate = async (expression: string) =>
+      ((await debug.sendCommand('Runtime.evaluate', { expression, returnByValue: true })) as { result?: { value?: unknown } }).result?.value;
+    const scrollTo = (y: number) => evaluate(`window.scrollTo({ top: ${y}, behavior: 'instant' })`);
     for (let y = options.height; y < (await contentHeight()); y += options.height) {
       await scrollTo(y);
       await sleep(SCROLL_STEP_MS);
     }
     await scrollTo(0);
+    // A script of the page may still be scrolling: wait (up to a second) until it rests at the top.
+    for (let tries = 0; tries < 20 && (await evaluate('window.scrollY')) !== 0; tries++) {
+      await scrollTo(0);
+      await sleep(50);
+    }
     await sleep(SCROLL_STEP_MS);
     height = await contentHeight();
   }

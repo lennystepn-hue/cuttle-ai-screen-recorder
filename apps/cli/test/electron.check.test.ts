@@ -53,21 +53,25 @@ describe.runIf(enabled)('cuttle in Electron', () => {
 
   it('captures a whole page and appends it as a scrolling still scene', () => {
     const page = join(project, 'page.html');
-    // A full-height hero (100vh) must stay one viewport tall in a whole-page capture, and a section
-    // that a script reveals when it scrolls into view (white until then, green after) must show.
+    // A landing page: smooth scrolling, a fixed header (black, 60 px), a full-height hero (100vh,
+    // red) that must stay one viewport tall, and a section a script reveals when it scrolls into
+    // view (white until then, green after), which must show.
     writeFileSync(
       page,
-      `<!doctype html><body style="margin:0"><div style="height:100vh;background:#f00"></div><div style="height:2000px;background:#00f"></div>
+      `<!doctype html><html style="scroll-behavior:smooth"><body style="margin:0">
+      <div style="position:fixed;top:0;left:0;right:0;height:60px;background:#000"></div>
+      <div style="height:100vh;background:#f00"></div><div style="height:6000px;background:#00f"></div>
       <div id="reveal" style="height:500px;background:#fff"></div>
-      <script>new IntersectionObserver((entries) => { if (entries[0].isIntersecting) reveal.style.background = '#0f0'; }).observe(reveal);</script></body>`,
+      <script>new IntersectionObserver((entries) => { if (entries[0].isIntersecting) reveal.style.background = '#0f0'; }).observe(reveal);</script></body></html>`,
     );
     const { code, json } = cuttle('-C', project, 'capture-page', page, '--scroll', '--add', '--duration', '3');
     expect(code).toBe(0);
-    expect(json).toMatchObject({ width: 1920, height: 3580, scene: { type: 'still', image: 'stills/page.png', duration: 3, motion: 'scroll', frame: 'browser-light' } });
+    expect(json).toMatchObject({ width: 1920, height: 7580, scene: { type: 'still', image: 'stills/page.png', duration: 3, motion: 'scroll', frame: 'browser-light' } });
     const png = PNG.sync.read(readFileSync(json.file as string));
-    expect([png.width, png.height]).toEqual([1920, 3580]);
+    expect([png.width, png.height]).toEqual([1920, 7580]);
     const rgb = (y: number) => [...png.data.subarray((y * png.width + 960) * 4, (y * png.width + 960) * 4 + 3)];
-    expect([rgb(1070), rgb(1090), rgb(3330)]).toEqual([[255, 0, 0], [0, 0, 255], [0, 255, 0]]);
+    // The header sits at the top (the page was scrolled back), the hero ends at 1080, the section shows.
+    expect([rgb(30), rgb(1070), rgb(1090), rgb(7330)]).toEqual([[0, 0, 0], [255, 0, 0], [0, 0, 255], [0, 255, 0]]);
   }, 120_000);
 
   it('renders the project with its still scene to 1:1', () => {

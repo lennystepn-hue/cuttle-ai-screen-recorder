@@ -1,5 +1,6 @@
 // Cuttle's icon set: 16 px, 1.6 px strokes, drawn for Cuttle.
 import type { ReactElement, SVGProps } from 'react';
+import { MARK_EYE, MARK_PATH, MARK_VIEW_BOX } from './mark';
 
 type IconProps = { size?: number } & Omit<SVGProps<SVGSVGElement>, 'children'>;
 
@@ -90,11 +91,13 @@ export const RecordIcon = icon(<circle cx="8" cy="8" r="5" />, true);
 export const ChevronIcon = icon(<path d="m4.5 6 3.5 3.5L11.5 6" />);
 
 /** Cuttle's mark: an orange tile with a dark arrow. */
+/** Cuttle's mark: the cuttlefish of its icons (tools/icons.mjs) on the brand's orange tile. */
 export function Mark({ size = 22 }: { size?: number }) {
   return (
-    <span className="mark" style={{ width: size, height: size, borderRadius: size * 0.32 }} aria-hidden="true">
-      <svg width={size * 0.55} height={size * 0.55} viewBox="0 0 12 12">
-        <path d="M2 2h5l3 4-3 4H2z" fill="#1b0f0a" />
+    <span className="mark" style={{ width: size, height: size, borderRadius: size * 0.3 }} aria-hidden="true">
+      <svg width={size * 0.8} height={size * 0.56} viewBox={MARK_VIEW_BOX}>
+        <path d={MARK_PATH} fill="#1b0f0a" />
+        <circle cx={MARK_EYE.cx} cy={MARK_EYE.cy} r={MARK_EYE.r} fill="#fff1e6" />
       </svg>
     </span>
   );

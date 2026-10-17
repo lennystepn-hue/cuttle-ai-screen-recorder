@@ -1,22 +1,26 @@
-// Draws Cuttle's macOS icons into apps/desktop/assets/: icon.icns (the app, 16–1024 px),
-// icon-mac.png (1024 px, the Dock icon while developing) and trayTemplate.png / trayTemplate@2x.png
-// (the menu bar; a template image, which macOS tints for light and dark menu bars).
+// Draws Cuttle's icons for both platforms into apps/desktop/assets/, and the app's own mark into
+// apps/desktop/src/renderer/mark.ts:
+// - Windows: icon.ico (16–256 px), icon.png (256 px, the windows' icon) and tray.png / tray@2x.png;
+// - macOS: icon.icns (16–1024 px), icon-mac.png (1024 px, the Dock icon while developing) and
+//   trayTemplate.png / trayTemplate@2x.png (a template image, tinted for light and dark menu bars).
 //
-// The mark is the Windows icon's dark arrow grown into a cuttlefish darting forward: the arrow is
-// its mantle with a frilled fin, the arms trail behind, the eye has a cuttlefish's W-shaped pupil,
-// and two dashed cut lines run across it. It sits on the brand's orange tile, shaped and lit like a
-// macOS icon (a squircle on the 1024 grid with a glass highlight).
+// The mark is the brand's dark arrow grown into a cuttlefish darting forward: the arrow is its
+// mantle with a frilled fin, the arms trail behind, the eye has a cuttlefish's W-shaped pupil, and
+// two dashed cut lines run across it, on the brand's orange tile. macOS gets it shaped and lit like a
+// macOS icon (a squircle on the 1024 grid with a glass highlight), Windows a full tile; at 32 px and
+// below, where the details blur, the cuttlefish is a plain silhouette.
 //
-// The design is SVG, rendered in an offscreen Electron window; iconutil (macOS only) packs the icns.
-// Run with `pnpm icons:mac`.
+// The design is SVG, rendered in an offscreen Electron window; iconutil packs the icns (on macOS
+// only: elsewhere the icns is left as it is). Run with `pnpm icons`.
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { app, BrowserWindow } from 'electron';
 
 const OUT = fileURLToPath(new URL('../apps/desktop/assets/', import.meta.url));
+const MARK = fileURLToPath(new URL('../apps/desktop/src/renderer/mark.ts', import.meta.url));
 const INK = '#1b0f0a';
 const CREAM = '#fff1e6';
 const ORANGE = '#f0956f';
@@ -104,9 +108,9 @@ const ARMS = [
   [[[452, 604], [372, 628], [326, 700], [252, 690]], 42, 11],
 ];
 
-function appIcon() {
-  const tile = squircle(512, 512, 412);
-  const cuttlefish = `
+/** The cuttlefish in full, on the 1024 grid: fin, arms, mantle, cut lines and eye. */
+function cuttlefish() {
+  return `
     <path d="${fin(FIN_LINE, { base: 15, ripple: 11, wave: 58 })}" fill="#6b2a16" opacity="0.78"/>
     <g fill="${INK}">${ARMS.map(([curve, from, to]) => arm(curve, from, to)).join('')}</g>
     <path d="${MANTLE}" fill="url(#mantle)"/>
@@ -117,12 +121,15 @@ function appIcon() {
     <circle cx="500" cy="472" r="44" fill="${CREAM}"/>
     <path d="M474 464c6 22 19 22 26 6c7 16 20 16 26-6" fill="none" stroke="${INK}" stroke-width="11" stroke-linecap="round" stroke-linejoin="round"/>
     <circle cx="484" cy="449" r="7" fill="#fff"/>`;
-  const bubbles = `
+}
+
+const BUBBLES = `
     <g fill="none" stroke="${CREAM}" stroke-width="7" opacity="0.85">
       <circle cx="300" cy="262" r="19"/><circle cx="352" cy="210" r="12"/><circle cx="258" cy="200" r="8"/>
     </g>`;
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
-  <defs>
+
+/** The gradients and shadows both platforms' tiles use. */
+const DEFS = `
     <linearGradient id="tile" x1="0" y1="0" x2="1" y2="1">
       <stop offset="0" stop-color="#f7a985"/><stop offset="0.5" stop-color="#e57b55"/><stop offset="1" stop-color="#b8492f"/>
     </linearGradient>
@@ -144,34 +151,100 @@ function appIcon() {
     </filter>
     <filter id="lift" x="-20%" y="-20%" width="140%" height="140%">
       <feDropShadow dx="0" dy="10" stdDeviation="12" flood-color="#5a1d0c" flood-opacity="0.3"/>
-    </filter>
+    </filter>`;
+
+/** macOS: the squircle on the 1024 grid, its shadow, a glass highlight and rim. */
+function appIcon() {
+  const tile = squircle(512, 512, 412);
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <defs>${DEFS}
     <clipPath id="clip"><path d="${tile}"/></clipPath>
   </defs>
   <path d="${tile}" fill="url(#tile)" filter="url(#shadow)"/>
   <g clip-path="url(#clip)">
     <rect width="1024" height="1024" fill="url(#glow)"/>
-    ${bubbles}
-    <g filter="url(#lift)" transform="translate(512 512) scale(1.08) translate(-506 -512)">${cuttlefish}</g>
+    ${BUBBLES}
+    <g filter="url(#lift)" transform="translate(512 512) scale(1.08) translate(-506 -512)">${cuttlefish()}</g>
     <rect width="1024" height="1024" fill="url(#gloss)"/>
   </g>
   <path d="${squircle(512, 512, 409)}" fill="none" stroke="url(#rim)" stroke-width="5"/>
 </svg>`;
 }
 
-/** The menu bar's mark: the cuttlefish alone (mantle and three thicker arms), black, its eye cut out. */
-function trayIcon() {
-  const arms = [
-    [[[452, 430], [372, 404], [330, 350], [262, 356]], 74, 34],
-    [[[446, 512], [360, 518], [310, 500], [236, 516]], 78, 36],
-    [[[452, 594], [372, 620], [330, 674], [262, 668]], 74, 34],
-  ];
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="220 300 610 424">
-  <defs><mask id="eye"><rect x="0" y="0" width="1024" height="1024" fill="#fff"/><circle cx="508" cy="474" r="46" fill="#000"/></mask></defs>
-  <g fill="#000" mask="url(#eye)">
-    <path d="${MANTLE}"/>
-    ${arms.map(([curve, from, to]) => arm(curve, from, to)).join('')}
+/** Windows: a full rounded tile (Windows draws no plate of its own), the cuttlefish larger in it. */
+function tileIcon() {
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <defs>${DEFS}
+    <clipPath id="clip"><rect x="16" y="16" width="992" height="992" rx="196"/></clipPath>
+  </defs>
+  <g clip-path="url(#clip)">
+    <rect width="1024" height="1024" fill="url(#tile)"/>
+    <rect width="1024" height="1024" fill="url(#glow)"/>
+    <g transform="translate(-40 -40) scale(1.08)">${BUBBLES}</g>
+    <g filter="url(#lift)" transform="translate(512 512) scale(1.18) translate(-506 -512)">${cuttlefish()}</g>
+    <rect width="1024" height="1024" fill="url(#gloss)" opacity="0.6"/>
   </g>
 </svg>`;
+}
+
+/** The silhouette's arms: three, thick enough for 16 px. */
+const SILHOUETTE_ARMS = [
+  [[[452, 430], [372, 404], [330, 350], [262, 356]], 74, 34],
+  [[[446, 512], [360, 518], [310, 500], [236, 516]], 78, 36],
+  [[[452, 594], [372, 620], [330, 674], [262, 668]], 74, 34],
+];
+/** The silhouette's box on the 1024 grid, and its eye. */
+const SILHOUETTE_BOX = '220 300 610 424';
+const SILHOUETTE_EYE = { cx: 508, cy: 474, r: 46 };
+const silhouette = (fill) => `<path d="${MANTLE}" fill="${fill}"/><g fill="${fill}">${SILHOUETTE_ARMS.map(([curve, from, to]) => arm(curve, from, to, 12)).join('')}</g>`;
+
+/** Windows at 32 px and below, and its tray: the silhouette on the orange tile, a cream eye. */
+function smallTile() {
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <defs>${DEFS}</defs>
+  <rect width="1024" height="1024" rx="230" fill="url(#tile)"/>
+  <g transform="translate(512 520) scale(1.38) translate(-525 -512)">${silhouette(INK)}<circle cx="${SILHOUETTE_EYE.cx}" cy="${SILHOUETTE_EYE.cy}" r="${SILHOUETTE_EYE.r}" fill="${CREAM}"/></g>
+</svg>`;
+}
+
+/** macOS's menu bar: the silhouette alone, black, its eye cut out. */
+function trayIcon() {
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${SILHOUETTE_BOX}">
+  <defs><mask id="eye"><rect x="0" y="0" width="1024" height="1024" fill="#fff"/><circle cx="${SILHOUETTE_EYE.cx}" cy="${SILHOUETTE_EYE.cy}" r="${SILHOUETTE_EYE.r}" fill="#000"/></mask></defs>
+  <g mask="url(#eye)">${silhouette('#000')}</g>
+</svg>`;
+}
+
+/** The app's own mark (titles, the pill, the settings): the silhouette's paths, for icons.tsx. */
+function markModule() {
+  const paths = SILHOUETTE_ARMS.map(([curve, from, to]) => arm(curve, from, to, 12)).join('');
+  const d = [MANTLE, ...[...paths.matchAll(/d="([^"]+)"/g)].map((match) => match[1])];
+  const circles = [...paths.matchAll(/<circle cx="([\d.]+)" cy="([\d.]+)" r="([\d.]+)"\/>/g)].map((match) => `M${match[1] - match[3]} ${match[2]}a${match[3]} ${match[3]} 0 1 0 ${2 * match[3]} 0a${match[3]} ${match[3]} 0 1 0 ${-2 * match[3]} 0Z`);
+  return `// Generated by tools/icons.mjs (pnpm icons): the cuttlefish of Cuttle's icons as the app's own mark.
+export const MARK_VIEW_BOX = '${SILHOUETTE_BOX}';
+export const MARK_PATH = '${[...d, ...circles].join('')}';
+export const MARK_EYE = { cx: ${SILHOUETTE_EYE.cx}, cy: ${SILHOUETTE_EYE.cy}, r: ${SILHOUETTE_EYE.r} };
+`;
+}
+
+/** An .ico of PNGs (each size its own image, as Windows picks them). */
+function ico(images) {
+  const header = Buffer.alloc(6 + 16 * images.length);
+  header.writeUInt16LE(0, 0);
+  header.writeUInt16LE(1, 2);
+  header.writeUInt16LE(images.length, 4);
+  let offset = header.length;
+  images.forEach(({ size, png }, i) => {
+    const entry = 6 + 16 * i;
+    header[entry] = size >= 256 ? 0 : size;
+    header[entry + 1] = size >= 256 ? 0 : size;
+    header.writeUInt16LE(1, entry + 4);
+    header.writeUInt16LE(32, entry + 6);
+    header.writeUInt32LE(png.length, entry + 8);
+    header.writeUInt32LE(offset, entry + 12);
+    offset += png.length;
+  });
+  return Buffer.concat([header, ...images.map(({ png }) => png)]);
 }
 
 /** Renders SVGs at their sizes in one offscreen window, through a page in a temporary folder. */
@@ -197,20 +270,40 @@ async function main() {
   mkdirSync(OUT, { recursive: true });
   const work = mkdtempSync(join(tmpdir(), 'cuttle-icons-'));
   const { render, close } = renderer(work);
+  const wrote = [];
   try {
+    // Windows: the full tile, the silhouette at 32 px and below
+    const tile = tileIcon();
+    const small = smallTile();
+    const images = [];
+    for (const size of [16, 24, 32, 48, 64, 128, 256]) images.push({ size, png: await render(size <= 32 ? small : tile, size) });
+    writeFileSync(join(OUT, 'icon.ico'), ico(images));
+    writeFileSync(join(OUT, 'icon.png'), images.at(-1).png);
+    writeFileSync(join(OUT, 'tray.png'), await render(small, 16));
+    writeFileSync(join(OUT, 'tray@2x.png'), await render(small, 32));
+    wrote.push('icon.ico', 'icon.png', 'tray.png', 'tray@2x.png');
+
+    // macOS: the squircle, packed by iconutil where there is one
     const icon = appIcon();
-    const iconset = join(work, 'icon.iconset');
-    mkdirSync(iconset);
-    for (const size of [16, 32, 128, 256, 512]) {
-      writeFileSync(join(iconset, `icon_${size}x${size}.png`), await render(icon, size));
-      writeFileSync(join(iconset, `icon_${size}x${size}@2x.png`), await render(icon, size * 2));
-    }
     writeFileSync(join(OUT, 'icon-mac.png'), await render(icon, 1024));
-    execFileSync('iconutil', ['-c', 'icns', iconset, '-o', join(OUT, 'icon.icns')]);
     const tray = trayIcon();
     writeFileSync(join(OUT, 'trayTemplate.png'), await render(tray, 16));
     writeFileSync(join(OUT, 'trayTemplate@2x.png'), await render(tray, 32));
-    console.log('wrote apps/desktop/assets: icon.icns, icon-mac.png, trayTemplate.png, trayTemplate@2x.png');
+    wrote.push('icon-mac.png', 'trayTemplate.png', 'trayTemplate@2x.png');
+    if (process.platform === 'darwin' && existsSync('/usr/bin/iconutil')) {
+      const iconset = join(work, 'icon.iconset');
+      mkdirSync(iconset);
+      for (const size of [16, 32, 128, 256, 512]) {
+        writeFileSync(join(iconset, `icon_${size}x${size}.png`), await render(icon, size));
+        writeFileSync(join(iconset, `icon_${size}x${size}@2x.png`), await render(icon, size * 2));
+      }
+      execFileSync('iconutil', ['-c', 'icns', iconset, '-o', join(OUT, 'icon.icns')]);
+      wrote.push('icon.icns');
+    } else {
+      console.log('icon.icns is left as it is: iconutil runs on macOS only');
+    }
+    writeFileSync(MARK, markModule());
+    console.log(`wrote apps/desktop/assets: ${wrote.join(', ')}; and apps/desktop/src/renderer/mark.ts`);
   } finally {
     close();
     rmSync(work, { recursive: true, force: true });

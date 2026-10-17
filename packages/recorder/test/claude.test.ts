@@ -1,9 +1,9 @@
-import { appendFileSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { appendFileSync, mkdirSync, mkdtempSync, utimesSync, writeFileSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
-import { claudeTranscriptDir, readTranscriptLine, SessionReader, watchClaude, type ClaudeSignal } from '../src/claude';
+import { claudeTranscriptDir, readTranscriptLine, recentClaudeFolders, SessionReader, watchClaude, type ClaudeSignal } from '../src/claude';
 
 afterEach(() => vi.unstubAllEnvs());
 const dirs: string[] = [];
@@ -172,5 +172,30 @@ describe('watchClaude', () => {
     await sleep(400);
     watcher.stop();
     expect(kinds()).toEqual(['prompt']);
+  });
+});
+
+describe('recentClaudeFolders', () => {
+  it('lists the folders Claude Code ran in, the most recently active first, skipping folders that are gone', async () => {
+    const config = temp('claude-config-');
+    const [older, newer, gone] = [temp('older-'), temp('newer-'), join(tmpdir(), 'cuttle-no-such-folder')];
+    const transcript = (cwd: string, name: string, seconds: number) => {
+      const dir = claudeTranscriptDir(cwd, config);
+      mkdirSync(dir, { recursive: true });
+      const file = join(dir, name);
+      writeFileSync(file, `${line({ type: 'user', cwd, message: { content: 'hi' } })}
+not json
+`);
+      utimesSync(file, seconds, seconds);
+    };
+    transcript(older, 'a.jsonl', 1_000_000);
+    transcript(newer, 'b.jsonl', 2_000_000);
+    transcript(gone, 'c.jsonl', 3_000_000);
+    expect(await recentClaudeFolders(5, config)).toEqual([
+      { cwd: newer, active: 2_000_000 },
+      { cwd: older, active: 1_000_000 },
+    ]);
+    expect(await recentClaudeFolders(1, config)).toHaveLength(1);
+    expect(await recentClaudeFolders(5, join(config, 'nothing'))).toEqual([]);
   });
 });

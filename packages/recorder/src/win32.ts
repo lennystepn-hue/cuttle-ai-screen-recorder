@@ -9,6 +9,8 @@ export interface Win32 {
   windows(): WindowInfo[];
   /** The pointer in physical desktop pixels, like the input hook's events. */
   cursorPosition(): { x: number; y: number };
+  /** Brings a window (`WindowInfo.id`) to the front; false when it is gone or Windows refused. */
+  focus(id: number): boolean;
   cursorShape(): CursorShape;
 }
 
@@ -31,6 +33,8 @@ const WS_EX_TOOLWINDOW = 0x80;
 const DWMWA_EXTENDED_FRAME_BOUNDS = 9;
 const DWMWA_CLOAKED = 14;
 const MONITOR_DEFAULTTONULL = 0;
+/** The desktop (Progman, WorkerW) and the taskbars pass the other filters, but are no window to record. */
+export const SHELL_CLASSES = new Set(['Progman', 'WorkerW', 'Shell_TrayWnd', 'Shell_SecondaryTrayWnd']);
 // IID_IDXGIFactory1 {770aae78-f26f-4dba-a829-253c83d1b387}
 const IID_IDXGIFactory1 = { Data1: 0x770aae78, Data2: 0xf26f, Data3: 0x4dba, Data4: [0xa8, 0x29, 0x25, 0x3c, 0x83, 0xd1, 0xb3, 0x87] };
 /** System cursor ids (`IDC_*`) and the shape each stands for; anything else is drawn as `arrow`. */
@@ -91,6 +95,10 @@ async function create(): Promise<Win32> {
   const GetWindowTextLengthW = user32.func('__stdcall', 'GetWindowTextLengthW', 'int', ['void *']);
   const GetWindowTextW = user32.func('__stdcall', 'GetWindowTextW', 'int', ['void *', 'void *', 'int']);
   const GetWindowThreadProcessId = user32.func('__stdcall', 'GetWindowThreadProcessId', 'uint32', ['void *', koffi.out(koffi.pointer('uint32'))]);
+  const GetClassNameW = user32.func('__stdcall', 'GetClassNameW', 'int', ['void *', 'void *', 'int']);
+  // A window id (the HWND's address) goes in as an integer.
+  const SetForegroundWindow = user32.func('__stdcall', 'SetForegroundWindow', 'int', ['intptr_t']);
+  const IsWindow = user32.func('__stdcall', 'IsWindow', 'int', ['intptr_t']);
   const MonitorFromWindow = user32.func('__stdcall', 'MonitorFromWindow', 'void *', ['void *', 'uint32']);
   const GetConsoleWindow = kernel32.func('__stdcall', 'GetConsoleWindow', 'void *', []);
   const GetConsoleTitleW = kernel32.func('__stdcall', 'GetConsoleTitleW', 'uint32', ['void *', 'uint32']);
@@ -176,6 +184,9 @@ async function create(): Promise<Win32> {
       const pid = [0];
       GetWindowThreadProcessId(hwnd, pid);
       if (pid[0] === process.pid || (ownConsole !== 0n && koffi.address(hwnd) === ownConsole)) return 1;
+      const classBuffer = Buffer.alloc(512);
+      const className = classBuffer.toString('utf16le', 0, GetClassNameW(hwnd, classBuffer, 256) * 2);
+      if (SHELL_CLASSES.has(className)) return 1;
       // Cloaked: on another virtual desktop, or a suspended UWP app that is "visible" but not shown.
       if (DwmGetWindowAttribute(hwnd, DWMWA_CLOAKED, cloaked, 4) >= 0 && cloaked.readUInt32LE(0) !== 0) return 1;
       const length = GetWindowTextLengthW(hwnd);
@@ -188,7 +199,8 @@ async function create(): Promise<Win32> {
       if (DwmGetWindowAttribute(hwnd, DWMWA_EXTENDED_FRAME_BOUNDS, rect, 16) < 0) return 1;
       const [left, top, right, bottom] = [0, 4, 8, 12].map((offset) => rect.readInt32LE(offset)) as [number, number, number, number];
       if (right - left < 2 || bottom - top < 2) return 1;
-      found.push({ title, bounds: { x: left, y: top, width: right - left, height: bottom - top }, monitor });
+      // A window handle has 32 significant bits (64-bit Windows sign-extends it): the id is those, unsigned.
+      found.push({ id: Number(BigInt.asUintN(32, koffi.address(hwnd))), pid: pid[0]!, className, title, bounds: { x: left, y: top, width: right - left, height: bottom - top }, monitor });
       return 1;
     }, koffi.pointer(WNDENUMPROC));
     try {
@@ -207,6 +219,10 @@ async function create(): Promise<Win32> {
     cursorPosition() {
       GetPhysicalCursorPos(point);
       return { x: point.x, y: point.y };
+    },
+    focus(id) {
+      const handle = id >= 2 ** 31 ? id - 2 ** 32 : id;
+      return IsWindow(handle) !== 0 && SetForegroundWindow(handle) !== 0;
     },
     cursorShape() {
       if (!GetCursorInfo(info) || info.hCursor === null) return 'arrow';

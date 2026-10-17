@@ -16,9 +16,9 @@ export function Pill() {
     <div className="pill-wrap">
       <div className="pill" role="toolbar" aria-label="Cuttle">
         <Mark size={36} />
-        <button className="main" disabled title="Recording from the app is coming soon. Record with the cuttle record command for now.">
+        <button className="main" onClick={() => void bridge.invoke('pill:record')} title="Pick a screen, a window or a region (Ctrl+Shift+Alt+R)" data-testid="new-recording">
           <i />
-          New recording
+          New recording <kbd>Ctrl Shift Alt R</kbd>
         </button>
         <button onClick={() => void bridge.invoke('pill:open')} title="Open a project folder">
           <FolderIcon size={15} />

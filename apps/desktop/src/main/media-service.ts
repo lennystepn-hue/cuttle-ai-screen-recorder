@@ -117,6 +117,11 @@ class Worker {
 
 export const mediaWorker = new Worker();
 
+/** Cuts a project's take with `suggest` (in the media worker); its hash-checked write never overwrites a newer save. */
+export async function cutTake(dir: string): Promise<void> {
+  await mediaWorker.run({ job: 'suggest', input: dir, output: '' }, () => {}).promise;
+}
+
 async function sourceKey(path: string, file: string): Promise<SourceKey | undefined> {
   try {
     const info = await stat(path);

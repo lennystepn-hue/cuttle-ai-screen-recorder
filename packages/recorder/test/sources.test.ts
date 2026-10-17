@@ -9,10 +9,10 @@ const devices: Devices = {
     { index: 2, name: 'DISPLAY3', bounds: { x: -1080, y: -335, width: 1080, height: 1920 }, scale: 1, primary: false },
   ],
   windows: [
-    { title: 'Claude Code - demo', bounds: { x: 2600, y: 600, width: 801, height: 501 }, monitor: 1 },
-    { title: 'Editor', bounds: { x: -1200, y: 100, width: 700, height: 400 }, monitor: 2 },
-    { title: 'Browser - docs', bounds: { x: 10, y: 10, width: 100, height: 100 }, monitor: 0 },
-    { title: 'Browser - mail', bounds: { x: 10, y: 10, width: 100, height: 100 }, monitor: 0 },
+    { id: 11, pid: 100, className: 'CASCADIA_HOSTING_WINDOW_CLASS', title: 'Claude Code - demo', bounds: { x: 2600, y: 600, width: 801, height: 501 }, monitor: 1 },
+    { id: 12, pid: 200, className: 'Chrome_WidgetWin_1', title: 'Editor', bounds: { x: -1200, y: 100, width: 700, height: 400 }, monitor: 2 },
+    { id: 13, pid: 300, className: 'Chrome_WidgetWin_1', title: 'Browser - docs', bounds: { x: 10, y: 10, width: 100, height: 100 }, monitor: 0 },
+    { id: 14, pid: 300, className: 'Chrome_WidgetWin_1', title: 'Browser - mail', bounds: { x: 10, y: 10, width: 100, height: 100 }, monitor: 0 },
   ],
   cameras: ['Cam'],
   mics: ['Mic (USB)'],
@@ -80,6 +80,11 @@ describe('resolveArea', () => {
       expect.objectContaining({ code: 'invalid-options', message: '"browser" matches 2 windows: "Browser - docs", "Browser - mail"' }),
     );
     expect(() => resolveArea({ kind: 'window', title: 'Terminal' }, devices)).toThrow(expect.objectContaining({ code: 'device-not-found' }));
+  });
+
+  it('finds a window by its id, whatever its title, and says when it is gone', () => {
+    expect(resolveArea({ kind: 'window', id: 14 }, devices)).toEqual(resolveArea({ kind: 'window', title: 'Browser - docs' }, devices));
+    expect(() => resolveArea({ kind: 'window', id: 99 }, devices)).toThrow(expect.objectContaining({ code: 'device-not-found', message: 'the window 99 is gone (closed, minimized or on another desktop)' }));
   });
 
   it('refuses a title that two windows have exactly', () => {

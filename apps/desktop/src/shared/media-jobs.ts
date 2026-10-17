@@ -22,7 +22,14 @@ export interface PeaksJob {
   output: string;
 }
 
-export type MediaJob = ProxyJob | ThumbnailsJob | PeaksJob;
+/** `suggest` on a project (`input`: its folder): it decodes the whole take, so it runs here, not in the main process. */
+export interface SuggestJob {
+  job: 'suggest';
+  input: string;
+  output: string;
+}
+
+export type MediaJob = ProxyJob | ThumbnailsJob | PeaksJob | SuggestJob;
 
 export interface ThumbnailsMeta {
   interval: number;

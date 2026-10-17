@@ -9,7 +9,8 @@ import { makeFixture } from './fixture';
 
 /**
  * The unpacked app (pnpm app:build) starts from its folder, opens a project, draws its first frame,
- * and runs the media worker from inside the asar archive. Runs only with vitest --mode build.
+ * runs the media worker from inside the asar archive, and starts the recorder host, whose native
+ * modules (koffi, uiohook-napi) load from outside it. Runs only with vitest --mode build.
  */
 const enabled = process.env.MODE === 'build';
 const EXE = fileURLToPath(new URL(`../build/Cuttle-${process.platform}-${process.arch}/Cuttle${process.platform === 'win32' ? '.exe' : ''}`, import.meta.url));
@@ -55,4 +56,19 @@ describe.runIf(enabled)('the unpacked Cuttle app', () => {
       { timeout: 60_000 },
     );
   }, 90_000);
+
+  it("lists this machine's displays and windows in the recorder host (koffi loads)", async () => {
+    const pill = app.windows().find((page) => page.url().includes('/pill.html'))!;
+    await pill.evaluate(() => (window as unknown as { cuttle: { invoke(channel: string): Promise<unknown> } }).cuttle.invoke('pill:record'));
+    let picker: Page | undefined;
+    await expect.poll(() => (picker = app.windows().find((page) => page.url().includes('/picker.html'))), { timeout: 30_000 }).toBeDefined();
+    await picker!.waitForSelector('[data-testid=picker]', { timeout: 30_000 });
+    const setup = await picker!.evaluate(() =>
+      (window as unknown as { cuttle: { invoke(channel: string): Promise<{ display: { monitor?: number }; problem?: string } | undefined> } }).cuttle.invoke('picker:setup'),
+    );
+    // Only the names and bounds are read; nothing is captured.
+    expect(setup?.problem).toBeUndefined();
+    expect(setup?.display.monitor).toBeTypeOf('number');
+    await picker!.evaluate(() => (window as unknown as { cuttle: { invoke(channel: string): Promise<unknown> } }).cuttle.invoke('picker:cancel')).catch(() => {});
+  }, 60_000);
 });

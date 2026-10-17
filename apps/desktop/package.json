@@ -9,6 +9,7 @@
     "@cuttle/engine": "workspace:*",
     "@cuttle/export": "workspace:*",
     "@cuttle/project": "workspace:*",
+    "@cuttle/recorder": "workspace:*",
     "@cuttle/timeline": "workspace:*",
     "@fontsource/inter": "5.3.0",
     "koffi": "3.3.2",

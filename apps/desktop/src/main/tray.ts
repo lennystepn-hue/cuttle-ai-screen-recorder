@@ -5,14 +5,16 @@ import type { Settings } from './settings';
 const label = (entry: { dir: string; name: string }) => `${entry.name} — ${entry.dir.split(/[\\/]/).at(-2) ?? ''}`;
 
 export interface TrayActions {
+  record(): void;
   showPill(): void;
   open(dir?: string): void;
   quit(): void;
 }
 
-/** The tray menu: show the pill, the recent projects, open a folder, quit. */
+/** The tray menu: a new recording, show the pill, the recent projects, open a folder, quit. */
 export function trayMenu(recent: Settings['recent'], actions: TrayActions): MenuItemConstructorOptions[] {
   return [
+    { label: 'New recording', accelerator: 'Control+Shift+Alt+R', click: () => actions.record() },
     { label: 'Show Cuttle', click: () => actions.showPill() },
     { type: 'separator' },
     ...(recent.length === 0

@@ -21,6 +21,14 @@
 .titlebar .seg {
   -webkit-app-region: no-drag;
 }
+.titlebar .seg button {
+  white-space: nowrap;
+}
+.chip-status .chip-text {
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .project-name {
   display: flex;
   align-items: baseline;
@@ -868,6 +876,13 @@ button.chip-status:hover {
     appear 1ms 400ms backwards,
     spin 900ms linear infinite;
   margin: 0 auto;
+}
+
+.spinner.small {
+  width: 12px;
+  height: 12px;
+  border-width: 2px;
+  margin: 0;
 }
 
 @keyframes spin {

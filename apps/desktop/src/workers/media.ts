@@ -3,7 +3,7 @@
 // the main process queues them.
 import { spawn, type ChildProcess } from 'node:child_process';
 import { rename, rm, writeFile } from 'node:fs/promises';
-import { ffmpegPath, probeScreen, streamSeconds } from '@cuttle/core';
+import { ffmpegPath, probeScreen, streamSeconds, suggestProject } from '@cuttle/core';
 import {
   PEAKS_SAMPLE_RATE,
   PeakFolder,
@@ -99,6 +99,10 @@ async function run(id: number, job: MediaJob): Promise<ThumbnailsMeta | undefine
         }),
       );
       return meta;
+    }
+    case 'suggest': {
+      await suggestProject(job.input, { onStatus: () => reply({ id, progress: 0 }) });
+      return undefined;
     }
     case 'peaks': {
       const seconds = await streamSeconds(job.input, 'a');

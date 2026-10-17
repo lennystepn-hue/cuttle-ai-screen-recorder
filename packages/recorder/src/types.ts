@@ -19,6 +19,12 @@ export interface Monitor {
 }
 
 export interface WindowInfo {
+  /** The window's handle (HWND) as a number: unique while the window exists. */
+  id: number;
+  /** The process that owns it. */
+  pid: number;
+  /** Its window class, e.g. `CASCADIA_HOSTING_WINDOW_CLASS`. */
+  className: string;
   title: string;
   /** The visible frame without the invisible resize border. */
   bounds: Bounds;
@@ -39,8 +45,9 @@ export type CaptureSource =
   | { kind: 'monitor'; index: number }
   /** `rect` is `[x, y, width, height]` in pixels of that monitor (origin at its top-left corner). */
   | { kind: 'region'; rect: Rect; monitor: number }
-  /** Captured as the region of the window's bounds when the recording starts. */
-  | { kind: 'window'; title: string };
+  /** Captured as the region of the window's bounds when the recording starts; by title or by id (`WindowInfo.id`). */
+  | { kind: 'window'; title: string }
+  | { kind: 'window'; id: number };
 
 export interface StopOptions {
   /** Stops this many seconds after the screen track's first frame. */
@@ -73,6 +80,11 @@ export interface RecordOptions {
   drawMouse?: boolean;
   /** `test`: ffmpeg test sources and synthetic input instead of real devices (default `auto`). */
   backend?: Backend;
+  /**
+   * Desktop areas (physical pixels) whose pointer input is not logged: the app's own controls, such
+   * as a recording HUD, so no take shows the pointer going to them or a click on Stop.
+   */
+  deadZones?: Bounds[];
   onEvent?: (event: RecorderEvent) => void;
 }
 
@@ -80,6 +92,8 @@ export type StopReason = 'stop' | 'hotkey' | 'max-seconds' | 'file' | 'idle' | '
 
 export type RecorderEvent =
   | { type: 'countdown'; seconds: number }
+  /** The capture processes started (ffmpeg's process ids), so a host that dies can be cleaned up after. */
+  | { type: 'processes'; pids: number[] }
   /** Every track is capturing; `dir` is the take folder relative to the project. */
   | { type: 'recording'; dir: string }
   | { type: 'marker'; marker: Marker }
@@ -106,6 +120,8 @@ export interface Recording {
   stop(): Promise<Take>;
   /** Adds a manual marker at the current time. */
   marker(label?: string): void;
+  /** Replaces the dead zones (`RecordOptions.deadZones`), e.g. after the HUD was dragged. */
+  setDeadZones(zones: Bounds[]): void;
   /** Resolves when the recording has stopped for any reason; rejects with a `RecorderError`. */
   done: Promise<Take>;
 }

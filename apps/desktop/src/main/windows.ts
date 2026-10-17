@@ -1,24 +1,21 @@
 import { createHash } from 'node:crypto';
-import { realpath, stat } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
+import { copyFile, readdir, readFile, realpath, stat } from 'node:fs/promises';
 import { basename, dirname, join, resolve } from 'node:path';
 import { app, BrowserWindow, dialog, Menu, screen, session, shell, type Session, type WebContents } from 'electron';
-import { PROJECT_FILE, type ProjectFile } from '@cuttle/core';
+import { PROJECT_FILE, writeProjectFile, type ProjectFile } from '@cuttle/core';
 import { plainIssue } from '../shared/format';
-import type { ExportEnd } from '../shared/ipc';
+import type { ExportEnd, ProjectStatus } from '../shared/ipc';
 import { isInside } from '../shared/media-path';
+import { CHECK, HIDDEN } from './check';
 import { ExportRun, exportPath } from './export-service';
 import { bindRequests, send } from './ipc';
 import { ProjectMedia } from './media-service';
 import { LockedError, lockProject, openProjectFile, projectInfo } from './project';
 import { APP_ORIGIN, assetPath, bundlePath, serveApp, serveMedia } from './protocols';
+import { cutIfPending, recut, startPicking } from './recording';
 import { addRecent, loadSettings, updateSettings } from './settings';
 
-/**
- * Windows are never shown and dialogs become log lines: the end-to-end check, which sets
- * CUTTLE_HIDDEN=1 and passes --cuttle-check (both, so a stray variable cannot hide a real app).
- */
-export const CHECK = process.argv.includes('--cuttle-check');
-export const HIDDEN = CHECK && process.env.CUTTLE_HIDDEN === '1';
 
 const BACKGROUND = '#0c0c0f';
 const TITLE_BAR_HEIGHT = 44;
@@ -55,6 +52,8 @@ interface Editor {
   media: ProjectMedia;
   release: () => Promise<void>;
   run?: ExportRun;
+  /** What the main process is doing to the project, shown in the title bar. */
+  status?: ProjectStatus;
 }
 
 /** Open editors and editors being opened, by the project folder's real path (junction and case aliases are one project). */
@@ -92,7 +91,9 @@ async function createEditor(dir: string, key: string, force: boolean): Promise<B
   const file = await openProjectFile(dir);
   const release = await lockProject(dir, { force });
   try {
-    return await editorWindow(dir, key, file, release);
+    const window = await editorWindow(dir, key, file, release);
+    void cutIfPending(dir);
+    return window;
   } catch (error) {
     // A window that failed to load is not left open (and invisible), nor the project locked.
     const editor = editors.get(key);
@@ -159,13 +160,19 @@ async function editorWindow(dir: string, key: string, file: ProjectFile, release
       return { out: join(dir, 'out') };
     },
     'export:cancel': () => editor.run?.cancel(),
+    'project:record': () => void startPicking(dir),
+    'project:takes': () => takesMenu(dir, window),
+    'project:cut': () => void recut(dir),
   });
+  contents.on('did-finish-load', () => send(contents, 'project:status', editor.status ?? {}));
 
   window.on('closed', () => {
     if (editors.get(key) === editor) editors.delete(key);
     media.dispose();
     editor.run?.cancel();
     void release();
+    // Closing the last editor returns to the pill (not while an editor is reopened on a new take).
+    if (editors.size === 0 && opening.size === 0 && reopening === 0 && !quitting) void showPill();
   });
   window.once('ready-to-show', () => {
     if (!HIDDEN) window.show();
@@ -180,6 +187,89 @@ async function editorWindow(dir: string, key: string, file: ProjectFile, release
   void media.start();
   void addRecent(dir);
   return window;
+}
+
+/** The open editor of a project folder (by its real path), if there is one. */
+async function editorOf(dir: string): Promise<Editor | undefined> {
+  const real = await realpath(resolve(dir)).catch(() => resolve(dir));
+  return editors.get(keyOf(real));
+}
+
+/** The window of a project's open editor, if there is one. */
+export async function editorWindowOf(dir: string): Promise<BrowserWindow | undefined> {
+  const editor = await editorOf(dir);
+  return editor && !editor.window.isDestroyed() ? editor.window : undefined;
+}
+
+/** Shows what the main process does to a project (`undefined`: nothing) in its editor's title bar. */
+export async function setEditorStatus(dir: string, status: ProjectStatus | undefined): Promise<void> {
+  const editor = await editorOf(dir);
+  if (!editor) return;
+  editor.status = status;
+  send(editor.contents, 'project:status', status ?? {});
+}
+
+/**
+ * Shows the project in an editor again after its take or its cut changed: `reload` reloads the
+ * page (the same take, new scenes); otherwise the window is opened anew (a new take needs new media).
+ */
+export async function reopenEditor(dir: string, options: { reload?: boolean } = {}): Promise<void> {
+  const editor = await editorOf(dir);
+  reopening++;
+  try {
+    if (editor && !editor.window.isDestroyed()) {
+      if (options.reload) {
+        editor.contents.reload();
+        if (!HIDDEN) editor.window.show();
+        return;
+      }
+      const closed = new Promise<void>((done) => editor.window.once('closed', () => done()));
+      editor.window.destroy();
+      await closed;
+      await editor.release();
+    }
+    await openEditorOrSay(dir);
+  } finally {
+    reopening--;
+  }
+}
+
+/** Editors being reopened on a new take: their close does not bring the pill back. */
+let reopening = 0;
+
+/** The take folder a project uses now (`takes/<n>/screen.mp4` → n). */
+const currentTake = (file: { raw: Record<string, unknown> }): string | undefined => /^takes\/(\d+)\//.exec(String((file.raw.sources as { screen?: unknown }).screen ?? '').replaceAll('\\', '/'))?.[1];
+
+/** The takes a project can go back to (`takes/<n>/cuttle.json`, kept when it recorded again), as a menu. */
+async function takesMenu(dir: string, window: BrowserWindow): Promise<void> {
+  const current = currentTake(await openProjectFile(dir));
+  const names = await readdir(join(dir, 'takes')).catch(() => [] as string[]);
+  const kept = names
+    .filter((name) => /^\d+$/.test(name) && name !== current && existsSync(join(dir, 'takes', name, PROJECT_FILE)))
+    .sort((a, b) => Number(b) - Number(a));
+  Menu.buildFromTemplate([
+    { label: `Take ${current ?? '?'} (now)`, enabled: false },
+    ...(kept.length === 0
+      ? [{ label: 'No earlier take to go back to', enabled: false }]
+      : kept.map((take) => ({ label: `Back to take ${take}`, click: () => void backToTake(dir, take) }))),
+    { type: 'separator' },
+    { label: 'Record a new take…', click: () => void startPicking(dir) },
+  ]).popup({ window });
+}
+
+/** Makes an earlier take the project's again, with the edit it had; the current one stays restorable. */
+async function backToTake(dir: string, take: string): Promise<void> {
+  try {
+    const file = await openProjectFile(dir);
+    const current = currentTake(file);
+    if (current) await copyFile(join(dir, PROJECT_FILE), join(dir, 'takes', current, PROJECT_FILE));
+    const kept = JSON.parse(await readFile(join(dir, 'takes', take, PROJECT_FILE), 'utf8')) as Record<string, unknown>;
+    await writeProjectFile({ ...file, raw: kept }, 'back to take', { backup: true });
+  } catch (error) {
+    if (!HIDDEN) void dialog.showMessageBox({ type: 'warning', title: 'Cuttle', message: `Cuttle cannot go back to take ${take}`, detail: (error as Error).message });
+    return;
+  }
+  await reopenEditor(dir);
 }
 
 /** One sentence for people from an error's message: the first line. */
@@ -285,6 +375,7 @@ export async function createPill(): Promise<BrowserWindow> {
       else await chooseAndOpen();
     },
     'pill:hide': () => window.hide(),
+    'pill:record': () => void startPicking(undefined, { fromPill: true }),
     'pill:menu': async () => {
       const recent = (await loadSettings()).recent;
       Menu.buildFromTemplate([
@@ -314,6 +405,11 @@ export async function createPill(): Promise<BrowserWindow> {
   await window.loadURL(`${APP_ORIGIN}/pill.html`);
   pill = window;
   return window;
+}
+
+/** Hides the pill: a recording is picked from it (it is not to be in the video). */
+export function hidePill(): void {
+  if (pill && !pill.isDestroyed()) pill.hide();
 }
 
 export async function showPill(): Promise<void> {

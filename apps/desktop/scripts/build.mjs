@@ -10,7 +10,7 @@ const at = (path) => fileURLToPath(new URL(`../${path}`, import.meta.url));
 
 rmSync(at('dist'), { recursive: true, force: true });
 await build({ configFile: at('vite.main.config.ts') });
-for (const kind of ['editor', 'pill']) {
+for (const kind of ['editor', 'pill', 'picker', 'hud', 'countdown']) {
   await build({
     configFile: false,
     root: desktop,

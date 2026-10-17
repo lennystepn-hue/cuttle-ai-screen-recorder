@@ -8,8 +8,8 @@ import type { Backend, Devices, WindowInfo } from './types';
 const LISTING_TIMEOUT_SECONDS = 10;
 
 /** Monitors, windows, cameras and microphones the recorder can capture. */
-export function listDevices(options: { backend?: Backend } = {}): Promise<Devices> {
-  return devicesFor(platformFor(options.backend), true);
+export function listDevices(options: { backend?: Backend; media?: boolean } = {}): Promise<Devices> {
+  return devicesFor(platformFor(options.backend), options.media ?? true);
 }
 
 /**
@@ -22,6 +22,17 @@ export async function devicesFor(platform: Platform, media: boolean): Promise<De
   const win = await loadWin32();
   const { cameras, mics } = media ? parseDshowDevices(await dshowListing()) : { cameras: [], mics: [] };
   return { monitors: win.monitors(), windows: win.windows(), cameras, mics };
+}
+
+/**
+ * Brings a window (`WindowInfo.id`) to the front, e.g. the one a picker took the focus from. Only
+ * the process that has the focus may do so on Windows; false when it is gone or Windows refused, and
+ * always with the test backend.
+ */
+export async function focusWindow(id: number, options: { backend?: Backend } = {}): Promise<boolean> {
+  if (platformFor(options.backend) === 'test') return false;
+  const { loadWin32 } = await import('./win32');
+  return (await loadWin32()).focus(id);
 }
 
 /** The windows now, for a window source that is resolved again when the countdown ends. */

@@ -83,6 +83,9 @@ importers:
       '@cuttle/project':
         specifier: workspace:*
         version: link:../../packages/project
+      '@cuttle/recorder':
+        specifier: workspace:*
+        version: link:../../packages/recorder
       '@cuttle/timeline':
         specifier: workspace:*
         version: link:../../packages/timeline

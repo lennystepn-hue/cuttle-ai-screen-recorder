@@ -1,0 +1,514 @@
+body.transparent,
+body.transparent #root {
+  background: transparent;
+}
+.picker {
+  position: fixed;
+  inset: 0;
+  cursor: crosshair;
+  font-size: var(--size-s);
+}
+.dim {
+  position: absolute;
+  inset: 0;
+  background: rgba(6, 6, 9, 0.55);
+  pointer-events: none;
+  transition: clip-path 90ms var(--ease-out);
+}
+.picker.inactive .dim {
+  background: rgba(6, 6, 9, 0.35);
+}
+.target {
+  position: absolute;
+  border-radius: 6px;
+  box-shadow: 0 0 0 2px var(--accent), 0 0 0 6px rgba(217, 119, 87, 0.22);
+  pointer-events: none;
+  transition:
+    left 90ms var(--ease-out),
+    top 90ms var(--ease-out),
+    width 90ms var(--ease-out),
+    height 90ms var(--ease-out);
+}
+.target.screen,
+.target.edge {
+  border-radius: 0;
+  box-shadow: inset 0 0 0 3px var(--accent);
+}
+/* a display the pointer is not on */
+.point-here {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  padding: 8px 14px;
+  border-radius: 10px;
+  background: var(--overlay);
+  color: var(--muted);
+  pointer-events: none;
+}
+.target-label {
+  position: absolute;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px;
+  border-radius: 8px;
+  background: var(--accent);
+  color: var(--accent-text);
+  font-weight: 600;
+  white-space: nowrap;
+  max-width: calc(100% - 32px);
+  pointer-events: none;
+  z-index: 3;
+}
+.target-label span {
+  font-weight: 500;
+  opacity: 0.75;
+  font-variant-numeric: tabular-nums;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.target-label b {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.handle {
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  margin: -5px 0 0 -5px;
+  background: #fff;
+  border-radius: 2px;
+  box-shadow: 0 0 0 1.5px var(--accent);
+}
+/* the keys: on their own backing, readable over any desktop */
+.hint {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 10px;
+  border-radius: 10px;
+  background: var(--overlay);
+  box-shadow: var(--shadow-float);
+  color: var(--muted);
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 2;
+}
+.hint kbd {
+  font: 600 10.5px var(--font);
+  background: rgba(255, 255, 255, 0.14);
+  padding: 2px 7px;
+  border-radius: 4px;
+  color: #fff;
+}
+.bar-rec {
+  position: absolute;
+  max-width: calc(100% - 32px);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px;
+  border-radius: 16px;
+  background: var(--overlay);
+  box-shadow: var(--shadow-float);
+  backdrop-filter: blur(20px);
+  cursor: default;
+  white-space: nowrap;
+}
+.modes {
+  display: flex;
+  background: var(--raised);
+  border-radius: 11px;
+  padding: 3px;
+  gap: 2px;
+}
+.modes button {
+  height: 34px;
+  padding: 0 11px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--muted);
+}
+.modes button[aria-pressed='true'] {
+  background: var(--raised-active);
+  color: var(--text);
+}
+.modes button:hover {
+  color: var(--text);
+}
+.bar-rec.compact .mode-name {
+  display: none;
+}
+.bar-rec.compact .opt small {
+  max-width: 90px;
+}
+.opt {
+  height: 40px;
+  border-radius: 11px;
+  padding: 0 10px 0 12px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  color: var(--muted);
+  max-width: 230px;
+}
+.opt.on {
+  background: var(--raised);
+  color: var(--text);
+}
+.opt button.toggle {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+  color: inherit;
+  height: 100%;
+}
+.opt .name {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  min-width: 0;
+  line-height: 1.15;
+}
+.opt small {
+  color: var(--faint);
+  font-size: 10.5px;
+  max-width: 140px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.opt select {
+  appearance: none;
+  background: transparent;
+  border: 0;
+  color: var(--muted);
+  font-size: 10.5px;
+  max-width: 150px;
+  padding: 0;
+  text-overflow: ellipsis;
+}
+/* "Stop on" says it is a menu */
+.opt select.stop {
+  padding-right: 14px;
+  background: transparent url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 16 16' fill='none' stroke='%239a9aa5' stroke-width='2'%3E%3Cpath d='m4 6 4 4 4-4'/%3E%3C/svg%3E") right center / 10px no-repeat;
+}
+.opt .folder {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  height: 26px;
+  padding: 0 8px;
+  border-radius: 7px;
+  color: var(--muted);
+  font-size: 11px;
+  max-width: 130px;
+  min-width: 0;
+}
+.opt .folder span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.opt .folder:hover {
+  background: var(--raised-hover);
+  color: var(--text);
+}
+.opt .folder.need {
+  color: var(--accent-text);
+  background: var(--card);
+  font-weight: 600;
+  max-width: none;
+}
+.opt .more {
+  color: var(--faint);
+  width: 20px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  border-radius: 6px;
+}
+.opt .more:hover {
+  color: var(--text);
+  background: var(--raised-hover);
+}
+/* the device menu is only its chevron: the chosen name shows beside the toggle */
+.opt select.more {
+  appearance: none;
+  border: 0;
+  padding: 0;
+  font-size: 0;
+  background: transparent url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 16 16' fill='none' stroke='%239a9aa5' stroke-width='1.8'%3E%3Cpath d='m4 6 4 4 4-4'/%3E%3C/svg%3E") center / 12px no-repeat;
+}
+.opt select.more:hover {
+  background-color: var(--raised-hover);
+}
+.opt select.more option {
+  font-size: var(--size-m);
+  color: var(--text);
+  background: var(--panel);
+}
+.meter {
+  width: 34px;
+  height: 4px;
+  border-radius: 2px;
+  background: #2a2a33;
+  overflow: hidden;
+}
+.meter i {
+  display: block;
+  height: 100%;
+  background: var(--caption);
+  transition: width 60ms linear;
+}
+.divider {
+  width: 1px;
+  height: 26px;
+  background: var(--line-strong);
+  margin: 0 2px;
+}
+.rec {
+  height: 40px;
+  padding: 0 16px 0 12px;
+  border-radius: 11px;
+  background: var(--recording);
+  color: #fff;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+.rec:hover:not(:disabled) {
+  background: #ff6365;
+}
+.rec i {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #fff;
+  display: block;
+}
+.rec kbd {
+  font: 600 10px var(--font);
+  opacity: 0.8;
+  background: none;
+  color: #fff;
+  padding: 0;
+}
+.bubble {
+  position: absolute;
+  border-radius: 50%;
+  overflow: hidden;
+  background: #1b1b21;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4), 0 0 0 3px rgba(255, 255, 255, 0.85);
+  pointer-events: none;
+  display: grid;
+  place-items: center;
+  color: var(--faint);
+  font-size: 11px;
+  text-align: center;
+}
+.bubble video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transform: scaleX(-1);
+}
+.problem {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  background: var(--overlay);
+  color: var(--card);
+  box-shadow: var(--shadow-float);
+  white-space: normal;
+  cursor: default;
+}
+.problem.blocking {
+  color: var(--text);
+  box-shadow: var(--shadow-float), inset 0 0 0 1px var(--card);
+}
+.problem .retry {
+  margin-left: 6px;
+  height: 26px;
+  padding: 0 10px;
+  border-radius: 7px;
+  background: var(--raised);
+  color: var(--text);
+  white-space: nowrap;
+}
+.problem .retry:hover {
+  background: var(--raised-hover);
+}
+
+/* countdown: a ring over the target, which stays visible */
+.countdown {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  box-shadow: inset 0 0 0 2px var(--accent);
+  border-radius: 6px;
+}
+/* the ring fits small targets, and reads over white pages too */
+.countdown b {
+  width: min(120px, 70vmin);
+  height: min(120px, 70vmin);
+  border-radius: 50%;
+  background: rgba(19, 19, 23, 0.72);
+  border: 3px solid rgba(255, 255, 255, 0.9);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.45), 0 8px 24px rgba(0, 0, 0, 0.35);
+  display: grid;
+  place-items: center;
+  font-size: min(56px, 34vmin);
+  font-weight: 600;
+  color: #fff;
+  animation: pop 1s var(--ease-out);
+}
+.countdown small {
+  position: absolute;
+  bottom: 22px;
+  left: 50%;
+  transform: translateX(-50%);
+  color: rgba(255, 255, 255, 0.85);
+  background: rgba(19, 19, 23, 0.55);
+  padding: 4px 10px;
+  border-radius: 8px;
+  white-space: nowrap;
+}
+@media (max-height: 219px), (max-width: 219px) {
+  .countdown small {
+    display: none;
+  }
+}
+
+/* HUD: never in the video, never takes the focus */
+.hud-wrap {
+  height: 100%;
+  display: grid;
+  place-items: center;
+}
+.hud {
+  width: 360px;
+  height: 48px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 6px 6px 14px;
+  border-radius: 16px;
+  background: var(--overlay);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45), 0 0 0 1px rgba(255, 255, 255, 0.07);
+  -webkit-app-region: drag;
+  color: var(--muted);
+}
+.hud button {
+  -webkit-app-region: no-drag;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+}
+.hud button:hover {
+  background: var(--raised);
+  color: var(--text);
+}
+.hud .dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--recording);
+  box-shadow: 0 0 0 4px rgba(255, 77, 79, 0.22);
+  animation: pulse 1.6s ease-in-out infinite;
+}
+.hud.stopping .dot {
+  background: var(--muted);
+  box-shadow: none;
+  animation: none;
+}
+.hud .time {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  margin: 0 8px 0 6px;
+  min-width: 52px;
+  color: var(--text);
+}
+.hud .sep {
+  width: 1px;
+  height: 22px;
+  background: var(--line-strong);
+  margin: 0 2px;
+}
+.hud button.stop {
+  background: var(--raised);
+}
+.hud button.stop i {
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+  background: var(--recording);
+  display: block;
+}
+/* the warning takes the room between the time and the buttons: Stop stays where it is */
+.hud .note {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--size-s);
+  margin: 0 6px 0 0;
+  white-space: nowrap;
+}
+.hud .note span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.hud .note.warn {
+  color: var(--card);
+}
+.hud .note svg {
+  flex: none;
+}
+.hud button.marker {
+  position: relative;
+}
+.hud button.marker small {
+  position: absolute;
+  right: 3px;
+  bottom: 2px;
+  font: 600 9px var(--font);
+  color: var(--muted);
+}
+.hud button.marker.flash {
+  color: var(--ok);
+  background: rgba(79, 209, 161, 0.14);
+}
+
+@keyframes pop {
+  from {
+    transform: scale(0.85);
+    opacity: 0.3;
+  }
+}
+@keyframes pulse {
+  50% {
+    box-shadow: 0 0 0 7px rgba(255, 77, 79, 0.1);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .countdown b,
+  .hud .dot {
+    animation: none;
+  }
+}

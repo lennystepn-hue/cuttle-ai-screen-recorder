@@ -2,6 +2,9 @@
 // what a window may send. The main process checks each request against it; the preloads expose only
 // their window's channels.
 import { z } from 'zod';
+import type { PickedTarget, PickerDisplay, PickerWindow, RecordChoices } from './recording';
+
+export type { PickedTarget, PickerDisplay, PickerWindow, Rect, RecordChoices } from './recording';
 
 export const EXPORT_FORMATS = ['16:9', '1:1', '9:16'] as const;
 /** What an export makes: the project's own output size, or a preset. */
@@ -63,6 +66,48 @@ export type ExportEnd =
   | { state: 'cancelled'; files: ExportFile[] }
   | { state: 'failed'; files: ExportFile[]; format: ExportTarget; code: string; message: string };
 
+/** What a picker shows: its display, the windows on it, the devices and the bar's choices. */
+export interface PickerSetup {
+  display: PickerDisplay;
+  windows: PickerWindow[];
+  cameras: string[];
+  mics: string[];
+  choices: RecordChoices;
+  /** Whether this picker is on the display the pointer is on (it shows the bar). */
+  active: boolean;
+  countdown: number;
+  /** Why recording cannot start (no ffmpeg, the recorder failed, an unknown display), said for people: Record is off. */
+  problem?: string;
+  /** What is worth knowing first (little disk space), said for people: Record stays on. */
+  warning?: string;
+  /** Cameras and mics are still being listed (DirectShow takes a moment): the bar says so. */
+  listingDevices?: boolean;
+}
+
+/** What the HUD shows. */
+export interface HudState {
+  phase: 'countdown' | 'recording' | 'stopping';
+  /** When the take started (epoch milliseconds). */
+  startedAt?: number;
+  markers: number;
+  /** A warning in a few words ("Mic is silent: muted?"), or "Stopping…". */
+  message?: string;
+  /** The whole warning, for the tooltip. */
+  detail?: string;
+  /** `warn`: a warning (amber); `info`: a state ("Stopping…"). */
+  tone?: 'warn' | 'info';
+}
+
+/** What the main process is doing to a project, shown in its editor's title bar. */
+export interface ProjectStatus {
+  text?: string;
+  /** `working`: cutting the take (a spinner); `failed`: it could not (Try again); `recording`: a new take records (the player pauses). */
+  state?: 'working' | 'failed' | 'recording';
+}
+
+const rect = z.strictObject({ x: z.number().finite(), y: z.number().finite(), width: z.number().finite().positive(), height: z.number().finite().positive() });
+const deviceName = z.string().min(1).max(512);
+
 /** Requests (window → main), each with the schema of its argument. */
 export const REQUESTS = {
   // editor
@@ -81,6 +126,32 @@ export const REQUESTS = {
   'pill:open': z.strictObject({ dir: z.string().min(1).max(4096) }).optional(),
   'pill:hide': z.undefined(),
   'pill:menu': z.undefined(),
+  'pill:record': z.undefined(),
+  // editor (recording)
+  'project:record': z.undefined(),
+  'project:takes': z.undefined(),
+  // cut the take with suggest again, after it failed
+  'project:cut': z.undefined(),
+  // picker
+  'picker:setup': z.undefined(),
+  'picker:hover': z.undefined(),
+  'picker:choices': z.strictObject({
+    camera: deviceName.optional(),
+    mic: deviceName.optional(),
+    stop: z.enum(['none', 'claude', 'idle']),
+    claudeFolder: z.string().min(1).max(4096).optional(),
+  }),
+  'picker:record': z.discriminatedUnion('kind', [
+    z.strictObject({ kind: z.literal('screen'), display: z.number().int() }),
+    z.strictObject({ kind: z.literal('window'), display: z.number().int(), window: z.number().int().nonnegative() }),
+    z.strictObject({ kind: z.literal('region'), display: z.number().int(), rect }),
+  ]),
+  'picker:cancel': z.undefined(),
+  'picker:claude-folder': z.undefined(),
+  'picker:retry': z.undefined(),
+  // HUD
+  'hud:stop': z.undefined(),
+  'hud:marker': z.undefined(),
 } as const;
 
 export type Request = keyof typeof REQUESTS;
@@ -99,6 +170,19 @@ export interface Responses {
   'pill:open': void;
   'pill:hide': void;
   'pill:menu': void;
+  'pill:record': void;
+  'project:record': void;
+  'project:takes': void;
+  'project:cut': void;
+  'picker:setup': PickerSetup | undefined;
+  'picker:hover': void;
+  'picker:choices': void;
+  'picker:record': void;
+  'picker:cancel': void;
+  'picker:claude-folder': string | undefined;
+  'picker:retry': void;
+  'hud:stop': void;
+  'hud:marker': void;
 }
 
 /** Events (main → window). */
@@ -107,6 +191,15 @@ export interface Events {
   'export:progress': ExportProgress;
   'export:end': ExportEnd;
   'pill:recent': Responses['pill:recent'];
+  'picker:open': PickerSetup;
+  /** The cameras and mics, listed after the pickers opened (DirectShow is slow). */
+  'picker:devices': Pick<PickerSetup, 'cameras' | 'mics' | 'choices'>;
+  'picker:active': { display: number };
+  'picker:choices': RecordChoices;
+  'countdown:tick': { seconds: number };
+  'hud:state': HudState;
+  /** What the main process is doing to the project (cutting the take), or nothing. */
+  'project:status': ProjectStatus;
 }
 
 export type Event = keyof Events;

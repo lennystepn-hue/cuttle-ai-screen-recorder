@@ -13,8 +13,10 @@ import { FIXTURE_OUTPUT, makeFixture } from './fixture';
 /**
  * The app end to end, its windows never shown: open a project, play, scrub, select, compare the
  * output view with the export's frames (`cuttle preview`), play the proxy, export, open a project
- * twice at once, close an editor during its export, close the pill. Runs only with `pnpm app:check`
- * (vitest --mode app, after app:build:js and cli:build). CUTTLE_CHECK_SHOTS=<folder> keeps screenshots.
+ * twice at once, close an editor during its export, close the pill; record through the picker with
+ * the recorder's `test` backend, stop from the HUD, and land in the take cut by suggest; record
+ * again. Runs only with `pnpm app:check` (vitest --mode app, after app:build:js and cli:build).
+ * CUTTLE_CHECK_SHOTS=<folder> keeps screenshots.
  */
 const enabled = process.env.MODE === 'app';
 const MAIN = fileURLToPath(new URL('../dist/main/index.mjs', import.meta.url));
@@ -40,6 +42,36 @@ interface Check {
 }
 
 const electronPath = (): string => createRequire(import.meta.url)('electron') as unknown as string;
+
+/** The first window (page) for which `test` holds, waiting for it. */
+async function waitForPage(app: ElectronApplication, test: (page: Page) => Promise<boolean>, timeout = 30_000): Promise<Page> {
+  const deadline = Date.now() + timeout;
+  while (Date.now() < deadline) {
+    for (const page of app.windows()) {
+      if (await test(page).catch(() => false)) return page;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  throw new Error('no such window appeared');
+}
+
+/** Clicks an element in a page without a real mouse (the window is never shown). */
+const click = (page: Page, selector: string) => page.evaluate((target) => (document.querySelector(target) as HTMLElement).click(), selector);
+
+/** cuttle.json of a project, once `ready` holds for it. */
+async function projectWhen(dir: string, ready: (project: { sources: { screen: string }; scenes: { id?: string }[] }) => boolean, timeout = 60_000) {
+  const deadline = Date.now() + timeout;
+  while (Date.now() < deadline) {
+    try {
+      const project = JSON.parse(readFileSync(join(dir, 'cuttle.json'), 'utf8'));
+      if (ready(project)) return project;
+    } catch {
+      // not written yet
+    }
+    await new Promise((resolve) => setTimeout(resolve, 200));
+  }
+  throw new Error(`${dir}/cuttle.json never got ready`);
+}
 
 function decode(dataUrl: string): PNG {
   return PNG.sync.read(Buffer.from(dataUrl.slice(dataUrl.indexOf(',') + 1), 'base64'));
@@ -123,10 +155,21 @@ describe.runIf(enabled)('the Cuttle app', () => {
     mkdirSync(project);
     makeFixture(project);
     if (SHOTS) mkdirSync(SHOTS, { recursive: true });
+    // New recordings go into a folder of the check's own.
+    mkdirSync(join(root, 'user-data'));
+    writeFileSync(join(root, 'user-data', 'settings.json'), JSON.stringify({ projectsFolder: join(root, 'projects') }));
     app = await _electron.launch({
       executablePath: electronPath(),
       args: [MAIN, '--cuttle-check', '--open', project],
-      env: { ...process.env, CUTTLE_HIDDEN: '1', CUTTLE_CHECK: '1', CUTTLE_NO_PROXY: '1', CUTTLE_USER_DATA: join(root, 'user-data') },
+      env: {
+        ...process.env,
+        CUTTLE_HIDDEN: '1',
+        CUTTLE_CHECK: '1',
+        CUTTLE_NO_PROXY: '1',
+        CUTTLE_USER_DATA: join(root, 'user-data'),
+        CUTTLE_RECORDER_BACKEND: 'test',
+        CUTTLE_COUNTDOWN: '0',
+      },
     });
     // Unhandled rejections in the main process are bugs: collect them for the last test.
     await app.evaluate(() => {
@@ -148,7 +191,7 @@ describe.runIf(enabled)('the Cuttle app', () => {
   }, 60_000);
 
   afterAll(async () => {
-    await app?.close();
+    await app?.close().catch(() => {});
     await rm(root, { recursive: true, force: true });
   });
 
@@ -319,7 +362,129 @@ describe.runIf(enabled)('the Cuttle app', () => {
     expect(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().filter((window) => window.webContents.getURL().includes('/pill.html')).length)).toBe(1);
   });
 
+  /** Records one take through the picker on the display that has the bar, stopping from the HUD after about 2 s. */
+  /**
+   * The picker of the display the test backend's first monitor (its moving pattern) maps to: the
+   * check records the same source wherever the real pointer is.
+   */
+  async function firstMonitorPicker(): Promise<{ page: Page; display: number }> {
+    let found: { page: Page; display: number } | undefined;
+    await waitForPage(app, async (page) => {
+      if (!page.url().includes('/picker.html')) return false;
+      const setup = await page.evaluate(() => (window as unknown as { cuttle: { invoke(channel: string): Promise<{ display: { id: number; monitor?: number } } | undefined> } }).cuttle.invoke('picker:setup'));
+      if (setup?.display.monitor !== 0) return false;
+      found = { page, display: setup.display.id };
+      return true;
+    });
+    return found!;
+  }
+
+  /**
+   * Records the first monitor's display with its picker's Record button (with `choices`), stopping
+   * from the HUD after about 1.5 s. The pointer is on that display, over nothing: Record takes it whole.
+   */
+  async function recordThroughPicker(start: () => Promise<unknown>, choices?: Record<string, unknown>, stop = true): Promise<void> {
+    await start();
+    const { page } = await firstMonitorPicker();
+    await page.evaluate(async (choices) => {
+      const bridge = (window as unknown as { cuttle: { invoke(channel: string, argument?: unknown): Promise<unknown> } }).cuttle;
+      if (choices) await bridge.invoke('picker:choices', choices);
+      await bridge.invoke('picker:hover');
+    }, choices);
+    await page.waitForSelector('[data-testid=picker-record]:not([disabled])', { state: 'attached' });
+    // the pickers close as the recording begins
+    await click(page, '[data-testid=picker-record]').catch(() => {});
+    if (!stop) return;
+    const hud = await waitForPage(app, async (page) => page.url().includes('/hud.html') && (await page.locator('[data-testid=hud-time]').textContent()) !== '0:00');
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    await click(hud, '[data-testid=hud-stop]');
+  }
+
+  it('records through the picker, stops from the HUD, and opens the take cut by suggest', async () => {
+    const pill = app.windows().find((page) => page.url().includes('/pill.html'))!;
+    await recordThroughPicker(() => pill.evaluate(() => (window as unknown as { cuttle: { invoke(channel: string): Promise<unknown> } }).cuttle.invoke('pill:record')));
+    const [made] = await new Promise<string[]>((resolve) => {
+      const poll = setInterval(() => {
+        const found = existsSync(join(root, 'projects')) ? readdirSync(join(root, 'projects')) : [];
+        if (found.length > 0) {
+          clearInterval(poll);
+          resolve(found);
+        }
+      }, 100);
+    });
+    const dir = join(root, 'projects', made!);
+    // The editor opens on the take while suggest cuts it; the cut arrives with ids and labels.
+    const cut = await projectWhen(dir, (written) => written.scenes[0]?.id === 's1');
+    expect(cut.sources.screen).toBe('takes/1/screen.mp4');
+    const opened = await waitForPage(app, async (page) => page.url().includes('/editor.html') && (await page.title()) === `${made} · Cuttle`);
+    await opened.waitForSelector('.app[data-phase="ready"]', { timeout: 30_000 });
+    expect(await opened.locator('[data-testid=project-status]').count()).toBe(0);
+    expect(await opened.locator('.scene').count()).toBe(cut.scenes.length);
+  }, 120_000);
+
+  it('records again into the same project, keeping the first take restorable', async () => {
+    const dir = join(root, 'projects', readdirSync(join(root, 'projects'))[0]!);
+    const opened = await waitForPage(app, async (page) => page.url().includes('/editor.html') && (await page.title()) !== 'demo · Cuttle');
+    await recordThroughPicker(() => click(opened, '[data-testid=record-again]'));
+    const second = await projectWhen(dir, (written) => written.sources.screen === 'takes/2/screen.mp4' && written.scenes[0]?.id !== undefined);
+    expect(second.scenes.length).toBeGreaterThan(0);
+    // The first take's edit is kept next to it, for "Back to take 1".
+    expect(JSON.parse(readFileSync(join(dir, 'takes', '1', 'cuttle.json'), 'utf8')).sources.screen).toBe('takes/1/screen.mp4');
+  }, 120_000);
+
+  it('keeps a take whose capture broke off: recover repairs it and the editor opens on it', async () => {
+    const projects = join(root, 'projects');
+    const before = new Set(readdirSync(projects));
+    const pill = app.windows().find((page) => page.url().includes('/pill.html'))!;
+    // The test backend's failing camera ends after 1 s, as an unplugged one does: the capture fails.
+    await recordThroughPicker(
+      () => pill.evaluate(() => (window as unknown as { cuttle: { invoke(channel: string): Promise<unknown> } }).cuttle.invoke('pill:record')),
+      { stop: 'none', camera: 'Failing Test Camera' },
+      false,
+    );
+    let made: string | undefined;
+    await expect.poll(() => (made = readdirSync(projects).find((name) => !before.has(name))), { timeout: 30_000 }).toBeDefined();
+    const recovered = await projectWhen(join(projects, made!), (written) => written.sources.screen === 'takes/1/screen.mp4' && written.scenes[0]?.id !== undefined);
+    expect(recovered.scenes.length).toBeGreaterThan(0);
+    const opened = await waitForPage(app, async (page) => page.url().includes('/editor.html') && (await page.title()) === `${made} · Cuttle`);
+    await opened.waitForSelector('.app[data-phase="ready"]', { timeout: 30_000 });
+  }, 120_000);
+
+  it('ends a pick whose picker was closed (Alt+F4), so New recording works again', async () => {
+    const pill = app.windows().find((page) => page.url().includes('/pill.html'))!;
+    const pick = () => pill.evaluate(() => (window as unknown as { cuttle: { invoke(channel: string): Promise<unknown> } }).cuttle.invoke('pill:record'));
+    await pick();
+    await firstMonitorPicker();
+    await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find((window) => window.webContents.getURL().includes('/picker.html'))?.close());
+    await expect.poll(() => app.windows().filter((page) => page.url().includes('/picker.html')).length, { timeout: 10_000 }).toBe(0);
+    await pick();
+    const { page } = await firstMonitorPicker();
+    await page.evaluate(() => (window as unknown as { cuttle: { invoke(channel: string): Promise<unknown> } }).cuttle.invoke('picker:cancel')).catch(() => {});
+  }, 60_000);
+
   it('had no unhandled rejection in the main process', async () => {
     expect(await app.evaluate(() => (globalThis as unknown as { __rejections: string[] }).__rejections)).toEqual([]);
   });
+
+  // Last: the app quits here.
+  it('stops a recording when the app quits, and writes the take into its project first (a second quit waits too)', async () => {
+    const projects = join(root, 'projects');
+    const before = new Set(readdirSync(projects));
+    const pill = app.windows().find((page) => page.url().includes('/pill.html'))!;
+    // no camera: the one the check before chose fails on purpose
+    await recordThroughPicker(() => pill.evaluate(() => (window as unknown as { cuttle: { invoke(channel: string): Promise<unknown> } }).cuttle.invoke('pill:record')), { stop: 'none' }, false);
+    await waitForPage(app, async (page) => page.url().includes('/hud.html') && (await page.locator('[data-testid=hud-time]').textContent()) !== '0:00');
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+    const exited = new Promise((resolve) => app.process().once('exit', resolve));
+    await app
+      .evaluate(({ app: electronApp }) => {
+        electronApp.quit();
+        // Quit again while the take is written (from the tray, say): it waits as well.
+        setTimeout(() => electronApp.quit(), 200);
+      })
+      .catch(() => {});
+    await exited;
+    const made = readdirSync(projects).find((name) => !before.has(name))!;
+    expect(JSON.parse(readFileSync(join(projects, made, 'cuttle.json'), 'utf8')).sources.screen).toBe('takes/1/screen.mp4');
+  }, 60_000);
 });

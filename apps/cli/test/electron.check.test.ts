@@ -40,8 +40,9 @@ describe.runIf(enabled)('cuttle in Electron', () => {
   it('renders stills at given times, and a contact sheet by default', () => {
     const some = cuttle('-C', project, 'preview', '--at', '0.5', '--at', '2');
     expect(some.code).toBe(0);
-    const stills = some.json.stills as { t: number; file: string }[];
-    expect(stills.map((still) => still.t)).toEqual([0.5, 2]);
+    const stills = some.json.stills as { t: number; file: string; source?: number }[];
+    // one clip over the whole take: each still shows the same source second
+    expect(stills.map((still) => [still.t, still.source])).toEqual([[0.5, 0.5], [2, 2]]);
     expect(stills.map((still) => pngSize(still.file))).toEqual([[1920, 1080], [1920, 1080]]);
     expect(some.json.sheet).toBeUndefined();
     const sheet = cuttle('-C', project, 'preview', '--format', '9:16');

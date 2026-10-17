@@ -4,6 +4,8 @@ import { rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import type { Scene } from '@cuttle/project';
+import { sourceSecond } from '../src/commands/preview';
 import { VERSION, runCli } from '../src/main';
 
 const dirs: string[] = [];
@@ -357,5 +359,35 @@ describe('cuttle suggest and recover', () => {
     const empty = await cli('--json', '-C', dir, 'recover', 'takes/9');
     expect(empty.code).toBe(1);
     expect((empty.json as { error: { code: string } }).error.code).toBe('invalid-media');
+  });
+});
+
+/** Width and height of a PNG, from its IHDR chunk. */
+const pngSize = (file: string) => {
+  const bytes = readFileSync(file);
+  return [bytes.readUInt32BE(16), bytes.readUInt32BE(20)];
+};
+
+describe('cuttle frame and the source seconds of stills', () => {
+  it('writes a source frame at full size, with a numbered grid on request', async () => {
+    const dir = temp();
+    takeFixture(dir);
+    const plain = await cli('--json', '-C', dir, 'frame', '10');
+    expect(stable(plain.json, dir)).toEqual({ t: 10, file: '<project>/frames/10.00s.png', width: 1280, height: 720, grid: false, labels: false });
+    expect(pngSize(join(dir, 'frames', '10.00s.png'))).toEqual([1280, 720]);
+    const grid = await cli('--json', '-C', dir, 'frame', '10', '--grid', '-o', join(dir, 'grid.png'));
+    expect(grid.json).toMatchObject({ grid: true, labels: process.platform === 'win32' }); // Windows always has Arial
+    expect(pngSize(join(dir, 'grid.png'))).toEqual([1280, 720]);
+    const past = await cli('--json', '-C', dir, 'frame', '25');
+    expect((past.json as { error: { code: string; message: string } }).error).toEqual({ code: 'usage', message: 'the screen track is 20.00 s long; 25 s is past its end' });
+  });
+
+  it('maps an output second to the source second a clip shows', () => {
+    const scenes = [
+      { type: 'clip', from: 0, to: 2, speed: 1 },
+      { type: 'clip', from: 10, to: 18, speed: 4 },
+      { type: 'card', title: 'The end', duration: 2 },
+    ] as const satisfies readonly Scene[];
+    expect([sourceSecond(scenes, 1), sourceSecond(scenes, 3), sourceSecond(scenes, 5)]).toEqual([1, 14, undefined]);
   });
 });

@@ -302,6 +302,24 @@ describe('motion', () => {
     expect(p.overlays[0]).toEqual({ id: 'o1', src: 'motion/callouts/index.html', at: 4.2, duration: 6, params: {}, network: false, enabled: true });
   });
 
+  it('reads motion blur with its defaults, and refuses too few samples and a shutter of zero', () => {
+    const p = ProjectSchema.parse({
+      ...minimal,
+      scenes: [
+        { type: 'motion', src: 'a.html', duration: 1, motionBlur: {} },
+        { type: 'motion', src: 'b.html', duration: 1, motionBlur: { samples: 16, shutter: 1 } },
+      ],
+      overlays: [{ src: 'c.html', at: 0, duration: 1, motionBlur: { samples: 4 } }],
+    });
+    expect(p.scenes.map((scene) => (scene.type === 'motion' ? scene.motionBlur : undefined))).toEqual([
+      { samples: 8, shutter: 0.5 },
+      { samples: 16, shutter: 1 },
+    ]);
+    expect(p.overlays[0]!.motionBlur).toEqual({ samples: 4, shutter: 0.5 });
+    expect(pathsOf({ ...minimal, scenes: [{ type: 'motion', src: 'a.html', duration: 1, motionBlur: { samples: 1 } }] })).toEqual(['scenes.0.motionBlur.samples']);
+    expect(pathsOf({ ...minimal, scenes: [{ type: 'motion', src: 'a.html', duration: 1, motionBlur: { shutter: 0 } }] })).toEqual(['scenes.0.motionBlur.shutter']);
+  });
+
   it('refuses a page without a path, a length of zero, a param that is a list and an id used elsewhere', () => {
     expect(pathsOf({ ...minimal, scenes: [{ type: 'motion', src: '', duration: 2 }] })).toEqual(['scenes.0.src']);
     expect(pathsOf({ ...minimal, scenes: [{ type: 'motion', src: 'a.html', duration: 0 }] })).toEqual(['scenes.0.duration']);

@@ -189,6 +189,16 @@ const motionPage = {
   params: z.record(z.string(), ParamValue).default({}),
   /** Let the page reach https: (off: only the project's files). */
   network: z.boolean().default(false),
+  /**
+   * Motion blur, as a camera's: each frame is the average of `samples` moments while the shutter is
+   * open, `shutter` a share of the frame (0.5 is film's 180°). Off without it.
+   */
+  motionBlur: z
+    .strictObject({
+      samples: z.number().int().min(2).max(32).default(8),
+      shutter: z.number().positive().max(1).default(0.5),
+    })
+    .optional(),
 };
 
 /** A page Claude or the person wrote, rendered frame by frame as a scene (an intro, an end card, a 3D shot). */

@@ -1,4 +1,5 @@
 import type { CuttleProject, InputEvent, TranscriptWord } from '@cuttle/project';
+import type { MotionView } from './motion/runtime';
 
 /**
  * Contract between the main process and the export page. Pure types and constants: both sides
@@ -35,8 +36,13 @@ export interface MotionFrameRequest {
   index: number;
   /** Frame n is n / fps seconds into the showing. */
   frame: number;
-  /** How long the showing lasts, in output seconds. */
+  /** Where the showing starts in the video, and how long it lasts (output seconds). */
+  start: number;
   duration: number;
+  /** The screen recording's size (source px). */
+  screen: { width: number; height: number };
+  /** An overlay's frame: where the clip under it shows the take. */
+  view?: MotionView;
 }
 
 /** Everything the page needs for one export. Paths are absolute; the page may read only these files. */
@@ -44,7 +50,8 @@ export interface ExportJob {
   kind: 'video';
   /** Output size already set to the export format. */
   project: CuttleProject;
-  screen: string;
+  /** The screen recording; absent in a project without clips. */
+  screen?: string;
   /** Present when the webcam bubble is on. `offset`: seconds the webcam started after the screen. */
   webcam?: { path: string; offset: number };
   /** Present when the cursor is on and the project has events. */

@@ -1,7 +1,11 @@
+import { readFile } from 'node:fs/promises';
 import { relative, sep } from 'node:path';
+import { KIT_FONTS } from '@cuttle/motion-kit';
 import type { CuttleProject, MotionOverlay, MotionScene } from '@cuttle/project';
 import { CHANNELS, type MotionFrameRequest, type MotionPages } from '../job';
 import { motionInit } from '../motion/init';
+import { declaredParams, paramDefaults } from '../motion/params';
+import { takeData, type TakeInputs } from '../motion/take';
 import { MotionPage, type MotionFrame, type MotionPageOptions } from './motion';
 
 /** What one motion item's page said while it rendered: its errors and its console, every showing together. */
@@ -18,20 +22,19 @@ interface Showing {
   page: Promise<MotionPage>;
   /** The page's work, one call at a time. */
   queue: Promise<unknown>;
-  /** The frame asked for last, and the next one drawn ahead of time. */
+  /** The latest frame asked for (the page draws them in that order). */
   asked: number;
-  ahead?: { frame: number; promise: Promise<MotionFrame> };
   /** The frame handed out last (the same frame again needs no drawing). */
   last?: { frame: number; data: MotionFrame };
   name: string;
-  duration: number;
 }
 
 /**
  * The main process's side of a job's motion: opens a page for each showing of an item the export
- * page asks for, draws its frames in order (drawing the next one ahead while the export works on
- * the current one), opens it again for a frame before one it drew, and closes it when the showing
- * is over. Collects what the pages said.
+ * page asks for, with the take as the page sees it, draws its frames in the order they are asked
+ * for (the export page asks for the next one while it works on the current one), opens it again
+ * for a frame before one it drew, and closes it when the showing is over. Collects what the pages
+ * said.
  */
 export class MotionHost {
   private readonly showings = new Map<string, Showing>();
@@ -40,7 +43,8 @@ export class MotionHost {
   constructor(
     private readonly project: CuttleProject,
     private readonly pages: MotionPages,
-    private readonly options: Pick<MotionPageOptions, 'frameTimeout' | 'loadTimeout'> = {},
+    private readonly take: TakeInputs,
+    private readonly options: Pick<MotionPageOptions, 'frameTimeout' | 'loadTimeout' | 'kitDir'> = {},
   ) {}
 
   private item(request: MotionFrameRequest): { item: MotionScene | MotionOverlay; name: string; file: string } {
@@ -51,19 +55,26 @@ export class MotionHost {
     return { item: item as MotionScene | MotionOverlay, name, file };
   }
 
+  private async openPage(request: MotionFrameRequest, item: MotionScene | MotionOverlay, name: string, file: string, report: MotionItemReport): Promise<MotionPage> {
+    // the params the page declares: their defaults, under the item's own values
+    const declared = declaredParams(await readFile(file, 'utf8'));
+    for (const issue of declared.issues) if (!report.errors.includes(issue)) report.errors.push(issue);
+    const window = 'type' in item ? null : { from: item.at, to: item.at + item.duration };
+    const init = motionInit(this.project, item, name, { start: request.start, duration: request.duration }, {
+      take: takeData(this.project, this.take, request.screen, window),
+      fonts: [...KIT_FONTS],
+      defaults: paramDefaults(declared.params),
+    });
+    return MotionPage.open({ file, root: this.pages.root, init, network: item.network, ...(item.motionBlur && { motionBlur: item.motionBlur }), ...this.options });
+  }
+
   private open(request: MotionFrameRequest): Showing {
     const { item, name, file } = this.item(request);
     const report = this.reports.get(name) ?? { item: name, src: relative(this.pages.root, file).split(sep).join('/'), errors: [], console: [] };
     this.reports.set(name, report);
-    const page = MotionPage.open({
-      file,
-      root: this.pages.root,
-      init: motionInit(this.project, item, name, request.duration),
-      network: item.network,
-      ...this.options,
-    });
+    const page = this.openPage(request, item, name, file, report);
     page.catch(() => {}); // awaited by the frame that asked for it
-    const showing: Showing = { page, queue: page, asked: -1, name, duration: request.duration };
+    const showing: Showing = { page, queue: page, asked: -1, name };
     this.showings.set(request.key, showing);
     return showing;
   }
@@ -79,26 +90,16 @@ export class MotionHost {
   async frame(request: MotionFrameRequest): Promise<MotionFrame> {
     let showing = this.showings.get(request.key);
     if (showing?.last?.frame === request.frame) return showing.last.data;
-    if (showing && request.frame < Math.max(showing.asked, showing.ahead?.frame ?? -1)) {
+    if (showing && request.frame < showing.asked) {
       // an earlier frame than the page drew: it starts again
       await this.done(request.key);
       showing = undefined;
     }
     showing ??= this.open(request);
+    showing.asked = Math.max(showing.asked, request.frame);
     try {
-      const ahead = showing.ahead?.frame === request.frame ? showing.ahead.promise : undefined;
-      showing.ahead = undefined;
-      const sequential = request.frame === showing.asked + 1;
-      showing.asked = request.frame;
-      const frame = await (ahead ?? this.run(showing, (page) => page.frame(request.frame)));
+      const frame = await this.run(showing, (page) => page.frame(request.frame, request.view));
       showing.last = { frame: request.frame, data: frame };
-      // playing on: the next frame is drawn while the export uses this one
-      const next = request.frame + 1;
-      if (sequential && next / this.project.output.fps < showing.duration) {
-        const promise = this.run(showing, (page) => page.frame(next));
-        promise.catch(() => {}); // a failure shows when that frame is asked for
-        showing.ahead = { frame: next, promise };
-      }
       return frame;
     } catch (error) {
       throw new Error(`${showing.name} (${this.reports.get(showing.name)?.src}): ${(error as Error).message}`, { cause: error });

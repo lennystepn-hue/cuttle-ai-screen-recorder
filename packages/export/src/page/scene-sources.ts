@@ -1,22 +1,32 @@
-import type { FrameSources } from '@cuttle/engine';
-import type { Scene } from '@cuttle/project';
-import type { RenderState } from '@cuttle/timeline';
+import { clipView, type FrameSources } from '@cuttle/engine';
+import type { CuttleProject } from '@cuttle/project';
+import type { RenderState, SceneFrame, SceneSpan } from '@cuttle/timeline';
 import type { FramePlan, OverlayPlan, ScenePlan } from '../frame-plan';
 import type { MotionFrameRequest, MotionPixels } from '../job';
+import type { MotionView } from '../motion/runtime';
 import { host, PageError } from './host';
 import { loadImage } from './images';
 import type { VideoFile } from './media';
 import { TrackReader } from './track-reader';
 
 export interface SceneMedia {
-  screen: VideoFile;
+  /** The screen recording; absent in a project without clips. */
+  screen?: VideoFile;
   /** `offset`: seconds the webcam started after the screen; webcam time = source time − offset. */
   webcam?: VideoFile & { offset: number };
   /** Scene index → image path of a still scene. */
   stills: Readonly<Record<number, string>>;
-  /** The project's scenes (a motion scene's duration). */
-  scenes: readonly Scene[];
   maxTextureSize: number;
+}
+
+/** What motion items need besides the media: the project and its spans, and the timeline's frames. */
+export interface MotionContext {
+  project: CuttleProject;
+  spans: readonly SceneSpan[];
+  /** The timeline's state on output frame `frame`. */
+  stateAt(frame: number): RenderState;
+  /** Ask for each item's next frame while the current one is drawn and encoded (a video; not stills, whose frames jump). */
+  ahead: boolean;
 }
 
 interface OpenScene {
@@ -31,28 +41,36 @@ interface OpenScene {
 const remoteMessage = (error: unknown): string =>
   (error instanceof Error ? error.message : String(error)).replace(/^Error invoking remote method '[^']*': (?:Error: )?/, '');
 
-/** One showing of a motion item: its frames, drawn by the main process; the first one is asked for as it opens. */
+/**
+ * One showing of a motion item: its frames, drawn by the main process in the order they are asked
+ * for. A frame may be asked for ahead of time (its first as it opens, the next while one is drawn).
+ */
 class MotionSource {
-  private first: Promise<MotionPixels> | undefined;
+  private readonly asked = new Map<number, Promise<MotionPixels>>();
 
-  constructor(private readonly request: Omit<MotionFrameRequest, 'frame'>) {
-    this.first = this.ask(0);
-    this.first.catch(() => {}); // awaited when the item shows
-  }
+  constructor(private readonly request: Omit<MotionFrameRequest, 'frame' | 'view'>) {}
 
-  private ask(frame: number): Promise<MotionPixels> {
+  private ask(frame: number, view: MotionView | undefined): Promise<MotionPixels> {
     return host()
-      .motionFrame({ ...this.request, frame })
+      .motionFrame({ ...this.request, frame, ...(view && { view }) })
       .catch((error: unknown) => {
         throw new PageError('render', remoteMessage(error));
       });
   }
 
-  /** Frame `n` of the showing (n / fps seconds into it). */
-  frame(n: number): Promise<MotionPixels> {
-    const first = n === 0 ? this.first : undefined;
-    this.first = undefined;
-    return first ?? this.ask(n);
+  /** Asks for frame `n` now, for later (once). */
+  ahead(n: number, view: MotionView | undefined): void {
+    if (this.asked.has(n)) return;
+    const frame = this.ask(n, view);
+    frame.catch(() => {}); // awaited when it shows
+    this.asked.set(n, frame);
+  }
+
+  /** Frame `n` of the showing (n / fps seconds into it), with this frame's view of the take. */
+  frame(n: number, view: MotionView | undefined): Promise<MotionPixels> {
+    const frame = this.asked.get(n) ?? this.ask(n, view);
+    for (const key of this.asked.keys()) if (key <= n) this.asked.delete(key);
+    return frame;
   }
 
   done(): void {
@@ -72,20 +90,48 @@ export class SceneSources {
   private readonly overlays = new Map<string, { plan: OverlayPlan; source: MotionSource }>();
   private readonly pendingOverlays: OverlayPlan[];
   private readonly fps: number;
+  /** The last frame of the video (or of the stills). */
+  private readonly lastFrame: number;
   private readonly sources: FrameSources = { screens: new Map(), webcams: new Map(), stills: new Map(), motion: new Map(), overlays: new Map() };
 
   constructor(
     plan: FramePlan,
     private readonly media: SceneMedia,
     private readonly lookahead: number,
+    private readonly motion: MotionContext,
   ) {
     this.pending = [...plan.scenes];
     this.pendingOverlays = [...plan.overlays].sort((a, b) => a.firstFrame - b.firstFrame);
     this.fps = plan.fps;
+    this.lastFrame = Math.max(0, ...plan.scenes.map((scene) => scene.lastFrame));
+  }
+
+  /** A clip layer's view of the take, for its overlays: where the take is in the frame. */
+  private viewOf(layer: SceneFrame): MotionView {
+    const { project } = this.motion;
+    const { zoom, content } = clipView(project.output, project.look, layer, this.screenSize);
+    return { source: layer.sourceTime ?? null, zoom, content, cursor: layer.cursor ? { x: layer.cursor.x, y: layer.cursor.y } : null };
+  }
+
+  /** Each motion item's frame on output frame `frame`, with its view: `each(source, n, view)`. */
+  private eachMotion(frame: number, each: (source: MotionSource, n: number, view: MotionView | undefined) => void): void {
+    for (const layer of this.motion.stateAt(frame).layers) {
+      const scene = this.open.get(layer.sceneIndex)?.motion;
+      if (scene) each(scene, Math.round(layer.local * this.fps), undefined);
+      for (const overlay of layer.overlays) {
+        const open = this.overlays.get(overlay.key);
+        if (open) each(open.source, Math.round(overlay.local * this.fps), this.viewOf(layer));
+      }
+    }
   }
 
   private screenTime(sourceTime: number): number {
-    return Math.max(sourceTime, this.media.screen.start);
+    return Math.max(sourceTime, this.media.screen?.start ?? 0);
+  }
+
+  /** The screen recording's size; the output's in a project without one. */
+  private get screenSize(): { width: number; height: number } {
+    return this.media.screen?.size ?? { width: this.motion.project.output.width, height: this.motion.project.output.height };
   }
 
   /** Webcam time for a source time, or undefined where the webcam track has no frame. */
@@ -99,6 +145,7 @@ export class SceneSources {
   private openScene(plan: ScenePlan): OpenScene {
     const { screen, webcam } = this.media;
     if (plan.kind === 'clip') {
+      if (!screen) throw new Error(`scene ${plan.index} is a clip, but there is no screen recording`);
       const screenTimes = [...new Set(plan.sourceTimes.map((t) => this.screenTime(t)))];
       const webcamTimes = plan.sourceTimes.map((t) => this.webcamTime(t)).filter((t): t is number => t !== undefined);
       return {
@@ -115,24 +162,31 @@ export class SceneSources {
       return { plan, still };
     }
     if (plan.kind === 'motion') {
-      const scene = this.media.scenes[plan.index];
+      const scene = this.motion.project.scenes[plan.index];
+      const span = this.motion.spans.find((candidate) => candidate.sceneIndex === plan.index);
       const duration = scene?.type === 'motion' ? scene.duration : 0;
-      return { plan, motion: new MotionSource({ key: `scene:${plan.index}`, kind: 'scene', index: plan.index, duration }) };
+      const request = { key: `scene:${plan.index}`, kind: 'scene' as const, index: plan.index, start: span?.start ?? 0, duration, screen: this.screenSize };
+      return { plan, motion: new MotionSource(request) };
     }
     return { plan };
   }
 
   /** Frames for every layer of `state`, which is output frame `frame`. */
   async sourcesFor(frame: number, state: RenderState): Promise<FrameSources> {
+    const opened = new Set<number>();
     while (this.pending.length > 0 && this.pending[0]!.firstFrame <= frame + this.lookahead) {
       const plan = this.pending.shift()!;
       this.open.set(plan.index, this.openScene(plan));
+      if (plan.kind === 'motion') opened.add(plan.firstFrame);
     }
     while (this.pendingOverlays.length > 0 && this.pendingOverlays[0]!.firstFrame <= frame + this.lookahead) {
       const plan = this.pendingOverlays.shift()!;
-      const source = new MotionSource({ key: `overlay:${plan.key}`, kind: 'overlay', index: plan.index, duration: plan.duration });
-      this.overlays.set(plan.key, { plan, source });
+      const request = { key: `overlay:${plan.key}`, kind: 'overlay' as const, index: plan.index, start: plan.start, duration: plan.duration, screen: this.screenSize };
+      this.overlays.set(plan.key, { plan, source: new MotionSource(request) });
+      opened.add(plan.firstFrame);
     }
+    // a motion item's page opens and draws its first frame while the frames before it are made
+    for (const first of opened) if (first > frame) this.eachMotion(first, (source, n, view) => source.ahead(n, view));
     const { screens, webcams, stills, motion, overlays } = this.sources;
     screens.clear();
     webcams.clear();
@@ -158,14 +212,16 @@ export class SceneSources {
       } else if (scene.still) {
         stills.set(layer.index, await scene.still);
       } else if (scene.motion) {
-        motion.set(layer.index, await scene.motion.frame(Math.round(layer.local * this.fps)));
+        motion.set(layer.index, await scene.motion.frame(Math.round(layer.local * this.fps), undefined));
       }
       for (const overlay of layer.overlays) {
         const open = this.overlays.get(overlay.key);
         if (!open) throw new Error(`overlays[${overlay.index}] shows on frame ${frame}, outside its planned frames`);
-        overlays.set(overlay.key, await open.source.frame(Math.round(overlay.local * this.fps)));
+        overlays.set(overlay.key, await open.source.frame(Math.round(overlay.local * this.fps), this.viewOf(layer)));
       }
     }
+    // the pages draw the next frame while this one is drawn and encoded
+    if (this.motion.ahead && frame < this.lastFrame) this.eachMotion(frame + 1, (source, n, view) => source.ahead(n, view));
     return this.sources;
   }
 

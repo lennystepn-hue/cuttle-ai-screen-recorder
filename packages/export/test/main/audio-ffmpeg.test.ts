@@ -81,7 +81,8 @@ describe.runIf(hasFfmpeg)('export audio through ffmpeg', () => {
       for (let i = 0; i < whole.length; i++) worst = Math.max(worst, Math.abs(cut[i]! - whole[i]!));
       expect(worst, `speed ${speed}`).toBeLessThan(1e-4);
     }
-  });
+    // eight ffmpeg runs one after another: under a full parallel test run they take several seconds
+  }, 30_000);
 
   it('mixes the typing sounds in where a key was typed: without a mic, and over one at its own level', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'cuttle-typing-mix-'));

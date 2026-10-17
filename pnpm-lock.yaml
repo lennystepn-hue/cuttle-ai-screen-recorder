@@ -153,6 +153,9 @@ importers:
       '@cuttle/engine':
         specifier: workspace:*
         version: link:../engine
+      '@cuttle/motion-kit':
+        specifier: workspace:*
+        version: link:../motion-kit
       '@cuttle/project':
         specifier: workspace:*
         version: link:../project

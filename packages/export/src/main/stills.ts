@@ -8,7 +8,7 @@ import { CHANNELS, type PageStillsSuccess, type StillsJob } from '../job';
 import { cancelledError, defaultPageDir, runPage, watchdog, whenCancelled } from './export';
 import { FileHost } from './files';
 import { MotionHost, serveMotion, type MotionItemReport } from './motion-host';
-import { loadSources, motionPages } from './sources';
+import { loadSources, motionPages, motionTake } from './sources';
 import { openExportWindow, type ExportWindow } from './window';
 
 export interface StillsOptions {
@@ -84,11 +84,12 @@ export async function renderStills(opts: StillsOptions): Promise<StillsResult> {
   if (opts.signal?.aborted) throw cancelledError();
   const project = withFormat(opts.project ? opts.project(sources.project) : sources.project, opts.format);
   const motionFiles = opts.project ? await motionPages(resolve(opts.projectDir), project) : sources.motion;
+  const take = motionFiles ? (sources.motionTake ?? (await motionTake(resolve(opts.projectDir), project))) : undefined;
   const columns = opts.sheet ? Math.max(1, Math.round(opts.sheet.columns ?? DEFAULT_SHEET_COLUMNS)) : undefined;
   const job: StillsJob = {
     kind: 'stills',
     project,
-    screen: sources.screen,
+    ...(sources.screen && { screen: sources.screen }),
     webcam: sources.webcam,
     events: sources.events,
     ...(sources.transcript && { transcript: sources.transcript }),
@@ -112,9 +113,9 @@ export async function renderStills(opts: StillsOptions): Promise<StillsResult> {
   const guard = watchdog();
   const images = [...Object.values(sources.stills), ...(sources.backgroundImage ? [sources.backgroundImage] : [])];
   // Reads only: stills mode writes PNGs through writeStill, never into a video file.
-  const host = new FileHost([sources.screen, ...(sources.webcam ? [sources.webcam.path] : [])], join(outDir, '.unused'), images);
+  const host = new FileHost([...(sources.screen ? [sources.screen] : []), ...(sources.webcam ? [sources.webcam.path] : [])], join(outDir, '.unused'), images);
   let window: ExportWindow | undefined;
-  const motion = motionFiles ? new MotionHost(project, motionFiles) : undefined;
+  const motion = motionFiles && take ? new MotionHost(project, motionFiles, take) : undefined;
   try {
     window = await openExportWindow(opts.pageDir ?? defaultPageDir());
     const ipc = window.win.webContents.ipc;

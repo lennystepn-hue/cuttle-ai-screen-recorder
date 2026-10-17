@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@cuttle/engine": "workspace:*",
+    "@cuttle/motion-kit": "workspace:*",
     "@cuttle/project": "workspace:*",
     "@cuttle/timeline": "workspace:*",
     "mediabunny": "1.61.0"

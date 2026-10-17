@@ -172,9 +172,9 @@ export const ProjectSchema = z.strictObject({
 });
 
 // One line of events.jsonl. Times are source seconds (seconds since the screen track started).
-// x and y are source pixels of the screen track (the recorder subtracts the capture origin and
-// applies the display scale factor); positions outside [0, width) x [0, height) mean the pointer
-// is off the captured area.
+// x and y are source pixels of the screen track (the recorder subtracts the capture origin and,
+// where the system reports points instead of pixels, applies the display scale); positions outside
+// [0, width) x [0, height) mean the pointer is off the captured area.
 const point = { t: seconds, x: z.number(), y: z.number() };
 export const InputEventSchema = z.discriminatedUnion('type', [
   z.strictObject({ type: z.literal('move'), ...point }),

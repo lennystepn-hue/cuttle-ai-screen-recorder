@@ -14,7 +14,7 @@ TypeScript tested with vitest. `engine` and `export` run in Chromium (a hidden E
 use WebGL2 and WebCodecs. `recorder` is Node and drives ffmpeg. `apps/cli` ties them together.
 
 **Tech Stack:** TypeScript 5, pnpm workspaces, vitest, zod 4, Electron, WebGL2, WebCodecs,
-Mediabunny, ffmpeg, uiohook-napi, commander.
+Mediabunny, ffmpeg, uiohook-napi, koffi, commander.
 
 ---
 
@@ -33,7 +33,7 @@ files, no overlap).
 | M1 | Monorepo, `@cuttle/project`, `@cuttle/timeline` | `2026-10-16-cuttle-m1-foundation.md` | `pnpm test` and `pnpm typecheck` pass; timeline answers every spec rule with a test |
 | M2 | `@cuttle/engine` (WebGL2 compositor + presets) | `2026-10-16-cuttle-m2-engine.md` | Golden-image tests for each preset, frame style, mask style, text style, the badge and all six cursor styles (with click ripple) pass in headless Electron |
 | M3 | `@cuttle/export` (decode → render → encode → mux, audio via ffmpeg) | `2026-10-16-cuttle-m3-export.md` | A 10 s `testsrc` fixture renders to 16:9, 1:1 and 9:16; ffprobe shows the expected duration (±1 frame), size, H.264 and AAC |
-| M4 | `@cuttle/recorder` (devices, ffmpeg backends, events, triggers, markers) | write before starting | The `test` backend records a 3 s take with all tracks; `untilFile` and `untilClaude` (fake transcript) stop it; a manual Windows run records a monitor |
+| M4 | `@cuttle/recorder` (devices, ffmpeg backends, events, triggers, markers) | `2026-10-17-cuttle-m4-recorder.md` | The `test` backend records a 3 s take with all tracks; `untilFile` and `untilClaude` (fake transcript) stop it; a manual Windows run records a monitor |
 | M5 | `apps/cli` (`cuttle …`) | write before starting | Every spec command exists with `--json`; snapshot tests pass; the treg demo can be rebuilt from its takes with `cuttle suggest`, a few JSON edits and `cuttle render` |
 | M6 | `skill/` + installer | write before starting | `pnpm skill:install` writes `~/.claude/skills/cuttle/SKILL.md`; a fresh Claude Code session follows it end to end |
 
@@ -61,6 +61,9 @@ export type TakeFile = z.output<typeof TakeFileSchema>;         // take.json (M3
 // start in seconds on one monotonic clock; written by the recorder next to the take's tracks
 export function parseTakeJson(text: string): { ok: true; take: TakeFile } | { ok: false; issues: ProjectIssue[] };
 export function trackOffset(take: TakeFile, track: 'webcam' | 'mic'): number | undefined; // track start − screen start
+export type Marker = z.output<typeof MarkerSchema>;            // one entry of markers.json (M4): { t, kind, label? },
+// t in source seconds; kind 'manual' | 'prompt' | 'tool' | 'answer'; label: the tool's name or a manual note
+export function parseMarkersJson(text: string): { ok: true; markers: Marker[] } | { ok: false; issues: ProjectIssue[] };
 export type CursorShape = 'arrow' | 'text' | 'pointer' | 'wait' | 'crosshair' | 'move' | 'not-allowed';
 export type CursorStyle = 'system' | 'arrow-white' | 'arrow-black' | 'dot' | 'ring' | 'spotlight';
 export function parseProject(raw: unknown): ParseResult;
@@ -142,18 +145,31 @@ export class ExportError extends Error {                     // CLI exit codes: 
 }                                                            // also refused: an out path that is a project file
 export const EXPORT_FORMATS: Record<'16:9' | '1:1' | '9:16', { width: number; height: number }>; // 1920×1080, 1080×1080, 1080×1920
 
-// @cuttle/recorder (M4)
+// @cuttle/recorder (M4) – Node (plain or Electron's main process); real capture on Windows, backend 'test' everywhere
 export interface RecordOptions {
-  projectDir: string;
+  projectDir: string;                      // must exist; the take goes to takes/<n>/
   source: { kind: 'monitor'; index: number } | { kind: 'region'; rect: Rect; monitor: number } | { kind: 'window'; title: string };
+                                           // rect in that monitor's pixels; a window is the region of its bounds at the start
   webcam?: string; mic?: string;           // device names from listDevices()
   stop: { maxSeconds?: number; untilFile?: string; untilIdleSeconds?: number; untilClaude?: string /* cwd */ };
-  countdownSeconds?: number; drawMouse?: boolean;
+  countdownSeconds?: number;               // default 3
+  drawMouse?: boolean;
   backend?: 'auto' | 'test';
+  onEvent?: (event: RecorderEvent) => void; // countdown, recording, marker, warning, stopping
 }
-export interface Take { dir: string; screen: string; webcam?: string; mic?: string; events: string; markers: string; screenSize: { width: number; height: number }; seconds: number }
-export function listDevices(): Promise<{ monitors: Monitor[]; windows: WindowInfo[]; cameras: string[]; mics: string[] }>;
-export function record(opts: RecordOptions): { stop(): Promise<Take>; done: Promise<Take> };
+export interface Take {                    // paths relative to projectDir, with forward slashes
+  dir: string; screen: string; webcam?: string; mic?: string; events: string; markers: string;
+  screenSize: { width: number; height: number }; seconds: number;
+  stopReason: 'stop' | 'hotkey' | 'max-seconds' | 'file' | 'idle' | 'claude'; warnings: string[];
+}
+export interface Monitor { index: number; name: string; bounds: Bounds; scale: number; primary: boolean } // index = ddagrab output_idx
+export interface WindowInfo { title: string; bounds: Bounds; monitor: number } // Bounds = { x, y, width, height }, physical desktop pixels
+export function listDevices(opts?: { backend?: 'auto' | 'test' }): Promise<{ monitors: Monitor[]; windows: WindowInfo[]; cameras: string[]; mics: string[] }>;
+export function record(opts: RecordOptions): { stop(): Promise<Take>; marker(label?: string): void; done: Promise<Take> };
+export class RecorderError extends Error {    // CLI exit codes: 1, 2, 2, 2, 2, 130
+  code: 'invalid-options' | 'device-not-found' | 'ffmpeg-missing' | 'capture' | 'unsupported-platform' | 'cancelled';
+}
+export const HOTKEYS: Record<'stop' | 'marker', string>; // Ctrl+Shift+Alt+S, Ctrl+Shift+Alt+M
 ```
 
 ## Things each later plan must verify first (before writing its tasks)
@@ -169,27 +185,8 @@ export function record(opts: RecordOptions): { stop(): Promise<Take>; done: Prom
 - **M2:** done; see "Decisions made while planning" and "Changes during execution" in
   `2026-10-16-cuttle-m2-engine.md`.
 - **M3:** done; see "Decisions made while planning" in `2026-10-16-cuttle-m3-export.md`.
-- **M4:** Mapping from Electron `screen.getAllDisplays()` to ffmpeg `ddagrab output_idx` (on the
-  user's PC, `output_idx=0` was the 2560×1440 primary and `1` a 1920×1080 secondary; match by
-  size and position, never by order). Graceful ffmpeg stop by writing `q` to stdin. Fragmented MP4
-  flags `-movflags +frag_keyframe+empty_moov+default_base_moof`. `uiohook-napi` prebuilt binaries for
-  the Electron ABI. Cursor shape on Windows: poll `GetCursorInfo` (user32, via koffi) at ~30 Hz and
-  compare `hCursor` with `LoadCursor(NULL, IDC_ARROW | IDC_IBEAM | IDC_HAND | IDC_WAIT | IDC_CROSS |
-  IDC_SIZEALL | IDC_NO)`; write a `shape` event only when it changes; unknown handles map to `arrow`.
-  macOS: best effort, `arrow` fallback. uiohook reports global desktop coordinates (negative left of
-  the primary monitor; points, not Retina pixels, on macOS): subtract the capture origin and apply
-  the display scale before writing `events.jsonl`. Drop events with `t < 0` (before the first
-  frame). M3 added `parseEventsJsonl` (tolerant of a cut-off last line) and the take.json schema
-  (`TakeFileSchema`, `parseTakeJson`, `trackOffset`) to `@cuttle/project`: write events.jsonl in
-  screen-track seconds and take.json next to the tracks, each track with its file name and the time
-  its first frame or sample was captured on one monotonic clock. Encode screen and webcam with the
-  BT.709 matrix and tags (`-vf scale=out_color_matrix=bt709:out_range=tv,format=yuv420p -colorspace
-  bt709 -color_range tv`): Chromium decodes untagged HD video as BT.709 and ffmpeg's default RGB
-  conversion is BT.601, which shifts every colour. Force a key frame every 2 s
-  (`-force_key_frames "expr:gte(t,n_forced*2)"`, works with variable frame rate): each fragment is
-  one GOP, so libx264's default of 250 frames loses up to 8 s in a crash and makes export decode up
-  to 249 extra frames at a scene start. Claude transcripts live in `~/.claude/projects/<cwd with : \ / replaced by ->/`
-  and have `timestamp`, `type` and `message.stop_reason`.
+- **M4:** done; see "Decisions made while planning" and "Changes during execution" in
+  `2026-10-17-cuttle-m4-recorder.md`.
 - **M5:** commander version; how the CLI starts the bundled Electron for `render`, `preview` and
   `capture-page`; `pnpm link --global` on Windows. From M3: bundle the Electron entry with Vite like
   `packages/export/electron/vite.main.config.ts` (`ssr.noExternal: true`, `electron` external) and
@@ -205,7 +202,13 @@ export function record(opts: RecordOptions): { stop(): Promise<Take>; done: Prom
   failure while the bundle's static imports load would otherwise show Electron's modal dialog;
   projects with more than ~170 audible clips need ffmpeg 7 or later (the graph goes into a file).
   Phase 2 note: `loadSources` does not confine paths to the project folder; a shared project could
-  pull in any local file, so the app should ask before opening one.
+  pull in any local file, so the app should ask before opening one. From M4: `record()` runs in
+  plain Node (the CLI does not need Electron for it); in a Vite bundle keep `koffi` and
+  `uiohook-napi` external (native modules) and ship them in `node_modules`. Turn Ctrl+C and a kill
+  into `Recording.stop()` (a stop during the countdown rejects with `cancelled`, exit 130), print
+  `HOTKEYS` when the recording starts, map `RecorderError.code` to exit codes 1/2/2/2/2/130, and
+  print the `Take` for `--json`. A take does not touch `cuttle.json`: the CLI decides whether
+  `cuttle record` points `sources` at the new take (its paths are already relative to the project).
 - **M6:** current Claude skill frontmatter (`name`, `description`) and the user-level skill folder.
 
 ## Lessons from the manual run (carry into M4–M6)

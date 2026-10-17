@@ -292,10 +292,10 @@ describe('cuttle models and transcribe', () => {
     const { notes, speech } = suggested.json as { notes: string[]; speech: unknown };
     expect(notes[0]).toBe('the mic was not transcribed: no speech model is downloaded ("cuttle models download small"), so filler words and pauses stay');
     // a steady tone is not speech
-    expect(speech).toEqual({ from: 'mic', fillers: 0, pauses: 0 });
+    expect(speech).toEqual({ from: 'mic', fillers: 0, pauses: 0, retakes: 0 });
     // --no-speech leaves the mic out altogether
     const without = await cli('--json', '-C', dir, 'suggest', '--dry-run', '--no-speech');
-    expect((without.json as { notes: string[]; speech: unknown }).speech).toEqual({ from: 'none', fillers: 0, pauses: 0 });
+    expect((without.json as { notes: string[]; speech: unknown }).speech).toEqual({ from: 'none', fillers: 0, pauses: 0, retakes: 0 });
   }, 30_000);
 });
 
@@ -397,6 +397,7 @@ describe('cuttle suggest and recover', () => {
           "fillers": 0,
           "from": "none",
           "pauses": 0,
+          "retakes": 0,
         },
         "written": true,
         "zooms": [

@@ -69,7 +69,7 @@ export async function recordCommand(projectDir: string, args: RecordArgs, output
     backend: args.backend,
     onEvent(event) {
       if (event.type === 'countdown') output.info(`recording in ${event.seconds} …`);
-      if (event.type === 'recording') output.info(`recording ${event.dir}; stop: Ctrl+C or ${HOTKEYS.stop}, marker: ${HOTKEYS.marker}, pause: ${HOTKEYS.pause}`);
+      if (event.type === 'recording') output.info(`recording ${event.dir}; stop: Ctrl+C or ${HOTKEYS.stop}, marker: ${HOTKEYS.marker}, pause: ${HOTKEYS.pause}, a slip: ${HOTKEYS.retake}`);
       if (event.type === 'paused') output.info(`paused: nothing is recorded until ${HOTKEYS.pause} again`);
       if (event.type === 'resuming') output.info('resuming …');
       if (event.type === 'resumed') output.info('recording again');

@@ -67,7 +67,7 @@ const SNAP_PX = 6;
  */
 let pointerSeekUntil = 0;
 
-const MARKER_DOT: Record<MarkerKind, string> = { prompt: '#ececf1', tool: '#7a7a85', answer: '#4fd1a1', manual: '#9a9aa5' };
+const MARKER_DOT: Record<MarkerKind, string> = { prompt: '#ececf1', tool: '#7a7a85', answer: '#4fd1a1', manual: '#9a9aa5', retake: '#f2b34a' };
 
 interface Layout {
   heights: Record<'markers' | 'ruler' | 'video' | OverlayKind | 'mic' | 'input', number>;

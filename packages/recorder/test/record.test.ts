@@ -41,6 +41,7 @@ describe.concurrent('record (test backend)', () => {
     const projectDir = project();
     const events: RecorderEvent[] = [];
     let markedAt = 0;
+    let slipAt = 0;
     const recording = record({
       ...test,
       projectDir,
@@ -55,6 +56,11 @@ describe.concurrent('record (test backend)', () => {
             markedAt = Date.now() / 1000;
             recording.marker('one second');
           }, 1000);
+          // the mistake key
+          setTimeout(() => {
+            slipAt = Date.now() / 1000;
+            recording.retake();
+          }, 1600);
         }
       },
     });
@@ -89,8 +95,12 @@ describe.concurrent('record (test backend)', () => {
 
     // Marker times count from the screen's first frame, which starts late on a loaded machine.
     const markedSecond = markedAt - takeFile.take.tracks.screen.start;
-    expect(markersOf(projectDir, take.markers)).toEqual([{ t: expect.closeTo(markedSecond, 1), kind: 'manual', label: 'one second' }]);
-    expect(events.map((event) => event.type)).toEqual(['processes', 'recording', 'marker', 'stopping']);
+    const slipSecond = slipAt - takeFile.take.tracks.screen.start;
+    expect(markersOf(projectDir, take.markers)).toEqual([
+      { t: expect.closeTo(markedSecond, 1), kind: 'manual', label: 'one second' },
+      { t: expect.closeTo(slipSecond, 1), kind: 'retake' },
+    ]);
+    expect(events.map((event) => event.type)).toEqual(['processes', 'recording', 'marker', 'marker', 'stopping']);
     // screen, webcam and mic: the app kills these when its recorder host dies
     const processes = events[0]!;
     expect(processes.type === 'processes' && processes.pids.length === 3 && processes.pids.every(Number.isInteger)).toBe(true);

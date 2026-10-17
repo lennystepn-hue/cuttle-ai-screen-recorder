@@ -8,7 +8,8 @@ export const MARKERS_VERSION = 1;
  * `manual`: the marker hotkey or the recorder API. From a Claude Code transcript: `prompt` (a prompt
  * was submitted), `tool` (a tool call, labelled with the tool's name) and `answer` (the final answer).
  */
-export const MARKER_KINDS = ['manual', 'prompt', 'tool', 'answer'] as const;
+/** `retake`: the person pressed the mistake key (a slip: Cuttle cuts back to the pause before it). */
+export const MARKER_KINDS = ['manual', 'prompt', 'tool', 'answer', 'retake'] as const;
 
 /** One marker; `t` is in source seconds of the screen track, like events.jsonl. */
 export const MarkerSchema = z.strictObject({

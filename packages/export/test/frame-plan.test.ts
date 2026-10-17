@@ -113,3 +113,13 @@ describe('stillFrames and shownSourceTime', () => {
     expect(shown(7)).toEqual([210, undefined]);
   });
 });
+
+describe('planFrames over cuts', () => {
+  it('reads the pieces of a cut clip with one decoder: one plan, its source times jumping forward', () => {
+    const result = plan({ scenes: [{ type: 'clip', from: 0, to: 2 }], cuts: [{ from: 0.5, to: 1.5 }] }, 10);
+    expect(result.frames).toBe(10);
+    expect(result.scenes).toHaveLength(1);
+    expect(result.scenes[0]).toMatchObject({ index: 0, firstFrame: 0, lastFrame: 9 });
+    expect(result.scenes[0]!.sourceTimes).toEqual([0, 0.1, 0.2, 0.3, 0.4, 1.5, 1.6, 1.7, 1.8, 1.9]);
+  });
+});

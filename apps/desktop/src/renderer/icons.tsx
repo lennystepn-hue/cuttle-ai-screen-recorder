@@ -56,6 +56,8 @@ export const SplitIcon = icon(
     <path d="M6.2 5.6 13.5 12M6.2 10.4 13.5 4" />
   </>,
 );
+/** A crop: two corner brackets crossing. */
+export const CropIcon = icon(<path d="M4.5 1.5v10h10M1.5 4.5h10v10" />);
 export const FitIcon = icon(<path d="M2.5 6V3.5a1 1 0 0 1 1-1H6M10 2.5h2.5a1 1 0 0 1 1 1V6M13.5 10v2.5a1 1 0 0 1-1 1H10M6 13.5H3.5a1 1 0 0 1-1-1V10" />);
 export const FolderIcon = icon(<path d="M2 4.5h4l1.5 1.5H14v6.5a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1z" />);
 export const TrashIcon = icon(<path d="M2.5 4.5h11M6 4.5V3h4v1.5M4 4.5l.7 9h6.6l.7-9M6.7 7v4.5M9.3 7v4.5" />);

@@ -14,6 +14,7 @@ import { dragRange, overlayRange, rangeFields, snapTime } from '../../shared/edi
 import { formatTime } from '../../shared/format';
 import {
   activityColumns,
+  blockSourceAt,
   groupPins,
   pinGroupDetail,
   pinGroupName,
@@ -26,6 +27,7 @@ import {
   type TimelineModel,
 } from '../../shared/timeline-model';
 import { FitIcon } from '../icons';
+import { Select } from '../Select';
 import { addCard, addMask, addPage, addZoom, overlayBlocked, selectedOrCurrentClip, setSpeed, split, SPEEDS } from './actions';
 import { audible } from './audio';
 import { edit, preview } from './doc';
@@ -122,7 +124,7 @@ export function Timeline() {
   const [cutOutList, setCutOutList] = useState<{ kind: OverlayKind; left: number; top: number }>();
 
   const project = shownProject();
-  const spans = useMemo(() => (project ? sceneSpans(project.scenes) : []), [project]);
+  const spans = useMemo(() => (project ? sceneSpans(project.scenes, project.cuts) : []), [project]);
   const duration = spans.at(-1)?.end ?? 0;
   const model = useMemo(() => (project ? timelineModel(project, spans, media?.markers) : undefined), [project, spans, media]);
   const layout = useMemo(() => layoutOf(model), [model]);
@@ -162,7 +164,7 @@ export function Timeline() {
       if (event.ctrlKey || event.altKey) {
         event.preventDefault();
         const project = shownProject();
-        const length = project ? (sceneSpans(project.scenes).at(-1)?.end ?? 0) : 0;
+        const length = project ? (sceneSpans(project.scenes, project.cuts).at(-1)?.end ?? 0) : 0;
         const fitPps = length > 0 ? (element.clientWidth - END_SPACE - 8) / length : current;
         const box = element.getBoundingClientRect();
         const anchorX = event.clientX - box.left;
@@ -300,7 +302,8 @@ export function Timeline() {
             if (edge === 'end') {
               const end = snapped(block.end + deltaOut, others, moved);
               setDrag({ guide: end.target });
-              commands = [{ type: 'trim', id: block.id, to: scene.from + (end.t - block.start) * scene.speed }];
+              // through the clip's pieces: cuts inside it take no output time
+              commands = [{ type: 'trim', id: block.id, to: blockSourceAt(block, end.t) }];
             } else commands = [{ type: 'trim', id: block.id, from: scene.from + deltaOut * scene.speed }];
           } else {
             const end = edge === 'end' ? snapped(block.end + deltaOut, others, moved) : { t: block.end - deltaOut, target: undefined };
@@ -445,6 +448,24 @@ export function Timeline() {
                   {model.scenes.map((scene) => (
                     <Scene key={scene.id} scene={scene} project={project} pps={pps} view={view} selected={isSelected(selection, 'scene', scene.id)} moving={drag.ghost?.id === scene.id} onPointerDown={(event) => pressScene(event, scene)} />
                   ))}
+                  {/* where cuts take a stretch out: a notch; an off cut, faint, where it would cut */}
+                  {model.cuts.map((notch) => (
+                    <button
+                      key={`${notch.ids.join('+')}@${notch.t}`}
+                      type="button"
+                      className={`cut-notch${notch.enabled ? '' : ' off'}${notch.ids.some((id) => isSelected(selection, 'cut', id)) ? ' selected' : ''}`}
+                      style={{ left: notch.t * pps }}
+                      title={`${notch.title}${notch.ids.length > 1 ? ` and ${notch.ids.length - 1} more` : ''}${notch.enabled ? '' : ' (off: the video plays it)'} · click to select`}
+                      aria-label={`${notch.enabled ? 'Cut' : 'Cut, off'}: ${notch.title}`}
+                      data-testid="cut-notch"
+                      onPointerDown={(event) => {
+                        event.stopPropagation();
+                        select({ kind: 'cut', id: notch.ids[0]! });
+                      }}
+                      // Enter or Space when it has the keyboard's focus
+                      onClick={() => select({ kind: 'cut', id: notch.ids[0]! })}
+                    />
+                  ))}
                 </div>
                 {!project.sources.mic && (
                   <span className="lane-hint" style={{ top: tops.mic + heights.mic / 2, left: view.left + 10 }}>
@@ -545,22 +566,18 @@ function TimelineBar({ status, fit, zoomValue, onScale }: { status: string; fit:
       </button>
       <label className="act speed" title="The clip's speed (R faster, Shift+R slower)">
         <span>Speed</span>
-        <select
-          value={clip ? String(clip.speed) : ''}
+        <Select
+          value={clip ? String(clip.speed) : undefined}
+          options={[
+            ...(clip && !SPEEDS.includes(clip.speed as (typeof SPEEDS)[number]) ? [{ value: String(clip.speed), label: `${clip.speed}×` }] : []),
+            ...SPEEDS.map((speed) => ({ value: String(speed), label: `${speed}×` })),
+          ]}
           disabled={!clip || broken}
-          onChange={(event) => setSpeed(Number(event.target.value), clip?.id)}
-          aria-label="Speed"
-          data-testid="speed"
-          id="speed-select"
-        >
-          {!clip && <option value="">–</option>}
-          {clip && !SPEEDS.includes(clip.speed as (typeof SPEEDS)[number]) && <option value={String(clip.speed)}>{clip.speed}×</option>}
-          {SPEEDS.map((speed) => (
-            <option key={speed} value={String(speed)}>
-              {speed}×
-            </option>
-          ))}
-        </select>
+          onChange={(speed) => setSpeed(Number(speed), clip?.id)}
+          label="Speed"
+          variant="compact"
+          testId="speed"
+        />
       </label>
       <span className="tl-sep" />
       <button className="act" onClick={() => addZoom()} disabled={!!blocked} title={blocked ?? 'A zoom at the playhead (Z draws one)'}>
@@ -705,7 +722,8 @@ function Scene(props: { scene: SceneBlock; project: CuttleProject; pps: number; 
     for (let i = from; i < to; i++) {
       const outT = scene.start + ((i + 0.5) * tileWidth) / pps;
       // The thumbnails count from the take's first frame.
-      const source = clip.from + (outT - scene.start) * clip.speed - screenStart;
+      // the source second shown there, through the clip's pieces (cuts take no output time)
+      const source = blockSourceAt(scene, outT) - screenStart;
       tiles.push({ x: i * tileWidth, index: Math.min(count - 1, Math.max(0, Math.floor(source / interval!))) });
     }
   }

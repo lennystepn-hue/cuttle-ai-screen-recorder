@@ -8,7 +8,7 @@ import type { Rect } from '@cuttle/project';
 import type { Command } from '../../shared/document';
 import { formatSource } from '../../shared/format';
 import { adjustRect, drawnRect, fitInside, toSource, toStage, type Fit, type Handle } from '../../shared/edit';
-import { addMask, addZoom, overlayBlocked, playheadPlace } from './actions';
+import { addMask, addZoom, cropClip, overlayBlocked, playheadPlace } from './actions';
 import { edit, preview } from './doc';
 import { beginGesture, cancelGesture } from './gesture';
 import { FrameGrabber } from './frames';
@@ -24,7 +24,7 @@ const MARGIN = 14;
 const MIN_DRAW = 12;
 
 interface Box {
-  kind: 'zoom' | 'mask';
+  kind: 'zoom' | 'mask' | 'crop';
   id: string;
   rect: Rect;
   /** It shows at the playhead's source second (others are drawn faint). */
@@ -61,13 +61,20 @@ export function SourceView() {
   }, [active]);
 
   const project = active ? shownProject() : undefined;
-  const source = active ? playheadPlace(t)?.source : undefined;
+  const place = active ? playheadPlace(t) : undefined;
+  const source = place?.source;
   const screen = media?.screen.size ?? { width: 1920, height: 1080 };
   const inner = fitInside({ width: Math.max(1, size.width - 2 * MARGIN), height: Math.max(1, size.height - BAND - MARGIN) }, screen);
   const fit: Fit = { x: inner.x + MARGIN, y: inner.y + BAND, scale: inner.scale };
   // A selected zoom or mask the playhead is not on shows on the frame where it starts.
   const item = selection?.kind === 'zoom' ? project?.zooms.find((zoom) => zoom.id === selection.id) : selection?.kind === 'mask' ? project?.masks.find((mask) => mask.id === selection.id) : undefined;
-  const range = item && ('at' in item ? [item.at, item.at + item.duration] : [item.from, item.to]);
+  // The clip the crop is about: a selected crop's, with the Crop tool the selected clip, else the one
+  // at the playhead. Its frames show: the playhead's when it is on the clip, else the clip's first.
+  const cropSelected = selection?.kind === 'crop' || (tool === 'crop' && selection?.kind === 'scene');
+  const cropTarget = cropSelected ? project?.scenes.find((scene) => scene.id === selection!.id) : tool === 'crop' ? place?.clip : undefined;
+  const croppedClip = cropTarget?.type === 'clip' ? cropTarget : undefined;
+  const cropRange = croppedClip ? [croppedClip.from, croppedClip.to] : undefined;
+  const range = item ? ('at' in item ? [item.at, item.at + item.duration] : [item.from, item.to]) : cropRange;
   const frameAt = range && (source === undefined || source < range[0]! || source >= range[1]!) ? range[0] : source;
 
   // The screen frame at that source second, decoded on its own (the player's frames are the video's).
@@ -107,6 +114,8 @@ export function SourceView() {
     ...project.zooms.map((zoom) => ({ kind: 'zoom' as const, id: zoom.id!, rect: zoom.rect, here: frameAt !== undefined && frameAt >= zoom.at && frameAt < zoom.at + zoom.duration })),
     ...project.masks.map((mask) => ({ kind: 'mask' as const, id: mask.id!, rect: mask.rect, here: frameAt !== undefined && frameAt >= mask.from && frameAt < mask.to })),
   ].filter((box) => box.here || (selection?.kind === box.kind && selection.id === box.id));
+  // that clip's crop, while cropping or selected
+  if (croppedClip?.crop && croppedClip.id) boxes.push({ kind: 'crop', id: croppedClip.id, rect: croppedClip.crop.rect, here: true });
   const selected = boxes.find((box) => selection?.kind === box.kind && selection.id === box.id);
   const aspect = screen.width / screen.height;
   /**
@@ -158,13 +167,16 @@ export function SourceView() {
     if (event.button !== 0) return;
     const handle = ((event.target as HTMLElement).dataset.handle as Handle | undefined) ?? 'move';
     select({ kind: box.kind, id: box.id });
-    const list = box.kind === 'zoom' ? 'zooms' : 'masks';
+    const list = box.kind === 'zoom' ? 'zooms' : box.kind === 'mask' ? 'masks' : 'scenes';
+    const clip = box.kind === 'crop' ? project.scenes.find((scene) => scene.id === box.id) : undefined;
     let commands: Command[] | undefined;
     follow(
       event,
       (dx, dy) => {
-        const rect = adjustRect(box.rect, handle, dx, dy, screen, box.kind === 'zoom' ? aspect : undefined);
-        commands = [{ type: 'set', list, id: box.id, fields: { rect: rect.map((value) => Math.round(value)) } }];
+        const rect = adjustRect(box.rect, handle, dx, dy, screen, box.kind === 'zoom' ? aspect : undefined).map((value) => Math.round(value));
+        // a crop moved by hand is the person's: a new crop object, without the automatic tag
+        const fields = box.kind === 'crop' && clip?.type === 'clip' ? { crop: { rect, ...(clip.crop?.enabled === false && { enabled: false }) } } : { rect };
+        commands = [{ type: 'set', list, id: box.id, fields }];
         preview(commands);
       },
       (moved) => {
@@ -174,10 +186,10 @@ export function SourceView() {
     );
   };
 
-  /** A press on the frame: with the Zoom or Mask tool, draw a new one there. */
+  /** A press on the frame: with the Zoom, Mask or Crop tool, draw a new one there. */
   const pressFrame = (event: ReactPointerEvent<HTMLElement>) => {
     if (event.button !== 0) return;
-    const kind = tool === 'zoom' || tool === 'mask' ? tool : undefined;
+    const kind = tool === 'zoom' || tool === 'mask' || tool === 'crop' ? tool : undefined;
     if (!kind) {
       select(undefined);
       return;
@@ -194,6 +206,7 @@ export function SourceView() {
         if (!moved || !rect || rect[2] * fit.scale < MIN_DRAW || rect[3] * fit.scale < MIN_DRAW) return;
         const whole = rect.map((value) => Math.round(value));
         if (kind === 'zoom') addZoom(whole);
+        else if (kind === 'crop') cropClip(whole, croppedClip?.id);
         else addMask(whole);
       },
     );
@@ -203,7 +216,8 @@ export function SourceView() {
   return (
     <div className="source-view" ref={area} onPointerDown={pressFrame} data-testid="source-view">
       <canvas ref={canvas} style={{ width: size.width, height: size.height }} />
-      {selected?.kind === 'zoom' && <ZoomDim fit={fit} rect={selected.rect} size={size} />}
+      {(selected?.kind === 'zoom' || selected?.kind === 'crop') && <ZoomDim fit={fit} rect={selected.rect} size={size} />}
+      {!selected && tool === 'crop' && boxes.some((box) => box.kind === 'crop') && <ZoomDim fit={fit} rect={boxes.find((box) => box.kind === 'crop')!.rect} size={size} />}
       {boxes.map((box) => {
         const at = toStage(box.rect, fit);
         const isSelected = box === selected;
@@ -214,13 +228,13 @@ export function SourceView() {
             style={{ left: at.x, top: at.y, width: at.width, height: at.height }}
             onPointerDown={(event) => pressBox(event, box)}
             data-id={box.id}
-            title={box.here ? `${box.kind === 'zoom' ? 'Zoom' : 'Mask'}: drag to move, handles to resize` : `This ${box.kind} is not shown at the playhead`}
+            title={box.here ? `${box.kind === 'zoom' ? 'Zoom' : box.kind === 'mask' ? 'Mask' : 'Crop: what the clip shows'}: drag to move, handles to resize` : `This ${box.kind} is not shown at the playhead`}
           >
             {isSelected && HANDLES.map((handle) => <i key={handle} className={`box-handle ${handle}`} data-handle={handle} />)}
           </div>
         );
       })}
-      {drawing && tool === 'zoom' && <ZoomDim fit={fit} rect={drawing} size={size} />}
+      {drawing && (tool === 'zoom' || tool === 'crop') && <ZoomDim fit={fit} rect={drawing} size={size} />}
       {drawing && (
         <div
           className={`source-box ${tool} drawing`}
@@ -239,13 +253,19 @@ export function SourceView() {
           ? ' · move the playhead onto a clip to see the screen'
           : frameAt !== source
             ? ` · the frame at ${formatSource(frameAt)}, where this ${selection?.kind} starts`
-            : tool === 'zoom' || tool === 'mask'
-              ? blocked
-                ? ` · ${blocked}`
-                : selected
-                  ? ` · drag the box to place it, elsewhere for a new ${tool}`
-                  : ` · drag to draw a ${tool}`
-              : ' · drag the box to move it, its handles to resize it'}
+            : tool === 'crop'
+              ? !croppedClip
+                ? ' · select a clip, or move the playhead onto one, to crop it'
+                : boxes.some((box) => box.kind === 'crop')
+                  ? ' · drag the crop to move it, its handles to resize it, elsewhere for a new one'
+                  : ' · drag over the part of the screen this clip shows'
+              : tool === 'zoom' || tool === 'mask'
+                ? blocked
+                  ? ` · ${blocked}`
+                  : selected
+                    ? ` · drag the box to place it, elsewhere for a new ${tool}`
+                    : ` · drag to draw a ${tool}`
+                : ' · drag the box to move it, its handles to resize it'}
         <span className="sep" />
         <kbd>Esc</kbd> for the video
       </div>
@@ -255,7 +275,7 @@ export function SourceView() {
         onPointerDown={(event) => event.stopPropagation()}
         onClick={() => {
           setTool('select');
-          if (selection?.kind === 'zoom' || selection?.kind === 'mask') select(undefined);
+          if (selection?.kind === 'zoom' || selection?.kind === 'mask' || selection?.kind === 'crop') select(undefined);
         }}
       >
         Back to the video

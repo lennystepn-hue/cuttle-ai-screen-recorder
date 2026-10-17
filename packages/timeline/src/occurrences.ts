@@ -18,8 +18,10 @@ export interface Occurrence {
 
 /**
  * The occurrence of the overlay with source range `[start, end)` in each span: `undefined` where
- * the span does not show it; spans joined by a continuous cut share one object. An overlay end that
- * lies within a continuous cut's tolerance of a clip's end counts as shown there (it ramps).
+ * the span does not show it; spans joined by a continuous cut or by a cut (`cuts`) share one
+ * object, so the overlay runs on. An overlay end that lies within a continuous cut's tolerance of a
+ * clip's end, or inside the cut after a piece, counts as shown there (it ramps); so does a start
+ * inside the cut before a piece.
  */
 export function occurrences(spans: readonly SceneSpan[], start: number, end: number): (Occurrence | undefined)[] {
   const result: (Occurrence | undefined)[] = [];
@@ -33,14 +35,17 @@ export function occurrences(spans: readonly SceneSpan[], start: number, end: num
     }
     const outEnd = Math.min(span.end, span.start + (to - scene.from) / scene.speed);
     const previous = result[i - 1];
-    const rampOut = end <= scene.to + CONTINUOUS_CUT_SECONDS;
-    if (previous && isContinuousCut(spans[i - 1]!.scene, scene)) {
+    const next = spans[i + 1];
+    const rampOut = end <= scene.to + CONTINUOUS_CUT_SECONDS || (next?.cutBefore === true && next.scene.type === 'clip' && end <= next.scene.from);
+    if (previous && (span.cutBefore || isContinuousCut(spans[i - 1]!.scene, scene))) {
       previous.end = outEnd;
       previous.rampOut = rampOut;
       result.push(previous);
       return;
     }
-    result.push({ start: span.start + (from - scene.from) / scene.speed, end: outEnd, rampIn: start >= scene.from - CONTINUOUS_CUT_SECONDS, rampOut });
+    const prior = spans[i - 1]?.scene;
+    const rampIn = start >= scene.from - CONTINUOUS_CUT_SECONDS || (span.cutBefore === true && prior?.type === 'clip' && start >= prior.to);
+    result.push({ start: span.start + (from - scene.from) / scene.speed, end: outEnd, rampIn, rampOut });
   });
   return result;
 }

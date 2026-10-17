@@ -124,6 +124,16 @@ export const SCENARIOS: Scenario[] = [
     t: 5,
   },
 
+  // A clip cropped to a wide band of the screen: the window takes its shape, the mask stays on its text
+  {
+    name: 'crop',
+    project: project(
+      { frame: { title: TITLE } },
+      { scenes: [{ type: 'clip', from: 0, to: 10, crop: { rect: [240, 40, 1000, 420] } }], masks: [{ from: 0, to: 10, rect: [270, 170, 700, 22], style: 'fill' }] },
+    ),
+    t: 1,
+  },
+
   // Cursors: six styles with a click ripple, then the system shapes
   ...(['system', 'arrow-white', 'arrow-black', 'dot', 'ring', 'spotlight'] as const).map(cursorScenario),
   ...(['text', 'pointer', 'wait', 'crosshair', 'move', 'not-allowed'] as const).map(shapeScenario),

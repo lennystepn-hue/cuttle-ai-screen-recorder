@@ -28,7 +28,8 @@ export interface SuggestResult {
   project: string;
   /** The suggested clips, with the project's still and card scenes before (those that were before the first clip) and after them. */
   scenes: (ClipScene | Record<string, unknown>)[];
-  zooms: { id: string; label: string; at: number; duration: number; rect: Rect }[];
+  /** Every zoom of the file afterwards: those kept (made by hand) and the new automatic ones, by start. */
+  zooms: SuggestedZoom[];
   notes: string[];
   /** Where the markers came from. */
   markers: { from: 'take' | 'transcript' | 'none'; count: number };
@@ -45,10 +46,13 @@ const ZOOM_SECONDS = 4;
 
 /**
  * Suggests scenes from the take (quiet start and end trimmed, idle stretches cut, waiting
- * sped up) and a zoom on Claude's answer, written to cuttle.json. The clip scenes and the zooms are
- * replaced; still and card scenes keep their place before or after the clips, masks and texts stay;
- * the previous file is kept as cuttle.json.bak. The new clips and zoom get ids no kept item uses and
- * labels from Claude's markers.
+ * sped up), a zoom on Claude's answer and zooms on clicks, written to cuttle.json. The clip scenes
+ * are replaced; still and card scenes keep their place before or after the clips; masks, texts and
+ * cuts stay. Of the zooms, only those suggest made before (tagged `auto`: "answer" or "click")
+ * are replaced: zooms without a tag (made or changed by hand) stay, and the new ones keep clear of
+ * them. A kind switched off in `autoEdits` is not made; a new zoom where one of its kind was
+ * switched off stays off. The previous file is kept as cuttle.json.bak. The new clips and zooms get
+ * ids no kept item uses and labels from Claude's markers.
  */
 export async function suggestProject(projectDir: string, args: SuggestOptions = {}): Promise<SuggestResult> {
   const file = await readProjectFile(projectDir);
@@ -105,10 +109,18 @@ export async function suggestProject(projectDir: string, args: SuggestOptions = 
     notes.push(`kept ${before.length + after.length} still or card scene(s)${before.length > 0 ? `, ${before.length} before the clips` : ''}`);
   }
   const scenes = [...before, ...clips, ...after];
-  const zooms: SuggestResult['zooms'] = [];
+  // The zooms suggest made before are replaced; the others stay, and the new ones avoid them.
+  const rawZooms = (file.raw.zooms as SuggestedZoom[] | undefined) ?? [];
+  const isOurs = (zoom: { auto?: string }) => zoom.auto === 'answer' || zoom.auto === 'click';
+  const kept = rawZooms.filter((zoom) => !isOurs(zoom));
+  const switchedOff = file.project.zooms.filter((zoom) => isOurs(zoom) && !zoom.enabled);
+  if (kept.length > 0) notes.push(`kept ${kept.length} zoom${kept.length === 1 ? '' : 's'} made or changed by hand`);
+  const zooms: SuggestedZoom[] = [];
+  const add = (zoom: SuggestedZoom & { auto: 'answer' | 'click' }) => zooms.push(staysOff(zoom, switchedOff) ? { ...zoom, enabled: false } : zoom);
   const first = suggestion.clips[0];
   const last = suggestion.clips.at(-1);
-  if (args.zoom !== false && suggestion.answer !== undefined && first && last) {
+  const keptOverlaps = (at: number, end: number) => kept.some((zoom) => at < zoom.at + zoom.duration && zoom.at < end);
+  if (args.zoom !== false && file.project.autoEdits.answerZoom && suggestion.answer !== undefined && first && last) {
     const [before, after] = await Promise.all([
       grabGray(screen, Math.max(first.from, suggestion.answer - ANSWER_LOOKBACK), COMPARE_WIDTH),
       grabGray(screen, Math.min(screenInfo.duration - 0.05, suggestion.answer + 0.3), COMPARE_WIDTH),
@@ -117,45 +129,79 @@ export async function suggestProject(projectDir: string, args: SuggestOptions = 
     const rect = region && zoomRect(region, COMPARE_WIDTH, screenInfo);
     const at = Math.max(first.from, suggestion.answer - 0.5);
     const duration = Math.min(ZOOM_SECONDS, last.to - at);
-    if (rect && duration > 0.5) {
-      zooms.push({ id: newId('zooms', taken), label: 'Answer', at: Math.round(at * 1000) / 1000, duration: Math.round(duration * 1000) / 1000, rect });
+    if (rect && duration > 0.5 && keptOverlaps(at, at + duration)) {
+      notes.push('no zoom on the answer: a zoom made by hand is there');
+    } else if (rect && duration > 0.5) {
+      add({ id: newId('zooms', taken), label: 'Answer', at: Math.round(at * 1000) / 1000, duration: Math.round(duration * 1000) / 1000, rect, auto: 'answer' });
       notes.push(`zoom on Claude's answer at ${at.toFixed(1)} s (${rect.join(', ')})`);
     } else {
       notes.push(region ? 'no zoom: most of the screen changed with the answer (add one by hand)' : 'no zoom: nothing changed around the answer');
     }
   }
-  if (args.zoom !== false && args.clickZooms !== false && events.length > 0) {
-    // where each clip starts in the output, with the cards and pages around the clips counted
+  if (args.zoom !== false && args.clickZooms !== false && file.project.autoEdits.clickZooms && events.length > 0) {
+    // where each clip piece starts in the output, with the cards and pages around the clips and the cuts counted
     const parsed = parseProject({ ...file.raw, scenes, zooms: [] });
-    const spans = parsed.ok ? sceneSpans(parsed.project.scenes) : [];
+    const spans = parsed.ok ? sceneSpans(parsed.project.scenes, parsed.project.cuts) : [];
     const shown = spans.flatMap((span) => (span.scene.type === 'clip' ? [{ from: span.scene.from, to: span.scene.to, speed: span.scene.speed, start: span.start }] : []));
-    const followed = clickZooms(events, shown, screenInfo, zooms);
-    // the clicks the answer zoom does not show, less those the click zooms follow
-    const left = shownClicks(events, shown, zooms) - followed.reduce((sum, zoom) => sum + zoom.clicks, 0);
+    const there = [...kept, ...zooms];
+    const followed = clickZooms(events, shown, screenInfo, there);
+    // the clicks the zooms there do not show, less those the click zooms follow
+    const left = shownClicks(events, shown, there) - followed.reduce((sum, zoom) => sum + zoom.clicks, 0);
     for (const zoom of followed) {
-      zooms.push({ id: newId('zooms', taken), label: zoom.clicks === 1 ? 'Click' : 'Clicks', at: zoom.at, duration: zoom.duration, rect: zoom.rect });
+      add({ id: newId('zooms', taken), label: zoom.clicks === 1 ? 'Click' : 'Clicks', at: zoom.at, duration: zoom.duration, rect: zoom.rect, auto: 'click' });
     }
-    zooms.sort((a, b) => a.at - b.at);
     if (followed.length > 0) notes.push(`${followed.length} zoom${followed.length === 1 ? '' : 's'} on clicks`);
     if (left > 0) notes.push(`${left} click${left === 1 ? '' : 's'} got no zoom: sped up, or near a cut or another zoom`);
   }
 
+  const allZooms = [...kept, ...zooms].sort((a, b) => a.at - b.at);
   let backup: string | undefined;
   if (!args.dryRun) {
     file.raw.scenes = scenes;
-    file.raw.zooms = zooms;
+    file.raw.zooms = allZooms;
     ({ backup } = await writeProjectFile(file, 'suggest', { backup: true }));
   }
   const result: SuggestResult = {
     project: file.path,
     scenes,
-    zooms,
+    zooms: allZooms,
     notes,
     markers: { from, count: markers.length },
     written: !args.dryRun,
     ...(backup && { backup }),
   };
   return result;
+}
+
+/** A zoom as written to cuttle.json (kept ones as they were, with whatever fields they had). */
+export interface SuggestedZoom {
+  id?: string;
+  label?: string;
+  at: number;
+  duration: number;
+  rect: Rect;
+  auto?: string;
+  enabled?: boolean;
+  [field: string]: unknown;
+}
+
+/**
+ * Whether a new automatic zoom takes the place of one of its kind the person switched off: the
+ * same kind, overlapping at least half of the shorter in time, and their rects at least half alike
+ * (intersection over union).
+ */
+function staysOff(zoom: SuggestedZoom, off: readonly { at: number; duration: number; rect: Rect; auto?: string }[]): boolean {
+  return off.some((other) => {
+    if (other.auto !== zoom.auto) return false;
+    const overlap = Math.min(zoom.at + zoom.duration, other.at + other.duration) - Math.max(zoom.at, other.at);
+    if (overlap < 0.5 * Math.min(zoom.duration, other.duration)) return false;
+    const [ax, ay, aw, ah] = zoom.rect;
+    const [bx, by, bw, bh] = other.rect;
+    const w = Math.min(ax + aw, bx + bw) - Math.max(ax, bx);
+    const h = Math.min(ay + ah, by + bh) - Math.max(ay, by);
+    const inter = w > 0 && h > 0 ? w * h : 0;
+    return inter / (aw * ah + bw * bh - inter) >= 0.5;
+  });
 }
 
 /** The events of events.jsonl; undefined when the file cannot be read. */

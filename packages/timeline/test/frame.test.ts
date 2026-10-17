@@ -352,3 +352,40 @@ describe('overlay ramps in output time', () => {
     }
   });
 });
+
+describe('cuts and crops in the timeline', () => {
+  it('jumps over a cut without a crossfade, and a zoom across it stays in', () => {
+    const timeline = createTimeline(
+      project({}, { scenes: [{ type: 'clip', from: 10, to: 30 }], cuts: [{ from: 15, to: 18 }], zooms: [{ at: 12, duration: 10, rect: [0, 0, 1280, 720] }], masks: [], texts: [] }),
+      { screenSize },
+    );
+    expect(timeline.duration).toBe(17);
+    // just before and after the cut: one layer each, the source jumps from 15 to 18
+    const before = timeline.frameAt(4.99).layers;
+    const after = timeline.frameAt(5).layers;
+    expect(before).toHaveLength(1);
+    expect(after).toHaveLength(1);
+    expect(before[0]).toMatchObject({ index: 0, sceneIndex: 0 });
+    expect(before[0]!.sourceTime).toBeCloseTo(14.99, 6);
+    expect(after[0]).toMatchObject({ index: 1, sceneIndex: 0, sourceTime: 18 });
+    // fully zoomed on both sides of the cut (no ramp out and in again)
+    expect(before[0]!.zoom).toEqual([0, 0, 1280, 720]);
+    expect(after[0]!.zoom).toEqual([0, 0, 1280, 720]);
+  });
+
+  it('shows a clip’s crop as its screen: the window takes its shape, a zoom fits inside it', () => {
+    const crop = [62, 141, 2478, 1237];
+    const timeline = createTimeline(
+      project({}, { scenes: [{ type: 'clip', from: 0, to: 10, crop: { rect: crop } }], zooms: [{ at: 5, duration: 4, rect: [0, 0, 400, 400] }], masks: [], texts: [] }),
+      { screenSize },
+    );
+    const [plain] = timeline.frameAt(1).layers;
+    expect(plain!.zoom).toEqual(crop);
+    expect(plain!.aspect).toBeCloseTo(2478 / 1237, 9);
+    const [zoomed] = timeline.frameAt(7).layers;
+    const [x, y, w, h] = zoomed!.zoom!;
+    expect(w / h).toBeCloseTo(2478 / 1237, 6);
+    expect(x).toBeGreaterThanOrEqual(62);
+    expect(y).toBeGreaterThanOrEqual(141);
+  });
+});

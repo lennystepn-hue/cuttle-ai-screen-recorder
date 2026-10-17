@@ -7,14 +7,20 @@ import { crossfadeHalf, isContinuousCut, sceneSpans, sourceTimeAt, spanAt, total
 import { ZOOM_RAMP_SECONDS, zoomRectAt } from './zoom';
 
 export interface SceneFrame {
+  /** The span it comes from (`Timeline.spans`); a clip with cuts in it has several. */
   index: number;
+  /** The scene it shows, in the project's `scenes`. */
+  sceneIndex: number;
   kind: 'clip' | 'still' | 'card';
   local: number;
   progress: number;
   opacity: number;
   /** Clip scenes: source seconds, always inside the clip's [from, to). */
   sourceTime?: number;
+  /** Clip scenes: the part of the screen shown (source px), the crop or the zoom inside it. */
   zoom?: Rect;
+  /** Clip scenes: the width / height the window shows, the crop's or else the screen's. */
+  aspect?: number;
   masks: Mask[];
   texts: ActiveText[];
   badge?: string;
@@ -42,7 +48,7 @@ export function createTimeline(project: CuttleProject, opts: TimelineOptions): T
   if (!(Number.isFinite(width) && width > 0 && Number.isFinite(height) && height > 0)) {
     throw new Error('createTimeline: screenSize must have a positive, finite width and height');
   }
-  const spans = sceneSpans(project.scenes);
+  const spans = sceneSpans(project.scenes, project.cuts);
   const duration = totalDuration(spans);
   // Source seconds where the video jumps (a clip's edge that is not a continuous cut): the smoothed
   // cursor keeps the two sides apart.
@@ -80,7 +86,7 @@ export function createTimeline(project: CuttleProject, opts: TimelineOptions): T
   function sceneFrame(span: SceneSpan, t: number, opacity: number): SceneFrame {
     const length = span.end - span.start;
     const local = clamp(t - span.start, 0, length);
-    const base = { index: span.index, local, progress: length === 0 ? 1 : local / length, opacity };
+    const base = { index: span.index, sceneIndex: span.sceneIndex, local, progress: length === 0 ? 1 : local / length, opacity };
     const scene = span.scene;
     if (scene.type !== 'clip') return { ...base, kind: scene.type, masks: [], texts: [] };
     // Past the end (or on a frame whose source time would be `to`), hold the last frame shown:
@@ -98,11 +104,14 @@ export function createTimeline(project: CuttleProject, opts: TimelineOptions): T
       const occurrence = shown?.[span.index];
       return occurrence ? rampAmount(occurrence, shownAt, ramp, curve) : 1;
     };
+    // the crop is the screen for this clip: zooms fit inside it, the window takes its shape
+    const screen = scene.crop?.enabled ? scene.crop.rect : full;
     return {
       ...base,
       kind: 'clip',
       sourceTime,
-      zoom: zoomRectAt(project.zooms, sourceTime, (zoom) => amount(zoomShown.get(zoom), ZOOM_RAMP_SECONDS, zoom.ease), full),
+      zoom: zoomRectAt(project.zooms, sourceTime, (zoom) => amount(zoomShown.get(zoom), ZOOM_RAMP_SECONDS, zoom.ease), screen),
+      aspect: screen[2] / screen[3],
       masks: activeMasks(project.masks, sourceTime),
       texts: activeTexts(project.texts, sourceTime, (text) => amount(textShown.get(text), TEXT_FADE_SECONDS, 'linear')),
       badge: badgeFor(scene),
@@ -119,7 +128,7 @@ export function createTimeline(project: CuttleProject, opts: TimelineOptions): T
     // held one.
     const following = spans[span.index + 1];
     const scene = span.scene;
-    if (following && isContinuousCut(scene, following.scene) && scene.type === 'clip' && !(scene.from + (time - span.start) * scene.speed < scene.to)) {
+    if (following && (following.cutBefore || isContinuousCut(scene, following.scene)) && scene.type === 'clip' && !(scene.from + (time - span.start) * scene.speed < scene.to)) {
       span = following;
     }
 

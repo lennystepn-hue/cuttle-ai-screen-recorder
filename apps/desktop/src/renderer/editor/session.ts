@@ -13,10 +13,11 @@ import { Player, type PlayerState } from './player';
 import { createStore } from './store';
 
 /** What is selected: a scene or an overlay by id, an overlay with the stretch of the video where it was clicked. */
-export type Selection = { kind: 'scene' | OverlayKind; id: string; start?: number; end?: number };
+/** What is selected; a `crop` is a clip's (its id is the clip's). */
+export type Selection = { kind: 'scene' | OverlayKind | 'cut' | 'crop'; id: string; start?: number; end?: number };
 
 /** The tools: V selects; Z and M draw zooms and masks in the source view; T adds a caption. */
-export type Tool = 'select' | 'zoom' | 'mask' | 'caption';
+export type Tool = 'select' | 'zoom' | 'mask' | 'caption' | 'crop';
 
 export interface EditorState {
   phase: 'loading' | 'ready' | 'failed';
@@ -30,7 +31,7 @@ export interface EditorState {
   player: PlayerState;
   selection?: Selection;
   tool: Tool;
-  tab: 'selection' | 'look';
+  tab: 'selection' | 'auto' | 'look';
   /** Snapping on the timeline (Ctrl while dragging turns it off for that drag). */
   snap: boolean;
   mediaState: MediaState;
@@ -138,7 +139,7 @@ export async function openSession(canvas: HTMLCanvasElement): Promise<void> {
   }
 }
 
-const LISTS = { scene: 'scenes', zoom: 'zooms', mask: 'masks', caption: 'texts' } as const;
+const LISTS = { scene: 'scenes', zoom: 'zooms', mask: 'masks', caption: 'texts', cut: 'cuts', crop: 'scenes' } as const;
 
 /** The player follows the document (edits, previews, outside changes) and the previewed format. */
 function followDocument(): void {
@@ -147,7 +148,7 @@ function followDocument(): void {
   store.subscribe(() => {
     // a selection whose item an undo or an outside change removed is cleared
     const { selection, doc } = store.get();
-    if (selection && doc && !doc.project[LISTS[selection.kind]].some((item) => item.id === selection.id)) select(undefined);
+    if (selection && doc && !(doc.project[LISTS[selection.kind]] as { id?: string }[]).some((item) => item.id === selection.id)) select(undefined);
     const next = shownProject();
     if (next === last || !next) return;
     last = next;
@@ -236,9 +237,10 @@ function dismissWarning(): void {
 
 /** The stage shows the source view: paused, with the Zoom or Mask tool on or a zoom or mask selected (playing shows the video). */
 export const sourceViewShown = (state: EditorState): boolean =>
-  !state.player.playing && (state.tool === 'zoom' || state.tool === 'mask' || state.selection?.kind === 'zoom' || state.selection?.kind === 'mask');
+  !state.player.playing &&
+  (state.tool === 'zoom' || state.tool === 'mask' || state.tool === 'crop' || state.selection?.kind === 'zoom' || state.selection?.kind === 'mask' || state.selection?.kind === 'crop');
 
-/** Picks a tool; Esc goes back to Select. Zoom and Mask show the source view. */
+/** Picks a tool; Esc goes back to Select. Zoom, Mask and Crop show the source view. */
 export function setTool(tool: Tool): void {
   dismissWarning();
   store.set({ tool });

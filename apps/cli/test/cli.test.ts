@@ -305,6 +305,7 @@ describe('cuttle suggest and recover', () => {
         "zooms": [
           {
             "at": 15.5,
+            "auto": "answer",
             "duration": 3,
             "id": "z1",
             "label": "Answer",
@@ -341,6 +342,43 @@ describe('cuttle suggest and recover', () => {
     const without = await cli('--json', '-C', dir, 'suggest', '--dry-run', '--no-click-zooms');
     expect((without.json as { zooms: { label: string }[] }).zooms.map((zoom) => zoom.label)).not.toContain('Clicks');
   }, 30_000);
+
+  it('replaces only the zooms it made: hand-made ones stay, one switched off stays off, a kind switched off is not made', async () => {
+    const dir = temp();
+    cpSync(fixture, dir, { recursive: true });
+    const events = [
+      ...Array.from({ length: 31 }, (_, i) => ({ t: 3 + i * 0.3, type: 'keys', count: 1 })),
+      { t: 6, type: 'click', x: 400, y: 300, button: 'left' },
+      { t: 6.6, type: 'click', x: 430, y: 320, button: 'left' },
+    ].sort((a, b) => a.t - b.t);
+    writeFileSync(join(dir, 'takes/1/events.jsonl'), events.map((event) => `${JSON.stringify(event)}\n`).join(''));
+    const first = await cli('--json', '-C', dir, 'suggest');
+    expect(first.code).toBe(0);
+    type Zoom = { id: string; label?: string; at: number; duration: number; rect: number[]; auto?: string; enabled?: boolean };
+    const made = (first.json as { zooms: Zoom[] }).zooms;
+    expect(made.map((zoom) => zoom.auto)).toContain('click');
+    const answer = made.find((zoom) => zoom.auto === 'answer');
+    expect(answer).toBeDefined();
+    // the person switches the click zoom off and puts a zoom of their own where the answer is
+    const file = JSON.parse(readFileSync(join(dir, 'cuttle.json'), 'utf8'));
+    file.zooms = [
+      ...file.zooms.filter((zoom: Zoom) => zoom.auto !== 'answer').map((zoom: Zoom) => (zoom.auto === 'click' ? { ...zoom, enabled: false } : zoom)),
+      { id: 'z9', label: 'Mine', at: answer!.at, duration: 2, rect: [0, 0, 800, 450] },
+    ];
+    writeFileSync(join(dir, 'cuttle.json'), JSON.stringify(file, null, 2));
+    const again = (await cli('--json', '-C', dir, 'suggest')).json as { zooms: Zoom[]; notes: string[] };
+    expect(again.zooms.find((zoom) => zoom.id === 'z9')).toMatchObject({ label: 'Mine', at: answer!.at });
+    expect(again.zooms.find((zoom) => zoom.auto === 'click')).toMatchObject({ enabled: false });
+    expect(again.notes).toContain('kept 1 zoom made or changed by hand');
+    // the answer zoom keeps clear of the zoom made by hand there
+    expect(again.zooms.filter((zoom) => zoom.auto === 'answer')).toEqual([]);
+    expect(again.notes).toContain('no zoom on the answer: a zoom made by hand is there');
+    // click zooms switched off as a kind: none made
+    const off = JSON.parse(readFileSync(join(dir, 'cuttle.json'), 'utf8'));
+    writeFileSync(join(dir, 'cuttle.json'), JSON.stringify({ ...off, autoEdits: { clickZooms: false } }, null, 2));
+    const none = (await cli('--json', '-C', dir, 'suggest', '--dry-run')).json as { zooms: Zoom[] };
+    expect(none.zooms.map((zoom) => zoom.auto)).not.toContain('click');
+  }, 60_000);
 
   it('leaves cuttle.json alone with --dry-run', async () => {
     const dir = temp();

@@ -77,3 +77,14 @@ describe('occurrences at a continuous cut within its tolerance', () => {
     expect(rampAmount({ start: 5, end: 5, rampIn: true, rampOut: true }, 5, 0.6, 'smooth')).toBe(0);
   });
 });
+
+describe('occurrences over cuts', () => {
+  it('runs on across a cut: one occurrence, ramps only at its ends; one that ends in a cut ramps out before it', () => {
+    const spans = sceneSpans([{ type: 'clip', from: 0, to: 20, speed: 1 }], [{ from: 8, to: 9 }]);
+    const across = occurrences(spans, 5, 12);
+    expect(across[0]).toBe(across[1]);
+    expect(across[0]).toEqual({ start: 5, end: 11, rampIn: true, rampOut: true });
+    expect(occurrences(spans, 5, 8.5)[0]).toMatchObject({ end: 8, rampOut: true });
+    expect(occurrences(spans, 8.5, 12)[1]).toMatchObject({ start: 8, rampIn: true });
+  });
+});

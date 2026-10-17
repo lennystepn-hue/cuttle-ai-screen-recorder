@@ -144,9 +144,10 @@ export function createRenderer(canvas: HTMLCanvasElement | OffscreenCanvas, proj
   let drawn: DrawnText[] = [];
   let scenes: readonly Scene[] = project.scenes;
 
-  function frame(style: FrameStyle | null): { chrome: FrameChrome | null; layout: WindowLayout } {
+  /** The window for a frame style; `aspect` is the content's (a clip's crop, else the screen's). */
+  function frame(style: FrameStyle | null, aspect = screenAspect): { chrome: FrameChrome | null; layout: WindowLayout } {
     const chrome = style ? FRAME_CHROME[style] : null;
-    return { chrome, layout: windowLayout(output, screenAspect, chrome ? { titleBar: chrome.titleBar, radius: look.frame.radius } : null) };
+    return { chrome, layout: windowLayout(output, aspect, chrome ? { titleBar: chrome.titleBar, radius: look.frame.radius } : null) };
   }
 
   /** `avoid`: rects the texts move clear of (the webcam bubble, the badge). */
@@ -162,7 +163,7 @@ export function createRenderer(canvas: HTMLCanvasElement | OffscreenCanvas, proj
   }
 
   function drawClip(layer: SceneFrame, sources: FrameSources): void {
-    const { chrome, layout } = frame(look.frame.enabled ? look.frame.style : null);
+    const { chrome, layout } = frame(look.frame.enabled ? look.frame.style : null, layer.aspect);
     if (chrome) windowPass.draw(layout, chrome, look.frame.shadow, look.frame.title);
     const screen = sources.screens.get(layer.index);
     if (!screen) throw new Error(`render: no screen frame for scene ${layer.index}`);
@@ -221,8 +222,8 @@ export function createRenderer(canvas: HTMLCanvasElement | OffscreenCanvas, proj
   }
 
   function drawLayer(layer: SceneFrame, sources: FrameSources, t: number): void {
-    const scene = scenes[layer.index];
-    if (!scene) throw new Error(`render: the project has no scene ${layer.index}`);
+    const scene = scenes[layer.sceneIndex];
+    if (!scene) throw new Error(`render: the project has no scene ${layer.sceneIndex}`);
     background.draw(t);
     if (scene.type === 'card') drawCard(scene);
     else if (scene.type === 'clip') drawClip(layer, sources);

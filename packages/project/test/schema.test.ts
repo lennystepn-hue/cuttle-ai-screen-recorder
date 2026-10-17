@@ -211,3 +211,35 @@ describe('InputEventSchema', () => {
     expect(InputEventSchema.safeParse({ t: -0.1, type: 'move', x: 0, y: 0 }).success).toBe(false);
   });
 });
+
+describe('automatic edits in the project', () => {
+  it('has no cuts and every kind of automatic edit on by default', () => {
+    const p = ProjectSchema.parse(minimal);
+    expect(p.cuts).toEqual([]);
+    expect(p.autoEdits).toEqual({
+      crop: true, privacy: true, retakes: true, fillers: true, pauses: true, typingZooms: true, dialogZooms: true, clickZooms: true, answerZoom: true,
+    });
+  });
+
+  it('reads cuts, crops and the tags of automatic items', () => {
+    const p = ProjectSchema.parse({
+      ...minimal,
+      scenes: [{ type: 'clip', id: 's1', from: 0, to: 40, crop: { rect: [62, 141, 2478, 1237], auto: 'crop' } }],
+      cuts: [{ id: 'c1', label: 'Filler: ähm', from: 12.4, to: 12.8, auto: 'filler' }],
+      zooms: [{ id: 'z1', at: 30, duration: 3, rect: [0, 0, 960, 540], auto: 'click' }],
+      masks: [{ id: 'm1', from: 1, to: 2, rect: [0, 0, 10, 10], auto: 'privacy' }],
+      autoEdits: { fillers: false },
+    });
+    expect(p.scenes[0]).toMatchObject({ crop: { rect: [62, 141, 2478, 1237], enabled: true, auto: 'crop' } });
+    expect(p.cuts[0]).toEqual({ id: 'c1', label: 'Filler: ähm', from: 12.4, to: 12.8, enabled: true, auto: 'filler' });
+    expect(p.zooms[0]!.auto).toBe('click');
+    expect(p.autoEdits).toMatchObject({ fillers: false, pauses: true });
+  });
+
+  it('refuses a cut that ends before it starts, an unknown kind, a crop tagged otherwise and an id used twice', () => {
+    expect(pathsOf({ ...minimal, cuts: [{ from: 3, to: 2 }] })).toEqual(['cuts.0.to']);
+    expect(pathsOf({ ...minimal, zooms: [{ at: 1, duration: 2, rect: [0, 0, 10, 10], auto: 'magic' }] })).toEqual(['zooms.0.auto']);
+    expect(pathsOf({ ...minimal, scenes: [{ type: 'clip', from: 0, to: 2, crop: { rect: [0, 0, 10, 10], auto: 'click' } }] })).toEqual(['scenes.0.crop.auto']);
+    expect(pathsOf({ ...minimal, zooms: [{ id: 'c1', at: 1, duration: 2, rect: [0, 0, 10, 10] }], cuts: [{ id: 'c1', from: 1, to: 2 }] })).toEqual(['cuts.0.id']);
+  });
+});

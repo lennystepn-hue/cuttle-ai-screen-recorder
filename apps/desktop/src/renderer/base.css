@@ -102,3 +102,133 @@ kbd {
 ::-webkit-scrollbar-track {
   background: transparent;
 }
+
+/* Cuttle's select (Select.tsx): a button and a list drawn by the page, not the system's */
+.select-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  max-width: 100%;
+  height: 28px;
+  padding: 0 8px 0 10px;
+  border-radius: 7px;
+  background: var(--raised);
+  box-shadow: inset 0 0 0 1px var(--line);
+  color: var(--text);
+  text-align: left;
+  transition: background var(--fast), box-shadow var(--fast);
+}
+.select-trigger:hover:not(:disabled) {
+  background: var(--raised-hover);
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+}
+.select-trigger[aria-expanded='true'] {
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+}
+.select-trigger:focus-visible {
+  box-shadow: var(--focus);
+}
+.select-trigger .select-value {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.select-trigger svg {
+  flex: none;
+  color: var(--faint);
+  transition: transform var(--fast);
+}
+.select-trigger[aria-expanded='true'] svg {
+  transform: rotate(180deg);
+}
+.select-trigger.select-field {
+  flex: 1;
+  min-width: 0;
+  width: 100%;
+}
+.select-trigger.select-compact {
+  height: 22px;
+  padding: 0 4px 0 7px;
+  border-radius: 6px;
+  gap: 3px;
+}
+.select-trigger.select-bare,
+.select-trigger.select-icon {
+  height: auto;
+  padding: 0;
+  background: none;
+  box-shadow: none;
+  color: var(--muted);
+}
+.select-trigger.select-bare:hover:not(:disabled),
+.select-trigger.select-icon:hover:not(:disabled) {
+  background: none;
+  box-shadow: none;
+  color: var(--text);
+}
+.select-trigger.select-icon {
+  justify-content: center;
+  width: 20px;
+  height: 26px;
+  border-radius: 6px;
+}
+.select-trigger.select-bare:focus-visible,
+.select-trigger.select-icon:focus-visible {
+  box-shadow: var(--focus);
+  border-radius: 4px;
+}
+.select-list {
+  position: fixed;
+  z-index: 1000;
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+  overflow-y: auto;
+  border-radius: 10px;
+  background: var(--panel);
+  box-shadow: var(--shadow-float);
+  color: var(--text);
+  font-size: var(--size-m);
+  outline: none;
+  animation: select-in var(--fast) var(--ease-out);
+}
+.select-list li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 28px;
+  padding: 4px 12px 4px 8px;
+  border-radius: 7px;
+  white-space: nowrap;
+}
+.select-list li.active {
+  background: var(--raised-active);
+}
+.select-list li .check {
+  flex: none;
+  color: var(--accent);
+  visibility: hidden;
+}
+.select-list li[aria-selected='true'] .check {
+  visibility: visible;
+}
+.select-list li[aria-disabled='true'] {
+  color: var(--faint);
+}
+.select-list .option-label {
+  flex: 1;
+}
+.select-list .option-note {
+  padding-left: 16px;
+  color: var(--muted);
+  font-size: var(--size-s);
+}
+@keyframes select-in {
+  from {
+    opacity: 0;
+    transform: translateY(-3px);
+  }
+}

@@ -22,6 +22,7 @@ export function audible(project: CuttleProject, speed: number): boolean {
  */
 export class AudioSchedule {
   private readonly nodes = new Set<AudioScheduledSourceNode>();
+  private readonly gains = new Set<GainNode>();
   private stopped = false;
   private readonly done: Promise<void>;
 
@@ -68,6 +69,7 @@ export class AudioSchedule {
       if (micEnd <= 0) continue;
       const gain = this.context.createGain();
       gain.connect(this.context.destination);
+      this.gains.add(gain);
       const fadeIn = this.when(outStart);
       const fadeOut = this.when(span.end);
       const start = Math.max(this.context.currentTime, fadeIn);
@@ -101,7 +103,10 @@ export class AudioSchedule {
         if (length <= 0) continue;
         node.start(Math.max(now, at), offset, length);
         this.nodes.add(node);
-        node.onended = () => this.nodes.delete(node);
+        node.onended = () => {
+          this.nodes.delete(node);
+          node.disconnect();
+        };
       }
     }
   }
@@ -114,8 +119,11 @@ export class AudioSchedule {
       } catch {
         // never started
       }
+      node.disconnect();
     }
     this.nodes.clear();
+    for (const gain of this.gains) gain.disconnect();
+    this.gains.clear();
   }
 
   finished(): Promise<void> {

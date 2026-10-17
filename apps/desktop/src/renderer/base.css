@@ -72,18 +72,33 @@ kbd {
   font-variant-numeric: tabular-nums;
 }
 
+/* Cuttle's mark (the pill and the editor's title bar) */
+.mark {
+  display: grid;
+  place-items: center;
+  flex: none;
+  color: #1b0f0a;
+  background: linear-gradient(135deg, #f0956f, #c45a3f);
+}
+
 ::-webkit-scrollbar {
   width: 10px;
   height: 10px;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.18);
   border-radius: 5px;
   border: 2px solid transparent;
   background-clip: padding-box;
 }
 
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.28);
+  background-clip: padding-box;
+}
+
+::-webkit-scrollbar-corner,
 ::-webkit-scrollbar-track {
   background: transparent;
 }

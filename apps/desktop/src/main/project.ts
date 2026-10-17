@@ -1,9 +1,12 @@
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { hostname } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 import { readProjectFile, samePath, type ProjectFile } from '@cuttle/core';
 import { parseTakeJson, trackOffset, type CuttleProject } from '@cuttle/project';
 import type { ProjectInfo } from '../shared/ipc';
-import { CACHE_DIR } from './media-service';
+
+/** The editor's folder inside the project: its lock, and the cached proxy, thumbnails and peaks. */
+export const CACHE_DIR = '.cuttle';
 
 /**
  * Seconds after the screen track that the webcam and the mic started, from the take.json next to
@@ -36,28 +39,30 @@ export function openProjectFile(dir: string): Promise<ProjectFile> {
 
 const LOCK = 'editor.lock';
 
-/** Whether a process with this id runs. */
-function alive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (error) {
-    return (error as NodeJS.ErrnoException).code === 'EPERM';
+/** The project is open in Cuttle on another computer (a synced or shared folder). */
+export class LockedError extends Error {
+  constructor(readonly host: string) {
+    super(`the project is open in Cuttle on ${host}`);
+    this.name = 'LockedError';
   }
 }
 
 /**
- * Marks the project as open in this app (`.cuttle/editor.lock` with the process id), so another
- * Cuttle does not open it too and the CLI's `record` can refuse it. Throws when another running
- * Cuttle holds it; a lock left by a process that is gone is taken over. Returns the release.
+ * Marks the project as open in this app (`.cuttle/editor.lock` with the computer's name), so the
+ * CLI's `record` and Cuttle on another computer (a synced folder) can see it. A lock from this
+ * computer is always taken over: only one Cuttle runs per user, so it was left by one that is gone
+ * (a crash, a power cut). A lock from another computer refuses with `LockedError` unless `force`.
+ * Returns the release.
  */
-export async function lockProject(dir: string): Promise<() => Promise<void>> {
+export async function lockProject(dir: string, options: { force?: boolean } = {}): Promise<() => Promise<void>> {
   const path = join(dir, CACHE_DIR, LOCK);
-  const held = await readFile(path, 'utf8').then((text) => JSON.parse(text) as { pid?: unknown }, () => undefined);
-  if (held && typeof held.pid === 'number' && held.pid !== process.pid && alive(held.pid)) {
-    throw new Error(`${basename(dir)} is open in another Cuttle window (process ${held.pid})`);
-  }
+  const held = await readFile(path, 'utf8').then((text) => JSON.parse(text) as { host?: unknown }, () => undefined);
+  if (!options.force && held && typeof held.host === 'string' && held.host !== hostname()) throw new LockedError(held.host);
   await mkdir(dirname(path), { recursive: true });
-  await writeFile(path, `${JSON.stringify({ pid: process.pid, opened: new Date().toISOString() })}\n`);
-  return () => rm(path, { force: true });
+  const lock = `${JSON.stringify({ host: hostname(), pid: process.pid, opened: new Date().toISOString() })}\n`;
+  await writeFile(path, lock);
+  // Only our own lock is removed: another computer may have taken it over meanwhile.
+  return async () => {
+    if ((await readFile(path, 'utf8').catch(() => '')) === lock) await rm(path, { force: true });
+  };
 }

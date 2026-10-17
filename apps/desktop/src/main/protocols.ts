@@ -1,10 +1,10 @@
-import { createReadStream, realpathSync } from 'node:fs';
-import { stat } from 'node:fs/promises';
-import { join } from 'node:path';
+import { createReadStream } from 'node:fs';
+import { realpath, stat } from 'node:fs/promises';
+import { join, resolve } from 'node:path';
 import { Readable } from 'node:stream';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { net, protocol, type Session } from 'electron';
-import { mediaFile, mediaType } from '../shared/media-path';
+import { isInside, mediaCandidate, mediaFile, mediaType } from '../shared/media-path';
 import { parseRange } from '../shared/range';
 
 /** The app's own pages: `app://cuttle/editor.html`, so a CSP's 'self' means the app. */
@@ -45,13 +45,25 @@ const CORS = {
   'Access-Control-Expose-Headers': 'Content-Length, Content-Range, Accept-Ranges',
 };
 
+/** The schemes each session serves already: a handler can be registered only once per session. */
+const served = new WeakMap<Session, Set<string>>();
+function first(session: Session, scheme: string): boolean {
+  const schemes = served.get(session) ?? new Set<string>();
+  served.set(session, schemes);
+  if (schemes.has(scheme)) return false;
+  schemes.add(scheme);
+  return true;
+}
+
 /**
  * Serves the renderer's built files (`rendererDir`, which may lie inside the app's asar archive) as
- * `app://cuttle/…` in `session`, HTML with the CSP.
+ * `app://cuttle/…` in `session`, HTML with the CSP. Once per session.
  */
 export function serveApp(session: Session, rendererDir: string): void {
-  // The app's own folder holds no junctions, and the asar archive has no real paths to resolve.
-  const options = { root: rendererDir, realpath: (path: string) => path, platform: process.platform };
+  if (!first(session, 'app')) return;
+  // The app's own folder holds no junctions and the asar archive has no real paths to resolve, so
+  // the path is resolved by name; no segment can carry a separator past mediaCandidate.
+  const options = { root: resolve(rendererDir), realpath: (path: string) => resolve(path), platform: process.platform };
   session.protocol.handle('app', async (request) => {
     const url = new URL(request.url);
     if (url.host !== 'cuttle') return notFound();
@@ -73,17 +85,19 @@ export function serveApp(session: Session, rendererDir: string): void {
 
 /**
  * Serves files inside the project folder `projectDir` as `cuttle-media://project/<path>` in
- * `session` (one session per editor window, so a window reaches only its own project), with Range
- * requests for the video demuxer. Paths are checked after junctions are resolved (`mediaFile`).
+ * `session` (one session per project, so a window reaches only its own project), with Range
+ * requests for the video demuxer. Paths are checked after junctions are resolved, without blocking
+ * the main process on a slow (synced or network) folder. Once per session.
  */
-export function serveMedia(session: Session, projectDir: string): void {
-  const root = realpathSync.native(projectDir);
-  const options = { root, realpath: (path: string) => realpathSync.native(path), platform: process.platform };
+export async function serveMedia(session: Session, projectDir: string): Promise<void> {
+  if (!first(session, 'cuttle-media')) return;
+  const root = await realpath(projectDir);
   session.protocol.handle('cuttle-media', async (request) => {
     const url = new URL(request.url);
     if (url.host !== 'project') return notFound(CORS);
-    const file = mediaFile(url.pathname, options);
-    if (!file) return notFound(CORS);
+    const candidate = mediaCandidate(url.pathname, root, process.platform);
+    const file = candidate === undefined ? undefined : await realpath(candidate).catch(() => undefined);
+    if (!file || !isInside(file, root, process.platform)) return notFound(CORS);
     let size: number;
     try {
       const info = await stat(file);

@@ -33,6 +33,8 @@ const reply = (message: WorkerReply) => port.postMessage(message);
 /** Runs ffmpeg; `onLine` gets each stdout line (`-progress` output), `onData` raw stdout instead. */
 function ffmpeg(id: number, args: string[], handlers: { onLine?: (line: string) => void; onData?: (chunk: Buffer) => void }): Promise<void> {
   return new Promise((resolve, reject) => {
+    // Cancelled while the input was probed: ffmpeg never starts.
+    if (cancelled.has(id)) return reject(new Error('cancelled'));
     const child = spawn(ffmpegPath(), args, { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
     running.set(id, child);
     let stderr = '';
@@ -55,9 +57,12 @@ function ffmpeg(id: number, args: string[], handlers: { onLine?: (line: string) 
   });
 }
 
-/** Writes to `<output>.part` and renames it when the job succeeded, so a half-made file never passes for a done one. */
-async function into<T>(output: string, make: (part: string) => Promise<T>): Promise<T> {
-  const part = `${output}.part`;
+/**
+ * Writes to `<output>.<job>.part` and renames it when the job succeeded, so a half-made file never
+ * passes for a done one, and two jobs never write one file.
+ */
+async function into<T>(id: number, output: string, make: (part: string) => Promise<T>): Promise<T> {
+  const part = `${output}.${id}.part`;
   try {
     const result = await make(part);
     await rename(part, output);
@@ -72,7 +77,7 @@ async function run(id: number, job: MediaJob): Promise<ThumbnailsMeta | undefine
   switch (job.job) {
     case 'proxy': {
       const { duration } = await probeScreen(job.input);
-      await into(job.output, (part) =>
+      await into(id, job.output, (part) =>
         ffmpeg(id, proxyArgs(job.input, part), {
           onLine(line) {
             const progress = progressOf(line, duration);
@@ -85,7 +90,7 @@ async function run(id: number, job: MediaJob): Promise<ThumbnailsMeta | undefine
     case 'thumbnails': {
       const { duration } = await probeScreen(job.input);
       const meta = thumbnailsMeta(duration);
-      await into(job.output, (part) =>
+      await into(id, job.output, (part) =>
         ffmpeg(id, thumbnailsArgs(job.input, part, meta), {
           onLine(line) {
             const progress = progressOf(line, duration);
@@ -106,7 +111,7 @@ async function run(id: number, job: MediaJob): Promise<ThumbnailsMeta | undefine
           if (seconds > 0) reply({ id, progress: Math.min(1, samples / PEAKS_SAMPLE_RATE / seconds) });
         },
       });
-      await into(job.output, (part) => writeFile(part, folder.finish()));
+      await into(id, job.output, (part) => writeFile(part, folder.finish()));
       return undefined;
     }
   }

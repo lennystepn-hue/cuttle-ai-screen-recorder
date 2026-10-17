@@ -4,6 +4,9 @@
 import { z } from 'zod';
 
 export const EXPORT_FORMATS = ['16:9', '1:1', '9:16'] as const;
+/** What an export makes: the project's own output size, or a preset. */
+export const EXPORT_TARGETS = ['project', ...EXPORT_FORMATS] as const;
+export type ExportTarget = (typeof EXPORT_TARGETS)[number];
 export const ENCODERS = ['auto', 'hardware', 'software'] as const;
 
 /** The origin of the media protocol in an editor window: `cuttle-media://project/<path in the project>`. */
@@ -39,7 +42,7 @@ export interface MediaState {
 }
 
 export interface ExportProgress {
-  format: (typeof EXPORT_FORMATS)[number];
+  format: ExportTarget;
   /** 0-based position of this format in the job, and the job's number of formats. */
   position: number;
   formats: number;
@@ -49,7 +52,7 @@ export interface ExportProgress {
 }
 
 export interface ExportFile {
-  format: (typeof EXPORT_FORMATS)[number];
+  format: ExportTarget;
   out: string;
   seconds: number;
   bytes: number;
@@ -58,7 +61,7 @@ export interface ExportFile {
 export type ExportEnd =
   | { state: 'done'; files: ExportFile[] }
   | { state: 'cancelled'; files: ExportFile[] }
-  | { state: 'failed'; files: ExportFile[]; format: (typeof EXPORT_FORMATS)[number]; code: string; message: string };
+  | { state: 'failed'; files: ExportFile[]; format: ExportTarget; code: string; message: string };
 
 /** Requests (window → main), each with the schema of its argument. */
 export const REQUESTS = {
@@ -66,8 +69,10 @@ export const REQUESTS = {
   'project:info': z.undefined(),
   'project:reveal': z.string().max(4096).optional(),
   'media:state': z.undefined(),
+  'media:retry': z.undefined(),
+  'export:targets': z.array(z.enum(EXPORT_TARGETS)).min(1).max(4),
   'export:start': z.strictObject({
-    formats: z.array(z.enum(EXPORT_FORMATS)).min(1).max(3),
+    formats: z.array(z.enum(EXPORT_TARGETS)).min(1).max(4),
     encoder: z.enum(ENCODERS),
   }),
   'export:cancel': z.undefined(),
@@ -85,6 +90,9 @@ export interface Responses {
   'project:info': ProjectInfo;
   'project:reveal': void;
   'media:state': MediaState;
+  'media:retry': void;
+  /** Where each format would be written, and when an export already there was made (epoch ms). */
+  'export:targets': { format: ExportTarget; out: string; modified?: number }[];
   'export:start': { out: string };
   'export:cancel': void;
   'pill:recent': { dir: string; name: string; opened: number }[];

@@ -1,14 +1,14 @@
 import { stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { exportProject, ExportError, type EncoderPreference } from '@cuttle/export';
-import type { EXPORT_FORMATS, ExportEnd, ExportFile, ExportProgress } from '../shared/ipc';
+import type { ExportEnd, ExportFile, ExportProgress, ExportTarget } from '../shared/ipc';
 import { bundlePath } from './protocols';
 
-type Format = (typeof EXPORT_FORMATS)[number];
+type Format = ExportTarget;
 
-/** The file a format is exported to, inside the project's `out/` (as the CLI does). */
+/** The file a format is exported to, inside the project's `out/`, named as the CLI names it (`export.mp4` for the project's own size). */
 export function exportPath(projectDir: string, format: Format): string {
-  return join(projectDir, 'out', `${format.replace(':', 'x')}.mp4`);
+  return join(projectDir, 'out', `${format === 'project' ? 'export' : format.replace(':', 'x')}.mp4`);
 }
 
 /** Progress events at most this often. */
@@ -36,7 +36,7 @@ export class ExportRun {
         const out = exportPath(projectDir, format);
         const result = await exportProject({
           projectDir,
-          format,
+          ...(format !== 'project' && { format }),
           out,
           encoder,
           pageDir: bundlePath('main', 'export-page'),

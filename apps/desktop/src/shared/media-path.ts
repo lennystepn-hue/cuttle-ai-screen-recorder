@@ -1,23 +1,13 @@
-// Which file a cuttle-media:// request may read. Pure (the file system comes in as `realpath`), so
-// the rules are tested on every platform: only files inside the project folder, after junctions and
-// symbolic links are resolved, compared the way the platform's file system compares names.
-
-export interface MediaPathOptions {
-  /** The real path of the project folder (junctions resolved), absolute. */
-  root: string;
-  /** Resolves a path to its real path; throws when it does not exist. */
-  realpath: (path: string) => string;
-  /** `win32` and `darwin` compare names without case. */
-  platform: NodeJS.Platform;
-}
+// Which file an app:// or cuttle-media:// request may read. Pure (the file system comes in as
+// `realpath`), so the rules are tested on every platform: only files inside the folder, after
+// junctions and symbolic links are resolved, compared the way the platform's file system compares names.
 
 /**
- * The real path of the file that the URL path `pathname` (percent-encoded, starting with "/") names
- * inside the project, or undefined when it is not one: an empty, "." or ".." segment, a backslash,
- * colon or NUL in a segment, bad percent-encoding, a file that does not exist, or a real path that
- * leaves the folder (a junction or link pointing elsewhere).
+ * The path that the URL path `pathname` (percent-encoded, starting with "/") names under `root`,
+ * not resolved yet; undefined when a decoded segment is empty, "." or "..", or holds a "/", "\",
+ * ":" or NUL (an encoded separator must not smuggle a ".." past this check), or when the encoding is bad.
  */
-export function mediaFile(pathname: string, { root, realpath, platform }: MediaPathOptions): string | undefined {
+export function mediaCandidate(pathname: string, root: string, platform: NodeJS.Platform): string | undefined {
   if (!pathname.startsWith('/')) return undefined;
   const segments: string[] = [];
   for (const raw of pathname.slice(1).split('/')) {
@@ -27,15 +17,34 @@ export function mediaFile(pathname: string, { root, realpath, platform }: MediaP
     } catch {
       return undefined;
     }
-    if (segment === '' || segment === '.' || segment === '..' || /[\\:\0]/.test(segment)) return undefined;
+    if (segment === '' || segment === '.' || segment === '..' || /[\\/:\0]/.test(segment)) return undefined;
     segments.push(segment);
   }
   if (segments.length === 0) return undefined;
   const separator = platform === 'win32' ? '\\' : '/';
-  const joined = [root.replace(/[\\/]+$/, ''), ...segments].join(separator);
+  return [root.replace(/[\\/]+$/, ''), ...segments].join(separator);
+}
+
+export interface MediaPathOptions {
+  /** The real path of the folder (junctions resolved), absolute. */
+  root: string;
+  /** Resolves a path to its real path; throws when it does not exist. */
+  realpath: (path: string) => string;
+  /** `win32` and `darwin` compare names without case. */
+  platform: NodeJS.Platform;
+}
+
+/**
+ * The real path of the file the URL path `pathname` names inside `root`, or undefined: a refused
+ * segment (`mediaCandidate`), a file that does not exist, or a real path that leaves the folder (a
+ * junction or link pointing elsewhere).
+ */
+export function mediaFile(pathname: string, { root, realpath, platform }: MediaPathOptions): string | undefined {
+  const candidate = mediaCandidate(pathname, root, platform);
+  if (candidate === undefined) return undefined;
   let real: string;
   try {
-    real = realpath(joined);
+    real = realpath(candidate);
   } catch {
     return undefined;
   }

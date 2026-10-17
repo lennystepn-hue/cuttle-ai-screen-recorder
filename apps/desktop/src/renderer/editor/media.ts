@@ -2,12 +2,29 @@
 import { ALL_FORMATS, Input, UrlSource, type InputAudioTrack, type InputVideoTrack, type VideoSinkDecoderOptions } from 'mediabunny';
 import { createCursorTrack, type CursorTrack } from '@cuttle/timeline';
 import { parseEventsJsonl, parseMarkersJson, parseProject, type CuttleProject, type InputEvent, type Marker } from '@cuttle/project';
+import { plainIssue } from '../../shared/format';
 import { MEDIA_ORIGIN, type ProjectInfo } from '../../shared/ipc';
+
+/** Whether a path of cuttle.json points outside the project folder (`../x`, `C:\x`, `/x`): the editor reads only its own project. */
+export function outsideProject(path: string): boolean {
+  const normal = path.replaceAll('\\', '/');
+  return normal.startsWith('/') || /^[A-Za-z]:/.test(normal) || normal.split('/').includes('..');
+}
 
 /** The protocol URL of a path inside the project (as cuttle.json writes it, forward or back slashes). */
 export function mediaUrl(path: string): string {
+  if (outsideProject(path)) throw new MediaError(`${path} lies outside the project folder. The editor reads only files inside it; copy the file into the project.`);
   return `${MEDIA_ORIGIN}/${path.replaceAll('\\', '/').split('/').filter((part) => part !== '' && part !== '.').map(encodeURIComponent).join('/')}`;
 }
+
+/** Whether a file of the project is there (one byte of it is read). */
+async function present(path: string): Promise<boolean> {
+  const response = await fetch(mediaUrl(path), { headers: { Range: 'bytes=0-0' } }).catch(() => undefined);
+  await response?.body?.cancel();
+  return response?.ok === true;
+}
+
+const missing = (path: string) => new MediaError(`${path} is missing from the project folder.`);
 
 export interface VideoSource {
   /** Project-relative path. */
@@ -60,7 +77,8 @@ export async function openVideo(path: string, what: string): Promise<VideoSource
   } catch (error) {
     input.dispose();
     if (error instanceof MediaError) throw error;
-    throw new MediaError(`${what} cannot be read (${path}): ${error instanceof Error ? error.message : String(error)}`);
+    if (!(await present(path))) throw missing(path);
+    throw new MediaError(`${what} (${path}) cannot be read: ${error instanceof Error ? error.message : String(error)}`);
   }
 }
 
@@ -87,14 +105,14 @@ async function fetchText(path: string): Promise<string | undefined> {
 /** An image for the engine: premultiplied, not flipped, at most `maxSize` on its longer side. */
 export async function loadImage(path: string, maxSize: number, what: string): Promise<ImageBitmap> {
   const response = await fetch(mediaUrl(path)).catch(() => undefined);
-  if (!response?.ok) throw new MediaError(`${what} not found (${path})`);
+  if (!response?.ok) throw missing(path);
   const blob = await response.blob();
   const options: ImageBitmapOptions = { premultiplyAlpha: 'premultiply', imageOrientation: 'from-image' };
   let bitmap: ImageBitmap;
   try {
     bitmap = await createImageBitmap(blob, options);
   } catch {
-    throw new MediaError(`${what} is not an image Cuttle can decode (${path})`);
+    throw new MediaError(`${what} (${path}) is not an image Cuttle can decode.`);
   }
   const longer = Math.max(bitmap.width, bitmap.height);
   if (longer <= maxSize) return bitmap;
@@ -123,43 +141,80 @@ export interface EditorMedia {
 /** Larger images are scaled down: textures of 8192 px work on every GPU Cuttle runs on. */
 const MAX_IMAGE = 8192;
 
+/** The issues of a cuttle.json that does not parse, one plain line each. */
+export function projectIssues(issues: readonly { path: string; message: string }[]): string {
+  return issues.map((issue) => plainIssue(`${issue.path}: ${issue.message}`)).join('\n');
+}
+
+/** What shows for an image that cannot be read: a quiet page that names the file (a plain one behind the video). */
+async function placeholder(path?: string): Promise<ImageBitmap> {
+  const canvas = new OffscreenCanvas(1600, 1000);
+  const context = canvas.getContext('2d')!;
+  context.fillStyle = '#232329';
+  context.fillRect(0, 0, canvas.width, canvas.height);
+  context.fillStyle = '#9a9aa5';
+  context.font = '500 44px system-ui, sans-serif';
+  context.textAlign = 'center';
+  if (path) context.fillText(`${path} is missing`, canvas.width / 2, canvas.height / 2);
+  return createImageBitmap(canvas, { premultiplyAlpha: 'premultiply' });
+}
+
 export async function openProjectMedia(info: ProjectInfo): Promise<EditorMedia> {
   const parsed = parseProject(info.raw);
-  if (!parsed.ok) throw new MediaError(`cuttle.json is not valid:\n${parsed.issues.map((issue) => `${issue.path}: ${issue.message}`).join('\n')}`);
+  if (!parsed.ok) throw new MediaError(`cuttle.json has a mistake:\n${projectIssues(parsed.issues)}`);
   const project = parsed.project;
   const { sources, look } = project;
   const warnings: string[] = [];
+  /** An optional file's problem is a warning: the editor works without it. */
+  const optional = async <T>(work: () => Promise<T>): Promise<T | undefined> => {
+    try {
+      return await work();
+    } catch (error) {
+      warnings.push(error instanceof Error ? error.message : String(error));
+      return undefined;
+    }
+  };
   const screen = await openVideo(sources.screen, 'The screen recording');
 
   let webcam: EditorMedia['webcam'];
   if (sources.webcam && look.webcam.enabled) {
-    try {
-      webcam = { ...(await openVideo(sources.webcam, 'The webcam recording')), offset: info.offsets.webcam };
-    } catch (error) {
-      warnings.push((error as Error).message);
-    }
+    const video = await optional(() => openVideo(sources.webcam!, 'The webcam recording'));
+    if (video) webcam = { ...video, offset: info.offsets.webcam };
   }
-  const mic = sources.mic && look.audio.enabled ? await openAudio(sources.mic, info.offsets.mic) : undefined;
-  if (sources.mic && look.audio.enabled && !mic) warnings.push(`The mic recording cannot be played (${sources.mic})`);
+  let mic: AudioSource | undefined;
+  if (sources.mic && look.audio.enabled) {
+    mic = await optional(async () => {
+      const audio = await openAudio(sources.mic!, info.offsets.mic);
+      if (audio) return audio;
+      throw (await present(sources.mic!)) ? new MediaError(`The mic recording (${sources.mic}) cannot be played.`) : missing(sources.mic!);
+    });
+  }
 
   let events: InputEvent[] = [];
   if (sources.events) {
-    const text = await fetchText(sources.events);
-    if (text === undefined) warnings.push(`${sources.events} cannot be read: no cursor or input activity`);
-    else events = parseEventsJsonl(text).events;
+    const text = await optional(async () => {
+      const found = await fetchText(sources.events!);
+      if (found === undefined) throw new MediaError(`${sources.events} cannot be read: no cursor or input activity.`);
+      return found;
+    });
+    if (text !== undefined) events = parseEventsJsonl(text).events;
   }
   const cursor = look.cursor.enabled && events.length > 0 ? createCursorTrack(events) : undefined;
   let markers: Marker[] = [];
   if (sources.markers) {
-    const parsedMarkers = parseMarkersJson((await fetchText(sources.markers)) ?? '');
+    const text = await optional(async () => (await fetchText(sources.markers!)) ?? '');
+    const parsedMarkers = parseMarkersJson(text ?? '');
     if (parsedMarkers.ok) markers = parsedMarkers.markers;
   }
 
   const stills = new Map<number, ImageBitmap>();
   for (const [index, scene] of project.scenes.entries()) {
-    if (scene.type === 'still') stills.set(index, await loadImage(scene.image, MAX_IMAGE, `The image of scene ${index + 1}`));
+    if (scene.type !== 'still') continue;
+    stills.set(index, (await optional(() => loadImage(scene.image, MAX_IMAGE, `The image of scene ${index + 1}`))) ?? (await placeholder(scene.image)));
   }
   const backgroundImage =
-    look.background.preset === 'image' && look.background.image ? await loadImage(look.background.image, MAX_IMAGE, 'The background image') : undefined;
+    look.background.preset === 'image' && look.background.image
+      ? ((await optional(() => loadImage(look.background.image!, MAX_IMAGE, 'The background image'))) ?? (await placeholder()))
+      : undefined;
   return { project, screen, ...(webcam && { webcam }), ...(mic && { mic }), events, ...(cursor && { cursor }), markers, stills, ...(backgroundImage && { backgroundImage }), warnings };
 }

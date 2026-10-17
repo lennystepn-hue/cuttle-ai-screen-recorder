@@ -3,7 +3,7 @@ import type { Event, Request } from './ipc';
 
 export const WINDOW_CHANNELS = {
   editor: {
-    requests: ['project:info', 'project:reveal', 'media:state', 'export:start', 'export:cancel'],
+    requests: ['project:info', 'project:reveal', 'media:state', 'media:retry', 'export:targets', 'export:start', 'export:cancel'],
     events: ['media:state', 'export:progress', 'export:end'],
   },
   pill: {

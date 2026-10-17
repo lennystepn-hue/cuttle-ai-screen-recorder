@@ -14,7 +14,10 @@
   /* text */
   --text: #ececf1;
   --muted: #9a9aa5;
-  --faint: #62626c;
+  --faint: #74747e;
+
+  /* bars of the mic's waveform and the input activity: quiet, but visible on the panel */
+  --bars: #5c5c68;
 
   /* one accent, used sparingly: the primary action, the playhead, the selection outline */
   --accent: #d97757;

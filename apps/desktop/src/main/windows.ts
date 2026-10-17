@@ -1,34 +1,43 @@
-import { join, resolve } from 'node:path';
-import { BrowserWindow, Menu, dialog, screen, session, shell, type Session, type WebContents } from 'electron';
+import { createHash } from 'node:crypto';
+import { realpath, stat } from 'node:fs/promises';
+import { basename, dirname, join, resolve } from 'node:path';
+import { app, BrowserWindow, dialog, Menu, screen, session, shell, type Session, type WebContents } from 'electron';
 import { PROJECT_FILE } from '@cuttle/core';
+import { plainIssue } from '../shared/format';
 import type { ExportEnd } from '../shared/ipc';
 import { isInside } from '../shared/media-path';
-import { ExportRun } from './export-service';
+import { ExportRun, exportPath } from './export-service';
 import { bindRequests, send } from './ipc';
 import { ProjectMedia } from './media-service';
-import { lockProject, openProjectFile, projectInfo } from './project';
+import { LockedError, lockProject, openProjectFile, projectInfo } from './project';
 import { APP_ORIGIN, assetPath, bundlePath, serveApp, serveMedia } from './protocols';
 import { addRecent, loadSettings, updateSettings } from './settings';
 
-/** Windows are never shown (the end-to-end check drives them hidden). */
-export const HIDDEN = process.env.CUTTLE_HIDDEN === '1';
+/**
+ * Windows are never shown and dialogs become log lines: the end-to-end check, which sets
+ * CUTTLE_HIDDEN=1 and passes --cuttle-check (both, so a stray variable cannot hide a real app).
+ */
+export const CHECK = process.argv.includes('--cuttle-check');
+export const HIDDEN = CHECK && process.env.CUTTLE_HIDDEN === '1';
 
 const BACKGROUND = '#0c0c0f';
+const TITLE_BAR_HEIGHT = 44;
 
-/** No permissions (camera, mic, notifications …), no downloads, no navigation, no new windows. */
-function lockDown(ses: Session): void {
+/** No permissions (camera, mic, notifications …), no downloads. */
+export function lockDown(ses: Session): void {
   ses.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
   ses.setPermissionCheckHandler(() => false);
   ses.on('will-download', (event) => event.preventDefault());
 }
 
-function guard(contents: WebContents): void {
+/** No navigation, no new windows, no webviews. */
+export function guard(contents: WebContents): void {
   contents.setWindowOpenHandler(() => ({ action: 'deny' }));
   contents.on('will-navigate', (event) => event.preventDefault());
   contents.on('will-attach-webview', (event) => event.preventDefault());
 }
 
-const webPreferences = (preload: string, ses: Session) => ({
+export const webPreferences = (preload: string, ses: Session) => ({
   preload: bundlePath('preload', preload),
   session: ses,
   sandbox: true,
@@ -41,30 +50,49 @@ const webPreferences = (preload: string, ses: Session) => ({
 
 interface Editor {
   window: BrowserWindow;
+  /** Its webContents, kept: a closed window's `webContents` getter throws. */
+  contents: WebContents;
   media: ProjectMedia;
   release: () => Promise<void>;
   run?: ExportRun;
 }
 
+/** Open editors and editors being opened, by the project folder's real path (junction and case aliases are one project). */
 const editors = new Map<string, Editor>();
-const key = (dir: string) => (process.platform === 'win32' ? resolve(dir).toLowerCase() : resolve(dir));
-let partitions = 0;
+const opening = new Map<string, Promise<BrowserWindow>>();
+const keyOf = (real: string) => (process.platform === 'win32' || process.platform === 'darwin' ? real.toLowerCase() : real);
 
-/** Opens the project in `dir` in an editor window (or brings its window to the front). Throws a readable error. */
-export async function openEditor(projectDir: string): Promise<BrowserWindow> {
-  const dir = resolve(projectDir);
-  const existing = editors.get(key(dir));
+/** One session per project (by its real path): reopening it reuses the session and its handlers. */
+function projectSession(real: string): Session {
+  const ses = session.fromPartition(`editor-${createHash('sha256').update(keyOf(real)).digest('hex').slice(0, 16)}`);
+  lockDown(ses);
+  serveApp(ses, bundlePath('renderer'));
+  return ses;
+}
+
+/** Opens the project in `dir` in an editor window, or brings its window to the front. Throws a readable error. */
+export async function openEditor(projectDir: string, options: { force?: boolean } = {}): Promise<BrowserWindow> {
+  const real = await realpath(resolve(projectDir)).catch(() => resolve(projectDir));
+  const key = keyOf(real);
+  const existing = editors.get(key);
   if (existing && !existing.window.isDestroyed()) {
+    if (existing.window.isMinimized()) existing.window.restore();
     if (!HIDDEN) existing.window.show();
     existing.window.focus();
     return existing.window;
   }
+  const pending = opening.get(key);
+  if (pending) return pending;
+  const open = createEditor(real, key, options.force ?? false).finally(() => opening.delete(key));
+  opening.set(key, open);
+  return open;
+}
+
+async function createEditor(dir: string, key: string, force: boolean): Promise<BrowserWindow> {
   const file = await openProjectFile(dir);
-  const release = await lockProject(dir);
-  const ses = session.fromPartition(`editor-${++partitions}`);
-  lockDown(ses);
-  serveApp(ses, bundlePath('renderer'));
-  serveMedia(ses, dir);
+  const release = await lockProject(dir, { force });
+  const ses = projectSession(dir);
+  await serveMedia(ses, dir);
 
   const area = screen.getPrimaryDisplay().workArea;
   const window = new BrowserWindow({
@@ -73,33 +101,44 @@ export async function openEditor(projectDir: string): Promise<BrowserWindow> {
     minWidth: 1100,
     minHeight: 700,
     show: false,
-    title: `${file.dir.split(/[\\/]/).at(-1)} · Cuttle`,
+    title: `${basename(dir)} · Cuttle`,
     backgroundColor: BACKGROUND,
     titleBarStyle: 'hidden',
-    titleBarOverlay: { color: BACKGROUND, symbolColor: '#9a9aa5', height: 40 },
+    titleBarOverlay: { color: BACKGROUND, symbolColor: '#9a9aa5', height: TITLE_BAR_HEIGHT },
     icon: assetPath('icon.png'),
     webPreferences: webPreferences('editor.cjs', ses),
   });
-  guard(window.webContents);
-  const media = new ProjectMedia(dir, file.project, (state) => send(window.webContents, 'media:state', state));
-  const editor: Editor = { window, media, release };
-  editors.set(key(dir), editor);
+  const contents = window.webContents;
+  guard(contents);
+  const media = new ProjectMedia(dir, file.project, (state) => send(contents, 'media:state', state));
+  const editor: Editor = { window, contents, media, release };
+  editors.set(key, editor);
 
-  bindRequests(window.webContents, 'editor', {
-    'project:info': () => projectInfo(file),
+  bindRequests(contents, 'editor', {
+    // Read again on every request: the file may have changed since the window opened.
+    'project:info': async () => projectInfo(await openProjectFile(dir)),
     'project:reveal': (path) => {
       const target = resolve(dir, path ?? PROJECT_FILE);
       if (!isInside(target, dir, process.platform)) throw new Error('only files inside the project can be shown');
       shell.showItemInFolder(target);
     },
     'media:state': () => media.current(),
+    'media:retry': () => void media.start(),
+    'export:targets': async (formats) =>
+      Promise.all(
+        formats.map(async (format) => {
+          const out = exportPath(dir, format);
+          const info = await stat(out).catch(() => undefined);
+          return { format, out, ...(info?.isFile() && { modified: info.mtimeMs }) };
+        }),
+      ),
     'export:start': ({ formats, encoder }) => {
       if (editor.run) throw new Error('an export is already running');
-      const run = new ExportRun(dir, formats, encoder, (progress) => send(window.webContents, 'export:progress', progress));
+      const run = new ExportRun(dir, formats, encoder, (progress) => send(contents, 'export:progress', progress));
       editor.run = run;
       void run.done.then((end: ExportEnd) => {
         editor.run = undefined;
-        send(window.webContents, 'export:end', end);
+        send(contents, 'export:end', end);
       });
       return { out: join(dir, 'out') };
     },
@@ -107,7 +146,7 @@ export async function openEditor(projectDir: string): Promise<BrowserWindow> {
   });
 
   window.on('closed', () => {
-    editors.delete(key(dir));
+    if (editors.get(key) === editor) editors.delete(key);
     media.dispose();
     editor.run?.cancel();
     void release();
@@ -117,50 +156,94 @@ export async function openEditor(projectDir: string): Promise<BrowserWindow> {
   });
   // The end-to-end check asks for a hook to drive the player (CUTTLE_CHECK=1) and for frames from
   // the take itself rather than the proxy (CUTTLE_NO_PROXY=1), to compare them with the export's.
-  const query = new URLSearchParams({ ...(process.env.CUTTLE_NO_PROXY === '1' && { proxy: 'off' }), ...(process.env.CUTTLE_CHECK === '1' && { check: '1' }) }).toString();
+  const query = new URLSearchParams({
+    ...(CHECK && process.env.CUTTLE_NO_PROXY === '1' && { proxy: 'off' }),
+    ...(CHECK && process.env.CUTTLE_CHECK === '1' && { check: '1' }),
+  }).toString();
   await window.loadURL(`${APP_ORIGIN}/editor.html${query ? `?${query}` : ''}`);
   void media.start();
   void addRecent(dir);
   return window;
 }
 
-/** Opens a project, showing what went wrong in a dialog instead of throwing. */
-export async function openEditorOrSay(dir: string): Promise<void> {
+/** One sentence for people from an error's message: the first line. */
+const firstLine = (message: string) => message.split('\n')[0]!;
+
+/** Opens a project, saying in a dialog what went wrong instead of throwing (with "Open anyway" for a lock held elsewhere). */
+export async function openEditorOrSay(dir: string, options: { force?: boolean } = {}): Promise<void> {
   try {
-    await openEditor(dir);
+    await openEditor(dir, options);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     if (HIDDEN) {
       console.error(`cannot open ${dir}: ${message}`);
       return;
     }
-    await dialog.showMessageBox({ type: 'warning', title: 'Cuttle', message: `Cuttle cannot open ${dir}`, detail: message });
+    const name = basename(resolve(dir));
+    if (error instanceof LockedError) {
+      const { response } = await dialog.showMessageBox({
+        type: 'warning',
+        title: 'Cuttle',
+        message: `${name} is open in Cuttle on ${error.host}`,
+        detail: 'Editing it in two places at once can lose changes. Open it here only if it is not open there any more.',
+        buttons: ['Cancel', 'Open anyway'],
+        defaultId: 0,
+        cancelId: 0,
+      });
+      if (response === 1) await openEditorOrSay(dir, { force: true });
+      return;
+    }
+    const issues = message.split('\n').slice(1).map((line) => plainIssue(line.trim())).filter(Boolean);
+    const { response } = await dialog.showMessageBox({
+      type: 'warning',
+      title: 'Cuttle',
+      message: `${name} can't be opened`,
+      detail: issues.length > 0 ? `cuttle.json has ${issues.length === 1 ? 'a mistake' : `${issues.length} mistakes`}:\n${issues.join('\n')}` : firstLine(message),
+      buttons: ['OK', 'Show the folder'],
+      defaultId: 0,
+      cancelId: 0,
+    });
+    if (response === 1) shell.showItemInFolder(join(resolve(dir), PROJECT_FILE));
   }
 }
 
 /** Asks for a project folder and opens it. */
 export async function chooseAndOpen(parent?: BrowserWindow): Promise<void> {
-  const options = { title: 'Open a Cuttle project', properties: ['openDirectory'] as ('openDirectory')[], buttonLabel: 'Open' };
+  const options = { title: 'Open a Cuttle project', properties: ['openDirectory'] as 'openDirectory'[], buttonLabel: 'Open' };
   const result = parent ? await dialog.showOpenDialog(parent, options) : await dialog.showOpenDialog(options);
   if (!result.canceled && result.filePaths[0]) await openEditorOrSay(result.filePaths[0]);
 }
 
+/** A recent project for a menu: its name, and its parent folder to tell same-named projects apart. */
+export const recentLabel = (entry: { dir: string; name: string }) => `${entry.name} — ${basename(dirname(entry.dir))}`;
+
 let pill: BrowserWindow | undefined;
+let quitting = false;
+app.on('before-quit', () => (quitting = true));
 const PILL_SIZE = { width: 420, height: 64 };
 
-/** The pill: a small launcher near the top of the primary display, kept out of every recording. */
+/** The pill's place on the display under the pointer: where it was left there (kept on screen), else the top centre. */
+async function pillPosition(): Promise<{ x: number; y: number }> {
+  const display = screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
+  const area = display.workArea;
+  const saved = (await loadSettings()).pill[String(display.id)];
+  const x = saved?.x ?? Math.round(area.x + (area.width - PILL_SIZE.width) / 2);
+  const y = saved?.y ?? area.y + 24;
+  return {
+    x: Math.min(Math.max(x, area.x), area.x + area.width - PILL_SIZE.width),
+    y: Math.min(Math.max(y, area.y), area.y + area.height - PILL_SIZE.height),
+  };
+}
+
+/** The pill: a small launcher near the top of the screen, kept out of every recording. Closing it hides it. */
 export async function createPill(): Promise<BrowserWindow> {
   if (pill && !pill.isDestroyed()) return pill;
   const ses = session.fromPartition('pill');
   lockDown(ses);
   serveApp(ses, bundlePath('renderer'));
-  const display = screen.getPrimaryDisplay();
-  const saved = (await loadSettings()).pill[String(display.id)];
-  const area = display.workArea;
   const window = new BrowserWindow({
     ...PILL_SIZE,
-    x: saved?.x ?? Math.round(area.x + (area.width - PILL_SIZE.width) / 2),
-    y: saved?.y ?? area.y + 24,
+    ...(await pillPosition()),
     show: false,
     frame: false,
     transparent: true,
@@ -175,10 +258,11 @@ export async function createPill(): Promise<BrowserWindow> {
     title: 'Cuttle',
     webPreferences: webPreferences('pill.cjs', ses),
   });
-  guard(window.webContents);
+  const contents = window.webContents;
+  guard(contents);
   window.setContentProtection(true);
   window.setAlwaysOnTop(true, 'floating');
-  bindRequests(window.webContents, 'pill', {
+  bindRequests(contents, 'pill', {
     'pill:recent': async () => (await loadSettings()).recent,
     'pill:open': async (target) => {
       if (target) await openEditorOrSay(target.dir);
@@ -190,7 +274,7 @@ export async function createPill(): Promise<BrowserWindow> {
       Menu.buildFromTemplate([
         ...(recent.length === 0
           ? [{ label: 'No recent projects', enabled: false }]
-          : recent.map((entry) => ({ label: entry.name, sublabel: entry.dir, click: () => void openEditorOrSay(entry.dir) }))),
+          : recent.map((entry) => ({ label: recentLabel(entry), toolTip: entry.dir, click: () => void openEditorOrSay(entry.dir) }))),
         { type: 'separator' },
         { label: 'Open folder…', click: () => void chooseAndOpen() },
       ]).popup({ window });
@@ -203,7 +287,13 @@ export async function createPill(): Promise<BrowserWindow> {
       settings.pill[String(on.id)] = { x: x!, y: y! };
     });
   });
-  window.on('show', () => void loadSettings().then((settings) => send(window.webContents, 'pill:recent', settings.recent)));
+  // Alt+F4 hides it; the tray and the hotkey bring it back.
+  window.on('close', (event) => {
+    if (quitting) return;
+    event.preventDefault();
+    window.hide();
+  });
+  window.on('show', () => void loadSettings().then((settings) => send(contents, 'pill:recent', settings.recent)));
   window.on('closed', () => (pill = undefined));
   await window.loadURL(`${APP_ORIGIN}/pill.html`);
   pill = window;
@@ -212,5 +302,7 @@ export async function createPill(): Promise<BrowserWindow> {
 
 export async function showPill(): Promise<void> {
   const window = await createPill();
+  const { x, y } = await pillPosition();
+  window.setPosition(x, y);
   if (!HIDDEN) window.showInactive();
 }

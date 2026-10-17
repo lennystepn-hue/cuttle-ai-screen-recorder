@@ -1,3 +1,4 @@
+import { win32 } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { isInside, mediaFile, mediaType } from '../src/shared/media-path';
 import { parseRange } from '../src/shared/range';
@@ -27,6 +28,18 @@ describe('mediaFile', () => {
   it('refuses dot segments, encoded or not, and separators, colons or NUL inside a segment', () => {
     for (const path of ['/../secret.txt', '/takes/../../secret.txt', '/%2e%2e/secret.txt', '/takes/%2E%2E/%2e%2e/secret.txt', '/.%2fsecret.txt', '/..%5csecret.txt', '/C:%5cUsers%5cme%5csecret.txt', '/takes%00/1', '/takes//1/screen.mp4', '/']) {
       expect(mediaFile(path, options), path).toBeUndefined();
+    }
+  });
+
+  it('refuses an encoded separator where every path exists, resolved by name as the app protocol does', () => {
+    // serveApp resolves by name (its folder may be an asar archive); before the check refused "/" in a
+    // segment, x%2F..%2F.. walked out of the folder and read any file on the disk
+    for (const realpath of [(path: string) => win32.resolve(path), (path: string) => path]) {
+      const byName = { root, realpath, platform: 'win32' as const };
+      for (const path of ['/x%2F..%2F..%2Fsecret.txt', '/x%2f' + '..%2f'.repeat(25) + 'Windows%2fwin.ini', '/x%5C..%5C..%5Csecret.txt', '/x%2F..%5C..%2Fsecret.txt']) {
+        expect(mediaFile(path, byName), path).toBeUndefined();
+      }
+      expect(mediaFile('/takes/1/screen.mp4', byName)).toBe('C:\\Users\\me\\demo\\takes\\1\\screen.mp4');
     }
   });
 

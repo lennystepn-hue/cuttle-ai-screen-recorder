@@ -202,6 +202,8 @@ export class Player {
       }
       if (token !== this.seekToken || this.disposed) return;
       if (this.draw(state, sources)) this.set({ t: time, source: this.sourceOf(state), error: undefined });
+    } catch (error) {
+      if (token === this.seekToken && !this.disposed) this.set({ t: time, error: frameError(error) });
     } finally {
       for (const frame of held) frame.close();
     }
@@ -209,13 +211,13 @@ export class Player {
 
   /** Plays from the playhead (from the start when it is at the end). */
   play(): void {
-    if (this.disposed || this.state.playing) return;
+    if (this.disposed || this.state.playing || !(this.duration > 0)) return;
     const from = this.state.t >= this.duration - 1 / this.fps ? 0 : this.state.t;
     this.seekToken++;
     const token = ++this.playToken;
     this.context ??= new AudioContext({ latencyHint: 'playback' });
     void this.context.resume();
-    this.set({ playing: true, t: from });
+    this.set({ playing: true, t: from, error: undefined });
     void this.run(token, from);
   }
 
@@ -224,6 +226,8 @@ export class Player {
     this.playToken++;
     this.audio?.stop();
     this.audio = undefined;
+    // A running context keeps the audio device busy (and the laptop awake) for nothing.
+    void this.context?.suspend();
     this.set({ playing: false });
   }
 
@@ -238,13 +242,12 @@ export class Player {
     const fps = this.fps;
     const last = this.frameOf(this.duration);
     let startFrame = this.frameOf(from);
-    // The clock: output time = from + (context time − contextStart).
+    // The clock: output time = from + (the context time being heard − contextStart).
     const contextStart = context.currentTime + 0.12;
-    const clock = () => from + Math.max(0, context.currentTime - contextStart);
+    const clock = () => from + Math.max(0, heardTime(context) - contextStart);
     this.clockNow = clock;
     this.playback.drawn = 0;
     this.playback.restarts = 0;
-    if (this.media.mic) this.audio = new AudioSchedule(context, this.media.mic, this.project, this.timeline.spans, from, contextStart);
 
     const video: PlaybackVideo = {
       screen: this.screen,
@@ -259,9 +262,11 @@ export class Player {
       const frames = Array.from({ length: last - frame + 1 }, (_, i) => frame + i);
       return new PlaybackFrames(planStills(this.timeline, fps, frames), video, this.media.stills, LOOKAHEAD_FRAMES);
     };
-    let frames = open(startFrame);
+    let frames: PlaybackFrames | undefined;
     let shown = startFrame - 1;
     try {
+      if (this.media.mic) this.audio = new AudioSchedule(context, this.media.mic, this.project, this.timeline.spans, from, contextStart);
+      frames = open(startFrame);
       while (token === this.playToken && !this.disposed) {
         const now = clock();
         if (now >= this.duration) break;
@@ -288,12 +293,15 @@ export class Player {
         }
         await nextTick();
       }
+    } catch (error) {
+      if (token === this.playToken && !this.disposed) this.set({ error: frameError(error) });
     } finally {
-      await frames.close();
+      await frames?.close();
       if (token === this.playToken) {
         this.clockNow = undefined;
         this.audio?.stop();
         this.audio = undefined;
+        void context.suspend();
         this.set({ playing: false, t: Math.min(this.state.t, this.duration) });
       }
     }
@@ -305,6 +313,27 @@ export class Player {
     this.renderer.dispose();
     void this.context?.close();
   }
+}
+
+/** A frame that could not be decoded or drawn, said for people. */
+function frameError(error: unknown): string {
+  return `This part of the video cannot be shown: ${error instanceof Error ? error.message : String(error)}`;
+}
+
+/**
+ * The AudioContext time the speakers play now. The context renders ahead of what is heard by its
+ * output latency (60–80 ms here, 150–250 ms over Bluetooth), so the picture follows this, not
+ * `currentTime`. The output timestamp is taken once per rendered block; it is moved on by the time
+ * since, at most 0.1 s (more means the sound stalled, and the picture waits for it).
+ */
+function heardTime(context: AudioContext): number {
+  if (context.state === 'running') {
+    const { contextTime, performanceTime } = context.getOutputTimestamp();
+    if (contextTime !== undefined && performanceTime !== undefined && performanceTime > 0) {
+      return contextTime + Math.min(0.1, Math.max(0, (performance.now() - performanceTime) / 1000));
+    }
+  }
+  return context.currentTime - context.baseLatency - (context.outputLatency || 0);
 }
 
 /**

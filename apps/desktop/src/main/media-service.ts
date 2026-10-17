@@ -5,10 +5,9 @@ import type { CuttleProject } from '@cuttle/project';
 import type { MediaState } from '../shared/ipc';
 import type { MediaJob, ThumbnailsMeta, WorkerReply } from '../shared/media-jobs';
 import { PEAKS_RATE } from '../shared/media-jobs';
+import { CACHE_DIR } from './project';
 import { bundlePath } from './protocols';
 
-/** The editor's cache inside the project: proxies, thumbnails and peaks, made from the take. */
-export const CACHE_DIR = '.cuttle';
 const CACHE_FILE = 'media.json';
 const CACHE_VERSION = 1;
 
@@ -34,11 +33,23 @@ interface Cache {
 type Kind = 'proxy' | 'thumbnails' | 'peaks';
 const OUTPUT: Record<Kind, string> = { proxy: 'proxy.mp4', thumbnails: 'thumbnails.jpg', peaks: 'peaks.bin' };
 
-/** The one media worker of the app, started on first use; jobs from every window go through it. */
+interface Job {
+  job: MediaJob;
+  onProgress: (progress: number) => void;
+  resolve: (meta?: ThumbnailsMeta) => void;
+  reject: (error: Error) => void;
+}
+
+/**
+ * The one media worker of the app, started on first use. Jobs from every window wait in one queue
+ * and run one at a time: two x264 encodes at once would only slow both down.
+ */
 class Worker {
   private process: UtilityProcess | undefined;
   private next = 1;
-  private readonly pending = new Map<number, { onProgress: (p: number) => void; resolve: (meta?: ThumbnailsMeta) => void; reject: (error: Error) => void }>();
+  private readonly pending = new Map<number, Job>();
+  private readonly queue: { id: number; job: Job }[] = [];
+  private running: number | undefined;
 
   private start(): UtilityProcess {
     if (this.process) return this.process;
@@ -47,25 +58,54 @@ class Worker {
       const job = this.pending.get(message.id);
       if (!job) return;
       if ('progress' in message) return job.onProgress(message.progress);
-      this.pending.delete(message.id);
+      this.finish(message.id);
       if ('done' in message) job.resolve(message.meta);
       else job.reject(Object.assign(new Error(message.error), { cancelled: message.cancelled === true }));
     });
     child.on('exit', () => {
       this.process = undefined;
+      this.running = undefined;
       for (const job of this.pending.values()) job.reject(new Error('the media worker stopped'));
       this.pending.clear();
+      this.queue.length = 0;
     });
     this.process = child;
     return child;
   }
 
-  run(job: MediaJob, onProgress: (progress: number) => void): { promise: Promise<ThumbnailsMeta | undefined>; cancel(): void } {
+  private finish(id: number): void {
+    this.pending.delete(id);
+    if (this.running === id) this.running = undefined;
+    this.pump();
+  }
+
+  private pump(): void {
+    if (this.running !== undefined) return;
+    const next = this.queue.shift();
+    if (!next) return;
+    this.running = next.id;
+    this.start().postMessage({ id: next.id, ...next.job.job });
+  }
+
+  run(media: MediaJob, onProgress: (progress: number) => void): { promise: Promise<ThumbnailsMeta | undefined>; cancel(): void } {
     const id = this.next++;
-    const child = this.start();
-    const promise = new Promise<ThumbnailsMeta | undefined>((resolve, reject) => this.pending.set(id, { onProgress, resolve, reject }));
-    child.postMessage({ id, ...job });
-    return { promise, cancel: () => this.process?.postMessage({ id, cancel: true }) };
+    const promise = new Promise<ThumbnailsMeta | undefined>((resolve, reject) => {
+      const job = { job: media, onProgress, resolve, reject };
+      this.pending.set(id, job);
+      this.queue.push({ id, job });
+    });
+    this.pump();
+    return {
+      promise,
+      cancel: () => {
+        const queued = this.queue.findIndex((entry) => entry.id === id);
+        if (queued >= 0) {
+          this.queue.splice(queued, 1);
+          this.pending.get(id)?.reject(Object.assign(new Error('cancelled'), { cancelled: true }));
+          this.pending.delete(id);
+        } else if (this.running === id) this.process?.postMessage({ id, cancel: true });
+      },
+    };
   }
 
   stop(): void {
@@ -128,14 +168,30 @@ export class ProjectMedia {
     }
   }
 
-  private async writeCache(): Promise<void> {
+  private writing = Promise.resolve();
+
+  /** Writes media.json, one write at a time. */
+  private writeCache(): Promise<void> {
+    this.writing = this.writing.then(() => this.writeCacheNow()).catch(() => {});
+    return this.writing;
+  }
+
+  private async writeCacheNow(): Promise<void> {
     const path = join(this.cacheDir(), CACHE_FILE);
     await writeFile(`${path}.part`, `${JSON.stringify(this.cache, null, 2)}\n`);
     await rename(`${path}.part`, path);
   }
 
-  /** Starts what is missing: the proxy, then the thumbnails from it; the peaks alongside. */
-  async start(): Promise<void> {
+  private started: Promise<void> | undefined;
+
+  /** Makes what is missing: the proxy, then the thumbnails from it; the peaks alongside. Again after a failure (retry). */
+  start(): Promise<void> {
+    if (this.started) return this.started;
+    this.started = this.startNow().finally(() => (this.started = undefined));
+    return this.started;
+  }
+
+  private async startNow(): Promise<void> {
     await mkdir(this.cacheDir(), { recursive: true });
     await this.readCache();
     const screen = resolve(this.dir, this.project.sources.screen);

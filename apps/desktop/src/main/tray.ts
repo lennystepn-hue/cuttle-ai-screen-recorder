@@ -1,6 +1,9 @@
 import { Menu, Tray, app, nativeImage, type MenuItemConstructorOptions } from 'electron';
 import type { Settings } from './settings';
 
+/** A recent project in a menu: its name, and its parent folder to tell same-named projects apart. */
+const label = (entry: { dir: string; name: string }) => `${entry.name} — ${entry.dir.split(/[\\/]/).at(-2) ?? ''}`;
+
 export interface TrayActions {
   showPill(): void;
   open(dir?: string): void;
@@ -14,7 +17,7 @@ export function trayMenu(recent: Settings['recent'], actions: TrayActions): Menu
     { type: 'separator' },
     ...(recent.length === 0
       ? [{ label: 'No recent projects', enabled: false }]
-      : recent.map((entry) => ({ label: entry.name, sublabel: entry.dir, click: () => actions.open(entry.dir) }))),
+      : recent.map((entry) => ({ label: label(entry), toolTip: entry.dir, click: () => actions.open(entry.dir) }))),
     { type: 'separator' },
     { label: 'Open folder…', click: () => actions.open() },
     { type: 'separator' },

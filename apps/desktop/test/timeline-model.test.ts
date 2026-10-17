@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { parseProject, type CuttleProjectInput, type InputEvent } from '@cuttle/project';
 import { sceneSpans } from '@cuttle/timeline';
-import { formatBytes, formatDuration, formatSpeed, formatTime } from '../src/shared/format';
-import { activityColumns, groupPins, outputTimesOf, timelineModel, waveformColumns } from '../src/shared/timeline-model';
+import { formatBytes, formatDuration, formatSource, formatSpeed, formatTime, plainIssue } from '../src/shared/format';
+import { activityColumns, exportChecks, groupPins, outputTimesOf, pinGroupDetail, pinGroupName, timelineModel, waveformColumns } from '../src/shared/timeline-model';
 
 function project(input: Partial<CuttleProjectInput>) {
   const parsed = parseProject({ version: 1, sources: { screen: 's.mp4' }, ...input });
@@ -40,7 +40,7 @@ describe('timelineModel', () => {
     expect(model.duration).toBe(10.75);
     expect(model.scenes.map((scene) => [scene.kind, scene.start, scene.end, scene.title, scene.detail])).toEqual([
       ['clip', 0, 3, 'Prompt', '3 s'],
-      ['clip', 3, 4.25, 'Sped up', '4× · 5 s → 1.3 s'],
+      ['clip', 3, 4.25, '', '5 s → 1.2 s'],
       ['clip', 4.25, 7.25, 'Clip', '3 s'],
       ['still', 7.25, 9.25, 'page.png', '2 s · scroll'],
       ['card', 9.25, 10.75, 'The end', '1.5 s'],
@@ -56,6 +56,27 @@ describe('timelineModel', () => {
     const [zoom] = model.lanes.zoom.blocks;
     expect([zoom?.start, zoom?.end, zoom?.title]).toEqual([expect.closeTo(4.55, 9), expect.closeTo(7.05, 9), 'Answer']);
     expect(model.lanes.caption.blocks.map((block) => block.title)).toEqual(['One prompt']);
+  });
+
+  it('lists what is worth a second look before an export', () => {
+    expect(exportChecks(demo, spans)).toEqual(['1 mask is off: what it covers shows in the video.', '1 mask is cut out: no clip shows it.']);
+    const quick = project({
+      scenes: [
+        { type: 'clip', from: 0, to: 4, speed: 4 },
+        { type: 'clip', from: 4, to: 6 },
+      ],
+      texts: [
+        { at: 0, duration: 2, text: 'Fast' },
+        { at: 9, duration: 1, text: 'Gone', label: 'Late' },
+      ],
+      zooms: [{ at: 7, duration: 1, rect: [0, 0, 10, 10] }],
+      look: { audio: { muteSpedUp: false } },
+    });
+    expect(exportChecks(quick, sceneSpans(quick.scenes))).toEqual([
+      '1 zoom and 1 caption are cut out: no clip shows them.',
+      'Caption "Fast" is on screen for only 0.5 s.',
+      'Clips at another speed keep the pitch of their sound in the export; the preview plays them higher or lower.',
+    ]);
   });
 
   it('pins markers where a clip shows them; a cut-out marker has no pin', () => {
@@ -90,6 +111,36 @@ describe('outputTimesOf and groupPins', () => {
       [5, 'tool', 1],
     ]);
   });
+
+  it('names a group after its tool, or counts the calls when the tools differ', () => {
+    const tool = (t: number, label: string) => ({ t, source: t, kind: 'tool' as const, label });
+    const [same] = groupPins([tool(1, 'Bash'), tool(1.1, 'Bash')], 1);
+    const [mixed] = groupPins([tool(1, 'Read'), tool(1.1, 'Bash'), tool(1.2, 'Read')], 1);
+    expect([pinGroupName(same!), pinGroupName(mixed!)]).toEqual(['Bash ×2', '3 tool calls']);
+    expect(pinGroupDetail(mixed!)).toBe('Read 2 · Bash 1');
+  });
+
+  it('puts overlays that overlap in time on separate rows of their lane', () => {
+    const packing = project({
+      scenes: [{ type: 'clip', from: 0, to: 20 }],
+      masks: [
+        { from: 0, to: 20, rect: [0, 0, 1, 1] },
+        { from: 2, to: 4, rect: [0, 0, 1, 1] },
+        { from: 3, to: 5, rect: [0, 0, 1, 1] },
+        { from: 4, to: 6, rect: [0, 0, 1, 1] },
+        { from: 4.5, to: 6, rect: [0, 0, 1, 1] },
+      ],
+    });
+    const lane = timelineModel(packing, sceneSpans(packing.scenes)).lanes.mask;
+    expect(lane.blocks.map((block) => [block.start, block.row])).toEqual([
+      [0, 0],
+      [2, 1],
+      [3, 2],
+      [4, 1],
+      [4.5, 2],
+    ]);
+    expect(lane.rows).toBe(3);
+  });
 });
 
 describe('activity and waveform columns', () => {
@@ -123,8 +174,16 @@ describe('activity and waveform columns', () => {
 describe('format', () => {
   it('writes times, lengths, speeds and sizes for people', () => {
     expect([0, 9.99, 42.55, 754.2, 3723].map(formatTime)).toEqual(['0:00.0', '0:09.9', '0:42.5', '12:34.2', '1:02:03.0']);
-    expect([0.42, 9.96, 12.4, 125, 3720].map(formatDuration)).toEqual(['0.4 s', '10 s', '12 s', '2 min 5 s', '1 h 2 min']);
+    // cut off at tenths as times are, so a video of 0:10.7 is 10.7 s long
+    expect([0.42, 9.96, 10.75, 12, 59.97, 125, 3720].map(formatDuration)).toEqual(['0.4 s', '9.9 s', '10.7 s', '12 s', '59.9 s', '2 min 5 s', '1 h 2 min']);
+    expect([54.47, 152.4].map(formatSource)).toEqual(['src 54.4 s', 'src 2:32.4']);
     expect([12, 1.25, 1].map(formatSpeed)).toEqual(['12×', '1.3×', '1×']);
     expect([2048, 13_002_342, 2.5 * 1024 ** 3].map(formatBytes)).toEqual(['2 KB', '12.4 MB', '2.5 GB']);
+  });
+
+  it('says what is wrong with a cuttle.json in plain lines', () => {
+    expect(plainIssue("(root): Invalid JSON: Expected ',' or '}' after property value in JSON at position 42 (line 1 column 43)")).toBe('It is not valid JSON at line 1, column 43.');
+    expect(plainIssue('(root): Unsupported version 2')).toBe('Unsupported version 2');
+    expect(plainIssue('scenes.2.to: Too small')).toBe('scenes.2.to: Too small');
   });
 });

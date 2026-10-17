@@ -18,44 +18,53 @@ export interface HeldFrame {
 
 /**
  * One frame at a time from a video, for scrubbing: while one decode runs, newer requests replace
- * each other, and only the newest is decoded next; older callers get `undefined`.
+ * each other, and only the newest is decoded next; older callers get `undefined`. A decode error
+ * rejects the newest request (an older one's is not news: the newer request decodes next).
  */
 export class FrameGrabber {
   private readonly sink: VideoSampleSink;
   private running: Promise<void> | undefined;
-  private queued: { time: number; resolve: (frame: HeldFrame | undefined) => void } | undefined;
+  private queued: { time: number; resolve: (frame: HeldFrame | undefined) => void; reject: (error: unknown) => void } | undefined;
 
   constructor(readonly source: VideoSource) {
     this.sink = new VideoSampleSink(source.track, source.decoder);
   }
 
   grab(time: number): Promise<HeldFrame | undefined> {
-    return new Promise((resolve) => {
+    return new Promise((resolve, reject) => {
       this.queued?.resolve(undefined);
-      this.queued = { time, resolve };
+      this.queued = { time, resolve, reject };
       if (!this.running) this.running = this.drain();
     });
   }
 
   private async drain(): Promise<void> {
     while (this.queued) {
-      const { time, resolve } = this.queued;
+      const { time, resolve, reject } = this.queued;
       this.queued = undefined;
+      let frame: VideoFrame | undefined;
       try {
         const sample = await this.sink.getSample(Math.max(time, this.source.start));
-        if (!sample) {
-          resolve(undefined);
-          continue;
+        if (sample) {
+          try {
+            frame = sample.toVideoFrame();
+          } finally {
+            sample.close();
+          }
         }
-        const frame = sample.toVideoFrame();
-        sample.close();
-        // A newer request came in while this one decoded: hand it nothing, the newer one draws.
-        if (this.queued) {
-          frame.close();
-          resolve(undefined);
-        } else resolve({ frame, close: () => frame.close() });
-      } catch {
+      } catch (error) {
+        if (this.queued) resolve(undefined);
+        else reject(error);
+        continue;
+      }
+      if (!frame) resolve(undefined);
+      // A newer request came in while this one decoded: hand it nothing, the newer one draws.
+      else if (this.queued) {
+        frame.close();
         resolve(undefined);
+      } else {
+        const held = frame;
+        resolve({ frame: held, close: () => held.close() });
       }
     }
     this.running = undefined;

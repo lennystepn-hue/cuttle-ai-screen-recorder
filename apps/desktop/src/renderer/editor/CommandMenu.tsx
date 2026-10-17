@@ -5,23 +5,46 @@ import { editorCommands, type EditorCommand } from './commands';
 import { store } from './session';
 import { useStore } from './store';
 
+/** Where the focus was before the menu opened (a field, a button): it goes back there. */
+let returnFocus: HTMLElement | undefined;
+
 export function openMenu(): void {
-  if (store.get().phase === 'ready' && !store.get().exportOpen) store.set({ menuOpen: true });
+  if (store.get().phase !== 'ready' || store.get().exportOpen || store.get().menuOpen) return;
+  // taken before the menu's input has the focus
+  const active = document.activeElement;
+  returnFocus = active instanceof HTMLElement && active !== document.body ? active : undefined;
+  store.set({ menuOpen: true });
 }
 
 export function closeMenu(): void {
+  if (!store.get().menuOpen) return;
   store.set({ menuOpen: false });
+  const back = returnFocus;
+  returnFocus = undefined;
+  // after the menu is gone (its input had the focus)
+  requestAnimationFrame(() => {
+    if (back?.isConnected) back.focus();
+  });
 }
 
-/** Every word typed is somewhere in the command's name, group or keys. */
-function matches(command: EditorCommand, query: string): boolean {
-  const haystack = `${command.name} ${command.group} ${command.keys ?? ''}`.toLowerCase();
-  return query
-    .toLowerCase()
-    .split(/\s+/)
-    .filter(Boolean)
-    .every((word) => haystack.includes(word));
+const words = (text: string) => text.toLowerCase().split(/\s+/).filter(Boolean);
+
+/**
+ * How well a command matches the query: undefined when a word typed is not in its name, keywords,
+ * group or keys; else 0 when its name starts with the first word, 1 when a word of its name or
+ * keywords does, 2 otherwise (what it would undo is not searched).
+ */
+export function rank(command: EditorCommand, query: string): number | undefined {
+  const typed = words(query);
+  if (typed.length === 0) return 2;
+  const haystack = `${command.name} ${command.keywords ?? ''} ${command.group} ${command.keys ?? ''}`.toLowerCase();
+  if (!typed.every((word) => haystack.includes(word))) return undefined;
+  const name = command.name.toLowerCase();
+  if (name.startsWith(typed[0]!)) return 0;
+  return words(`${command.name} ${command.keywords ?? ''}`).some((word) => word.startsWith(typed[0]!)) ? 1 : 2;
 }
+
+const HISTORY = new Set(['undo', 'redo']);
 
 export function CommandMenu() {
   const open = useStore(store, (state) => state.menuOpen);
@@ -31,28 +54,33 @@ export function CommandMenu() {
 
 function Menu() {
   const [query, setQuery] = useState('');
-  const [active, setActive] = useState(0);
+  /** The command chosen with the arrows or the pointer; none: the best match. */
+  const [chosen, setChosen] = useState<string>();
+  const [notice, setNotice] = useState<string>();
   const list = useRef<HTMLDivElement>(null);
-  // The commands as they are when the menu opens (their names say what Undo would undo).
+  // The commands as they are when the menu opens (Undo says what it would undo).
   const commands = useMemo(() => editorCommands().map((command) => ({ command, blocked: command.blocked?.() })), []);
-  const shown = commands.filter(({ command }) => matches(command, query));
+  const shown = commands
+    .map((item, order) => ({ ...item, order, rank: rank(item.command, query) }))
+    .filter((item) => item.rank !== undefined)
+    .sort((a, b) => (query.trim() === '' ? 0 : a.rank! - b.rank!) || a.order - b.order);
   const runnable = shown.filter((item) => !item.blocked);
-  const current = runnable[Math.min(active, runnable.length - 1)];
+  // Enter right after Ctrl+K never undoes: the best match is not Undo or Redo unless asked for by name
+  const best = runnable.find((item) => !HISTORY.has(item.command.id) || item.rank === 0);
+  const current = runnable.find((item) => item.command.id === chosen) ?? best;
 
-  // The focus goes back where it was when the menu closes.
   useEffect(() => {
-    const before = document.activeElement instanceof HTMLElement ? document.activeElement : undefined;
-    return () => before?.focus();
-  }, []);
-  useEffect(() => setActive(0), [query]);
+    setChosen(undefined);
+    setNotice(undefined);
+  }, [query]);
   useEffect(() => {
     list.current?.querySelector('[data-active="true"]')?.scrollIntoView({ block: 'nearest' });
   }, [current?.command.id]);
 
   const run = (command: EditorCommand) => {
     closeMenu();
-    // after the menu is gone, so a command that moves the focus (Speed…) keeps it
-    requestAnimationFrame(() => command.run());
+    // after the menu is gone and the focus is back
+    requestAnimationFrame(() => requestAnimationFrame(() => command.run()));
   };
 
   const onKey = (event: React.KeyboardEvent) => {
@@ -63,11 +91,13 @@ function Menu() {
     } else if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
       event.preventDefault();
       if (runnable.length === 0) return;
-      const at = Math.min(active, runnable.length - 1);
-      setActive((at + (event.key === 'ArrowDown' ? 1 : runnable.length - 1)) % runnable.length);
+      const at = Math.max(0, runnable.findIndex((item) => item === current));
+      setChosen(runnable[(at + (event.key === 'ArrowDown' ? 1 : runnable.length - 1)) % runnable.length]!.command.id);
     } else if (event.key === 'Enter') {
       event.preventDefault();
       if (current) run(current.command);
+      // nothing runs: say why instead of doing nothing
+      else setNotice(shown[0]?.blocked ?? (query.trim() ? `No command has “${query.trim()}” in it.` : undefined));
     }
   };
 
@@ -79,7 +109,7 @@ function Menu() {
           autoFocus
           value={query}
           onChange={(event) => setQuery(event.target.value)}
-          placeholder="Type a command (split, zoom, undo…)"
+          placeholder="Type a command (split, zoom, faster…)"
           aria-label="Command"
           role="combobox"
           aria-expanded="true"
@@ -90,7 +120,7 @@ function Menu() {
         <div className="command-list" id="command-list" role="listbox" ref={list}>
           {shown.length === 0 && <p className="hint">No command has “{query}” in it.</p>}
           {shown.map(({ command, blocked }) => {
-            const heading = command.group !== group ? (group = command.group) : undefined;
+            const heading = query.trim() === '' && command.group !== group ? (group = command.group) : undefined;
             const isActive = command.id === current?.command.id;
             return (
               <div key={command.id}>
@@ -102,30 +132,36 @@ function Menu() {
                   aria-selected={isActive}
                   aria-disabled={!!blocked}
                   data-active={isActive}
-                  onPointerMove={() => {
-                    const index = runnable.findIndex((item) => item.command.id === command.id);
-                    if (index >= 0 && index !== active) setActive(index);
-                  }}
+                  onPointerMove={() => !blocked && command.id !== current?.command.id && setChosen(command.id)}
                   onClick={() => !blocked && run(command)}
                 >
-                  <span className="command-name">{command.name}</span>
+                  <span className="command-name">
+                    {command.name}
+                    {command.detail && <span className="command-detail">{command.detail}</span>}
+                  </span>
                   {blocked ? <em>{blocked}</em> : command.keys && <kbd>{command.keys}</kbd>}
                 </div>
               </div>
             );
           })}
         </div>
-        <div className="command-foot">
-          <span>
-            <kbd>↑</kbd>
-            <kbd>↓</kbd> choose
-          </span>
-          <span>
-            <kbd>Enter</kbd> run
-          </span>
-          <span>
-            <kbd>Esc</kbd> close
-          </span>
+        <div className="command-foot" role="status">
+          {notice ? (
+            <span className="notice">{notice}</span>
+          ) : (
+            <>
+              <span>
+                <kbd>↑</kbd>
+                <kbd>↓</kbd> choose
+              </span>
+              <span>
+                <kbd>Enter</kbd> run
+              </span>
+              <span>
+                <kbd>Esc</kbd> close
+              </span>
+            </>
+          )}
         </div>
       </div>
     </div>

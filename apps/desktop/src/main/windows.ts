@@ -187,6 +187,9 @@ async function editorWindow(dir: string, key: string, file: ProjectFile, release
     'project:cut': () => void recut(dir),
     'project:save': ({ raw, base }) => editor.watch.save(raw, base),
     'project:draft': ({ raw }) => writeFile(join(dir, DRAFT_FILE), `${JSON.stringify(raw, null, 2)}\n`),
+    // contents.reload() from here is not a navigation the page started (guard() refuses those)
+    'project:reload': () => contents.reload(),
+    'project:closed': () => closeNow(),
     'project:import-image': async ({ purpose }) => {
       const chosen =
         CHECK_IMAGE ??
@@ -203,6 +206,25 @@ async function editorWindow(dir: string, key: string, file: ProjectFile, release
   editor.watch.start(file.hash);
   contents.on('did-finish-load', () => send(contents, 'project:status', editor.status ?? {}));
 
+  // Closing waits until the page has written its last edits (a field being typed in too); what it
+  // cannot write it keeps in cuttle.json.draft. A page that does not answer in 4 s is closed anyway.
+  let mayClose = false;
+  let asked: ReturnType<typeof setTimeout> | undefined;
+  function closeNow(): void {
+    mayClose = true;
+    clearTimeout(asked);
+    if (window.isDestroyed()) return;
+    window.close();
+    // a quit waited for this window: it goes on
+    if (quitting) app.quit();
+  }
+  window.on('close', (event) => {
+    if (mayClose || contents.isCrashed()) return;
+    event.preventDefault();
+    if (asked) return;
+    asked = setTimeout(closeNow, 4000);
+    send(contents, 'project:closing', {});
+  });
   window.on('closed', () => {
     if (editors.get(key) === editor) editors.delete(key);
     editor.watch.close();

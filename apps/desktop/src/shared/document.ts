@@ -147,8 +147,10 @@ export function applyCommand(raw: Raw, command: Command, limits: EditLimits = {}
     case 'trim': {
       const { item } = find(next, 'scenes', command.id);
       if (item.type === 'clip') {
-        if (command.from !== undefined) item.from = command.from;
-        if (command.to !== undefined) item.to = command.to;
+        // the edge that moves stops a frame before the other one: the clip never grows into source it did not show
+        const frame = Number(item.speed ?? 1) / (limits.fps ?? 30);
+        if (command.from !== undefined) item.from = Math.min(command.from, Number(command.to ?? item.to) - frame);
+        if (command.to !== undefined) item.to = Math.max(command.to, Number(item.from) + frame);
       } else if (command.duration !== undefined) item.duration = command.duration;
       touched.push(['scenes', item]);
       break;
@@ -168,6 +170,8 @@ export function applyCommand(raw: Raw, command: Command, limits: EditLimits = {}
       const from = Number(item.from);
       const to = Number(item.to);
       if (speed === 1 && item.speed === undefined) break;
+      // shorter than a frame at that speed: refused, not grown into source the clip did not show
+      if ((to - from) / speed < 1 / (limits.fps ?? 30) - 1e-9) throw new DocumentError('invalid', `the clip is too short for ${round(speed)}×`);
       item.speed = round(speed);
       touched.push(['scenes', item]);
       // Zooms and captions inside the clip keep their output length: a 3 s caption stays 3 s at 12×.
@@ -258,15 +262,53 @@ export function applyCommand(raw: Raw, command: Command, limits: EditLimits = {}
   return next;
 }
 
-/** Applies commands in order; the ones whose item is gone are left out and named. */
+/**
+ * The command with the id it gave a new item (add, split, duplicate) pinned in it, so a replay on a
+ * newer version names the same item, never one someone else added meanwhile.
+ */
+export function pinIds(before: Raw, after: Raw, command: Command): Command {
+  const fresh = (list: ListName) => {
+    const old = new Set(items(before, list).map((item) => item.id));
+    const found = items(after, list).find((item) => !old.has(item.id))?.id;
+    return typeof found === 'string' ? found : undefined;
+  };
+  if (command.type === 'add') {
+    const id = fresh(command.list);
+    return id ? { ...command, item: { ...command.item, id } } : command;
+  }
+  if (command.type === 'split' || command.type === 'duplicate') {
+    const id = fresh(command.type === 'split' ? 'scenes' : command.list);
+    return id ? { ...command, newId: id } : command;
+  }
+  return command;
+}
+
+/**
+ * Applies commands in order; the ones that cannot go on are left out and named: their item is gone,
+ * the id a new item had is taken by another one now (and what was done to that new item after).
+ * Deleting an item the newer version no longer has is done already, not left out.
+ */
 export function replayCommands(raw: Raw, commands: readonly Command[], limits: EditLimits = {}): { raw: Raw; dropped: string[] } {
   let current = raw;
   const dropped: string[] = [];
+  /** New items that could not be added again: commands on them are left out too. */
+  const lost = new Set<string>();
   for (const command of commands) {
+    const pinned = command.type === 'add' ? command.item.id : command.type === 'split' || command.type === 'duplicate' ? command.newId : undefined;
+    if (typeof pinned === 'string' && usedIds(current).has(pinned)) {
+      lost.add(pinned);
+      dropped.push(`the id ${pinned} of a new item is taken by another one now`);
+      continue;
+    }
+    if ('id' in command && lost.has(command.id)) {
+      dropped.push(`${command.id} was not added again`);
+      continue;
+    }
     try {
       current = applyCommand(current, command, limits);
     } catch (error) {
       if (!(error instanceof DocumentError)) throw error;
+      if (command.type === 'delete' && error.code === 'gone') continue;
       dropped.push(error.message);
     }
   }

@@ -153,16 +153,25 @@ export const REQUESTS = {
   'hud:stop': z.undefined(),
   'hud:marker': z.undefined(),
   // editor (editing)
-  'project:save': z.strictObject({
-    raw: z.record(z.string(), z.unknown()),
-    /** The hash of the version this one was made from: the write is refused when the file changed since. */
-    base: z.string().regex(/^[0-9a-f]{64}$/),
-  }),
+  'project:save': z
+    .strictObject({
+      raw: z.record(z.string(), z.unknown()),
+      /** The hash of the version this one was made from: the write is refused when the file changed since. */
+      base: z.string().regex(/^[0-9a-f]{64}$/),
+    })
+    .refine((value) => JSON.stringify(value.raw).length <= MAX_PROJECT_BYTES, 'cuttle.json is too large'),
   'project:import-image': z.strictObject({ purpose: z.enum(['still', 'background']) }),
-  'project:draft': z.strictObject({ raw: z.record(z.string(), z.unknown()) }),
+  'project:draft': z.strictObject({ raw: z.record(z.string(), z.unknown()) }).refine((value) => JSON.stringify(value.raw).length <= MAX_PROJECT_BYTES, 'cuttle.json is too large'),
+  /** The page asks to be loaded anew (another take): a page cannot reload itself (navigation is refused). */
+  'project:reload': z.undefined(),
+  /** The page has written its last edits (`project:closing`): the window may close. */
+  'project:closed': z.undefined(),
 } as const;
 
 export type Request = keyof typeof REQUESTS;
+
+/** A project file larger than this is not written from the editor (a few hundred scenes are ~100 KB). */
+export const MAX_PROJECT_BYTES = 4 * 1024 * 1024;
 
 /** What each request answers. */
 export interface Responses {
@@ -192,11 +201,13 @@ export interface Responses {
   'hud:stop': void;
   'hud:marker': void;
   /** Written (its new hash); or the file changed meanwhile (the version on disk now); or it could not be written. */
-  'project:save': { hash: string } | { conflict: ProjectVersion } | { problem: string };
+  'project:save': { hash: string } | { conflict: ProjectVersion & { origin: 'outside' | 'suggest' } } | { problem: string };
   /** An image chosen by the person, copied into the project when it lay outside (a path inside the project). */
   'project:import-image': { path: string } | undefined;
   /** The person's version a save conflict could not carry over, written to cuttle.json.draft. */
   'project:draft': void;
+  'project:reload': void;
+  'project:closed': void;
 }
 
 /** A version of cuttle.json: as written, and the SHA-256 of its bytes. */
@@ -227,6 +238,8 @@ export interface Events {
   /** What the main process is doing to the project (cutting the take), or nothing. */
   'project:status': ProjectStatus;
   'project:file': ProjectFileEvent;
+  /** The window is about to close: write the last edits, then `project:closed`. */
+  'project:closing': Record<string, never>;
 }
 
 export type Event = keyof Events;

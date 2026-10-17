@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
@@ -42,8 +42,9 @@ interface Check {
   playback(): { drawn: number; restarts: number; clock: number };
   pixels(): string;
   useProxy(): Promise<boolean>;
-  doc(): { hash: string; saving: boolean; problem?: string; issues?: string[]; toast?: { text: string; undo?: boolean; draft?: boolean }; undo?: string; redo?: string };
+  doc(): { hash: string; saving: boolean; problem?: string; issues?: string[]; toast?: { text: string; undo?: boolean }; draftNote?: string; undo?: string; redo?: string };
   flush(): Promise<void>;
+  select(selection: { kind: string; id: string } | undefined): void;
 }
 
 /** cuttle.json as the checks read it back. */
@@ -110,6 +111,7 @@ describe.runIf(enabled)('the Cuttle app', () => {
   let project: string;
   let app: ElectronApplication;
   let editor: Page;
+  const pageErrors: string[] = [];
   // The page's hook (`__cuttleCheck`); each call is its own function, as the page's CSP allows no eval.
   type Hooked = { __cuttleCheck: Check };
   const state = () => editor.evaluate(() => (window as unknown as Hooked).__cuttleCheck.state());
@@ -199,6 +201,8 @@ describe.runIf(enabled)('the Cuttle app', () => {
         else void page.waitForURL(/editor\.html/).then(() => resolve(page), () => {});
       });
     });
+    // An error in the editor's page is a bug: collected for the last check.
+    editor.on('pageerror', (error) => pageErrors.push(error.message));
     await editor.setViewportSize({ width: 1440, height: 900 });
     // A window that is never shown runs no CSS animations: without motion, what opens shows at once in the screenshots.
     await editor.emulateMedia({ reducedMotion: 'reduce' });
@@ -545,23 +549,102 @@ describe.runIf(enabled)('the Cuttle app', () => {
 
   it('keeps an edit a newer version cannot take in cuttle.json.draft, and puts it back on "Use mine"', async () => {
     await press('.item.zoom');
-    // Claude deletes the zoom just as it is deleted here (before the app sees Claude's write)
+    // Claude deletes the zoom just as it is duplicated here (before the app sees Claude's write)
     const outside = onDisk();
     outside.zooms = [];
     outside.masks.push({ id: 'm9', label: 'From Claude', from: 1, to: 2, rect: [10, 10, 100, 40] });
     writeFileSync(projectFile(), `${JSON.stringify(outside, null, 2)}\n`);
-    await editor.keyboard.press('Delete');
-    await editor.waitForFunction(() => (window as unknown as Hooked).__cuttleCheck.doc().toast?.draft === true);
-    // the newer version shows; the person's is kept, with the zoom deleted and without Claude's mask
+    await editor.keyboard.press('Control+D');
+    await editor.waitForFunction(() => (window as unknown as Hooked).__cuttleCheck.doc().draftNote !== undefined);
+    expect((await doc()).draftNote).toContain('“Duplicate zoom” no longer fits it');
+    // the newer version shows; the person's is kept, with the zoom and its copy and without Claude's mask
     const draft = JSON.parse(readFileSync(join(project, 'cuttle.json.draft'), 'utf8')) as Written;
-    expect(draft.zooms).toEqual([]);
+    expect(draft.zooms).toHaveLength(2);
     expect(draft.masks.map((item) => item.id)).toEqual(['m1']);
     expect(onDisk().masks.map((item) => item.id)).toEqual(['m1', 'm9']);
     await shot('13-draft');
-    await click(editor, '[data-testid=toast-use-draft]');
-    await savedWhen((file) => file.masks.length === 1 && file.zooms.length === 0);
+    await click(editor, '[data-testid=draft-use]');
+    await savedWhen((file) => file.masks.length === 1 && file.zooms.length === 2);
     expect((await doc()).undo).toBe('Use your version');
     await undoAll();
+  }, 30_000);
+
+  it('keeps a change from outside as its own step when an edit meets it: undoing the edit keeps the change', async () => {
+    await seek(1);
+    const outside = onDisk();
+    outside.masks.push({ id: 'm9', label: 'From Claude', from: 1, to: 2, rect: [10, 10, 100, 40] });
+    writeFileSync(projectFile(), `${JSON.stringify(outside, null, 2)}\n`);
+    // at once: the split meets Claude's write in its save (or comes just after it)
+    await editor.keyboard.press('s');
+    await savedWhen((file) => file.scenes.length === 6 && file.masks.length === 2);
+    expect((await doc()).undo).toBe('Split clip');
+    await editor.keyboard.press('Control+Z');
+    await savedWhen((file) => file.scenes.length === 5 && file.masks.length === 2);
+    expect((await doc()).undo).toBe('the outside change');
+    await editor.keyboard.press('Control+Z');
+    await savedWhen((file) => file.masks.length === 1);
+    await undoAll();
+  }, 30_000);
+
+  it('takes a version from outside even when this window wrote it before (Claude reverting)', async () => {
+    const original = readFileSync(projectFile(), 'utf8');
+    await seek(1);
+    await editor.keyboard.press('s');
+    await savedWhen((file) => file.scenes.length === 6);
+    writeFileSync(projectFile(), original);
+    await expect.poll(() => editor.locator('.scene').count(), { timeout: 10_000 }).toBe(5);
+    expect((await doc()).undo).toBe('the outside change');
+    await undoAll();
+    expect(readFileSync(projectFile(), 'utf8')).toBe(original);
+  }, 30_000);
+
+  it('opens anew on another take written from outside', async () => {
+    const original = readFileSync(projectFile(), 'utf8');
+    const reloaded = async (change: () => void) => {
+      await editor.evaluate(() => Object.assign(window, { __before: true }));
+      change();
+      await expect.poll(() => editor.evaluate(() => (window as unknown as { __before?: boolean }).__before === undefined).catch(() => false), { timeout: 15_000 }).toBe(true);
+      await editor.waitForSelector('.app[data-phase="ready"]', { timeout: 30_000 });
+    };
+    // the take without its input track: the editor opens on it (a page cannot reload itself)
+    const other = JSON.parse(original) as { sources: Record<string, string> };
+    delete other.sources.events;
+    await reloaded(() => writeFileSync(projectFile(), `${JSON.stringify(other, null, 2)}\n`));
+    expect(await editor.evaluate(() => (window as unknown as Hooked).__cuttleCheck.doc().hash)).not.toBe('');
+    // and back, for the checks after this one
+    await reloaded(() => writeFileSync(projectFile(), original));
+  }, 60_000);
+
+  it('refuses to export edits that are not saved, and saves them on Try again', async () => {
+    chmodSync(projectFile(), 0o444); // a lock (OneDrive, a scanner) or no right to write
+    try {
+      await seek(1);
+      await editor.keyboard.press('s');
+      await editor.waitForFunction(() => document.querySelector('[data-testid=save-state]')?.textContent?.includes('Not saved'), undefined, { timeout: 30_000 });
+      await editor.keyboard.press('Control+E');
+      // a real click: it waits for the button to be enabled (the sheet chooses a format after it shows)
+      await editor.click('[data-testid=export-start]');
+      await editor.waitForSelector('.sheet .error-text');
+      expect(await editor.locator('.sheet .error-text').textContent()).toContain('your latest edits are not saved');
+      await editor.keyboard.press('Escape');
+    } finally {
+      chmodSync(projectFile(), 0o644);
+    }
+    await click(editor, '[data-testid=save-state]');
+    await savedWhen((file) => file.scenes.length === 6);
+    await undoAll();
+  }, 60_000);
+
+  it('ends a drawing with Esc: nothing is added', async () => {
+    await seek(1);
+    await editor.keyboard.press('z');
+    await drag('[data-testid=source-view]', [200, 60], { from: [0.3, 0.3], hold: true });
+    await editor.keyboard.press('Escape');
+    await release([20, 0]);
+    await editor.waitForTimeout(300);
+    expect(onDisk().zooms).toHaveLength(1);
+    expect((await doc()).undo).toBeUndefined();
+    await editor.keyboard.press('Escape');
   }, 30_000);
 
   it('opens a project once when asked twice at once, and cancels its export when it closes', async () => {
@@ -588,8 +671,12 @@ describe.runIf(enabled)('the Cuttle app', () => {
           void bridge.invoke('export:start', { formats: ['project'], encoder: 'software' });
         }),
     );
+    // a label typed and not yet left is written as the window closes
+    await page.evaluate(() => (window as unknown as Hooked).__cuttleCheck.select({ kind: 'scene', id: 's1' }));
+    await page.fill('[data-testid=clip-label]', 'Typed before closing');
     await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find((window) => window.getTitle() === 'second · Cuttle')?.close());
     await expect.poll(() => existsSync(lock), { timeout: 10_000 }).toBe(false);
+    expect((JSON.parse(readFileSync(join(second, 'cuttle.json'), 'utf8')) as { scenes: { label?: string }[] }).scenes[0]!.label).toBe('Typed before closing');
     // longer than the whole export takes: had it gone on, its file would be there by now
     await editor.waitForTimeout(5000);
     expect(existsSync(join(second, 'out')) ? readdirSync(join(second, 'out')) : []).toEqual([]);
@@ -711,8 +798,9 @@ describe.runIf(enabled)('the Cuttle app', () => {
     await page.evaluate(() => (window as unknown as { cuttle: { invoke(channel: string): Promise<unknown> } }).cuttle.invoke('picker:cancel')).catch(() => {});
   }, 60_000);
 
-  it('had no unhandled rejection in the main process', async () => {
+  it('had no unhandled rejection in the main process, and no error in the editor', async () => {
     expect(await app.evaluate(() => (globalThis as unknown as { __rejections: string[] }).__rejections)).toEqual([]);
+    expect(pageErrors).toEqual([]);
   });
 
   // Last: the app quits here.

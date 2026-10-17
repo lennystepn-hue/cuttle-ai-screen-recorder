@@ -10,11 +10,16 @@ import { formatSource } from '../../shared/format';
 import { adjustRect, drawnRect, fitInside, toSource, toStage, type Fit, type Handle } from '../../shared/edit';
 import { addMask, addZoom, overlayBlocked, playheadPlace } from './actions';
 import { edit, preview } from './doc';
+import { beginGesture, cancelGesture } from './gesture';
 import { FrameGrabber } from './frames';
 import { currentPlayer, select, setTool, shownProject, sourceViewShown, store } from './session';
 import { useStore } from './store';
 
 const HANDLES: Handle[] = ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'];
+/** Room above the frame for the chip and "Back to the video", so they never cover the screen (a secret at its top). */
+const BAND = 52;
+/** Room around the frame, so the handles of an area at the screen's edge stay whole and easy to hit. */
+const MARGIN = 14;
 /** Smaller drags are clicks, not new boxes. */
 const MIN_DRAW = 12;
 
@@ -40,6 +45,11 @@ export function SourceView() {
   const [drawing, setDrawing] = useState<Rect>();
   const grabber = useRef<{ grabber: FrameGrabber; source: unknown }>(undefined);
 
+  // a drag under way ends with the view (Esc, playing)
+  useEffect(() => {
+    if (!active) cancelGesture('source');
+  }, [active]);
+
   useLayoutEffect(() => {
     const element = area.current;
     if (!element) return;
@@ -53,7 +63,8 @@ export function SourceView() {
   const project = active ? shownProject() : undefined;
   const source = active ? playheadPlace(t)?.source : undefined;
   const screen = media?.screen.size ?? { width: 1920, height: 1080 };
-  const fit: Fit = fitInside(size.width > 0 ? size : { width: 1, height: 1 }, screen);
+  const inner = fitInside({ width: Math.max(1, size.width - 2 * MARGIN), height: Math.max(1, size.height - BAND - MARGIN) }, screen);
+  const fit: Fit = { x: inner.x + MARGIN, y: inner.y + BAND, scale: inner.scale };
   // A selected zoom or mask the playhead is not on shows on the frame where it starts.
   const item = selection?.kind === 'zoom' ? project?.zooms.find((zoom) => zoom.id === selection.id) : selection?.kind === 'mask' ? project?.masks.find((mask) => mask.id === selection.id) : undefined;
   const range = item && ('at' in item ? [item.at, item.at + item.duration] : [item.from, item.to]);
@@ -98,12 +109,11 @@ export function SourceView() {
   ].filter((box) => box.here || (selection?.kind === box.kind && selection.id === box.id));
   const selected = boxes.find((box) => selection?.kind === box.kind && selection.id === box.id);
   const aspect = screen.width / screen.height;
-  const local = (event: { clientX: number; clientY: number }) => {
-    const bounds = area.current!.getBoundingClientRect();
-    return toSource({ x: event.clientX - bounds.left, y: event.clientY - bounds.top }, fit);
-  };
-
-  /** Follows a drag from a press: `onMove` with the source-pixel offset, `onEnd` when released (on the window: the box is drawn anew as it moves). */
+  /**
+   * Follows a drag from a press: `onMove` with the source-pixel offset, `onEnd` when released. It
+   * listens on the window (the box is drawn anew as it moves) and keeps the view's place from the
+   * press; Esc, playing or the view going away cancel it (`gesture.ts`): no edit, no preview.
+   */
   const follow = (event: ReactPointerEvent<HTMLElement>, onMove: (dx: number, dy: number, at: { x: number; y: number }) => void, onEnd: (moved: boolean) => void) => {
     event.stopPropagation();
     const target = event.currentTarget;
@@ -112,6 +122,8 @@ export function SourceView() {
     } catch {
       // a synthetic pointer (the check) has nothing to capture
     }
+    const bounds = area.current!.getBoundingClientRect();
+    const local = (point: { clientX: number; clientY: number }) => toSource({ x: point.clientX - bounds.left, y: point.clientY - bounds.top }, fit);
     const start = local(event);
     let moved = false;
     const move = (next: PointerEvent) => {
@@ -120,10 +132,19 @@ export function SourceView() {
       moved = true;
       onMove(at.x - start.x, at.y - start.y, at);
     };
-    const up = () => {
+    const stop = () => {
       window.removeEventListener('pointermove', move);
       window.removeEventListener('pointerup', up);
       window.removeEventListener('pointercancel', up);
+    };
+    const ended = beginGesture('source', () => {
+      stop();
+      setDrawing(undefined);
+      preview(undefined);
+    });
+    const up = () => {
+      stop();
+      ended();
       onEnd(moved);
     };
     window.addEventListener('pointermove', move);
@@ -199,11 +220,18 @@ export function SourceView() {
           </div>
         );
       })}
+      {drawing && tool === 'zoom' && <ZoomDim fit={fit} rect={drawing} size={size} />}
       {drawing && (
-        <div className={`source-box ${tool} drawing`} style={(() => {
-          const at = toStage(drawing, fit);
-          return { left: at.x, top: at.y, width: at.width, height: at.height };
-        })()} />
+        <div
+          className={`source-box ${tool} drawing`}
+          style={(() => {
+            const at = toStage(drawing, fit);
+            return { left: at.x, top: at.y, width: at.width, height: at.height };
+          })()}
+        >
+          {/* how close the zoom brings it: the screen's width over the area's */}
+          {tool === 'zoom' && <span className="zoom-factor">{(screen.width / Math.max(1, drawing[2])).toFixed(1)}×</span>}
+        </div>
       )}
       <div className="source-chip" role="status" data-testid="source-chip">
         <b>Source view</b>
@@ -214,7 +242,9 @@ export function SourceView() {
             : tool === 'zoom' || tool === 'mask'
               ? blocked
                 ? ` · ${blocked}`
-                : ` · drag to draw a ${tool}`
+                : selected
+                  ? ` · drag the box to place it, elsewhere for a new ${tool}`
+                  : ` · drag to draw a ${tool}`
               : ' · drag the box to move it, its handles to resize it'}
         <span className="sep" />
         <kbd>Esc</kbd> for the video

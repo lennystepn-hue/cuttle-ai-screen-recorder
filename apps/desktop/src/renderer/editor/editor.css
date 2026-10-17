@@ -457,7 +457,7 @@ button.chip-status:hover {
   color: var(--faint);
   font-size: 10px;
   font-variant-numeric: tabular-nums;
-  cursor: col-resize;
+  cursor: default;
 }
 .ruler span {
   position: absolute;
@@ -923,13 +923,13 @@ button.chip-status:hover {
 }
 .tools kbd {
   position: absolute;
-  right: 2px;
-  bottom: 1px;
+  right: 1px;
+  bottom: 0;
   padding: 0 2px;
   background: none;
-  font-size: 8.5px;
+  font-size: 10px;
   line-height: 1.2;
-  color: var(--faint);
+  color: var(--muted);
 }
 .tools button[aria-pressed='true'] kbd {
   color: inherit;
@@ -968,6 +968,7 @@ button.chip-status:hover {
   transform: translateX(-50%);
   width: min(580px, calc(100% - 24px));
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
   padding: 8px;
@@ -985,8 +986,8 @@ button.chip-status:hover {
   bottom: 12px;
 }
 .caption-bar input {
-  flex: 1;
-  min-width: 0;
+  flex: 1 1 200px;
+  min-width: 200px;
   height: 30px;
   padding: 0 10px;
   border: 0;
@@ -1003,6 +1004,19 @@ button.chip-status:hover {
 }
 .caption-bar .seg {
   flex: none;
+}
+/* a position where a caption shows now: the new one would cover it */
+.caption-bar .seg button.used::before {
+  content: '';
+  display: inline-block;
+  width: 5px;
+  height: 5px;
+  margin: 0 5px 2px 0;
+  border-radius: 50%;
+  background: var(--caption);
+}
+.caption-bar .ghost.small {
+  height: 30px;
 }
 .primary.small {
   height: 30px;
@@ -1213,13 +1227,44 @@ button.chip-status:hover {
   user-select: text;
 }
 
+/* a version a conflict set aside: offered back until answered */
+.draft-note {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  max-width: min(720px, calc(100% - 48px));
+  min-height: 36px;
+  padding: 4px 6px 4px 14px;
+  border-radius: 10px;
+  background: #261f14;
+  box-shadow:
+    var(--shadow-float),
+    inset 0 0 0 1px rgba(242, 179, 74, 0.35);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: var(--size-s);
+  z-index: 4;
+}
+.draft-note > svg {
+  color: var(--card);
+}
+.draft-note span {
+  min-width: 0;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-height: 1.4;
+}
+
 /* what just happened, with Undo */
 .toast {
   position: absolute;
-  left: 50%;
-  bottom: 62px;
-  transform: translateX(-50%);
-  max-width: min(640px, calc(100% - 48px));
+  right: 24px;
+  bottom: 14px;
+  max-width: min(600px, calc(100% - 300px));
   min-height: 36px;
   padding: 4px 6px 4px 14px;
   border-radius: 10px;
@@ -1249,9 +1294,12 @@ button.chip-status:hover {
   height: 26px;
   padding: 0 10px;
   border-radius: 7px;
-  color: var(--accent);
+  color: var(--text);
   font-weight: 600;
   flex: none;
+  text-decoration: underline;
+  text-decoration-color: var(--line-strong);
+  text-underline-offset: 3px;
 }
 .toast-undo:hover {
   background: var(--raised);
@@ -1272,7 +1320,7 @@ button.chip-status:hover {
 @keyframes toast-in {
   from {
     opacity: 0;
-    transform: translate(-50%, 8px);
+    transform: translateY(8px);
   }
 }
 
@@ -1310,6 +1358,9 @@ button.chip-status:hover {
 }
 .command-menu input::placeholder {
   color: var(--faint);
+}
+.command-menu input:focus-visible {
+  box-shadow: none;
 }
 .command-list {
   flex: 1;
@@ -1352,9 +1403,17 @@ button.chip-status:hover {
 }
 .command em {
   flex: none;
-  color: var(--faint);
+  color: var(--muted);
   font-size: var(--size-xs);
   font-style: normal;
+}
+/* what Undo would undo: beside the name, never searched */
+.command-detail {
+  margin-left: 8px;
+  color: var(--muted);
+}
+.command-foot .notice {
+  color: var(--card);
 }
 .command-foot {
   flex: none;
@@ -1370,11 +1429,53 @@ button.chip-status:hover {
 }
 
 /* inspector fields */
+.panel-fields {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.panel-fields:disabled {
+  opacity: 0.5;
+}
 .field {
   display: flex;
   flex-direction: column;
   gap: 5px;
   min-width: 0;
+}
+.field.inline {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.field.inline .field-input {
+  flex: none;
+  min-height: 0;
+}
+.hint-list {
+  margin: 0;
+  padding-left: 16px;
+  color: var(--muted);
+  font-size: var(--size-s);
+  line-height: 1.7;
+}
+.kind-head .head-action {
+  width: 28px;
+  height: 28px;
+  border-radius: 7px;
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+  flex: none;
+}
+.kind-head .head-action:hover {
+  background: var(--raised);
+  color: var(--text);
 }
 .field .field-label {
   display: flex;
@@ -1399,7 +1500,6 @@ button.chip-status:hover {
   text-overflow: ellipsis;
 }
 .field input[type='text'],
-.field input[type='number'],
 .field textarea,
 .field select {
   flex: 1;
@@ -1432,9 +1532,6 @@ button.chip-status:hover {
 .field textarea:focus,
 .field select:focus {
   box-shadow: inset 0 0 0 1px var(--accent);
-}
-.field input[type='number']::-webkit-inner-spin-button {
-  opacity: 0.3;
 }
 .field-input.narrow input {
   flex: 0 0 76px;
@@ -1470,12 +1567,9 @@ button.chip-status:hover {
   color: var(--faint);
   pointer-events: none;
 }
-.grid4 input[type='number'] {
-  padding: 0 4px 0 17px;
-}
-/* four numbers in a row: room for 4 digits, the arrow keys step them */
-.grid4 input[type='number']::-webkit-inner-spin-button {
-  display: none;
+/* four numbers in a row, each after its letter: room for 4 digits, the arrow keys step them */
+.grid4 input[type='text'] {
+  padding: 0 4px 0 19px;
 }
 .chips {
   display: flex;
@@ -1523,12 +1617,13 @@ button.chip-status:hover {
     transform var(--fast) var(--ease-out),
     background var(--fast);
 }
+/* on: light, not the accent (that is for the one primary action, the playhead and the selection) */
 .toggle[aria-checked='true'] {
-  background: var(--accent);
+  background: var(--text);
 }
 .toggle[aria-checked='true'] i {
   transform: translateX(14px);
-  background: #fff;
+  background: var(--panel);
 }
 .swatches {
   display: grid;
@@ -1596,9 +1691,12 @@ button.chip-status:hover {
   flex: none;
 }
 .link {
-  color: var(--accent);
+  color: var(--text);
   font-size: var(--size-xs);
   font-weight: 500;
+  text-decoration: underline;
+  text-decoration-color: var(--line-strong);
+  text-underline-offset: 3px;
 }
 .link:hover {
   text-decoration: underline;
@@ -1679,6 +1777,40 @@ button.chip-status:hover {
   border-radius: 6px;
   background: var(--raised);
   box-shadow: inset 0 0 0 1px var(--line);
+}
+.tl-bar .act.speed select:focus-visible {
+  box-shadow: var(--focus);
+}
+/* what can be dragged says so */
+.scene,
+.item {
+  cursor: grab;
+}
+.scene:active,
+.item:active {
+  cursor: grabbing;
+}
+@media (max-width: 1250px) {
+  .tl-status {
+    display: none;
+  }
+}
+/* how close a zoom being drawn brings it */
+.zoom-factor {
+  position: absolute;
+  right: 4px;
+  bottom: 4px;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.65);
+  color: #fff;
+  font: 600 11px var(--font);
+}
+/* a preview in another format than the project's says so */
+.preview-note {
+  margin-left: 14px;
+  color: var(--muted);
+  font-size: var(--size-s);
 }
 .scene .lbl .detail {
   color: #a9a9b2;

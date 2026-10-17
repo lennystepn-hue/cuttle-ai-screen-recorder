@@ -7,7 +7,7 @@ import type { Command, EditLimits } from '../../shared/document';
 import type { ExportEnd, ExportProgress, ExportTarget, MediaState, ProjectInfo, ProjectStatus } from '../../shared/ipc';
 import type { OverlayKind } from '../../shared/timeline-model';
 import { bridge } from '../bridge';
-import { edit, flush, openDocument, outsideChange, redo, undo, type DocState } from './doc';
+import { beforeClose, dismissToast, edit, flush, openDocument, outsideChange, redo, undo, type DocState } from './doc';
 import { ensureMedia, openProjectMedia, openVideo, type EditorMedia } from './media';
 import { Player, type PlayerState } from './player';
 import { createStore } from './store';
@@ -96,6 +96,9 @@ const query = new URLSearchParams(location.search);
 
 /** Opens the window's project: the document, its media through the protocol, the engine's assets, the player. */
 export async function openSession(canvas: HTMLCanvasElement): Promise<void> {
+  // The window closes once the last edits are written (from the first moment: a project that is
+  // still opening has none).
+  bridge.on('project:closing', () => void beforeClose().finally(() => void bridge.invoke('project:closed')));
   // The status comes before the project is open (the window opens while the take is cut).
   bridge.on('project:status', (status) => {
     store.set({ status: status.text ? status : undefined });
@@ -123,14 +126,8 @@ export async function openSession(canvas: HTMLCanvasElement): Promise<void> {
     void applyMediaState(await bridge.invoke('media:state'));
     bridge.on('export:progress', (progress) => store.set({ exportProgress: progress }));
     bridge.on('export:end', (end) => store.set((state) => ({ exportEnd: end, exporting: false, exportUnseen: !state.exportOpen })));
-    bridge.on('project:file', (event) => {
-      // Another take: its media are opened anew.
-      if ('raw' in event && JSON.stringify((event.raw as { sources?: unknown }).sources) !== JSON.stringify(store.get().info?.raw.sources)) {
-        location.reload();
-        return;
-      }
-      void outsideChange(event);
-    });
+    // (another take reloads the editor: outsideChange asks the main process)
+    bridge.on('project:file', (event) => void outsideChange(event));
   } catch (error) {
     store.set({ phase: 'failed', error: error instanceof Error ? error.message : String(error) });
   }
@@ -178,7 +175,7 @@ function exposeCheckHook(canvas: HTMLCanvasElement): void {
       /** The document as edited, and whether it is saved. */
       doc: () => {
         const doc = store.get().doc!;
-        return { raw: doc.raw, hash: doc.hash, saving: doc.saving, problem: doc.problem, issues: doc.issues, toast: doc.toast, undo: doc.undoLabel, redo: doc.redoLabel };
+        return { raw: doc.raw, hash: doc.hash, saving: doc.saving, problem: doc.problem, issues: doc.issues, toast: doc.toast, draftNote: doc.draftNote, undo: doc.undoLabel, redo: doc.redoLabel };
       },
       edit: (commands: Command[], label: string) => edit(commands, label),
       undo,
@@ -220,7 +217,13 @@ export function setFormat(format: ExportFormat | undefined): void {
 }
 
 export function select(selection: Selection | undefined): void {
+  dismissWarning();
   store.set({ selection, ...(selection && { tab: 'selection' as const }) });
+}
+
+/** A warning (an edit that was not possible) is about what was being done: a new selection or tool ends it. */
+function dismissWarning(): void {
+  if (store.get().doc?.toast?.tone === 'warning') dismissToast();
 }
 
 /** The stage shows the source view: paused, with the Zoom or Mask tool on or a zoom or mask selected (playing shows the video). */
@@ -229,6 +232,7 @@ export const sourceViewShown = (state: EditorState): boolean =>
 
 /** Picks a tool; Esc goes back to Select. Zoom and Mask show the source view. */
 export function setTool(tool: Tool): void {
+  dismissWarning();
   store.set({ tool });
 }
 
@@ -247,7 +251,7 @@ export function closeExport(): void {
 export async function startExport(formats: ExportTarget[], encoder: 'auto' | 'hardware' | 'software'): Promise<void> {
   store.set({ exporting: true, exportEnd: undefined, exportProgress: undefined, exportStarted: Date.now() });
   try {
-    await flush();
+    if (!(await flush())) throw new Error(`your latest edits are not saved (${store.get().doc?.problem ?? 'cuttle.json has a mistake'}), so the export would not have them. Save them first (Try again in the title bar).`);
     await bridge.invoke('export:start', { formats, encoder });
   } catch (error) {
     store.set({ exporting: false, exportEnd: { state: 'failed', files: [], format: formats[0]!, code: 'internal', message: (error as Error).message } });

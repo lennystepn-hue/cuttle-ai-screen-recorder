@@ -36,6 +36,7 @@ export async function editorLockOf(dir: string): Promise<EditorLock | undefined>
   if (typeof held !== 'object' || held === null) return undefined;
   const { host, pid } = held as { host?: unknown; pid?: unknown };
   if (typeof host !== 'string') return undefined;
-  if (host === hostname() && typeof pid === 'number' && !running(pid)) return undefined;
+  // from this computer: open only while its app still runs (a lock without a process id is not from one)
+  if (host === hostname() && (typeof pid !== 'number' || !running(pid))) return undefined;
   return { host, ...(typeof pid === 'number' && { pid }) };
 }

@@ -21,9 +21,10 @@ import {
   WarningIcon,
   ZoomIcon,
 } from '../icons';
-import { captionCommand, chooseTool, freeCaptionPosition, deleteSelection, duplicateSelection, overlayBlocked, reveal, split, type CaptionPosition } from './actions';
+import { captionCommand, captionPositionsAt, chooseTool, cycleSpeed, freeCaptionPosition, deleteSelection, duplicateSelection, overlayBlocked, reveal, split, type CaptionPosition } from './actions';
 import { CommandMenu, closeMenu, openMenu } from './CommandMenu';
-import { dismissToast, edit, preview, redo, retrySave, undo, useDraft } from './doc';
+import { cancelGesture } from './gesture';
+import { dismissDraft, dismissToast, edit, preview, redo, retrySave, undo, useDraft } from './doc';
 import { ExportSheet } from './ExportSheet';
 import { Inspector } from './Inspector';
 import { SourceView } from './SourceView';
@@ -41,6 +42,7 @@ export function App() {
     if (canvas.current) void openSession(canvas.current);
   }, []);
   useShortcuts();
+  useMouseFocus();
 
   if (phase === 'failed') return <Failed />;
   return (
@@ -77,7 +79,7 @@ function Failed() {
               <FolderIcon size={14} />
               Show the folder
             </button>
-            <button className="primary" onClick={() => location.reload()}>
+            <button className="primary" onClick={() => void bridge.invoke('project:reload')}>
               Try again
             </button>
           </div>
@@ -393,6 +395,7 @@ function Stage({ canvas }: { canvas: React.RefObject<HTMLCanvasElement | null> }
         <VideoFrame canvas={canvas} size={size} output={output} />
         <SourceView />
       </div>
+      <DraftNote />
       <ToastNote />
       <Transport />
     </main>
@@ -447,25 +450,27 @@ function VideoFrame({ canvas, size, output }: { canvas: React.RefObject<HTMLCanv
   const toStage = (rect: Rect) => ({ left: rect[0] * scale - 3, top: rect[1] * scale - 3, width: rect[2] * scale + 6, height: rect[3] * scale + 6 });
 
   return (
-    <div className="frame" style={{ width: size.width || undefined, height: size.height || undefined }}>
-      <canvas
-        ref={canvas}
-        data-testid="output"
-        className={hover && tool === 'select' ? 'over-caption' : undefined}
-        style={{ width: size.width || undefined, height: size.height || undefined }}
-        onPointerDown={press}
-        onPointerMove={(event) => tool === 'select' && setHover(captionAt(event)?.overlay.id)}
-        onPointerLeave={() => setHover(undefined)}
-        onDoubleClick={(event) => {
-          if (tool !== 'select' || !captionAt(event)) return;
-          requestAnimationFrame(() => document.querySelector<HTMLTextAreaElement>('[data-testid="caption-text"]')?.focus());
-        }}
-      />
-      {outlined.map(({ overlay, rect }) => (
-        <div key={overlay.id} className={`caption-box${selection?.id === overlay.id ? ' selected' : ''}`} style={toStage(rect)} />
-      ))}
+    <>
+      <div className="frame" style={{ width: size.width || undefined, height: size.height || undefined }}>
+        <canvas
+          ref={canvas}
+          data-testid="output"
+          className={hover && tool === 'select' ? 'over-caption' : undefined}
+          style={{ width: size.width || undefined, height: size.height || undefined }}
+          onPointerDown={press}
+          onPointerMove={(event) => tool === 'select' && setHover(captionAt(event)?.overlay.id)}
+          onPointerLeave={() => setHover(undefined)}
+          onDoubleClick={(event) => {
+            if (tool !== 'select' || !captionAt(event)) return;
+            requestAnimationFrame(() => document.querySelector<HTMLTextAreaElement>('[data-testid="caption-text"]')?.focus());
+          }}
+        />
+        {outlined.map(({ overlay, rect }) => (
+          <div key={overlay.id} className={`caption-box${selection?.id === overlay.id ? ' selected' : ''}`} style={toStage(rect)} />
+        ))}
+      </div>
       {tool === 'caption' && <CaptionBar position={position} onPosition={setPosition} />}
-    </div>
+    </>
   );
 }
 
@@ -485,6 +490,7 @@ function CaptionBar({ position, onPosition }: { position: CaptionPosition; onPos
   const input = useRef<HTMLInputElement>(null);
   void t;
   const blocked = overlayBlocked();
+  const used = captionPositionsAt();
 
   useEffect(() => {
     if (!blocked) input.current?.focus();
@@ -530,12 +536,19 @@ function CaptionBar({ position, onPosition }: { position: CaptionPosition; onPos
       />
       <div className="seg" role="group" aria-label="Where the caption goes">
         {POSITIONS.map((item) => (
-          <button key={item.position} type="button" aria-pressed={position === item.position} onClick={() => onPosition(item.position)}>
+          <button
+            key={item.position}
+            type="button"
+            aria-pressed={position === item.position}
+            className={used.has(item.position) ? 'used' : undefined}
+            title={used.has(item.position) ? `${item.name}: a caption shows there now` : item.name}
+            onClick={() => onPosition(item.position)}
+          >
             {item.name}
           </button>
         ))}
       </div>
-      <button type="button" className="primary small" onClick={add} disabled={!text.trim() || !!blocked}>
+      <button type="button" className="ghost small add" onClick={add} disabled={!text.trim() || !!blocked}>
         Add
       </button>
     </div>
@@ -565,13 +578,30 @@ function IssuesBanner({ issues }: { issues: string[] }) {
   );
 }
 
+/** A version a save conflict set aside (cuttle.json.draft): offered back until it is answered. */
+function DraftNote() {
+  const note = useStore(store, (state) => state.doc?.draftNote);
+  if (!note) return null;
+  return (
+    <div className="draft-note" role="alert" data-testid="draft-note">
+      <WarningIcon size={14} />
+      <span title={note}>{note}</span>
+      <button className="toast-undo" onClick={useDraft} title="Put your version back (one step to undo)" data-testid="draft-use">
+        Use mine
+      </button>
+      <button className="toast-close" onClick={dismissDraft} aria-label="Keep the newer version" title="Keep the newer version (cuttle.json.draft stays in the folder)">
+        <CloseIcon size={11} />
+      </button>
+    </div>
+  );
+}
+
 /** What just happened (an outside change, a cut by suggest, an edit that was not possible), with Undo where it applies. */
 function ToastNote() {
   const toast = useStore(store, (state) => state.doc?.toast);
   const [held, setHeld] = useState(false);
   useEffect(() => {
-    // a choice to make (a draft) stays until it is made or dismissed
-    if (!toast || held || toast.draft) return;
+    if (!toast || held) return;
     const timer = setTimeout(dismissToast, toast.tone === 'warning' ? 9000 : 6000);
     return () => clearTimeout(timer);
   }, [toast?.id, held]);
@@ -580,11 +610,6 @@ function ToastNote() {
     <div className={`toast${toast.tone === 'warning' ? ' warn' : ''}`} role="status" aria-live="polite" onPointerEnter={() => setHeld(true)} onPointerLeave={() => setHeld(false)} data-testid="toast" key={toast.id}>
       {toast.tone === 'warning' && <WarningIcon size={14} />}
       <span title={toast.text}>{toast.text}</span>
-      {toast.draft && (
-        <button className="toast-undo" onClick={useDraft} title="Put your version back (one step to undo)" data-testid="toast-use-draft">
-          Use mine
-        </button>
-      )}
       {toast.show && (
         <button className="toast-undo" onClick={() => reveal(toast.show!.list, toast.show!.id)} data-testid="toast-show">
           Show
@@ -606,6 +631,9 @@ function Transport() {
   const playing = useStore(store, (state) => state.player.playing);
   const t = useStore(store, (state) => state.player.t);
   const source = useStore(store, (state) => state.player.source);
+  const format = useStore(store, (state) => state.format);
+  const output = useStore(store, (state) => state.doc?.project.output);
+  const own = ownFormat(output);
   const duration = currentPlayer()?.duration ?? 0;
   return (
     <div className="transport">
@@ -616,6 +644,11 @@ function Transport() {
         <b>{formatTime(t)}</b> / {formatTime(duration)}
         {source !== undefined && <em>{formatSource(source)}</em>}
       </span>
+      {format !== undefined && format !== own && output && (
+        <span className="preview-note" title="The preview shows another format; the export sheet picks what is exported">
+          Preview {format} · the project is {own ?? `${output.width}×${output.height}`}
+        </span>
+      )}
     </div>
   );
 }
@@ -625,7 +658,7 @@ const REPEATING = new Set(['ArrowLeft', 'ArrowRight']);
 
 /**
  * The editor's keys (the command menu lists them): Space (K pauses, L plays, J a second back),
- * arrows (Shift: a second), Home/End, S split, Delete, Ctrl+D, R speed, V/Z/M/T tools, Shift+Z
+ * arrows (Shift: a second), Home/End, S split, Delete, Ctrl+D, R/Shift+R speed, V/Z/M/T tools, Shift+Z
  * fit, Ctrl+Z/Ctrl+Shift+Z/Ctrl+Y, Ctrl+K or ? the menu, Ctrl+E export, Esc back out. Typing in a
  * field, and Space or Enter on a focused button outside the timeline, keep their own meaning.
  */
@@ -669,9 +702,10 @@ function useShortcuts(): void {
       const { t } = player.current();
       const frame = 1 / player.fps;
       const keys: Record<string, () => void> = {
-        ' ': () => player.toggle(),
+        // playing ends a drag under way (what it drags moves under it)
+        ' ': () => (cancelGesture(), player.toggle()),
         k: () => player.pause(),
-        l: () => player.play(),
+        l: () => (cancelGesture(), player.play()),
         j: () => void player.seek(t - 1),
         ArrowLeft: () => void player.seek(t - (event.shiftKey ? 1 : frame)),
         ArrowRight: () => void player.seek(t + (event.shiftKey ? 1 : frame)),
@@ -681,7 +715,8 @@ function useShortcuts(): void {
         s: split,
         Delete: deleteSelection,
         Backspace: deleteSelection,
-        r: () => document.querySelector<HTMLSelectElement>('#speed-select')?.focus(),
+        // R: the next speed, Shift+R: the one before
+        r: () => cycleSpeed(event.shiftKey ? -1 : 1),
         v: () => setTool('select'),
         // Shift+Z: the whole video in the timeline
         z: () => (event.shiftKey ? store.set({ pxPerSecond: 0 }) : chooseTool('zoom')),
@@ -700,8 +735,45 @@ function useShortcuts(): void {
   }, []);
 }
 
+/**
+ * A click leaves the keys to the editor: a button pressed with the mouse takes no focus (Space and
+ * the arrows go on playing and stepping; a field the person typed in is left, which saves it), and a
+ * menu chosen with the mouse lets go of the focus once chosen (its arrows would change it). Keyboard
+ * focus (Tab) is kept as it is.
+ */
+function useMouseFocus(): void {
+  useEffect(() => {
+    let menuByMouse = false;
+    const down = (event: MouseEvent) => {
+      const target = event.target instanceof Element ? event.target : undefined;
+      menuByMouse = Boolean(target?.closest('select'));
+      if (event.button !== 0 || !target?.closest('button')) return;
+      event.preventDefault();
+      // the caption bar and the menu keep their field's focus
+      if (target.closest('.caption-bar, .command-menu')) return;
+      const active = document.activeElement;
+      if (active instanceof HTMLElement && active !== document.body) active.blur();
+    };
+    const change = (event: Event) => {
+      if (menuByMouse && event.target instanceof HTMLSelectElement) event.target.blur();
+      menuByMouse = false;
+    };
+    const key = () => (menuByMouse = false);
+    window.addEventListener('mousedown', down, true);
+    window.addEventListener('change', change, true);
+    window.addEventListener('keydown', key, true);
+    return () => {
+      window.removeEventListener('mousedown', down, true);
+      window.removeEventListener('change', change, true);
+      window.removeEventListener('keydown', key, true);
+    };
+  }, []);
+}
+
 /** Esc: out of the source view (the tool and a zoom or mask selected), else out of a tool, else the selection. */
 function backOut(): void {
+  // first a drag under way: it ends without an edit
+  if (cancelGesture()) return;
   const { tool, selection } = store.get();
   closeMenu();
   const inSource = tool === 'zoom' || tool === 'mask' || selection?.kind === 'zoom' || selection?.kind === 'mask';

@@ -1,6 +1,7 @@
 // The inspector: the selection's settings and the look, edited in place. A field saves when it is
 // left or Enter is pressed (text also every 2 s while typing); each save is one step to undo.
-// Output times read m:ss.t, source seconds "src 54.4 s", lengths "2.5 s".
+// Output times read m:ss.t, take seconds "54.4 s into the take", lengths "2.5 s". While cuttle.json
+// does not parse, every field is off (editing waits).
 import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { EXPORT_FORMATS } from '@cuttle/export/formats';
 import { BACKGROUND_PRESETS, CLICK_EFFECTS, CURSOR_STYLES, EASES, FRAME_STYLES, MASK_STYLES, STILL_MOTIONS, TEXT_POSITIONS, TEXT_STYLES, WEBCAM_CORNERS, WEBCAM_SHAPES, type CuttleProject, type Rect } from '@cuttle/project';
@@ -21,10 +22,10 @@ import {
   WEBCAM_SHAPE_NAMES,
 } from '../../shared/names';
 import { outputTimesOf } from '../../shared/timeline-model';
-import { CardIcon, FilmIcon, MaskIcon, PageIcon, TextIcon, ZoomIcon } from '../icons';
-import { chooseImage, LIST_OF, SPEEDS } from './actions';
-import { edit } from './doc';
-import { setTool, store, type Selection } from './session';
+import { CardIcon, CopyIcon, FilmIcon, MaskIcon, PageIcon, TextIcon, TrashIcon, ZoomIcon } from '../icons';
+import { chooseImage, deleteSelection, duplicateSelection, LIST_OF, SPEEDS } from './actions';
+import { edit, preview } from './doc';
+import { setTool, store, type Selection, type Tool } from './session';
 import { useStore } from './store';
 
 const TABS = [
@@ -34,6 +35,7 @@ const TABS = [
 
 export function Inspector() {
   const tab = useStore(store, (state) => state.tab);
+  const broken = useStore(store, (state) => state.doc?.issues !== undefined);
   const tabs = useRef<HTMLDivElement>(null);
   // Arrow keys move between the tabs, as in any tab list.
   const onKey = (event: KeyboardEvent) => {
@@ -62,7 +64,9 @@ export function Inspector() {
         ))}
       </div>
       <div className="panel-body" id="inspector-panel" role="tabpanel" aria-labelledby={`tab-${tab}`}>
-        {tab === 'selection' ? <SelectionPanel /> : <LookPanel />}
+        <fieldset className="panel-fields" disabled={broken}>
+          {tab === 'selection' ? <SelectionPanel /> : <LookPanel />}
+        </fieldset>
       </div>
     </aside>
   );
@@ -74,10 +78,10 @@ export function Inspector() {
  * A labelled field. The label is a <label> (a click on it reaches the field) unless `plain`: a row
  * with a button that is not its field (Replace…) must not press it from its label.
  */
-function Row({ label, children, note, wide, plain }: { label: string; children: ReactNode; note?: ReactNode; wide?: boolean; plain?: boolean }) {
+function Row({ label, children, note, wide, plain, inline }: { label: string; children: ReactNode; note?: ReactNode; wide?: boolean; plain?: boolean; inline?: boolean }) {
   const Tag = plain ? 'div' : 'label';
   return (
-    <Tag className={`field${wide ? ' wide' : ''}`}>
+    <Tag className={`field${wide ? ' wide' : ''}${inline ? ' inline' : ''}`}>
       <span className="field-label">{label}</span>
       <span className="field-input">
         {children}
@@ -130,25 +134,27 @@ function TextInput({ value, onCommit, multiline, placeholder, testId }: { value:
   return multiline ? <textarea rows={2} {...props} /> : <input type="text" {...props} />;
 }
 
-/** A number that saves when left or on Enter, clamped to [min, max]; arrows step it. */
+/**
+ * A number that saves when left or on Enter, clamped to [min, max]. It reads with a point whatever
+ * the system's language (as every time in the app does); ↑ and ↓ step it (Shift: ten steps); Esc
+ * puts it back and leaves the field.
+ */
 function NumberInput({ value, onCommit, step = 0.1, min, max, digits = 2, testId }: { value: number; onCommit: (value: number) => void; step?: number; min?: number; max?: number; digits?: number; testId?: string }) {
   const shown = String(Math.round(value * 10 ** digits) / 10 ** digits);
   const [draft, setDraft] = useState(shown);
   useEffect(() => setDraft(shown), [shown]);
+  const clamp = (number: number) => Math.min(max ?? Infinity, Math.max(min ?? -Infinity, number));
   const commit = (text = draft) => {
-    const parsed = Number(text.replace(',', '.'));
-    if (!Number.isFinite(parsed)) return setDraft(shown);
-    const clamped = Math.min(max ?? Infinity, Math.max(min ?? -Infinity, parsed));
+    const parsed = Number(text.trim().replace(',', '.'));
+    if (text.trim() === '' || !Number.isFinite(parsed)) return setDraft(shown);
+    const clamped = clamp(parsed);
     if (Math.abs(clamped - value) > 1e-9) onCommit(clamped);
     else setDraft(shown);
   };
   return (
     <input
-      type="number"
+      type="text"
       inputMode="decimal"
-      step={step}
-      {...(min !== undefined && { min })}
-      {...(max !== undefined && { max })}
       value={draft}
       data-testid={testId}
       onChange={(event) => setDraft(event.target.value)}
@@ -156,7 +162,18 @@ function NumberInput({ value, onCommit, step = 0.1, min, max, digits = 2, testId
       onKeyDown={(event) => {
         event.stopPropagation();
         if (event.key === 'Enter') commit();
-        if (event.key === 'Escape') setDraft(shown);
+        if (event.key === 'ArrowUp' || event.key === 'ArrowDown') {
+          event.preventDefault();
+          const from = Number(draft.replace(',', '.'));
+          const next = clamp((Number.isFinite(from) ? from : value) + (event.key === 'ArrowUp' ? 1 : -1) * step * (event.shiftKey ? 10 : 1));
+          const text = String(Math.round(next * 10 ** digits) / 10 ** digits);
+          setDraft(text);
+          commit(text);
+        }
+        if (event.key === 'Escape') {
+          setDraft(shown);
+          (event.target as HTMLInputElement).blur();
+        }
       }}
     />
   );
@@ -191,6 +208,12 @@ function Head({ icon, color, name }: { icon: ReactNode; color: string; name: str
       <span className="name" title={name}>
         {name}
       </span>
+      <button type="button" className="head-action" onClick={duplicateSelection} title="Duplicate (Ctrl+D)" aria-label="Duplicate" data-testid="duplicate">
+        <CopyIcon size={15} />
+      </button>
+      <button type="button" className="head-action" onClick={deleteSelection} title="Delete (Del)" aria-label="Delete" data-testid="delete">
+        <TrashIcon size={15} />
+      </button>
     </div>
   );
 }
@@ -214,17 +237,30 @@ function stretchOf(project: CuttleProject, selection: Selection, from: number, t
   return { start, end, speed: speedAt(start) };
 }
 
+/** What the empty inspector says: how to start with the tool in hand. */
+const HINTS: Record<Tool, ReactNode> = {
+  select: (
+    <ul className="hint-list">
+      <li>Click a scene, zoom, mask or caption on the timeline, or a caption on the video, to change it here.</li>
+      <li>
+        <kbd>S</kbd> splits at the playhead, <kbd>R</kbd> speeds a clip up, <kbd>Del</kbd> deletes.
+      </li>
+      <li>
+        <kbd>Z</kbd> zoom, <kbd>M</kbd> mask, <kbd>T</kbd> caption; <kbd>Ctrl+K</kbd> finds any command.
+      </li>
+    </ul>
+  ),
+  zoom: <p className="hint">Zoom tool: drag on the screen over what the video should show close up. It starts at the playhead and lasts 3 s. Esc goes back.</p>,
+  mask: <p className="hint">Mask tool: drag on the screen over what the video must not show (a password, an address). It lasts from the playhead to the end of the clip. Esc goes back.</p>,
+  caption: <p className="hint">Caption tool: type the caption in the bar and press Enter; it shows at the playhead for 3 s. Esc goes back.</p>,
+};
+
 function SelectionPanel() {
   const selection = useStore(store, (state) => state.selection);
-  const project = useStore(store, (state) => state.doc?.project);
-  if (!project || !selection) {
-    return (
-      <p className="hint">
-        Click a scene, zoom, mask or caption on the timeline to change it here. Drag on the timeline to trim, move and resize; S splits at the playhead. The Look tab holds the background, frame, cursor
-        and more.
-      </p>
-    );
-  }
+  const tool = useStore(store, (state) => state.tool);
+  // a drag in progress shows here as it goes
+  const project = useStore(store, (state) => state.doc?.preview ?? state.doc?.project);
+  if (!project || !selection) return HINTS[tool];
   const list = LIST_OF[selection.kind];
   const item = (project[list] as { id?: string }[]).find((candidate) => candidate.id === selection.id);
   if (!item) return <p className="hint">The selection is not in the project any more.</p>;
@@ -261,10 +297,10 @@ function Details({ project, selection }: { project: CuttleProject; selection: Se
           </div>
           {inVideo}
           <div className="grid2">
-            <Row label="From (src s)">
+            <Row label="From (take s)">
               <NumberInput value={scene.from} min={0} onCommit={(from) => edit([{ type: 'trim', id, from }], 'Trim clip')} testId="clip-from" />
             </Row>
-            <Row label="To (src s)">
+            <Row label="To (take s)">
               <NumberInput value={scene.to} min={0} onCommit={(to) => edit([{ type: 'trim', id, to }], 'Trim clip')} testId="clip-to" />
             </Row>
           </div>
@@ -277,7 +313,7 @@ function Details({ project, selection }: { project: CuttleProject; selection: Se
     if (scene.type === 'still') {
       return (
         <>
-          <Head icon={<PageIcon />} color="var(--still)" name={scene.label ?? 'Page'} />
+          <Head icon={<PageIcon />} color="var(--still)" name={scene.label ?? scene.image.split(/[\\/]/).at(-1)!} />
           <Row label="Label">
             <TextInput value={scene.label ?? ''} placeholder="Page" onCommit={(value) => set('scenes', id, { label: value.trim() || undefined }, 'Rename page')} />
           </Row>
@@ -327,21 +363,21 @@ function Details({ project, selection }: { project: CuttleProject; selection: Se
     const label = list === 'masks' ? 'mask' : list === 'zooms' ? 'zoom' : 'caption';
     return (
       <>
-        <Row label="In the video" note={formatSource(from)}>
-          {stretch ? span(stretch.start, stretch.end) : 'Cut out: no clip shows it'}
+        <Row label="Shows at" note={formatSource(from)}>
+          {stretch ? span(stretch.start, stretch.end) : 'Nowhere: no clip shows it'}
         </Row>
         {list === 'masks' ? (
           <div className="grid2">
-            <Row label="From (src s)">
+            <Row label="From (take s)">
               <NumberInput value={from} min={0} onCommit={(value) => set('masks', id, { from: value, to: Math.max(to, value + 0.05) }, 'Move mask')} />
             </Row>
-            <Row label="To (src s)">
+            <Row label="To (take s)">
               <NumberInput value={to} min={0} onCommit={(value) => set('masks', id, { to: value }, 'Change the length of the mask')} />
             </Row>
           </div>
         ) : (
           <div className="grid2">
-            <Row label="Start (src s)">
+            <Row label="Start (take s)">
               <NumberInput value={from} min={0} onCommit={(at) => set(list, id, { at }, `Move ${label}`)} testId={`${label}-at`} />
             </Row>
             <Row label="Length (s)" note={stretch && stretch.speed !== 1 ? `${formatDuration(to - from)} src` : undefined}>
@@ -378,9 +414,9 @@ function Details({ project, selection }: { project: CuttleProject; selection: Se
   );
 
   const enabled = (list: 'zooms' | 'masks' | 'texts', on: boolean, label: string) => (
-    <Row label="In the video">
-      <Toggle checked={on} label={`${label} on`} onChange={(value) => set(list, id, { enabled: value ? undefined : false }, value ? `Turn ${label} on` : `Turn ${label} off`)} />
-      <em>{on ? 'On' : 'Off: not in the video'}</em>
+    <Row label="Show" inline>
+      <em>{on ? 'On' : 'Off: kept, not in the video'}</em>
+      <Toggle checked={on} label={`Show the ${label}`} onChange={(value) => set(list, id, { enabled: value ? undefined : false }, value ? `Turn ${label} on` : `Turn ${label} off`)} />
     </Row>
   );
 
@@ -446,6 +482,36 @@ function Details({ project, selection }: { project: CuttleProject; selection: Se
 
 const look = (path: string[], value: unknown, label: string) => edit([{ type: 'look', path, value } as Command], label);
 
+/**
+ * A colour well: the video follows the picker while it moves, and the colour is one step to undo
+ * once the picker closes (its native change), not one per move.
+ */
+function ColorInput({ value, path, label, upper }: { value: string; path: string[]; label: string; upper?: boolean }) {
+  const input = useRef<HTMLInputElement>(null);
+  const shape = (colour: string) => (upper ? colour.toUpperCase() : colour);
+  useEffect(() => {
+    const element = input.current;
+    if (!element) return;
+    const commit = () => {
+      preview(undefined);
+      look(path, shape(element.value), label);
+    };
+    element.addEventListener('change', commit);
+    return () => element.removeEventListener('change', commit);
+  }, [path.join('.'), label, upper]);
+  // uncontrolled while it is picked: a new version of the look resets it (`key`)
+  return (
+    <input
+      key={value}
+      ref={input}
+      type="color"
+      defaultValue={value.toLowerCase()}
+      onInput={(event) => preview([{ type: 'look', path, value: shape((event.target as HTMLInputElement).value) } as Command])}
+      aria-label={label}
+    />
+  );
+}
+
 const SIZES = [
   { name: '16:9', ...EXPORT_FORMATS['16:9'] },
   { name: '1:1', ...EXPORT_FORMATS['1:1'] },
@@ -499,7 +565,7 @@ function LookPanel() {
       </div>
       {current.background.preset === 'solid' && (
         <Row label="Colour">
-          <input type="color" value={current.background.color ?? '#1c1c22'} onChange={(event) => look(['background', 'color'], event.target.value, 'Background colour')} />
+          <ColorInput value={current.background.color ?? '#1c1c22'} path={['background', 'color']} label="Background colour" />
         </Row>
       )}
       {current.background.preset === 'image' && current.background.image && (
@@ -514,7 +580,7 @@ function LookPanel() {
       )}
 
       <div className="section-title">Window frame</div>
-      <Row label="Frame">
+      <Row label="Frame" inline>
         <Toggle checked={current.frame.enabled} label="Window frame" onChange={(on) => look(['frame', 'enabled'], on, on ? 'Window frame on' : 'Window frame off')} />
       </Row>
       {current.frame.enabled && (
@@ -529,7 +595,7 @@ function LookPanel() {
             <Row label="Corners (px)">
               <NumberInput value={current.frame.radius} min={0} max={48} step={1} digits={0} onCommit={(radius) => look(['frame', 'radius'], radius, 'Frame corners')} />
             </Row>
-            <Row label="Shadow">
+            <Row label="Shadow" inline>
               <Toggle checked={current.frame.shadow} label="Shadow" onChange={(on) => look(['frame', 'shadow'], on, on ? 'Shadow on' : 'Shadow off')} />
             </Row>
           </div>
@@ -537,7 +603,7 @@ function LookPanel() {
       )}
 
       <div className="section-title">Cursor</div>
-      <Row label="Cursor">
+      <Row label="Cursor" inline>
         <Toggle checked={current.cursor.enabled} label="Cursor" onChange={(on) => look(['cursor', 'enabled'], on, on ? 'Cursor on' : 'Cursor off')} />
       </Row>
       {current.cursor.enabled && (
@@ -550,7 +616,7 @@ function LookPanel() {
               <NumberInput value={current.cursor.size} min={0.5} max={4} step={0.25} onCommit={(value) => look(['cursor', 'size'], value, 'Cursor size')} />
             </Row>
             <Row label="Colour">
-              <input type="color" value={current.cursor.color.toLowerCase()} onChange={(event) => look(['cursor', 'color'], event.target.value.toUpperCase(), 'Cursor colour')} />
+              <ColorInput value={current.cursor.color} path={['cursor', 'color']} label="Cursor colour" upper />
             </Row>
           </div>
           <Row label="Clicks">
@@ -560,7 +626,7 @@ function LookPanel() {
       )}
 
       <div className="section-title">Webcam</div>
-      <Row label="Bubble" note={sources.webcam ? undefined : 'no webcam in this take'}>
+      <Row label="Bubble" inline note={sources.webcam ? undefined : 'no webcam in this take'}>
         <Toggle checked={current.webcam.enabled} disabled={!sources.webcam} label="Webcam bubble" onChange={(on) => look(['webcam', 'enabled'], on, on ? 'Webcam on' : 'Webcam off')} />
       </Row>
       {current.webcam.enabled && sources.webcam && (
@@ -573,23 +639,23 @@ function LookPanel() {
               <Select value={current.webcam.corner} options={WEBCAM_CORNERS} names={CORNER_NAMES} onChange={(corner) => look(['webcam', 'corner'], corner, 'Webcam corner')} />
             </Row>
           </div>
-          <Row label="Size" note="of the output's height">
-            <NumberInput value={current.webcam.size} min={0.08} max={0.5} step={0.02} onCommit={(value) => look(['webcam', 'size'], value, 'Webcam size')} />
+          <Row label="Size" note="% of the output's height">
+            <NumberInput value={current.webcam.size * 100} min={8} max={50} step={1} digits={0} onCommit={(value) => look(['webcam', 'size'], value / 100, 'Webcam size')} />
           </Row>
         </>
       )}
 
       <div className="section-title">Sound and transitions</div>
-      <Row label="Mic">
+      <Row label="Mic" inline>
         <Toggle checked={current.audio.enabled} label="Mic sound" onChange={(on) => look(['audio', 'enabled'], on, on ? 'Sound on' : 'Sound off')} />
       </Row>
       {current.audio.enabled && (
-        <Row label="Sped-up clips">
+        <Row label="Sped-up clips" inline>
           <Toggle checked={current.audio.muteSpedUp} label="Silent when sped up" onChange={(on) => look(['audio', 'muteSpedUp'], on, on ? 'Sped-up clips silent' : 'Sped-up clips heard')} />
           <em>{current.audio.muteSpedUp ? 'Silent' : 'Heard'}</em>
         </Row>
       )}
-      <Row label="Crossfade">
+      <Row label="Crossfade" inline>
         <Toggle checked={current.transition.enabled} label="Crossfade at cuts" onChange={(on) => look(['transition', 'enabled'], on, on ? 'Crossfade on' : 'Crossfade off')} />
       </Row>
       {current.transition.enabled && (

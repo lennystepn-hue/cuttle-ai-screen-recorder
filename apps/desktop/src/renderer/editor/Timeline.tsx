@@ -29,6 +29,7 @@ import { FitIcon } from '../icons';
 import { addCard, addMask, addPage, addZoom, overlayBlocked, selectedOrCurrentClip, setSpeed, split, SPEEDS } from './actions';
 import { audible } from './audio';
 import { edit, preview } from './doc';
+import { beginGesture } from './gesture';
 import { mediaUrl } from './media';
 import { currentPlayer, select, setTool, shownProject, store, type Selection } from './session';
 import { useStore } from './store';
@@ -118,9 +119,12 @@ export function Timeline() {
   const model = useMemo(() => (project ? timelineModel(project, spans, media?.markers) : undefined), [project, spans, media]);
   const layout = useMemo(() => layoutOf(model), [model]);
 
+  /** The whole video is in view: it stays so when the window changes size, until the person scales it. */
+  const fitted = useRef(true);
   const fit = useCallback(() => {
     const element = scroller.current;
     if (!element || !(duration > 0)) return;
+    fitted.current = true;
     store.set({ pxPerSecond: Math.max(0.01, (element.clientWidth - END_SPACE - 8) / duration) });
     element.scrollLeft = 0;
   }, [duration]);
@@ -134,7 +138,10 @@ export function Timeline() {
     if (!element) return;
     const update = () => setView({ left: element.scrollLeft, width: element.clientWidth });
     update();
-    const observer = new ResizeObserver(update);
+    const observer = new ResizeObserver(() => {
+      update();
+      if (fitted.current) store.set({ pxPerSecond: 0 }); // fitted again by the layout effect
+    });
     observer.observe(element);
     element.addEventListener('scroll', update, { passive: true });
     const onWheel = (event: WheelEvent) => {
@@ -153,6 +160,7 @@ export function Timeline() {
         const anchorX = event.clientX - box.left;
         const anchorT = (element.scrollLeft + anchorX) / current;
         const next = Math.min(MAX_PPS, Math.max(fitPps, current * Math.exp(-event.deltaY * 0.002)));
+        fitted.current = false;
         store.set({ pxPerSecond: next });
         requestAnimationFrame(() => (element.scrollLeft = Math.max(0, anchorT * next - anchorX)));
         return;
@@ -216,10 +224,20 @@ export function Timeline() {
       last = moved;
       onMove(moved.clientX - startX, moved);
     };
-    const up = () => {
+    const stop = () => {
       window.removeEventListener('pointermove', move);
       window.removeEventListener('pointerup', up);
       window.removeEventListener('pointercancel', up);
+    };
+    // Esc or playing cancels it: no edit, the preview and the guides go
+    const ended = beginGesture('timeline', () => {
+      stop();
+      setDrag({});
+      preview(undefined);
+    });
+    const up = () => {
+      stop();
+      ended();
       onEnd(dragging, last);
     };
     window.addEventListener('pointermove', move);
@@ -355,6 +373,7 @@ export function Timeline() {
         if (!element || !(fitPps > 0)) return;
         const next = fitPps * Math.pow(MAX_PPS / fitPps, value);
         const anchor = currentPlayer()?.current().t ?? 0;
+        fitted.current = false;
         store.set({ pxPerSecond: next });
         requestAnimationFrame(() => (element.scrollLeft = Math.max(0, anchor * next - element.clientWidth / 2)));
       }} />
@@ -422,7 +441,7 @@ export function Timeline() {
                           onPointerEnter={() => setHovered(block.id)}
                           onPointerLeave={() => setHovered((id) => (id === block.id ? undefined : id))}
                           style={{ left: blockLeft, width: blockWidth, top: 4 + block.row * ROW }}
-                          title={`${block.title}${block.enabled ? '' : ' (off: not in the video)'} · drag to move, edges to change the length, Alt to copy`}
+                          title={`${block.title}${block.enabled ? '' : ' (off: not in the video)'} · drag to move, edges to change the length, Alt to copy, Del to delete`}
                           data-id={block.id}
                           onPointerDown={(event) => pressOverlay(event, block, lane.list)}
                           onKeyDown={(event) => event.key === 'Enter' && select({ kind: lane.kind, id: block.id, start: block.start, end: block.end })}
@@ -474,20 +493,21 @@ function TimelineBar({ status, fit, zoomValue, onScale }: { status: string; fit:
   useStore(store, (state) => state.selection);
   const t = useStore(store, (state) => Math.round(state.player.t * 10));
   const snap = useStore(store, (state) => state.snap);
+  const broken = useStore(store, (state) => state.doc?.issues !== undefined);
   const clip = selectedOrCurrentClip();
-  const blocked = overlayBlocked();
+  const blocked = broken ? 'cuttle.json has a mistake: editing waits' : overlayBlocked();
   void t;
   return (
     <div className="tl-bar" role="toolbar" aria-label="Edit">
-      <button className="act" onClick={split} disabled={!clip} title="Split the clip at the playhead (S)" data-testid="split">
+      <button className="act" onClick={split} disabled={!clip || broken} title="Split the clip at the playhead (S)" data-testid="split">
         <SplitGlyph />
         Split
       </button>
-      <label className="act speed" title="The clip's speed (R)">
+      <label className="act speed" title="The clip's speed (R faster, Shift+R slower)">
         <span>Speed</span>
         <select
           value={clip ? String(clip.speed) : ''}
-          disabled={!clip}
+          disabled={!clip || broken}
           onChange={(event) => setSpeed(Number(event.target.value), clip?.id)}
           aria-label="Speed"
           data-testid="speed"
@@ -512,10 +532,10 @@ function TimelineBar({ status, fit, zoomValue, onScale }: { status: string; fit:
       <button className="act" onClick={() => setTool('caption')} disabled={!!blocked} title={blocked ?? 'A caption at the playhead: type it on the video (T)'}>
         + Caption
       </button>
-      <button className="act" onClick={addCard} title="A title card after the scene under the playhead">
+      <button className="act" onClick={addCard} disabled={broken} title="A title card after the scene under the playhead">
         + Card
       </button>
-      <button className="act" onClick={() => void addPage()} title="A page (an image, scrolled through) after the scene under the playhead">
+      <button className="act" onClick={() => void addPage()} disabled={broken} title="A page (an image, scrolled through) after the scene under the playhead">
         + Page
       </button>
       <span className="tl-status">{status}</span>

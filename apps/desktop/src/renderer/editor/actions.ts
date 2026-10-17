@@ -44,8 +44,8 @@ export function playheadPlace(t = currentPlayer()?.current().t ?? 0): PlayheadPl
 export function overlayBlocked(t = currentPlayer()?.current().t ?? 0): string | undefined {
   const place = playheadPlace(t);
   if (!place) return 'There is nothing in the video yet';
-  if (!place.clip) return place.span.scene.type === 'still' ? 'Not on a page: move the playhead onto a clip' : 'Not on a card: move the playhead onto a clip';
-  if ((currentPlayer()?.clipsAt(t) ?? 1) > 1) return 'Not inside a crossfade: move the playhead a little';
+  if (!place.clip) return `Zooms, masks and captions go on clips, not on a ${place.span.scene.type === 'still' ? 'page' : 'card'}: move the playhead onto a clip`;
+  if ((currentPlayer()?.clipsAt(t) ?? 1) > 1) return 'Zooms, masks and captions do not go inside a crossfade: move the playhead a little';
   return undefined;
 }
 
@@ -86,6 +86,16 @@ export function duplicateSelection(): void {
 export function setSpeed(speed: number, id = selectedOrCurrentClip()?.id): void {
   if (!id) return toast('Select a clip to change its speed.', { tone: 'warning' });
   edit([{ type: 'speed', id, speed }], `Speed ${speed}×`);
+}
+
+/** R (`by` 1) and Shift+R (-1): the selected clip's (or the one at the playhead) next speed of the list. */
+export function cycleSpeed(by: 1 | -1): void {
+  const clip = selectedOrCurrentClip();
+  if (!clip) return toast('Select a clip, or move the playhead onto one, to change its speed.', { tone: 'warning' });
+  const at = SPEEDS.findIndex((speed) => speed >= clip.speed - 1e-9);
+  const index = at < 0 ? SPEEDS.length : SPEEDS[at] === clip.speed ? at + by : by > 0 ? at : at - 1;
+  const speed = SPEEDS[Math.min(SPEEDS.length - 1, Math.max(0, index))]!;
+  if (speed !== clip.speed) setSpeed(speed, clip.id);
 }
 
 export function selectedOrCurrentClip(): ClipScene | undefined {
@@ -149,10 +159,15 @@ export function captionCommand(text: string, position: CaptionPosition): Extract
   return { type: 'add', list: 'texts', item: { at, duration, text, position } };
 }
 
+/** The positions of the captions shown at the playhead (two at one position cover each other). */
+export function captionPositionsAt(): Set<CaptionPosition> {
+  const source = playheadPlace()?.source;
+  return new Set((documentProject()?.texts ?? []).filter((text) => text.enabled && source !== undefined && source >= text.at && source < text.at + text.duration).map((text) => text.position));
+}
+
 /** Where a new caption goes: the first of bottom, top and middle that no caption shown at the playhead uses. */
 export function freeCaptionPosition(): CaptionPosition {
-  const source = playheadPlace()?.source;
-  const used = new Set((documentProject()?.texts ?? []).filter((text) => text.enabled && source !== undefined && source >= text.at && source < text.at + text.duration).map((text) => text.position));
+  const used = captionPositionsAt();
   return (['bottom', 'top', 'center'] as const).find((position) => !used.has(position)) ?? 'bottom';
 }
 

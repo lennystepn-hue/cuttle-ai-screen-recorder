@@ -10,7 +10,7 @@ export function formatTime(seconds: number): string {
 
 /** A source second for people, beside an output time: `src 54.4 s`, `src 2:32.4` past a minute. */
 export function formatSource(seconds: number): string {
-  return seconds < 60 ? `src ${(Math.floor(seconds * 10 + 1e-6) / 10).toFixed(1)} s` : `src ${formatTime(seconds)}`;
+  return seconds < 60 ? `${(Math.floor(seconds * 10 + 1e-6) / 10).toFixed(1)} s into the take` : `${formatTime(seconds)} into the take`;
 }
 
 /**
@@ -34,7 +34,26 @@ export function formatDuration(seconds: number): string {
 export function plainIssue(line: string): string {
   const json = /Invalid JSON:.*\(line (\d+) column (\d+)\)/.exec(line);
   if (json) return `It is not valid JSON at line ${json[1]}, column ${json[2]}.`;
+  const at = /Invalid JSON: .*\(near line (\d+)\)$/.exec(line);
+  const token = /Invalid JSON: Unexpected token '(.+?)'/.exec(line);
+  if (token) return `It is not valid JSON: "${token[1]}" where it does not belong${at ? ` (line ${at[1]})` : ''}.`;
+  if (/Invalid JSON: Unexpected end of JSON input/.test(line)) return 'It is not valid JSON: it ends too early (a closing bracket or quote is missing).';
+  if (/Invalid JSON: Unterminated string/.test(line)) return `It is not valid JSON: a string has no closing quote${at ? ` (line ${at[1]})` : ''}.`;
   return line.replace(/^\(root\):\s*/, '');
+}
+
+/**
+ * Adds where a JSON parse error is to its message when the engine leaves it out: V8 quotes the text
+ * before the error (`…"cenes": [ }" is not valid JSON`), which is found in `text` for its line.
+ */
+export function locateJsonIssue(message: string, text: string): string {
+  if (/\(line \d+ column \d+\)/.test(message)) return message;
+  const quoted = /, (?:\.\.\.)?"([\s\S]*?)(?:\.\.\.)?" is not valid JSON/.exec(message);
+  if (!quoted?.[1]) return message;
+  const index = text.indexOf(quoted[1]);
+  if (index < 0) return message;
+  const line = text.slice(0, index + quoted[1].length).split('\n').length;
+  return `${message} (near line ${line})`;
 }
 
 /** A speed for people: `12×`, `1.5×`. */

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { parseProject } from '@cuttle/project';
-import { applyCommand, clampRect, describeChange, DocumentError, ensureIds, firstChanged, replayCommands, type Command, type Raw } from '../src/shared/document';
+import { applyCommand, clampRect, describeChange, DocumentError, ensureIds, firstChanged, pinIds, replayCommands, type Command, type Raw } from '../src/shared/document';
 import { adjustRect, dragRange, drawnRect, fitInside, overlayRange, rangeFields, snapTime, toSource, toStage } from '../src/shared/edit';
 
 const base: Raw = {
@@ -47,6 +47,15 @@ describe('the document', () => {
     expect((card.scenes as { duration?: number }[])[2]!.duration).toBe(2.5);
   });
 
+  it('stops a trimmed edge a frame before the other one, and refuses a speed that leaves less than a frame', () => {
+    const late = applyCommand(base, { type: 'trim', id: 's1', from: 5 }, limits);
+    expect((late.scenes as { from: number; to: number }[])[0]).toMatchObject({ from: 2.966667, to: 3 });
+    const early = applyCommand(base, { type: 'trim', id: 's1', to: -1 }, limits);
+    expect((early.scenes as { from: number; to: number }[])[0]).toMatchObject({ from: 0, to: 0.033333 });
+    const short = applyCommand(base, { type: 'trim', id: 's1', to: 0.5 }, limits);
+    expect(() => applyCommand(short, { type: 'speed', id: 's1', speed: 64 }, limits)).toThrow(DocumentError);
+  });
+
   it('keeps the output length of zooms and captions inside a clip whose speed changes', () => {
     const next = applyCommand(base, { type: 'speed', id: 's2', speed: 8 }, limits);
     expect((next.scenes as { speed?: number }[])[1]!.speed).toBe(8);
@@ -85,14 +94,31 @@ describe('the document', () => {
     expect(() => applyCommand(base, { type: 'look', path: ['background', 'preset'], value: 'solid' }, limits)).toThrow(/color/);
   });
 
-  it('replays commands on a newer version and drops the ones whose item is gone', () => {
+  it('replays commands on a newer version and drops the ones whose item is gone (deleting it is done already)', () => {
     const newer = applyCommand(base, { type: 'delete', list: 'texts', id: 't1' }, limits);
     const { raw, dropped } = replayCommands(newer, [
       { type: 'set', list: 'texts', id: 't1', fields: { text: 'Lost' } },
       { type: 'set', list: 'scenes', id: 's1', fields: { label: 'Kept' } },
+      { type: 'delete', list: 'texts', id: 't1' },
     ], limits);
     expect(dropped).toEqual(['text t1 is not in the project any more']);
     expect((raw.scenes as { label?: string }[])[0]!.label).toBe('Kept');
+  });
+
+  it('pins the id a new item got, and leaves it out of a replay where another item has it now', () => {
+    const add = { type: 'add', list: 'zooms', item: { at: 1, duration: 2, rect: [0, 0, 640, 360] } } as const;
+    const mine = applyCommand(base, add, limits);
+    const pinned = pinIds(base, mine, add);
+    expect(pinned).toEqual({ ...add, item: { ...add.item, id: 'z2' } });
+    // Claude added a zoom meanwhile: it got z2 too
+    const claude = applyCommand(base, { type: 'add', list: 'zooms', item: { id: 'z2', label: 'From Claude', at: 9, duration: 1, rect: [0, 0, 640, 400] } }, limits);
+    const { raw, dropped } = replayCommands(claude, [pinned, { type: 'set', list: 'zooms', id: 'z2', fields: { rect: [10, 10, 640, 400] } }], limits);
+    expect(dropped).toHaveLength(2);
+    // Claude's zoom is as Claude left it
+    expect((raw.zooms as { id: string; label?: string; rect: number[] }[]).map((zoom) => [zoom.id, zoom.label, zoom.rect[0]])).toEqual([
+      ['z1', undefined, 0],
+      ['z2', 'From Claude', 0],
+    ]);
   });
 
   it('says what changed between two versions', () => {

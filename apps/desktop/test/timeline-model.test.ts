@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { parseProject, type CuttleProjectInput, type InputEvent } from '@cuttle/project';
 import { sceneSpans } from '@cuttle/timeline';
-import { formatBytes, formatDuration, formatSource, formatSpeed, formatTime, plainIssue } from '../src/shared/format';
+import { formatBytes, formatDuration, formatSource, formatSpeed, formatTime, locateJsonIssue, plainIssue } from '../src/shared/format';
 import { activityColumns, exportChecks, groupPins, outputTimesOf, pinGroupDetail, pinGroupName, timelineModel, waveformColumns } from '../src/shared/timeline-model';
 
 function project(input: Partial<CuttleProjectInput>) {
@@ -177,7 +177,7 @@ describe('format', () => {
     expect([0, 9.99, 42.55, 754.2, 3723].map(formatTime)).toEqual(['0:00.0', '0:09.9', '0:42.5', '12:34.2', '1:02:03.0']);
     // cut off at tenths as times are, so a video of 0:10.7 is 10.7 s long
     expect([0.42, 9.96, 10.75, 12, 59.97, 125, 3720].map(formatDuration)).toEqual(['0.4 s', '9.9 s', '10.7 s', '12 s', '59.9 s', '2 min 5 s', '1 h 2 min']);
-    expect([54.47, 152.4].map(formatSource)).toEqual(['src 54.4 s', 'src 2:32.4']);
+    expect([54.47, 152.4].map(formatSource)).toEqual(['54.4 s into the take', '2:32.4 into the take']);
     expect([12, 1.25, 1].map(formatSpeed)).toEqual(['12×', '1.3×', '1×']);
     expect([2048, 13_002_342, 2.5 * 1024 ** 3].map(formatBytes)).toEqual(['2 KB', '12.4 MB', '2.5 GB']);
   });
@@ -185,6 +185,11 @@ describe('format', () => {
   it('says what is wrong with a cuttle.json in plain lines', () => {
     expect(plainIssue("(root): Invalid JSON: Expected ',' or '}' after property value in JSON at position 42 (line 1 column 43)")).toBe('It is not valid JSON at line 1, column 43.');
     expect(plainIssue('(root): Unsupported version 2')).toBe('Unsupported version 2');
+    // what this Electron's V8 says, with the line found in the file
+    const text = '{\n  "version": 1,\n  "scenes": [ }';
+    const message = locateJsonIssue(`Invalid JSON: Unexpected token '}', ..."cenes": [ }" is not valid JSON`, text);
+    expect(plainIssue(`(root): ${message}`)).toBe('It is not valid JSON: "}" where it does not belong (line 3).');
+    expect(plainIssue('(root): Invalid JSON: Unexpected end of JSON input')).toBe('It is not valid JSON: it ends too early (a closing bracket or quote is missing).');
     expect(plainIssue('scenes.2.to: Too small')).toBe('scenes.2.to: Too small');
   });
 });

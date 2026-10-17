@@ -73,7 +73,7 @@ export function makeRestingFixture(dir: string): void {
 /**
  * A take with motion: a still screen (dark grey) for 5 s, a 1 s motion scene before it (a page that
  * fills the frame with magenta) and a motion overlay over source 1 to 4 s (a green bar across the
- * bottom fifth, clear above it).
+ * bottom fifth, clear above it, shown by the motion kit's helper).
  */
 export function makeMotionFixture(dir: string): void {
   const take = join(dir, 'takes', '1');
@@ -81,7 +81,8 @@ export function makeMotionFixture(dir: string): void {
   ffmpeg(['-f', 'lavfi', '-i', 'color=c=0x202020:s=1280x720:r=30:d=5', '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', join(take, 'screen.mp4')]);
   for (const [name, body] of [
     ['intro', '<body style="margin:0;background:#ff00ff"></body>'],
-    ['bar', '<body style="margin:0"><div style="position:absolute;left:0;right:0;bottom:0;height:20%;background:#00ff00"></div></body>'],
+    // the bar shows only through the kit's helper: the app serves the motion kit
+    ['bar', '<body style="margin:0"><div id="bar" style="position:absolute;left:0;right:0;bottom:0;height:20%;background:#00ff00;opacity:0"></div><script type="module">import { at } from "cuttle"; cuttle.onFrame((t) => (bar.style.opacity = String(at(t, 0, 0.001))));</script></body>'],
   ] as const) {
     mkdirSync(join(dir, 'motion', name), { recursive: true });
     writeFileSync(join(dir, 'motion', name, 'index.html'), `<!doctype html>${body}`);

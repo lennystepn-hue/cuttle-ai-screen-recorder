@@ -1,6 +1,7 @@
 // The privacy masks: each private thing the screen showed, masked from just before it was first seen
 // to just after it was last seen, following it where it moved (text that scrolls). Pure.
 import type { Rect, ScreenTextFrame, ZoomMove } from '@cuttle/project';
+import { maskRectAt } from '@cuttle/timeline';
 import { SECRET_LABELS, lineSecrets, type SecretKind } from './patterns';
 
 export const MASK_RULES = {
@@ -8,8 +9,20 @@ export const MASK_RULES = {
   margin: 0.5,
   /** Room around the text (px). */
   pad: 6,
-  /** A secret moved when an edge of its rect moved more than this (px). */
+  /** A secret moved when an edge of its rect moved more than this (px)… */
   moved: 4,
+  /**
+   * …unless the rect still overlaps where it was this much (intersection over union): that is the
+   * OCR's box around still text drawn a little larger or smaller (Vision's do), and the mask grows
+   * to hold both. Text that scrolls has moved on further between two frames read.
+   */
+  jitter: 0.6,
+  /**
+   * A secret of the same kind whose text reads nearly the same (at most one character in this many
+   * different) in the same column is the same one, where it moved to: text that scrolls, read with
+   * a slip in some frames (Vision read a 0 as @ on GitHub's macOS runners).
+   */
+  alike: 10,
   /**
    * It was gone when this many frames read in a row lacked it, over at least `gone` seconds: the
    * OCR misses a line now and then (a token that scrolls was read in one frame of four).
@@ -30,6 +43,31 @@ export interface PrivacyMask {
 interface Sighting {
   t: number;
   rect: Rect;
+}
+
+/** The rect that holds both. */
+const union = (a: Rect, b: Rect): Rect => {
+  const left = Math.min(a[0], b[0]);
+  const top = Math.min(a[1], b[1]);
+  return [left, top, Math.max(a[0] + a[2], b[0] + b[2]) - left, Math.max(a[1] + a[3], b[1] + b[3]) - top];
+};
+
+/** Whether two rects share most of the narrower one's columns. */
+const sameColumn = (a: Rect, b: Rect) => Math.min(a[0] + a[2], b[0] + b[2]) - Math.max(a[0], b[0]) >= 0.5 * Math.min(a[2], b[2]);
+
+/** Whether two texts are at most one edit in `per` characters apart (texts of 8 characters or more). */
+export function alike(a: string, b: string, per: number): boolean {
+  const most = Math.floor(Math.min(a.length, b.length) / per);
+  if (Math.min(a.length, b.length) < 8 || Math.abs(a.length - b.length) > most) return false;
+  // edit distance, row by row, given up once a whole row is over `most`
+  let previous = Array.from({ length: b.length + 1 }, (_, k) => k);
+  for (let i = 1; i <= a.length; i++) {
+    const row = [i];
+    for (let k = 1; k <= b.length; k++) row.push(Math.min(previous[k]! + 1, row[k - 1]! + 1, previous[k - 1]! + (a[i - 1] === b[k - 1] ? 0 : 1)));
+    if (Math.min(...row) > most) return false;
+    previous = row;
+  }
+  return previous[b.length]! <= most;
 }
 
 const overlap = (a: Rect, b: Rect) => {
@@ -55,7 +93,8 @@ export function privacyMasks(frames: readonly ScreenTextFrame[], words: readonly
     for (const secret of secrets) {
       const group =
         open.find((candidate) => !seen.has(candidate) && candidate.key === secret.key) ??
-        open.find((candidate) => !seen.has(candidate) && candidate.kind === secret.kind && overlap(candidate.sightings.at(-1)!.rect, secret.rect) >= 0.5);
+        open.find((candidate) => !seen.has(candidate) && candidate.kind === secret.kind && overlap(candidate.sightings.at(-1)!.rect, secret.rect) >= 0.5) ??
+        open.find((candidate) => !seen.has(candidate) && candidate.kind === secret.kind && sameColumn(candidate.sightings.at(-1)!.rect, secret.rect) && alike(candidate.key, secret.key, rules.alike));
       if (group) {
         if (group.sightings.at(-1)!.t !== frame.t) group.sightings.push({ t: frame.t, rect: secret.rect });
         group.missed = 0;
@@ -89,17 +128,26 @@ export function privacyMasks(frames: readonly ScreenTextFrame[], words: readonly
     .map((group): PrivacyMask => {
       const [first, ...rest] = group.sightings as [Sighting, ...Sighting[]];
       const from = round(Math.max(0, first.t - rules.margin));
-      const moves: ZoomMove[] = [];
+      const moves: { at: number; rect: Rect }[] = [];
+      // where the mask is now (its rect, or its last move's), unpadded: a jittering box grows it
+      let base = first.rect;
+      let shown = first.rect;
       let previous = first;
       for (const sighting of rest) {
-        if (moved(previous.rect, sighting.rect)) {
+        if (moved(previous.rect, sighting.rect) && overlap(previous.rect, sighting.rect) >= rules.jitter) {
+          shown = union(shown, sighting.rect);
+          if (moves.length > 0) moves.at(-1)!.rect = shown;
+          else base = shown;
+        } else if (moved(previous.rect, sighting.rect)) {
           // where it was last seen before it moved, then where it went: between the two it covers both
-          if (moves.at(-1)?.at !== previous.t && previous !== first) moves.push({ at: round(previous.t), rect: pad(previous.rect) });
-          moves.push({ at: round(sighting.t), rect: pad(sighting.rect) });
+          if (moves.at(-1)?.at !== previous.t && previous !== first) moves.push({ at: round(previous.t), rect: previous.rect });
+          moves.push({ at: round(sighting.t), rect: sighting.rect });
+          shown = sighting.rect;
         }
         previous = sighting;
       }
-      return { from, to: round(until(previous.t)), rect: pad(first.rect), ...(moves.length > 0 && { moves }), kind: group.kind, label: SECRET_LABELS[group.kind] };
+      const path: ZoomMove[] = moves.map((move) => ({ at: move.at, rect: pad(move.rect) }));
+      return { from, to: round(until(previous.t)), rect: pad(base), ...(path.length > 0 && { moves: path }), kind: group.kind, label: SECRET_LABELS[group.kind] };
     })
     .sort((a, b) => a.from - b.from);
   return joinCovering(masks);
@@ -111,7 +159,10 @@ const SPECIFIC: readonly SecretKind[] = ['key', 'token', 'iban', 'card', 'email'
 /**
  * Masks over the same text, found by two rules (a key in a `NAME=value` line), are one: those that
  * overlap in time and, place by place (their rect, then each move at the same time), one covers
- * most of the other.
+ * most of the other. Masks whose places differ in time (one rule found its text in fewer frames)
+ * are one when, at each place of either while both are shown, one covers most of the other as
+ * they are drawn (between two places a mask covers both): the one with more places stays, each of
+ * them grown to hold the other there.
  */
 function joinCovering(masks: PrivacyMask[]): PrivacyMask[] {
   const covered = (a: Rect, b: Rect) => {
@@ -124,9 +175,17 @@ function joinCovering(masks: PrivacyMask[]): PrivacyMask[] {
     const top = Math.min(a[1], b[1]);
     return [left, top, Math.max(a[0] + a[2], b[0] + b[2]) - left, Math.max(a[1] + a[3], b[1] + b[3]) - top];
   };
-  const samePath = (a: PrivacyMask, b: PrivacyMask) => {
+  const sameTimes = (a: PrivacyMask, b: PrivacyMask) => {
     const [first, second] = [a.moves ?? [], b.moves ?? []];
-    return covered(a.rect, b.rect) >= 0.8 && first.length === second.length && first.every((move, k) => move.at === second[k]!.at && covered(move.rect, second[k]!.rect) >= 0.8);
+    return first.length === second.length && first.every((move, k) => move.at === second[k]!.at);
+  };
+  const placesOf = (mask: PrivacyMask) => [mask.from, ...(mask.moves ?? []).map((move) => move.at)];
+  const samePath = (a: PrivacyMask, b: PrivacyMask) => {
+    if (sameTimes(a, b)) return covered(a.rect, b.rect) >= 0.8 && (a.moves ?? []).every((move, k) => covered(move.rect, b.moves![k]!.rect) >= 0.8);
+    const from = Math.max(a.from, b.from);
+    const to = Math.min(a.to, b.to);
+    const times = [from, ...placesOf(a), ...placesOf(b)].filter((t) => t >= from && t < to);
+    return times.every((t) => covered(maskRectAt(a, t), maskRectAt(b, t)) >= 0.8);
   };
   const joined: PrivacyMask[] = [];
   for (const mask of masks) {
@@ -135,8 +194,16 @@ function joinCovering(masks: PrivacyMask[]): PrivacyMask[] {
       joined.push({ ...mask });
       continue;
     }
-    other.rect = both(other.rect, mask.rect);
-    if (other.moves) other.moves = other.moves.map((move, k) => ({ at: move.at, rect: both(move.rect, mask.moves![k]!.rect) }));
+    if (sameTimes(other, mask)) {
+      other.rect = both(other.rect, mask.rect);
+      if (other.moves) other.moves = other.moves.map((move, k) => ({ at: move.at, rect: both(move.rect, mask.moves![k]!.rect) }));
+    } else {
+      const [kept, rest] = placesOf(mask).length > placesOf(other).length ? [mask, { ...other }] : [{ ...other }, mask];
+      const there = (t: number) => maskRectAt(rest, Math.min(Math.max(t, rest.from), rest.to));
+      other.rect = both(kept.rect, there(kept.from));
+      other.moves = kept.moves?.map((move) => ({ at: move.at, rect: move.at < rest.to ? both(move.rect, there(move.at)) : move.rect }));
+      if (!other.moves) delete other.moves;
+    }
     other.from = Math.min(other.from, mask.from);
     other.to = Math.max(other.to, mask.to);
     if (SPECIFIC.indexOf(mask.kind) < SPECIFIC.indexOf(other.kind)) {

@@ -1,5 +1,5 @@
 // Reading the screen's text for the privacy masks: the frames where the picture changed inside the
-// clips (at most 2 a second, at least one every 5 s), each read with Windows' OCR, written as the
+// clips (at most 2 a second, at least one every 5 s), each read with the system's OCR (ocr.ts), written as the
 // take's screen-text.jsonl. Only the frames that are read are written to a temporary folder, one at
 // a time, and removed once read.
 import { mkdtempSync, renameSync, rmSync, writeFileSync } from 'node:fs';

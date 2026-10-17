@@ -1,12 +1,12 @@
-// The Auto tab's note while the take's screen was not read: once it is (Windows' own OCR), Cuttle
+// The Auto tab's note while the take's screen was not read: once it is (the system's own OCR), Cuttle
 // masks the private things it showed. A button reads it now.
 import { useState } from 'react';
 import { bridge } from '../bridge';
 import { store } from './session';
 import { useStore } from './store';
 
-/** Only Windows reads the screen's text for now. */
-const READS_SCREEN = navigator.userAgent.includes('Windows');
+/** Windows (its own OCR) and macOS (Vision) read the screen's text. */
+const READS_SCREEN = navigator.userAgent.includes('Windows') || navigator.userAgent.includes('Macintosh');
 
 export function PrivacyNote() {
   const read = useStore(store, (state) => state.doc?.project.sources.screenText !== undefined);

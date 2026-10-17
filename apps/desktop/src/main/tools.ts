@@ -48,9 +48,10 @@ const wingetLinks = () => join(process.env.LOCALAPPDATA ?? join(homedir(), 'AppD
 
 /**
  * Where macOS keeps commands a terminal finds but an app started from the Finder or the Dock does not
- * (its PATH is /usr/bin:/bin:/usr/sbin:/sbin): Homebrew's on Apple silicon and on Intel, and ~/.local/bin.
+ * (its PATH is /usr/bin:/bin:/usr/sbin:/sbin): Homebrew's on Apple silicon and on Intel, ~/.local/bin,
+ * and Homebrew's ffmpeg-full, which is keg-only (its own folder, not linked into Homebrew's).
  */
-const macCommandDirs = () => ['/opt/homebrew/bin', '/usr/local/bin', join(homedir(), '.local', 'bin')];
+const macCommandDirs = () => ['/opt/homebrew/bin', '/usr/local/bin', join(homedir(), '.local', 'bin'), '/opt/homebrew/opt/ffmpeg-full/bin', '/usr/local/opt/ffmpeg-full/bin'];
 
 /**
  * The folders a command is looked for in: the PATH as the OS has it now (Windows: the machine's and

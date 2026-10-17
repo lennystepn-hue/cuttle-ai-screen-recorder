@@ -79,7 +79,8 @@ const AREA_EVERY = 30;
 /** A content area that moved less than this (px) has not moved. */
 const AREA_SLACK = 2;
 
-type Watched = Pick<import('./win32').Win32, 'foreground' | 'contentArea' | 'popups'>;
+/** What both platforms tell of the windows (win32.ts, darwin.ts). */
+type Watched = Pick<import('./win32').Win32, 'foreground' | 'contentArea' | 'popups'> & Pick<import('./darwin').Darwin, 'foreground' | 'contentArea' | 'popups'>;
 
 /**
  * The window shown and what opens over it: called on every shape read, it passes on the foreground
@@ -216,9 +217,11 @@ const WHERE_INPUT_MONITORING = 'allow the app that runs Cuttle (your terminal, o
 /**
  * macOS: an event tap of darwin.ts (see there why not uiohook) in desktop pixels, each event at its
  * own timestamp (a caret read or a busy moment of this thread does not shift it); the pointer's
- * shape read as on Windows. Without Input Monitoring only the mouse is logged (no key counts, no
- * hotkeys, no caret); the caret also needs the Accessibility permission (without it, zooms on
- * typing follow what the screen changes).
+ * shape, the windows' dialogs, menus and notifications and the page shown read as on Windows.
+ * Without Input Monitoring only the mouse is logged (no key counts, no hotkeys, no caret); the caret
+ * and the page also need the Accessibility permission (without it, zooms on typing follow what the
+ * screen changes, the crop comes from the picture, and a notification is masked on the whole right
+ * side of its display).
  */
 async function startMacInput(onInput: InputSink, onHotkey: HotkeySink): Promise<InputSource> {
   const { loadDarwin } = await import('./darwin');
@@ -243,19 +246,24 @@ async function startMacInput(onInput: InputSink, onHotkey: HotkeySink): Promise<
     : !keyboard
       ? `the keyboard is not logged (no typing activity, no hotkeys): ${WHERE_INPUT_MONITORING}`
       : undefined;
-  // the pointer's shape and the caret, read as on Windows (the caret a few times a second while keys come)
+  // the pointer's shape, the caret and the windows, read as on Windows (the caret a few times a second while keys come)
   const caret = caretWatch(() => mac.caret(), onInput);
+  const windows = windowWatch(mac, onInput);
   let shape = mac.cursorShape();
-  const poll = tap
-    ? setInterval(() => {
-        const current = mac.cursorShape();
-        if (current !== shape) {
-          shape = current;
-          onInput({ type: 'shape', time: now(), shape });
-        }
-        if (keyboard) caret(now(), typedAt);
-      }, SHAPE_POLL_MS)
-    : undefined;
+  const poll = setInterval(() => {
+    // an answer the system could not give must not end the recording: the next look tries again
+    try {
+      const current = mac.cursorShape();
+      if (tap && current !== shape) {
+        shape = current;
+        onInput({ type: 'shape', time: now(), shape });
+      }
+      if (tap && keyboard) caret(now(), typedAt);
+      windows(now());
+    } catch {
+      // as above
+    }
+  }, SHAPE_POLL_MS);
   return {
     initial: (time) => [{ type: 'move', time, ...mac.cursorPosition() }, { type: 'shape', time, shape }],
     stop: () => {

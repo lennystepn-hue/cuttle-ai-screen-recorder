@@ -37,6 +37,30 @@ describe('privacyMasks', () => {
     expect(privacyMasks([frame(1, email), frame(7), frame(7.5)], [], screen).map((mask) => [mask.from, mask.to])).toEqual([[0.5, 7]]);
   });
 
+  it('holds still text whose box the OCR drew a little larger in one frame (Vision): one place, grown to hold both', () => {
+    const still = line('lena@example.com', 100, 200);
+    // read 8 px higher and 10 px taller once, as Vision's boxes jitter around text that stays
+    const taller: ScreenTextLine = { ...still, words: still.words.map((word) => ({ ...word, rect: [word.rect[0], word.rect[1] - 8, word.rect[2], word.rect[3] + 10] })) };
+    const frames = [frame(1, still), frame(1.5, taller), frame(2, still), frame(2.5), frame(3), frame(4)];
+    expect(privacyMasks(frames, [], screen)).toEqual([{ from: 0.5, to: 2.5, rect: [94, 186, 172, 42], kind: 'email', label: 'Email address' }]);
+  });
+
+  it('follows a key that scrolls through frames the OCR misread it in (a 0 read as @): one mask, the key', () => {
+    const token = (y: number, text = 'ghp_1234567890abcdefghijklmnop') => line(`export GITHUB_TOKEN=${text}`, 100, y);
+    const slip = 'ghp_123456789@abcdefghijklmnop';
+    // read with the slip, the key's prefix is too short to be a key: only the NAME=value rule finds it there
+    const frames = [frame(1, token(400)), frame(1.5, token(384)), frame(2, token(368, slip)), frame(2.5, token(352, slip)), frame(3, token(336)), frame(3.5, token(320)), frame(4), frame(5)];
+    const masks = privacyMasks(frames, [], screen);
+    expect(masks.map((mask) => [mask.kind, mask.from, mask.to])).toEqual([['key', 0.5, 4]]);
+    // where it is drawn holds the text in every frame
+    const at = (t: number) => masks[0]!.moves!.filter((move) => move.at <= t).at(-1)?.rect ?? masks[0]!.rect;
+    for (const [t, y] of [[2, 368], [2.5, 352]] as const) {
+      const next = masks[0]!.moves!.find((move) => move.at > t)?.rect;
+      const top = Math.min(at(t)[1], next?.[1] ?? Infinity);
+      expect(top, String(t)).toBeLessThanOrEqual(y);
+    }
+  });
+
   it('follows text that scrolls: where it was last seen before it moved, then each place it went', () => {
     const key = (y: number) => line('ghp_1234567890abcdefghijklmnop', 100, y);
     const frames = [frame(1, key(300)), frame(1.5, key(300)), frame(2, key(250)), frame(2.5, key(200)), frame(3), frame(3.5)];

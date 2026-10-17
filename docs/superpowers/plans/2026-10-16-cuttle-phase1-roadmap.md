@@ -35,7 +35,7 @@ files, no overlap).
 | M3 | `@cuttle/export` (decode → render → encode → mux, audio via ffmpeg) | `2026-10-16-cuttle-m3-export.md` | A 10 s `testsrc` fixture renders to 16:9, 1:1 and 9:16; ffprobe shows the expected duration (±1 frame), size, H.264 and AAC |
 | M4 | `@cuttle/recorder` (devices, ffmpeg backends, events, triggers, markers) | `2026-10-17-cuttle-m4-recorder.md` | The `test` backend records a 3 s take with all tracks; `untilFile` and `untilClaude` (fake transcript) stop it; a manual Windows run records a monitor |
 | M5 | `apps/cli` (`cuttle …`) | `2026-10-17-cuttle-m5-cli.md` | Every spec command exists with `--json`; snapshot tests pass; the treg demo can be rebuilt from its takes with `cuttle suggest`, a few JSON edits and `cuttle render` |
-| M6 | `skill/` + installer | write before starting | `pnpm skill:install` writes `~/.claude/skills/cuttle/SKILL.md`; a fresh Claude Code session follows it end to end |
+| M6 | `skill/` + installer | `2026-10-17-cuttle-m6-skill.md` | `pnpm skill:install` writes `~/.claude/skills/cuttle/SKILL.md`; a fresh Claude Code session follows it end to end |
 
 ## Shared interfaces (fixed now, used by every milestone)
 
@@ -191,14 +191,7 @@ export const HOTKEYS: Record<'stop' | 'marker', string>; // Ctrl+Shift+Alt+S, Ct
 - **M4:** done; see "Decisions made while planning" and "Changes during execution" in
   `2026-10-17-cuttle-m4-recorder.md`.
 - **M5:** done; see "Decisions made while planning" in `2026-10-17-cuttle-m5-cli.md`.
-- **M6:** current Claude skill frontmatter (`name`, `description`) and the user-level skill folder.
-  From M5: the skill drives `cuttle … --json` and reads one JSON document per command (exit codes
-  0/1/2/3/130). `cuttle record` blocks until a stop trigger, and Claude cannot press Ctrl+C or the
-  hotkey: start it in the background and stop it with `--until-claude` or `--until-file` (Claude
-  creates the file), with `--max` as a safety net. Run `render` in the background too (Claude
-  Code's Bash tool kills long commands at its timeout). Check the edit with `cuttle preview` and
-  look at `sheet.png`. The skill should check `cuttle --version` and point to `pnpm cli:install`
-  when it is missing; the shims run the repo's build, so the repo must stay where it was built.
+- **M6:** done; see "Decisions made while planning" in `2026-10-17-cuttle-m6-skill.md`.
 
 ## Lessons from the manual run (carry into M4–M6)
 

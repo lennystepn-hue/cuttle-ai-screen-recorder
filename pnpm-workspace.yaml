@@ -1,6 +1,7 @@
 packages:
   - packages/*
   - apps/*
+  - skill
 allowBuilds:
   koffi: false
   uiohook-napi: false

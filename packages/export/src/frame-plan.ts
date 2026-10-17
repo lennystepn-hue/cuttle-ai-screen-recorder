@@ -1,4 +1,4 @@
-import type { Timeline } from '@cuttle/timeline';
+import type { RenderState, Timeline } from '@cuttle/timeline';
 
 /** Where one scene is visible in the export and which source times its clip frames come from. */
 export interface ScenePlan {
@@ -26,6 +26,23 @@ export interface FramePlan {
 /** Frames for `duration` output seconds: every started frame counts, so the video never ends early. */
 export function frameCount(duration: number, fps: number): number {
   return Math.max(1, Math.ceil(duration * fps - 1e-6));
+}
+
+/** The output frame on screen at each of `times` (output seconds); a time past the end shows the last frame. */
+export function stillFrames(duration: number, fps: number, times: readonly number[]): number[] {
+  const last = frameCount(duration, fps) - 1;
+  return times.map((t) => Math.min(last, Math.max(0, Math.floor(t * fps + 1e-6))));
+}
+
+/**
+ * The source second a frame shows: that of its most visible layer (in the middle of a crossfade the
+ * front one), to the millisecond; undefined when that layer is a still or a card.
+ */
+export function shownSourceTime(state: RenderState): number | undefined {
+  const most = Math.max(...state.layers.map((layer) => layer.opacity));
+  // Layers run back to front; equal opacities (up to rounding: 0.15 / 0.3 is 0.4999…) go to the front.
+  const shown = state.layers.filter((layer) => layer.opacity >= most - 1e-9).at(-1);
+  return shown?.sourceTime === undefined ? undefined : Math.round(shown.sourceTime * 1000) / 1000;
 }
 
 /**

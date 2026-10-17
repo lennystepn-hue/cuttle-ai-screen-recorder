@@ -253,9 +253,10 @@ Look rules (fixed in M2):
 |---|---|
 | `cuttle init [dir]` | New project folder with a default `cuttle.json` |
 | `cuttle devices` | Monitors (index, size, position), windows, cameras, mics |
-| `cuttle record [--monitor N] [--region x,y,w,h] [--window "title"] [--webcam [name]] [--mic [name]] [--until-claude [cwd]] [--until-file p] [--until-idle s] [--max s] [--countdown s] [--draw-mouse]` | Record a take into the project (created when missing) and use it: `sources` point at the take, one clip scene covers it; scenes and overlays of the previous take are dropped. `--draw-mouse` also sets `look.cursor.enabled` to `false` (the pointer is in the video) |
+| `cuttle record [--monitor N] [--region x,y,w,h] [--window "title"] [--webcam [name]] [--mic [name]] [--until-claude [cwd]] [--until-file p] [--until-idle s] [--max s] [--countdown s] [--draw-mouse]` | Record a take into the project (created when missing) and use it: `sources` point at the take, one clip scene covers it; scenes and overlays of the previous take are dropped. `--draw-mouse` also sets `look.cursor.enabled` to `false` (the pointer is in the video). After a stop by `--until-file` the file is removed, so the next take can use it |
 | `cuttle suggest [--claude [cwd]] [--no-zoom] [--dry-run]` | From markers, events and the screen, propose scenes (trim the quiet start and end, cut idle stretches, speed up waiting) and a zoom on Claude's answer, and write them to `cuttle.json`: clip scenes and zooms are replaced, still and card scenes keep their place before or after the clips, masks and texts stay; `--claude` reads the transcript for a take without Claude markers |
-| `cuttle preview [--at t…] [--sheet] [--format f] [-o dir]` | PNG stills of the output; without `--at` 12 evenly spaced stills and a contact sheet with timestamps, for checking. A run that fails or is cancelled writes nothing; in the default folder (`preview/`) stills of earlier runs are replaced |
+| `cuttle preview [--at t…] [--sheet] [--format f] [-o dir]` | PNG stills of the output; without `--at` 12 evenly spaced stills and a contact sheet with timestamps, for checking. The JSON names the source second each still shows. A run that fails or is cancelled writes nothing; in the default folder (`preview/`) stills of earlier runs are replaced |
+| `cuttle frame <seconds> [--grid] [-o file]` | A frame of the screen track at a source second, at full size (the pixels masks and zooms use); `--grid` draws a line every 100 px with its pixel number, to read rects from |
 | `cuttle capture-page <url\|file> [--scroll] [--add] [--duration s] [--wait ms] [--width px] [--height px] [--name n]` | Capture a page (offscreen Chromium, scale 1, a session without stored cookies, permissions or downloads) into `stills/`; `--scroll` takes the whole page with the viewport's height kept (sections sized in `vh` stay their size); `--add` appends a still scene (browser frame, scrolling with `--scroll`) |
 | `cuttle render [--format 16:9\|1:1\|9:16] [-o file] [--encoder auto\|hardware\|software]` | Export (default `out/<format>.mp4` in the project, `out/export.mp4` without `--format`) |
 | `cuttle recover <take>` | Repair a take after a crash and use it (`<take>` relative to the project, e.g. `takes/2`): checks the tracks, drops a cut-off events line, rewrites a missing or broken markers.json or take.json (keeping readable start times). When the project already uses the take, its scenes and overlays stay (a clip is added only when it has no scenes) |
@@ -284,16 +285,24 @@ there is none and a note says so.
 
 ## Skill (`skill/` → `~/.claude/skills/cuttle/`)
 
-`SKILL.md` triggers on requests to record, demo, screencast or edit a screen recording. Workflow:
+`SKILL.md` (frontmatter `name: cuttle` and a description of when to use it: requests to record a
+demo, a screencast or screen recording, a launch or product video, or to edit a cuttle project)
+and `project.md` (the `cuttle.json` reference it links) are copied into Claude Code's personal
+skills by `pnpm skill:install`, with the repository's path filled in. It also works as `/cuttle`.
+Workflow:
 
-1. Agree the scenario and the output format with the user.
-2. `cuttle devices`, pick the monitor; check font size and fullscreen with a short test take
-   (`cuttle record --max 3`) and a `preview` still.
-3. Start `cuttle record` before the user acts; prefer `--until-claude` for agent demos.
-4. `cuttle suggest`, then `cuttle preview --sheet` and look at it.
-5. Scan stills for private data (names, emails, tokens, file paths with user names, hook errors) and
-   add masks.
-6. `cuttle render`, check a sheet of the result, send the file.
+1. `cuttle --version` (when it is missing, ask the user for `pnpm cli:install`). Agree the
+   scenario, the screen, the output format and a project folder with the user; ask for large text
+   and a clean screen.
+2. `cuttle devices`, pick the monitor or window.
+3. Start `cuttle record` in the background before the user acts, stopped by `--until-claude` for
+   agent demos or `--until-file` (Claude creates the file when the user is done), with `--max` as a
+   safety net; tell the user to start once it prints `recording takes/<n>`.
+4. `cuttle suggest`, then `cuttle preview` and look at the sheet.
+5. Scan stills for private data (names, emails, tokens, file paths with user names, hook errors)
+   and add masks, reading their rects off `cuttle frame <source second> --grid`; refine zooms, the
+   look, cards and captions.
+6. `cuttle render` (in the background for long takes) and tell the user the file's path.
 
 It also records the lessons from the treg demo:
 

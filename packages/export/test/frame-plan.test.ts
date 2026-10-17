@@ -1,7 +1,7 @@
 import { parseProject, type CuttleProjectInput } from '@cuttle/project';
 import { createTimeline } from '@cuttle/timeline';
 import { describe, expect, it } from 'vitest';
-import { frameCount, planFrames, planStills } from '../src/frame-plan';
+import { frameCount, planFrames, planStills, shownSourceTime, stillFrames } from '../src/frame-plan';
 
 function plan(input: Omit<CuttleProjectInput, 'version' | 'sources'>, fps = 30) {
   const parsed = parseProject({ version: 1, sources: { screen: 's.mp4' }, ...input, output: { fps } });
@@ -79,5 +79,37 @@ describe('planStills', () => {
       { index: 0, firstFrame: 10, lastFrame: 60, sourceTimes: [10 / 30, 59 / 30] },
       { index: 1, firstFrame: 60, lastFrame: 90, sourceTimes: [10, 14] },
     ]);
+  });
+});
+
+describe('stillFrames and shownSourceTime', () => {
+  // 2 s at 1×, 48 source seconds at 12× (4 s), a 2 s card: 8 s at 30 fps.
+  const parsed = parseProject({
+    version: 1,
+    sources: { screen: 's.mp4' },
+    scenes: [
+      { type: 'clip', from: 0, to: 2 },
+      { type: 'clip', from: 10, to: 58, speed: 12 },
+      { type: 'card', title: 'The end', duration: 2 },
+    ],
+  });
+  if (!parsed.ok) throw new Error(JSON.stringify(parsed.issues));
+  const timeline = createTimeline(parsed.project, { screenSize: { width: 1920, height: 1080 } });
+  const shown = (t: number) => {
+    const [frame] = stillFrames(timeline.duration, 30, [t]);
+    return [frame, shownSourceTime(timeline.frameAt(frame! / 30))];
+  };
+
+  it('snaps a time to the frame on screen, and a time past the end to the last frame', () => {
+    expect(stillFrames(timeline.duration, 30, [0, 1 / 30 - 1e-9, 2.25, 100])).toEqual([0, 1, 67, 239]);
+  });
+
+  it('names the source second the frame shows, not the one at the raw time', () => {
+    // 2.25 s shows frame 67 (2.2333 s): 0.2333 s into the 12× clip is source 12.8 s, not 13.0 s.
+    expect(shown(2.25)).toEqual([67, 12.8]);
+    // The middle of the crossfade: both clips at half opacity, the front one (the second) counts.
+    expect(shown(2)).toEqual([60, 10]);
+    // On the card no clip shows.
+    expect(shown(7)).toEqual([210, undefined]);
   });
 });

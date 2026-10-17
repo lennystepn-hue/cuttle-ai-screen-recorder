@@ -34,8 +34,11 @@ export interface StillsOptions {
 }
 
 export interface StillsResult {
-  /** One PNG per time, in the order of `times`. */
-  stills: { t: number; file: string }[];
+  /**
+   * One PNG per time, in the order of `times`, with the source second it shows (`source`: the frame's
+   * most visible clip; absent on a still or card scene), for placing masks, zooms and texts.
+   */
+  stills: { t: number; file: string; source?: number }[];
   sheet?: string;
   /** The output size (each still's size). */
   width: number;
@@ -131,7 +134,10 @@ export async function renderStills(opts: StillsOptions): Promise<StillsResult> {
     if (opts.signal?.aborted) throw cancelledError();
     await publish(work, outDir, [...names.values()], opts.clean ?? false);
     return {
-      stills: opts.times.map((t, n) => ({ t, file: join(outDir, names.get(`still-${n}`)!) })),
+      stills: opts.times.map((t, n) => {
+        const source = page.sources[n];
+        return { t, file: join(outDir, names.get(`still-${n}`)!), ...(typeof source === 'number' && { source }) };
+      }),
       ...(columns !== undefined && { sheet: join(outDir, SHEET_NAME) }),
       width: page.width,
       height: page.height,

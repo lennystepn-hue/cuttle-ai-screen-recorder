@@ -1,0 +1,108 @@
+# cuttle.json reference
+
+`cuttle.json` is the only file to edit. `cuttle record` and `cuttle suggest` write it, you refine
+it by hand, check it with `cuttle preview` and export it with `cuttle render`. Unknown fields are
+errors, and every command names the path of a problem, counting from 0
+(`scenes[1].to: "to" must be greater than "from"`). A clip must end inside the take.
+
+## Times and pixels
+
+- **Source seconds** are seconds of the take's screen track (`takes/<n>/screen.mp4`). Scenes cut
+  and speed them up. `zooms`, `masks` and `texts` use source seconds too, so they stay on their
+  content; they show only while a clip scene covers that source time. In a clip at speed `s`, `d`
+  source seconds last `d / s` output seconds: a 3 s caption over a 12× clip is on screen for a
+  quarter second, so give it `"duration": 36` there.
+- **Output seconds** are seconds of the rendered video. `cuttle preview --at` and the times on the
+  contact sheet are output seconds; each still in `preview`'s JSON also has the `source` second it
+  shows.
+- **Rects** are `[x, y, width, height]` in pixels of the screen track (the recorded monitor, region
+  or window, e.g. 2560×1440), not of the output.
+
+## A complete example
+
+```json
+{
+  "version": 1,
+  "output": { "width": 1920, "height": 1080, "fps": 30 },
+  "sources": {
+    "screen": "takes/1/screen.mp4",
+    "mic": "takes/1/mic.m4a",
+    "events": "takes/1/events.jsonl",
+    "markers": "takes/1/markers.json"
+  },
+  "look": {
+    "background": { "preset": "sunset-sky" },
+    "frame": { "style": "mac-dark", "title": "claude · ~/demo" },
+    "cursor": { "style": "system" }
+  },
+  "scenes": [
+    { "type": "clip", "from": 1.2, "to": 7.5 },
+    { "type": "clip", "from": 7.5, "to": 120.4, "speed": 12 },
+    { "type": "clip", "from": 120.4, "to": 128 },
+    { "type": "still", "image": "stills/example-com.png", "duration": 5, "motion": "scroll", "frame": "browser-light" },
+    { "type": "card", "title": "Built with Claude Code", "subtitle": "example.com", "duration": 2.5 }
+  ],
+  "zooms": [{ "at": 121, "duration": 4, "rect": [0, 600, 1400, 788] }],
+  "masks": [{ "from": 0, "to": 128, "rect": [2200, 0, 360, 40], "style": "fill" }],
+  "texts": [{ "at": 2, "duration": 3, "text": "One prompt", "style": "pill", "position": "bottom" }]
+}
+```
+
+## Fields
+
+`output`: `width` and `height` (even, at most 4096; default 1920×1080) and `fps` (default 30).
+`cuttle render --format` overrides the size: `16:9` is 1920×1080, `1:1` is 1080×1080, `9:16` is
+1080×1920.
+
+`sources`: paths relative to the project folder. `cuttle record` sets them.
+
+`look` (every field is optional):
+
+| Field | Values (default first) |
+|---|---|
+| `background.preset` | `sunset-sky`, `aurora`, `mesh`, `solid` (needs `color`, e.g. `"#0c0c0c"`), `image` (needs `image`: a path) |
+| `frame` | `enabled` (`true`), `style` (`mac-dark`, `mac-light`, `browser-light`, `none`), `title` (`""`), `radius` (`14`), `shadow` (`true`) |
+| `cursor` | `enabled` (`true`), `style` (`system`, `arrow-white`, `arrow-black`, `dot`, `ring`, `spotlight`), `size` (`1`, up to 4), `color` (`"#D97757"`: tints dot, ring, spotlight and the click ripple), `clickEffect` (`ripple`, `none`) |
+| `webcam` | `enabled` (`false`), `shape` (`circle`, `rounded`), `corner` (`bottom-left`, `bottom-right`, `top-left`, `top-right`), `size` (`0.18` of the output's short side, up to 0.5) |
+| `audio` | `enabled` (`true`), `muteSpedUp` (`true`: sped-up clips are silent) |
+| `transition` | `enabled` (`true`: a crossfade between scenes), `duration` (`0.3` s, up to 2) |
+
+`frame.enabled: false` shows the screen alone, filling the output. A take recorded with
+`--draw-mouse` has the real pointer in the video; `record` then sets `cursor.enabled` to `false`, so
+there are not two cursors.
+
+`scenes` play in order:
+
+| Type | Fields |
+|---|---|
+| `clip` | `from`, `to` (source seconds, `to` > `from`), `speed` (`1`, up to 64; above 1 a badge like "12× speed" shows), `badge` (custom badge text, `""` for none) |
+| `still` | `image` (a path, e.g. from `cuttle capture-page`), `duration` (output seconds), `motion` (`none`, `kenburns`, `scroll`: top to bottom of a tall image), `frame` (`none`, `mac-dark`, `mac-light`, `browser-light`) |
+| `card` | `title`, `subtitle` (optional), `duration` (output seconds): a title or end card on the background |
+
+`zooms`: `at` and `duration` (source seconds), `rect`, `ease` (`smooth`, `linear`) and `enabled`
+(`true`). The rect is widened to the screen's aspect and kept inside the screen. The zoom eases in
+and out over 0.6 output seconds each, so give it 2 output seconds or more (`2 × speed` source
+seconds over a sped-up clip).
+
+`masks` hide private things: `from` and `to` (source seconds), `rect`, `style` (`fill`: the colour
+around it, safest for tokens and keys; `blur`) and `enabled` (`true`). Make the rect generous: a
+few pixels too small leaves letters readable. Masks cover clips only, not still scenes (a captured
+page).
+
+`texts`: `at` and `duration` (source seconds), `text`, `style` (`pill`, `lower-third`, `caption`),
+`position` (`top`, `center`, `bottom`) and `enabled` (`true`). A `top` text sits over the window's
+title bar; `bottom` keeps the title visible.
+
+## Finding source seconds and rects
+
+- `cuttle --json preview` lists each still's `source` second next to its output second `t`.
+- `cuttle --json frame <source second> --grid` writes that frame of the screen track at full size
+  with a numbered grid every 100 pixels (stronger lines every 500). Read the PNG and take rects off
+  the grid; `frames/<t>s-grid.png` is the default file.
+- `takes/<n>/markers.json` lists the prompt, each tool call and Claude's answer in source seconds.
+- `cuttle --json suggest` prints notes with source seconds (`sped up 112.9 s without input 12×
+  (7.5–120.4 s)`).
+- To get from output to source seconds by hand, walk the scenes. A clip lasts
+  `(to − from) / speed` output seconds and a still or card its `duration`; the video is their sum
+  (a crossfade is centred on the boundary and does not shorten it). Inside a clip,
+  source = `from + (output − scene start) × speed`.

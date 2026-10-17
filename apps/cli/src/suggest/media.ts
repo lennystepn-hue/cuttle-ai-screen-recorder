@@ -45,6 +45,13 @@ export function parseAnalysis(log: string): ScreenAnalysis {
   return { duration, width: Number(size?.[1] ?? 0), height: Number(size?.[2] ?? 0), still };
 }
 
+/** Size and length of the screen track from a pass that copies its packets (fast: nothing is decoded). */
+export async function probeScreen(path: string): Promise<{ duration: number; width: number; height: number }> {
+  const { stderr } = await runFfmpeg(['-i', path, '-map', '0:v:0', '-c', 'copy', '-f', 'null', '-']);
+  const { duration, width, height } = parseAnalysis(stderr);
+  return { duration, width, height };
+}
+
 /**
  * Seconds of the first video (`v`) or audio (`a`) stream of a file, read by copying its packets
  * (fast: nothing is decoded); 0 when the file has no such stream or nothing readable. A missing

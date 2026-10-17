@@ -1,6 +1,6 @@
 import { FONT_FAMILY, createRenderer, loadEngineAssets, type Renderer } from '@cuttle/engine';
 import { createCursorTrack, createTimeline, type Timeline } from '@cuttle/timeline';
-import { frameCount, planFrames, planStills, type FramePlan } from '../frame-plan';
+import { planFrames, planStills, shownSourceTime, stillFrames, type FramePlan } from '../frame-plan';
 import type { ExportJob, PageJob, PageResult, PageStillsSuccess, PageSuccess, StillsJob } from '../job';
 import { host, PageError } from './host';
 import { loadImage } from './images';
@@ -157,11 +157,8 @@ async function renderStills(job: StillsJob): Promise<PageStillsSuccess> {
     job,
     (timeline) => {
       // The output frame on screen at each time; times past the end show the last frame.
-      const last = frameCount(timeline.duration, fps) - 1;
-      const frames = job.times.map((t) => Math.min(last, Math.max(0, Math.floor(t * fps + 1e-6))));
-      const plan = planStills(timeline, fps, frames);
-      byTime = frames;
-      return plan;
+      byTime = stillFrames(timeline.duration, fps, job.times);
+      return planStills(timeline, fps, byTime);
     },
     0,
     async ({ timeline, renderer, canvas, gl, sources }) => {
@@ -201,7 +198,9 @@ async function renderStills(job: StillsJob): Promise<PageStillsSuccess> {
         host().progress(done + 1, unique.length);
       }
       if (sheet) await host().writeStill('sheet', await png(sheet));
-      return { ok: true, stills: job.times.length, width, height, gpu: gpuName(gl), totalMs: Math.round(performance.now() - started) };
+      // The source second each still shows, from the frame it really is (null on a still or card).
+      const shown = byTime.map((frame) => shownSourceTime(timeline.frameAt(frame / fps)) ?? null);
+      return { ok: true, stills: job.times.length, sources: shown, width, height, gpu: gpuName(gl), totalMs: Math.round(performance.now() - started) };
     },
   );
 }

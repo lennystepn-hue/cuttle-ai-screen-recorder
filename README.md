@@ -16,7 +16,8 @@ Status: phase 1 in progress. Spec: `docs/superpowers/specs/2026-10-16-cuttle-des
 | `@cuttle/engine` | WebGL2 compositor: backgrounds, window frames, zoom, masks, cursors, webcam, texts, stills, cards, crossfades |
 | `@cuttle/export` | MP4 export in a hidden Electron window: decode, render, encode H.264, mux; mic cut to the scenes with ffmpeg (AAC) |
 | `@cuttle/recorder` | Records a take on Windows: a monitor, region or window (ddagrab), webcam and mic (DirectShow), input events, markers; stops by hotkey, time, a file, an idle screen or the end of a Claude Code turn |
-| `apps/cli` | The `cuttle` command: init, devices, record, suggest, preview, capture-page, render, recover; `--json` for Claude |
+| `apps/cli` | The `cuttle` command: init, devices, record, suggest, preview, frame, capture-page, render, recover; `--json` for Claude |
+| `skill/` | The Claude skill: `SKILL.md` (the workflow) and `project.md` (the `cuttle.json` reference), installed by `pnpm skill:install` |
 
 ## Development
 
@@ -48,6 +49,7 @@ cuttle devices                       # monitors, windows, cameras, microphones
 cuttle record --mic --until-claude   # stops when Claude Code in this folder ends its turn (or Ctrl+C)
 cuttle suggest                       # scenes: quiet start and end trimmed, idle cut, waiting sped up, a zoom on the answer
 cuttle preview                       # 12 stills and a contact sheet in preview/
+cuttle frame 42.5 --grid             # a source frame with a numbered pixel grid, for masks and zooms
 cuttle capture-page https://example.com --scroll --add
 cuttle render --format 9:16          # out/9x16.mp4
 cuttle recover takes/2               # after a crash
@@ -56,6 +58,14 @@ cuttle recover takes/2               # after a crash
 Every command takes `-C <project folder>` and `--json` (one JSON document on stdout, errors as
 `{ "error": { "code", "message" } }`). Exit codes: 0 ok, 1 usage or validation, 2 device or
 permission, 3 render, 130 cancelled with Ctrl+C.
+
+## The Claude skill
+
+`pnpm skill:install` copies the skill into Claude Code's personal skills
+(`~/.claude/skills/cuttle/`, or under `CLAUDE_CONFIG_DIR`) with this repository's path filled in.
+`pnpm skill:uninstall` removes it; a `cuttle` skill it did not install is never touched. The skill
+needs `cuttle` on PATH (`pnpm cli:install`). Then ask Claude Code for a demo video, or type
+`/cuttle`.
 
 Engine golden images live in `packages/engine/test/__golden__/`, one PNG per platform. A new
 scenario writes its PNG on the first run and fails once so you can look at it.

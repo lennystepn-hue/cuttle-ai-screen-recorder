@@ -16,7 +16,11 @@ export interface PreviewArgs {
 
 /** What @cuttle/export's renderStills returns. */
 export interface PreviewResult {
-  stills: { t: number; file: string }[];
+  /**
+   * `source`: the source second the still shows (the most visible clip of its frame; absent on a
+   * still or card scene), for placing masks, zooms and texts.
+   */
+  stills: { t: number; file: string; source?: number }[];
   sheet?: string;
   width: number;
   height: number;
@@ -42,7 +46,10 @@ export async function previewCommand(projectDir: string, args: PreviewArgs, outp
     signal,
   );
   output.result(result, () =>
-    [...result.stills.map((still) => `${still.t.toFixed(2)} s  ${still.file}`), ...(result.sheet ? [`sheet  ${result.sheet}`] : [])].join('\n'),
+    [
+      ...result.stills.map((still) => `${still.t.toFixed(2)} s${still.source !== undefined ? ` (source ${still.source.toFixed(2)} s)` : ''}  ${still.file}`),
+      ...(result.sheet ? [`sheet  ${result.sheet}`] : []),
+    ].join('\n'),
   );
   return result;
 }

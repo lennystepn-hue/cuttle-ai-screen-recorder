@@ -1,6 +1,7 @@
 import { Command, CommanderError, InvalidArgumentError, Option } from 'commander';
 import { capturePageCommand } from './commands/capture-page';
 import { devices } from './commands/devices';
+import { frameCommand } from './commands/frame';
 import { init } from './commands/init';
 import { previewCommand } from './commands/preview';
 import { recordCommand } from './commands/record';
@@ -165,6 +166,14 @@ export async function runCli(argv: readonly string[], streams?: Streams): Promis
         withSignal(output, (signal) => capturePageCommand(project, target, options, output, signal)),
       ),
     );
+
+  program
+    .command('frame')
+    .description('a frame of the screen track at full size (the pixels masks and zooms use), optionally with a numbered grid')
+    .argument('<seconds>', 'source seconds of the frame', seconds)
+    .option('--grid', 'a pixel grid with numbers, every 100 px')
+    .option('-o, --out <file>', 'PNG to write (default: frames/<seconds>s.png in the project)')
+    .action(action((output, project, at: number, options: { grid?: boolean; out?: string }) => frameCommand(project, at, options, output)));
 
   program
     .command('render')

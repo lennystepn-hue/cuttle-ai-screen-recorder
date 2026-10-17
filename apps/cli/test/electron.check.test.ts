@@ -40,8 +40,9 @@ describe.runIf(enabled)('cuttle in Electron', () => {
   it('renders stills at given times, and a contact sheet by default', () => {
     const some = cuttle('-C', project, 'preview', '--at', '0.5', '--at', '2');
     expect(some.code).toBe(0);
-    const stills = some.json.stills as { t: number; file: string }[];
-    expect(stills.map((still) => still.t)).toEqual([0.5, 2]);
+    const stills = some.json.stills as { t: number; file: string; source?: number }[];
+    // one clip over the whole take: each still shows the same source second
+    expect(stills.map((still) => [still.t, still.source])).toEqual([[0.5, 0.5], [2, 2]]);
     expect(stills.map((still) => pngSize(still.file))).toEqual([[1920, 1080], [1920, 1080]]);
     expect(some.json.sheet).toBeUndefined();
     const sheet = cuttle('-C', project, 'preview', '--format', '9:16');
@@ -72,6 +73,9 @@ describe.runIf(enabled)('cuttle in Electron', () => {
     const rgb = (y: number) => [...png.data.subarray((y * png.width + 960) * 4, (y * png.width + 960) * 4 + 3)];
     // The header sits at the top (the page was scrolled back), the hero ends at 1080, the section shows.
     expect([rgb(30), rgb(1070), rgb(1090), rgb(7330)]).toEqual([[0, 0, 0], [255, 0, 0], [0, 0, 255], [0, 255, 0]]);
+    // A still of the page scene shows no source second; one of the clip does.
+    const stills = cuttle('-C', project, 'preview', '--at', '1', '--at', '5').json.stills as { t: number; source?: number }[];
+    expect(stills.map((still) => still.source)).toEqual([1, undefined]);
   }, 120_000);
 
   it('renders the project with its still scene to 1:1', () => {

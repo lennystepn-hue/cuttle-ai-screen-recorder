@@ -115,7 +115,8 @@ cuts have no subtitle.
 `cuts` take a stretch out of whatever clip covers it, without splitting the clip: `from` and `to`
 (source seconds) and `enabled` (`true`). The video jumps there (no crossfade); zooms, masks and
 texts run on across it. Use them for a slip, a filler or a pause inside a clip; `suggest` makes
-them for filler words ("Filler: äh") and pauses ("Pause: 2.4 s") from the transcript.
+them for slips ("Retake": the mistake key, or a spoken "nochmal" with the bit said again), filler
+words ("Filler: äh") and pauses ("Pause: 2.4 s") from the transcript.
 
 Every scene, zoom, mask, text and cut may have an `id` (1 to 64 letters, digits, `-` or `_`,
 unique in the whole project) and a `label` (a name for people, shown in the Cuttle app). `suggest`
@@ -137,7 +138,8 @@ it is yours and the next `suggest` keeps it (switching it on or off keeps the ta
 - `cuttle --json frame <source second> --grid` writes that frame of the screen track at full size
   with a numbered grid every 100 pixels (stronger lines every 500). Read the PNG and take rects off
   the grid; `frames/<t>s-grid.png` is the default file.
-- `takes/<n>/markers.json` lists the prompt, each tool call and Claude's answer in source seconds.
+- `takes/<n>/markers.json` lists the prompt, each tool call and Claude's answer in source seconds,
+  and each press of the mistake key (kind `retake`).
 - `cuttle --json suggest` prints notes with source seconds (`sped up 112.9 s without input 12×
   (7.5–120.4 s)`).
 - To get from output to source seconds by hand, walk the scenes. A clip lasts

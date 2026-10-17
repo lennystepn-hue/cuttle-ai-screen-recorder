@@ -74,6 +74,18 @@ pnpm app:build                           # an unpacked app in apps/desktop/build
 pnpm icons:mac                           # macOS only: draw icon.icns, the Dock icon and the menu bar's template icon into apps/desktop/assets/
 ```
 
+**Signing on macOS.** `pnpm app:build` signs Cuttle.app when `CUTTLE_SIGN_IDENTITY` names an
+identity: a "Developer ID Application: …" from the keychain, or `-` for an ad-hoc signature that runs
+on this Mac only. It signs with the hardened runtime and `apps/desktop/scripts/entitlements.mac.plist`
+(JIT, the native modules, camera, microphone), the capture helper and the native modules included,
+and zips the app (`apps/desktop/build/Cuttle-<version>-mac-<arch>.zip`). It also notarizes with
+`CUTTLE_NOTARIZE_PROFILE` (a profile from `xcrun notarytool store-credentials`), or with `APPLE_ID`,
+`APPLE_APP_SPECIFIC_PASSWORD` and `APPLE_TEAM_ID`.
+
+```bash
+CUTTLE_SIGN_IDENTITY="Developer ID Application: Your Name (TEAMID)" CUTTLE_NOTARIZE_PROFILE=cuttle pnpm app:build
+```
+
 The Windows icons (icon.ico, tray.png) come from `node tools/desktop-icons.mjs`; the macOS ones from
 `tools/mac-icons.mjs`, the same mark grown into a cuttlefish on a macOS squircle.
 

@@ -1,9 +1,15 @@
 // Packages the built app (apps/desktop/dist, from app:build:js) as an unpacked app folder in
-// apps/desktop/build/Cuttle-<platform>-<arch>/: no installer, no signing. The native modules the
+// apps/desktop/build/Cuttle-<platform>-<arch>/: no installer, and on Windows no signing. On macOS
+// it signs when CUTTLE_SIGN_IDENTITY names an identity ("Developer ID Application: …", or "-" for
+// an ad-hoc signature that runs on this Mac only), with the hardened runtime and
+// entitlements.mac.plist, and notarizes when CUTTLE_NOTARIZE_PROFILE names a notarytool keychain
+// profile (xcrun notarytool store-credentials) or APPLE_ID, APPLE_APP_SPECIFIC_PASSWORD and
+// APPLE_TEAM_ID are set; a signed app is zipped beside its folder for handing out. The native modules the
 // recorder loads (koffi and uiohook-napi, with their prebuilt binaries for this platform) are
 // copied next to the bundle and kept outside the asar archive. So is the app's own copy of the CLI
 // (apps/cli/dist, from cli:build): the cuttle command the app installs runs it with the app as Node,
 // which cannot load modules from inside the archive. The skill's files go in for the same install.
+import { execFileSync } from 'node:child_process';
 import { cpSync, existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { basename, dirname, join } from 'node:path';
@@ -88,6 +94,24 @@ writeFileSync(
   )}\n`,
 );
 
+/** macOS: signing and notarizing, from the environment (see the top); nothing when it names no identity. */
+function macSigning() {
+  const identity = process.env.CUTTLE_SIGN_IDENTITY;
+  if (process.platform !== 'darwin' || !identity) return {};
+  const entitlements = join(desktop, 'scripts', 'entitlements.mac.plist');
+  const osxSign = {
+    identity,
+    // an ad-hoc signature is not in the keychain
+    ...(identity === '-' && { identityValidation: false }),
+    optionsForFile: () => ({ hardenedRuntime: true, entitlements }),
+  };
+  const { CUTTLE_NOTARIZE_PROFILE: keychainProfile, APPLE_ID: appleId, APPLE_APP_SPECIFIC_PASSWORD: appleIdPassword, APPLE_TEAM_ID: teamId } = process.env;
+  const osxNotarize = keychainProfile ? { keychainProfile } : appleId && appleIdPassword && teamId ? { appleId, appleIdPassword, teamId } : undefined;
+  if (osxNotarize && identity === '-') throw new Error('an ad-hoc signature cannot be notarized: set CUTTLE_SIGN_IDENTITY to a Developer ID Application identity');
+  return { osxSign, ...(osxNotarize && { osxNotarize }) };
+}
+const signing = macSigning();
+
 const electronVersion = JSON.parse(readFileSync(createRequire(join(desktop, '..', '..', 'package.json')).resolve('electron/package.json'), 'utf8')).version;
 const [out] = await packager({
   dir: stage,
@@ -114,6 +138,13 @@ const [out] = await packager({
     NSMicrophoneUsageDescription: 'Cuttle records your microphone into a take when you choose a mic.',
     NSScreenCaptureUsageDescription: 'Cuttle records the screen, a window or a region of it.',
   },
+  ...signing,
 });
 rmSync(stage, { recursive: true, force: true });
-console.log(`packaged ${basename(out)}: ${out}`);
+console.log(`packaged ${basename(out)}: ${out}${signing.osxSign ? ` (signed${signing.osxNotarize ? ' and notarized' : ''})` : ''}`);
+if (signing.osxSign) {
+  // the signed app as one file to hand out: ditto keeps its signature and extended attributes
+  const zip = join(build, `Cuttle-${manifest.version}-mac-${process.arch}.zip`);
+  execFileSync('ditto', ['-c', '-k', '--sequesterRsrc', '--keepParent', join(out, 'Cuttle.app'), zip]);
+  console.log(`zipped ${zip}`);
+}

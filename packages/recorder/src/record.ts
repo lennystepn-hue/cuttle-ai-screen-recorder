@@ -27,7 +27,8 @@ const message = (error: unknown) => (error instanceof Error ? error.message : St
 /** Records a take into `<projectDir>/takes/<n>/`. See `RecordOptions` for the stop triggers. */
 export function record(options: RecordOptions): Recording {
   const control = new Control();
-  const done = run(options, control);
+  const since = now(); // Claude prompts count from here, during the device listing and the countdown too
+  const done = run(options, control, since);
   done.catch(() => {}); // the caller sees a failure through `done` or `stop()`
   return {
     stop() {
@@ -102,16 +103,16 @@ type ClaudeTrigger = ReturnType<typeof claudeTrigger>;
 
 const cancelled = (what: string) => new RecorderError('cancelled', `the recording was stopped before ${what}`);
 
-async function run(options: RecordOptions, control: Control): Promise<Take> {
+async function run(options: RecordOptions, control: Control, since: number): Promise<Take> {
   try {
-    return await prepareAndRecord(options, control);
+    return await prepareAndRecord(options, control, since);
   } catch (error) {
     // File system and native-module failures get a code too, so the CLI can map every failure.
     throw error instanceof RecorderError ? error : new RecorderError('capture', `the recording failed: ${message(error)}`, { cause: error });
   }
 }
 
-async function prepareAndRecord(options: RecordOptions, control: Control): Promise<Take> {
+async function prepareAndRecord(options: RecordOptions, control: Control, since: number): Promise<Take> {
   const platform = platformFor(options.backend);
   const projectDir = resolve(options.projectDir);
   checkOptions(options, projectDir);
@@ -120,7 +121,6 @@ async function prepareAndRecord(options: RecordOptions, control: Control): Promi
   if (options.webcam !== undefined) checkDevice('camera', options.webcam, devices);
   if (options.mic !== undefined) checkDevice('mic', options.mic, devices);
   const reporter = new Reporter(options.onEvent);
-  const since = now(); // Claude prompts during the countdown count: the user may start early
   const claude = options.stop.untilClaude === undefined ? undefined : claudeTrigger(options.stop.untilClaude, since);
   try {
     for (let left = options.countdownSeconds ?? DEFAULT_COUNTDOWN_SECONDS; left > 0 && control.reason === undefined; left--) {
@@ -177,14 +177,43 @@ async function recordTake({ options, control, platform, area, projectDir, dir, r
 
   const { size, origin } = areaGeometry(area);
   const events = openSync(path(FILES.events), 'a');
-  const writer = new EventsWriter((line) => writeSync(events, line), origin);
+  let eventsOpen = true;
+  const closeEvents = () => {
+    if (!eventsOpen) return;
+    eventsOpen = false;
+    try {
+      closeSync(events);
+    } catch {
+      // nothing more to lose
+    }
+  };
+  let eventsFailed = false;
+  // Called from the input hook: a failed write must not throw there, it would end the process.
+  const writer = new EventsWriter((line) => {
+    if (eventsFailed || !eventsOpen) return;
+    try {
+      writeSync(events, line);
+    } catch (error) {
+      eventsFailed = true;
+      reporter.warn(`events.jsonl could not be written (${message(error)}); the input from here on is missing`);
+    }
+  }, origin);
   let lastInput = now();
   const captures: CaptureProcess[] = [];
   let input: InputSource | undefined;
   const cleanups: (() => void)[] = [];
+  let finished = false;
   const timer = (callback: () => void, ms: number, repeat = false) => {
+    if (finished) return; // a late Claude answer must not start a timer after the take ended
     const handle = repeat ? setInterval(callback, ms) : setTimeout(callback, ms);
     cleanups.push(() => clearTimeout(handle));
+  };
+  /** Ends every trigger, the transcript watcher and the input: nothing new happens after this. */
+  const finish = () => {
+    finished = true;
+    for (const cleanup of cleanups.splice(0)) cleanup();
+    claude?.stop();
+    input?.stop();
   };
 
   try {
@@ -234,12 +263,17 @@ async function recordTake({ options, control, platform, area, projectDir, dir, r
     void mic?.started.then((at) => (starts.mic = at), () => {});
     const others = [webcam && 'webcam', mic && 'mic'].filter(Boolean).join(' and ');
     if (others !== '') await startedWithin(Promise.race([Promise.all([webcam?.started, mic?.started]), failed, control.stopped()]), others);
+    // The tracks of this take: one that starts while the stop runs is left out of take.json and the Take alike.
+    const begun = { ...starts };
+    for (const [track, capture] of [['webcam', webcam], ['mic', mic]] as const) {
+      if (capture && begun[track] === undefined) reporter.warn(`the ${track} had not started when the recording was stopped; it is left out of the take`);
+    }
     writeJson(path(FILES.take), {
       version: TAKE_VERSION,
       tracks: {
         screen: { file: FILES.screen, start: screenAt },
-        ...(starts.webcam !== undefined && { webcam: { file: FILES.webcam, start: starts.webcam } }),
-        ...(starts.mic !== undefined && { mic: { file: FILES.mic, start: starts.mic - micLatency(platform) } }),
+        ...(begun.webcam !== undefined && { webcam: { file: FILES.webcam, start: begun.webcam } }),
+        ...(begun.mic !== undefined && { mic: { file: FILES.mic, start: begun.mic - micLatency(platform) } }),
       },
     } satisfies TakeFile);
     reporter.emit({ type: 'recording', dir: rel(dir) });
@@ -251,20 +285,20 @@ async function recordTake({ options, control, platform, area, projectDir, dir, r
 
     const reason = await Promise.race([control.stopped(), failed]);
     reporter.emit({ type: 'stopping', reason });
-    for (const cleanup of cleanups.splice(0)) cleanup();
-    claude?.stop();
-    input.stop();
-    writer.close();
+    finish();
     await Promise.all(captures.map((capture) => capture.stop()));
-    // A track stopped before it delivered anything has no usable file.
-    if (webcam && starts.webcam === undefined) rmSync(path(FILES.webcam), { force: true });
-    if (mic && starts.mic === undefined) rmSync(path(FILES.mic), { force: true });
+    writer.close();
+    closeEvents();
+    // A track that was left out has no file of this take.
+    for (const [track, file] of [['webcam', FILES.webcam], ['mic', FILES.mic]] as const) {
+      if ((track === 'webcam' ? webcam : mic) && begun[track] === undefined) removeQuietly(path(file));
+    }
     if (markersFailed) saveMarkers();
     return {
       dir: rel(dir),
       screen: rel(path(FILES.screen)),
-      ...(starts.webcam !== undefined && { webcam: rel(path(FILES.webcam)) }),
-      ...(starts.mic !== undefined && { mic: rel(path(FILES.mic)) }),
+      ...(begun.webcam !== undefined && { webcam: rel(path(FILES.webcam)) }),
+      ...(begun.mic !== undefined && { mic: rel(path(FILES.mic)) }),
       events: rel(path(FILES.events)),
       markers: rel(path(FILES.markers)),
       screenSize: size,
@@ -273,25 +307,29 @@ async function recordTake({ options, control, platform, area, projectDir, dir, r
       warnings: reporter.warnings,
     };
   } catch (error) {
-    for (const cleanup of cleanups.splice(0)) cleanup();
-    input?.stop();
-    writer.close();
-    // The tracks that still run finish their files; the take folder keeps what was recorded.
+    finish();
+    // The tracks that still run finish their files first; the take folder keeps what was recorded.
     await Promise.allSettled(captures.map((capture) => capture.stop()));
+    writer.close();
+    closeEvents();
     if (screenStart === undefined) {
-      closeSync(events);
-      rmSync(dir, { recursive: true, force: true }); // nothing on screen: no take
+      removeQuietly(dir); // nothing on screen: no take
       throw error instanceof RecorderError ? error : new RecorderError('capture', `the recording failed: ${message(error)}`, { cause: error });
     }
     const code = error instanceof RecorderError ? error.code : 'capture';
     throw new RecorderError(code, `${message(error)}\n(what was recorded is in ${rel(dir)})`, { cause: error });
   } finally {
     control.onMarker = undefined;
-    try {
-      closeSync(events);
-    } catch {
-      // already closed when the take folder was removed
-    }
+    closeEvents();
+  }
+}
+
+/** Removes a file or folder of the take; a lock (a virus scanner, OneDrive) must not turn a result into a failure. */
+function removeQuietly(path: string): void {
+  try {
+    rmSync(path, { recursive: true, force: true, maxRetries: 3 });
+  } catch {
+    // left behind; the take is complete without it
   }
 }
 

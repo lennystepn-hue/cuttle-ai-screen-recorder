@@ -3,7 +3,7 @@ import { rm } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
-import { claudeTranscriptDir, readTranscriptLine, watchClaude, type ClaudeSignal } from '../src/claude';
+import { claudeTranscriptDir, readTranscriptLine, SessionReader, watchClaude, type ClaudeSignal } from '../src/claude';
 
 afterEach(() => vi.unstubAllEnvs());
 const dirs: string[] = [];
@@ -53,7 +53,11 @@ describe('readTranscriptLine', () => {
       { isCompactSummary: true, message: { content: 'This session is being continued …' } },
     ];
     for (const value of notPrompts) expect(readTranscriptLine(line({ type: 'user', ...value }))).toEqual([]);
-    expect(readTranscriptLine(line({ type: 'user', message: { content: '<command-name>/review</command-name>' } }))).toEqual([{ kind: 'prompt', time }]);
+    expect(readTranscriptLine(line({ type: 'user', message: { content: '<command-name>/review</command-name>' } }))).toEqual([{ kind: 'prompt', time, command: true }]);
+  });
+
+  it('gives a prompt its line uuid as id', () => {
+    expect(readTranscriptLine(line({ type: 'user', uuid: 'u1', message: { content: 'go' } }))).toEqual([{ kind: 'prompt', time, id: 'u1' }]);
   });
 
   it('reads tool calls and the end of the turn', () => {
@@ -72,6 +76,22 @@ describe('readTranscriptLine', () => {
     expect(readTranscriptLine('null')).toEqual([]);
     expect(readTranscriptLine(JSON.stringify({ type: 'user', message: { content: 'no time' } }))).toEqual([]);
     expect(readTranscriptLine(line({ type: 'attachment' }))).toEqual([]);
+  });
+});
+
+describe('SessionReader', () => {
+  const command = (name: string) => line({ type: 'user', message: { content: `<command-name>${name}</command-name>` } });
+  const output = line({ type: 'user', message: { content: '<local-command-stdout>Set model to Opus</local-command-stdout>' } });
+  const answer = line({ type: 'assistant', message: { id: 'm1', stop_reason: 'end_turn', content: [{ type: 'text' }] } });
+
+  it('drops a local slash command, which only writes its output', () => {
+    const reader = new SessionReader();
+    expect([command('/model'), output, line({ type: 'user', message: { content: 'build it' } })].flatMap((text) => reader.read(text))).toEqual([{ kind: 'prompt', time }]);
+  });
+
+  it('keeps a slash command that Claude answers, before the answer', () => {
+    const reader = new SessionReader();
+    expect([command('/review'), answer].flatMap((text) => reader.read(text)).map((signal) => signal.kind)).toEqual(['prompt', 'answer']);
   });
 });
 

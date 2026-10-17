@@ -28,12 +28,15 @@ export interface ClaudeSignal {
   time: number;
   /** The tool's name, for `tool`. */
   label?: string;
-  /** For deduplication: the tool call's id, or the message id of an `answer`. */
+  /** For deduplication: the prompt line's uuid, the tool call's id, or the message id of an `answer`. */
   id?: string;
+  /** A prompt that is a slash command: a real prompt only once Claude answers it (`SessionReader`). */
+  command?: true;
 }
 
 interface TranscriptLine {
   type?: unknown;
+  uuid?: unknown;
   timestamp?: unknown;
   isSidechain?: unknown;
   isMeta?: unknown;
@@ -69,7 +72,12 @@ export function readTranscriptLine(text: string): ClaudeSignal[] {
   const time = typeof line.timestamp === 'string' ? Date.parse(line.timestamp) / 1000 : Number.NaN;
   if (!Number.isFinite(time)) return [];
   const content = line.message?.content;
-  if (line.type === 'user') return isPrompt(content) ? [{ kind: 'prompt', time }] : [];
+  if (line.type === 'user') {
+    const prompt = promptText(content);
+    if (prompt === undefined) return [];
+    const command = prompt.startsWith('<command-name>') || prompt.startsWith('<command-message>');
+    return [{ kind: 'prompt', time, ...(typeof line.uuid === 'string' && { id: line.uuid }), ...(command && { command: true as const }) }];
+  }
   if (line.type !== 'assistant') return [];
   const signals: ClaudeSignal[] = [];
   for (const item of Array.isArray(content) ? (content as { type?: unknown; name?: unknown; id?: unknown }[]) : []) {
@@ -84,15 +92,40 @@ export function readTranscriptLine(text: string): ClaudeSignal[] {
   return signals;
 }
 
-function isPrompt(content: unknown): boolean {
+/** The text of a user line that is a prompt, or undefined. */
+function promptText(content: unknown): string | undefined {
   const text =
     typeof content === 'string'
       ? content
       : Array.isArray(content) && !content.some((item: { type?: unknown }) => item?.type === 'tool_result')
         ? (content as { type?: unknown; text?: unknown }[]).find((item) => item?.type === 'text')?.text
         : undefined;
-  if (typeof text !== 'string' || text.trim() === '') return false;
-  return !NOT_PROMPTS.some((prefix) => text.startsWith(prefix));
+  if (typeof text !== 'string' || text.trim() === '' || NOT_PROMPTS.some((prefix) => text.startsWith(prefix))) return undefined;
+  return text;
+}
+
+/**
+ * One session's signals in order. A slash command is held back until Claude answers it: a prompt
+ * command such as /review starts a turn, a local one such as /model or /clear only writes its output
+ * and must neither lock the watcher onto its session nor become a marker.
+ */
+export class SessionReader {
+  private command: ClaudeSignal | undefined;
+
+  read(text: string): ClaudeSignal[] {
+    const signals: ClaudeSignal[] = [];
+    for (const signal of readTranscriptLine(text)) {
+      if (signal.kind === 'prompt') {
+        this.command = signal.command ? signal : undefined; // a command nobody answered was a local one
+        if (!signal.command) signals.push(signal);
+        continue;
+      }
+      if (this.command) signals.push(this.command);
+      this.command = undefined;
+      signals.push(signal);
+    }
+    return signals;
+  }
 }
 
 export interface ClaudeWatcher {
@@ -107,7 +140,7 @@ export interface ClaudeWatcher {
  * `since`. `onSignal` must not throw; if it does, the error is dropped and watching goes on.
  */
 export function watchClaude(dir: string, since: number, onSignal: (signal: ClaudeSignal) => void): ClaudeWatcher {
-  const files = new Map<string, { offset: number; partial: string; decoder: StringDecoder }>();
+  const files = new Map<string, { offset: number; partial: string; decoder: StringDecoder; reader: SessionReader }>();
   const seen = new Set<string>();
   let session: string | undefined;
   let busy = false;
@@ -144,7 +177,7 @@ export function watchClaude(dir: string, since: number, onSignal: (signal: Claud
         let state = files.get(name);
         if (state === undefined) {
           const offset = info.mtimeMs / 1000 < since ? info.size : Math.max(0, info.size - CATCH_UP_BYTES);
-          state = { offset, partial: '', decoder: new StringDecoder('utf8') };
+          state = { offset, partial: '', decoder: new StringDecoder('utf8'), reader: new SessionReader() };
           files.set(name, state);
         }
         if (info.size < state.offset) {
@@ -152,13 +185,14 @@ export function watchClaude(dir: string, since: number, onSignal: (signal: Claud
           state.offset = 0;
           state.partial = '';
           state.decoder = new StringDecoder('utf8');
+          state.reader = new SessionReader();
         }
         if (info.size === state.offset) continue;
         const bytes = await readRange(path, state.offset, info.size);
         state.offset += bytes.length;
         const lines = (state.partial + state.decoder.write(bytes)).split('\n');
         state.partial = lines.pop() ?? '';
-        for (const line of lines) for (const signal of readTranscriptLine(line)) if (!stopped) handle(name, signal);
+        for (const line of lines) for (const signal of state.reader.read(line)) if (!stopped) handle(name, signal);
       }
     } finally {
       busy = false;

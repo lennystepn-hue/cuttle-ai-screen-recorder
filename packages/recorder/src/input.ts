@@ -75,6 +75,7 @@ async function startWindowsInput(onInput: InputSink, onHotkey: HotkeySink): Prom
   ]);
   const keys = keyHandler(modifiers, new Map<number, HotkeyAction>([[UiohookKey.S, 'stop'], [UiohookKey.M, 'marker']]), onInput, onHotkey);
   const buttons = new Map<unknown, 'left' | 'right' | 'middle'>([[1, 'left'], [2, 'right'], [3, 'middle']]);
+  let shape = win.cursorShape(); // before the hook starts: nothing to undo if it throws
 
   const onMove = (event: { x: number; y: number }) => onInput({ type: 'move', time: now(), x: event.x, y: event.y });
   const onDown = (event: { x: number; y: number; button: unknown }) => {
@@ -107,7 +108,6 @@ async function startWindowsInput(onInput: InputSink, onHotkey: HotkeySink): Prom
   }
   hookUsers++;
 
-  let shape = win.cursorShape();
   let stopped = false;
   const poll = setInterval(() => {
     const current = win.cursorShape();

@@ -93,6 +93,7 @@ async function create(): Promise<Win32> {
   const GetWindowThreadProcessId = user32.func('__stdcall', 'GetWindowThreadProcessId', 'uint32', ['void *', koffi.out(koffi.pointer('uint32'))]);
   const MonitorFromWindow = user32.func('__stdcall', 'MonitorFromWindow', 'void *', ['void *', 'uint32']);
   const GetConsoleWindow = kernel32.func('__stdcall', 'GetConsoleWindow', 'void *', []);
+  const GetConsoleTitleW = kernel32.func('__stdcall', 'GetConsoleTitleW', 'uint32', ['void *', 'uint32']);
   const DwmGetWindowAttribute = dwmapi.func('__stdcall', 'DwmGetWindowAttribute', 'long', ['void *', 'uint32', 'void *', 'uint32']);
   const GetDpiForMonitor = shcore.func('__stdcall', 'GetDpiForMonitor', 'long', ['void *', 'int', koffi.out(koffi.pointer('uint32')), koffi.out(koffi.pointer('uint32'))]);
   const CreateDXGIFactory1 = dxgi.func('__stdcall', 'CreateDXGIFactory1', 'long', [koffi.pointer(GUID), koffi.out(koffi.pointer('void *'))]);
@@ -155,15 +156,23 @@ async function create(): Promise<Win32> {
     }
   };
 
+  /** The console's title: Windows Terminal shows it on a window of its own process, which the pid check misses. */
+  const consoleTitle = (): string | undefined => {
+    const buffer = Buffer.alloc(2048);
+    const length = GetConsoleTitleW(buffer, 1024);
+    return length > 0 ? buffer.toString('utf16le', 0, length * 2) : undefined;
+  };
+
   const windows = (): WindowInfo[] => {
     const monitorOf = new Map(outputs().map(({ monitor, handle }) => [handle, monitor.index]));
+    const ownTitle = consoleTitle();
     const found: WindowInfo[] = [];
     const rect = Buffer.alloc(16);
     const cloaked = Buffer.alloc(4);
     const visit = koffi.register((hwnd: unknown) => {
       if (!IsWindowVisible(hwnd) || IsIconic(hwnd)) return 1;
       if ((Number(GetWindowLongPtrW(hwnd, GWL_EXSTYLE)) & WS_EX_TOOLWINDOW) !== 0) return 1;
-      // The recorder's own console (cmd.exe titles it with the command line) and windows.
+      // The recorder's own console (cmd.exe titles it with the command line) and windows; see also ownTitle.
       const pid = [0];
       GetWindowThreadProcessId(hwnd, pid);
       if (pid[0] === process.pid || (ownConsole !== 0n && koffi.address(hwnd) === ownConsole)) return 1;
@@ -175,7 +184,7 @@ async function create(): Promise<Win32> {
       const title = text.toString('utf16le', 0, GetWindowTextW(hwnd, text, length + 1) * 2);
       // The monitor that holds most of the window.
       const monitor = monitorOf.get(koffi.address(MonitorFromWindow(hwnd, MONITOR_DEFAULTTONULL)));
-      if (title === '' || monitor === undefined) return 1;
+      if (title === '' || title === ownTitle || monitor === undefined) return 1;
       if (DwmGetWindowAttribute(hwnd, DWMWA_EXTENDED_FRAME_BOUNDS, rect, 16) < 0) return 1;
       const [left, top, right, bottom] = [0, 4, 8, 12].map((offset) => rect.readInt32LE(offset)) as [number, number, number, number];
       if (right - left < 2 || bottom - top < 2) return 1;

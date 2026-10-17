@@ -44,6 +44,7 @@ export { formatPath, parseProject, parseProjectJson, type ParseResult, type Proj
 export { defaultProject } from './defaults';
 export { ID_PREFIXES, newId, usedIds, type IdList } from './ids';
 export { parseEventsJsonl } from './events';
+export { SEGMENTS_VERSION, SegmentsFileSchema, parseSegmentsJson, segmentOffsets, takeTime, type Segment, type SegmentsFile, type SegmentsFileParseResult } from './segments';
 export { TAKE_VERSION, TakeFileSchema, parseTakeJson, trackOffset, type TakeFile, type TakeFileParseResult, type TakeFileTrack } from './take';
 export {
   MARKERS_VERSION,

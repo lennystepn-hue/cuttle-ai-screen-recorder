@@ -231,7 +231,7 @@ export function timelineModel(project: CuttleProject, spans: readonly SceneSpan[
     cuts: cutNotches(project, spans),
     lanes: {
       zoom: lane('zoom', project.zooms, spans, (zoom) => [zoom.at, zoom.at + zoom.duration], () => 'Zoom', (zoom) => (zoom.moves ?? []).map((move) => move.at)),
-      mask: lane('mask', project.masks, spans, (mask) => [mask.from, mask.to], () => 'Mask'),
+      mask: lane('mask', project.masks, spans, (mask) => [mask.from, mask.to], () => 'Mask', (mask) => (mask.moves ?? []).map((move) => move.at)),
       caption: lane('caption', project.texts, spans, (text) => [text.at, text.at + text.duration], (text) => text.text),
     },
     markers: markers

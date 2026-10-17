@@ -832,7 +832,14 @@ function Details({ project, selection }: { project: CuttleProject; selection: Se
           <TextInput value={mask.label ?? ''} placeholder="Mask" onCommit={(value) => set('masks', id, { label: value.trim() || undefined }, 'Rename mask')} />
         </Row>
         {timing('masks', mask.from, mask.to)}
-        {area('masks', mask.rect, 'mask')}
+        {area('masks', mask.rect, 'mask', mask.moves?.length ? 'Start, in source pixels' : undefined)}
+        {mask.moves && mask.moves.length > 0 && (
+          <Row label="Follows" note={`${mask.moves.length} move${mask.moves.length === 1 ? '' : 's'}`} plain>
+            <button type="button" className="ghost small" onClick={() => set('masks', id, { moves: undefined }, 'Hold the mask still')} data-testid="mask-hold">
+              Hold still
+            </button>
+          </Row>
+        )}
         <Row label="Style">
           <Select value={mask.style} options={MASK_STYLES} names={MASK_STYLE_NAMES} onChange={(style) => set('masks', id, { style }, 'Change mask style')} />
         </Row>

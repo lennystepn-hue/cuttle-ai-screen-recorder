@@ -16,8 +16,16 @@ function followMotion(): void {
   ipcRenderer.on('app:motion', (_event, motion: unknown) => apply(motion));
 }
 
+/** The OS as `data-platform` on the page's root: macOS has its window buttons on the left of the title bar. */
+function markPlatform(): void {
+  const apply = () => (document.documentElement.dataset.platform = process.platform);
+  if (document.documentElement) apply();
+  else document.addEventListener('DOMContentLoaded', apply, { once: true });
+}
+
 export function exposeBridge(kind: WindowKind): void {
   followMotion();
+  markPlatform();
   const requests: readonly string[] = WINDOW_CHANNELS[kind].requests;
   const events: readonly string[] = WINDOW_CHANNELS[kind].events;
   // An event that says a state (the HUD's, a status, the media) is kept, so a listener that

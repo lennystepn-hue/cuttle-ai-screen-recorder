@@ -98,13 +98,22 @@ const [out] = await packager({
   electronVersion,
   platform: process.platform,
   arch: process.arch,
-  icon: join(desktop, 'assets', process.platform === 'win32' ? 'icon.ico' : 'icon.png'),
+  icon: join(desktop, 'assets', process.platform === 'win32' ? 'icon.ico' : process.platform === 'darwin' ? 'icon.icns' : 'icon.png'),
   // the CLI and the native modules whole (with their package.json files), so Node resolves them
-  asar: { unpack: '**/{*.node,*.dll}', unpackDir: `{cli,${[...modules.keys()].map((name) => `node_modules/${name}`).join(',')}}` },
+  asar: { unpack: '**/{*.node,*.dll,cuttle-capture}', unpackDir: `{cli,${[...modules.keys()].map((name) => `node_modules/${name}`).join(',')}}` },
   prune: false,
   overwrite: true,
   quiet: true,
   win32metadata: { CompanyName: 'Cuttle', ProductName: 'Cuttle', FileDescription: 'Cuttle' },
+  // macOS asks for the screen, the camera and the microphone on behalf of the app (ffmpeg runs as its child)
+  appBundleId: 'app.cuttle.desktop',
+  appCategoryType: 'public.app-category.video',
+  darwinDarkModeSupport: true,
+  extendInfo: {
+    NSCameraUsageDescription: 'Cuttle records your webcam into a take when you choose a camera.',
+    NSMicrophoneUsageDescription: 'Cuttle records your microphone into a take when you choose a mic.',
+    NSScreenCaptureUsageDescription: 'Cuttle records the screen, a window or a region of it.',
+  },
 });
 rmSync(stage, { recursive: true, force: true });
 console.log(`packaged ${basename(out)}: ${out}`);

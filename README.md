@@ -3,7 +3,8 @@
 Screen recordings that edit themselves: record a monitor, region or window with webcam and mic,
 then turn the take into a polished demo with cuts, speed-ups, smooth zooms, masks, a framed window
 on a designed background, text overlays and an end card. A desktop app for people, a CLI and a
-skill for Claude, one project file (`cuttle.json`) and one render engine for both.
+skill for Claude, one project file (`cuttle.json`) and one render engine for both. Runs on
+Windows and macOS.
 
 Status: phase 1 (engine, CLI, skill) done; phase 2 (the desktop app) in progress. Specs:
 `docs/superpowers/specs/2026-10-16-cuttle-design.md` and `2026-10-17-cuttle-desktop-design.md`;
@@ -17,11 +18,29 @@ design mockups in `docs/design/desktop/`.
 | `@cuttle/timeline` | What is on screen at any output time: scenes, speed, zooms, masks, texts, cursor, crossfades (none at a continuous cut), overlay ramps in output time |
 | `@cuttle/engine` | WebGL2 compositor: backgrounds, window frames, zoom, masks, cursors, webcam, texts, stills, cards, crossfades |
 | `@cuttle/export` | MP4 export in a hidden Electron window: decode, render, encode H.264, mux; mic cut to the scenes with ffmpeg (AAC) |
-| `@cuttle/recorder` | Records a take on Windows: a monitor, region or window (ddagrab), webcam and mic (DirectShow), input events, markers; stops by hotkey, time, a file, an idle screen or the end of a Claude Code turn |
+| `@cuttle/recorder` | Records a take on Windows (ddagrab, DirectShow, a global input hook) and macOS (avfoundation, an event tap): a monitor, region or window, webcam and mic, input events, markers; stops by hotkey, time, a file, an idle screen or the end of a Claude Code turn |
 | `@cuttle/core` | Project operations for the CLI and the app: `cuttle.json` as written (hash-checked writes, backups), takes, suggest, recover, frame, ffmpeg |
 | `apps/cli` | The `cuttle` command: init, devices, record, suggest, preview, frame, capture-page, render, recover; `--json` for Claude |
 | `apps/desktop` | The Cuttle app (Electron, React): the pill and tray, an editor per project (the export's engine in the output view, played with the mic as the clock; a timeline with thumbnails, waveform, markers and input activity; the export sheet) |
 | `skill/` | The Claude skill: `SKILL.md` (the workflow) and `project.md` (the `cuttle.json` reference), installed by `pnpm skill:install` |
+
+## Setup
+
+| | Windows | macOS (Apple silicon or Intel) |
+|---|---|---|
+| Node 22 or newer | `winget install OpenJS.NodeJS.LTS` | `brew install node`, or the installer from nodejs.org |
+| pnpm 11 | `corepack enable` (or `npm install -g pnpm@11`) | the same |
+| ffmpeg and ffprobe | `winget install Gyan.FFmpeg` | `brew install ffmpeg` |
+| Permissions | none | the first recording asks for them (see below) |
+
+`pnpm install` also downloads Electron's binary for the platform. Native modules come prebuilt:
+koffi (the OS APIs) for both, uiohook-napi (the input hook) for Windows.
+
+**macOS permissions.** macOS asks the app the recorder runs in: the terminal for the `cuttle`
+command, Cuttle (or "Electron" when it runs from this repository) for the app. Allow it under
+System Settings > Privacy & Security: *Screen & System Audio Recording* (needed; quit and reopen
+the app afterwards), *Microphone* and *Camera* (when a take uses them), and *Input Monitoring*
+(the clicks, scrolls, key counts and hotkeys; without it a take has no input log and warns).
 
 ## Development
 
@@ -38,7 +57,7 @@ pnpm cuttle <command>                    # the built CLI without installing it (
 ```
 
 Export and recording need ffmpeg on PATH (or its path in `CUTTLE_FFMPEG`); `export:check` and the
-recorder tests also need ffprobe. Recording works on Windows so far; the recorder's tests use its
+recorder tests also need ffprobe. Recording works on Windows and macOS; the recorder's tests use its
 `test` backend (ffmpeg test sources, synthetic input), which runs everywhere.
 
 ## The desktop app
@@ -48,15 +67,20 @@ pnpm app                                 # build and start the app (the pill nea
 pnpm app -- --open <project folder>      # … and open a project in the editor
 pnpm app -- --settings                   # … and show the settings
 pnpm app:check                           # end to end with its windows hidden: open, play, scrub, compare with the export, play the proxy, export, edit, record, pause, the first run
-pnpm app:build                           # an unpacked app in apps/desktop/build/Cuttle-<platform>-<arch>/ with its own CLI, checked that it starts
+pnpm app:build                           # an unpacked app in apps/desktop/build/Cuttle-<platform>-<arch>/ (Cuttle.exe, or Cuttle.app on macOS) with its own CLI, checked that it starts
+pnpm icons:mac                           # macOS only: draw icon.icns, the Dock icon and the menu bar's template icon into apps/desktop/assets/
 ```
+
+The Windows icons (icon.ico, tray.png) come from `node tools/desktop-icons.mjs`; the macOS ones from
+`tools/mac-icons.mjs`, the same mark grown into a cuttlefish on a macOS squircle.
 
 The editor shows exactly what the export renders: the same engine and timeline, compared pixel for
 pixel by `app:check`. It plays a 720p proxy of the take (made in the background into the project's
 `.cuttle/` folder, with the thumbnails and the mic's waveform); the export always uses the take.
 
 **Editing.** Every edit is written to `cuttle.json` as its gesture ends, so Claude and the CLI see it
-at once, and one gesture is one step to undo (Ctrl+Z, Ctrl+Shift+Z). On the timeline: S splits the
+at once, and one gesture is one step to undo (Ctrl+Z, Ctrl+Shift+Z; on a Mac ⌘ works wherever Ctrl
+does). On the timeline: S splits the
 clip at the playhead, edges trim, a dragged scene moves, R or the bar sets a clip's speed, overlays
 move and stretch (Alt copies, Ctrl skips snapping). The tools beside the video: V selects (a click
 on a caption picks it), Z and M draw a zoom or a mask on the screen itself (the source view, Esc
@@ -66,8 +90,8 @@ the CLI or `suggest`) shows in a note with Undo; a gesture under way is carried 
 what cannot be is kept in `cuttle.json.draft` with "Use mine". `cuttle record` refuses a project
 that is open in the app ("Record again" records it there).
 
-**Recording.** "New recording" on the pill, in the tray, or Ctrl+Shift+Alt+R shows a picker over every
-display: the window under the pointer lights up (the display where there is none), a drag draws a
+**Recording.** "New recording" on the pill, in the tray (the menu bar on macOS), or Ctrl+Shift+Alt+R
+(Ctrl+Shift+Option+R on a Mac) shows a picker over every display: the window under the pointer lights up (the display where there is none), a drag draws a
 region, and the bar sets the camera, the mic and when to stop (your stop, Claude's answer, an idle
 screen). After the countdown only a small HUD remains, which never appears in the video;
 Ctrl+Shift+Alt+S stops and Ctrl+Shift+Alt+M sets a marker. Pause (the HUD, or Ctrl+Shift+Alt+P)
@@ -78,16 +102,18 @@ the project; the earlier one stays restorable ("Back to take 1"). New projects g
 `~/Cuttle/<date time>`.
 
 **First run and settings.** The first start looks for ffmpeg where Windows has it now (also right
-after `winget install Gyan.FFmpeg`: "Check again", no restart) and installs, on request, the
-`cuttle` command (the app's own copy of the CLI, run by the app itself, in
-`%LOCALAPPDATA%\Cuttle\bin`, which goes on your PATH) and the Claude skill. The settings (the tray,
+after `winget install Gyan.FFmpeg`: "Check again", no restart), on macOS also in Homebrew's folders
+and `~/.local/bin` (an app started from the Dock does not see a terminal's PATH), and installs, on
+request, the `cuttle` command (the app's own copy of the CLI, run by the app itself, in
+`%LOCALAPPDATA%\Cuttle\bin`, which goes on your PATH; `~/.local/bin` on macOS) and the Claude skill. The settings (the tray,
 the pill's menu, Ctrl+, in the editor) hold the projects folder, the countdown, the default camera
 and mic, starting at sign-in, motion, and the recent projects (open, rename, show, remove).
 
 ## The CLI
 
 `pnpm cli:install` builds the CLI and puts `cuttle` on PATH: shims in npm's global folder
-(`%APPDATA%\npm` on Windows, `~/.local/bin` elsewhere; `CUTTLE_BIN_DIR` picks another one).
+(`%APPDATA%\npm` on Windows, `~/.local/bin` on macOS, where zsh needs
+`export PATH="$HOME/.local/bin:$PATH"` in `~/.zshrc` once; `CUTTLE_BIN_DIR` picks another one).
 `pnpm cli:uninstall` removes them.
 
 ```bash

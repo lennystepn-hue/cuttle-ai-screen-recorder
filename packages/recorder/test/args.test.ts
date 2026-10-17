@@ -20,6 +20,13 @@ describe('ffmpeg arguments', () => {
     expect(args.slice(-2)).toEqual(['-y', 'screen.mp4']);
   });
 
+  it('puts a prefilter before everything else (macOS crops there)', () => {
+    expect(screenArgs(input, 'screen.mp4', undefined, 'crop=800:500:40:92')).toContain(`[0:v]crop=800:500:40:92,${BT709}[out]`);
+    expect(screenArgs(input, 'screen.mp4', 4, 'crop=800:500:40:92')).toContain(
+      `[0:v]crop=800:500:40:92,split[rec][idle];[idle]scale=320:-2,format=gray,freezedetect=n=-60dB:d=4,nullsink;[rec]${BT709}[out]`,
+    );
+  });
+
   it('adds a freezedetect branch only for untilIdleSeconds', () => {
     expect(screenArgs(input, 'screen.mp4').join(' ')).not.toContain('freezedetect');
     expect(screenArgs(input, 'screen.mp4', 4)).toContain(

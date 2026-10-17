@@ -213,7 +213,7 @@ function MediaChip() {
         onClick={retryMedia}
         title={
           noFfmpeg
-            ? 'Cuttle makes these with ffmpeg, and ffmpeg was not found. Install it (winget install Gyan.FFmpeg), then click to try again. Playback and export work without them.'
+            ? `Cuttle makes these with ffmpeg, and ffmpeg was not found. Install it (${navigator.userAgent.includes('Macintosh') ? 'brew install ffmpeg' : 'winget install Gyan.FFmpeg'}), then click to try again. Playback and export work without them.`
             : `${messages.filter(Boolean).join('\n')}\nPlayback and export work without them. Click to try again.`
         }
       >

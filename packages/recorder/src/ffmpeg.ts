@@ -1,4 +1,5 @@
-import { spawn } from 'node:child_process';
+import { spawn, type ChildProcessByStdio } from 'node:child_process';
+import type { Readable, Writable } from 'node:stream';
 import { RecorderError } from './errors';
 
 /** The ffmpeg executable: `CUTTLE_FFMPEG` when set, otherwise `ffmpeg` from PATH. */
@@ -31,6 +32,8 @@ const PROGRESS_TIME = /time=(\d+):(\d\d):(\d\d(?:\.\d+)?)/;
 export interface CaptureProcess {
   /** ffmpeg's process id (undefined when it could not be started). */
   readonly pid: number | undefined;
+  /** The feeder's process id, when one feeds ffmpeg. */
+  readonly feederPid?: number;
   /** Wall-clock seconds (Unix epoch) of the first captured frame or sample. */
   readonly started: Promise<number>;
   /** Resolves when ffmpeg exits after `stop()`; rejects when it fails or exits on its own. */
@@ -43,9 +46,30 @@ export interface CaptureProcess {
   stop(): Promise<void>;
 }
 
-/** Starts one capture process. `name` labels its errors ("screen", "webcam", "mic"). */
-export function spawnCapture(name: string, args: readonly string[]): CaptureProcess {
-  const child = spawn(ffmpegPath(), ['-hide_banner', ...args], { stdio: ['pipe', 'ignore', 'pipe'], windowsHide: true });
+/** A process that feeds ffmpeg: its stdout becomes ffmpeg's file descriptor 3 (`-i /dev/fd/3`). */
+export interface Feeder {
+  command: string;
+  args: readonly string[];
+}
+
+/** A feeder's exit code that means the OS does not allow the capture (cuttle-capture: screen recording). */
+const FEEDER_DENIED = 3;
+
+/**
+ * Starts one capture process. `name` labels its errors ("screen", "webcam", "mic"). With a `feeder`,
+ * ffmpeg reads that process's output; the feeder ends with ffmpeg, and its own failure is the one reported.
+ */
+export function spawnCapture(name: string, args: readonly string[], feeder?: Feeder): CaptureProcess {
+  const feed = feeder && spawn(feeder.command, [...feeder.args], { stdio: ['ignore', 'pipe', 'pipe'] });
+  const feedTail: string[] = [];
+  feed?.stderr?.setEncoding('utf8');
+  feed?.stderr?.on('data', (chunk: string) => feedTail.push(...chunk.split(/\r?\n/).filter((line) => line.trim() !== '')));
+  feed?.on('error', () => {}); // a feeder that cannot start ends its pipe: ffmpeg reports that
+  const feedExit = feed && new Promise<number | null>((resolve) => feed.once('close', (code) => resolve(code)));
+  // stdin for "q", stderr for the log; a feeder's pipe as file descriptor 3
+  const child = spawn(ffmpegPath(), ['-hide_banner', ...args], { stdio: ['pipe', 'ignore', 'pipe', ...(feed ? [feed.stdout] : [])], windowsHide: true }) as ChildProcessByStdio<Writable, null, Readable>;
+  // ffmpeg holds the pipe now: this process lets go of it, so the feeder sees ffmpeg's end
+  feed?.stdout?.destroy();
   const listeners: ((line: string) => void)[] = [];
   const tail: string[] = [];
   let partial = '';
@@ -94,19 +118,32 @@ export function spawnCapture(name: string, args: readonly string[]): CaptureProc
     child.on('close', (code) => {
       line(partial);
       partial = '';
-      const what = stopping ? 'failed while stopping' : 'stopped unexpectedly';
-      const failure = new RecorderError('capture', `the ${name} capture ${what} (ffmpeg exit code ${code}):\n${tail.join('\n')}`);
-      rejectStarted(failure);
-      // After "q", ffmpeg exits with 0; a kill leaves a readable fragmented file. Any exit before
-      // stop() is a failure, even with code 0: a capture only ends when asked to.
-      if (stopping && (code === 0 || killed)) resolve();
-      else reject(failure);
+      // a feeder still running is done now; one that ended first says why the capture failed
+      if (feed && feed.exitCode === null && feed.signalCode === null) feed.kill();
+      void (feedExit ?? Promise.resolve(null)).then((fed) => {
+        const what = stopping ? 'failed while stopping' : 'stopped unexpectedly';
+        const failure =
+          fed === FEEDER_DENIED
+            ? new RecorderError(
+                'permission-denied',
+                'macOS does not let this app record the screen: allow the app that runs Cuttle (your terminal, or Cuttle) under System Settings > Privacy & Security > Screen & System Audio Recording, then quit and reopen it',
+              )
+            : fed !== null && fed !== 0 && !stopping
+              ? new RecorderError('capture', `the ${name} capture ${what}:\n${feedTail.slice(-STDERR_TAIL_LINES).join('\n') || `its feeder exited with code ${fed}`}`)
+              : new RecorderError('capture', `the ${name} capture ${what} (ffmpeg exit code ${code}):\n${tail.join('\n')}`);
+        rejectStarted(failure);
+        // After "q", ffmpeg exits with 0; a kill leaves a readable fragmented file. Any exit before
+        // stop() is a failure, even with code 0: a capture only ends when asked to.
+        if (stopping && (code === 0 || killed)) resolve();
+        else reject(failure);
+      });
     });
   });
   exited.catch(() => {}); // surfaced through `started`, `stop()` or the caller's own await
 
   return {
     pid: child.pid,
+    ...(feed?.pid !== undefined && { feederPid: feed.pid }),
     started,
     exited,
     onLine: (listener) => void listeners.push(listener),

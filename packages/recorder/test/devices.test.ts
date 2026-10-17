@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { listDevices, parseDshowDevices } from '../src/devices';
+import { listDevices, parseAvfoundationDevices, parseDshowDevices } from '../src/devices';
 import { TEST_DEVICES } from '../src/sources';
 
 describe('parseDshowDevices', () => {
@@ -23,6 +23,26 @@ describe('parseDshowDevices', () => {
   });
 });
 
+describe('parseAvfoundationDevices', () => {
+  it('reads cameras and microphones from the avfoundation listing, leaving out the screens', () => {
+    const log = [
+      '[AVFoundation indev @ 0x151614d20] AVFoundation video devices:',
+      '[AVFoundation indev @ 0x151614d20] [0] FaceTime HD Camera',
+      '[AVFoundation indev @ 0x151614d20] [1] Camera of „iPhone“',
+      '[AVFoundation indev @ 0x151614d20] [2] Capture screen 0',
+      '[AVFoundation indev @ 0x151614d20] [3] Capture screen 1',
+      '[AVFoundation indev @ 0x151614d20] AVFoundation audio devices:',
+      '[AVFoundation indev @ 0x151614d20] [0] MacBook Air Microphone',
+      '[AVFoundation indev @ 0x151614d20] [1] Microphone of „iPhone“',
+      '[in#0 @ 0x151614380] Error opening input: Input/output error',
+    ].join('\n');
+    expect(parseAvfoundationDevices(log)).toEqual({
+      cameras: ['FaceTime HD Camera', 'Camera of „iPhone“'],
+      mics: ['MacBook Air Microphone', 'Microphone of „iPhone“'],
+    });
+  });
+});
+
 describe('listDevices', () => {
   it('lists the test devices as a copy', async () => {
     const devices = await listDevices({ backend: 'test' });
@@ -41,5 +61,16 @@ describe('listDevices', () => {
     expect(monitors.filter((monitor) => monitor.primary).length).toBeLessThanOrEqual(1);
     for (const window of windows) expect(monitors.map((monitor) => monitor.index)).toContain(window.monitor);
     expect(Array.isArray(cameras) && Array.isArray(mics)).toBe(true);
+  });
+
+  it.runIf(process.platform === 'darwin')('lists the displays in avfoundation order with their backing pixels', async () => {
+    const { monitors, windows } = await listDevices({ media: false });
+    expect(monitors.map((monitor) => monitor.index)).toEqual(monitors.map((_, index) => index));
+    for (const monitor of monitors) {
+      expect(monitor.bounds.width).toBeGreaterThan(0);
+      expect(monitor.displayId).toBeTypeOf('number');
+    }
+    expect(monitors.filter((monitor) => monitor.primary)).toHaveLength(1);
+    for (const window of windows) expect(monitors.map((monitor) => monitor.index)).toContain(window.monitor);
   });
 });

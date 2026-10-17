@@ -5,7 +5,9 @@ import type { Motion, RequestArgument, SettingsView, ToolsStatus } from '../../s
 import { bridge } from '../bridge';
 import { CheckIcon, CloseIcon, CopyIcon, FolderIcon, Mark, WarningIcon } from '../icons';
 
-const WINGET = 'winget install Gyan.FFmpeg';
+const MAC = navigator.userAgent.includes('Macintosh');
+/** The command that installs ffmpeg on this OS. */
+const INSTALL_FFMPEG = MAC ? 'brew install ffmpeg' : 'winget install Gyan.FFmpeg';
 
 type Devices = { cameras: string[]; mics: string[]; problem?: string };
 
@@ -58,7 +60,7 @@ export function Settings() {
     // Esc (not while a field or menu has it) and Ctrl+W close the window
     const onKey = (event: globalThis.KeyboardEvent) => {
       const typing = (event.target as HTMLElement | null)?.closest('input, select, textarea');
-      if ((event.key === 'Escape' && !typing && !event.defaultPrevented) || (event.ctrlKey && event.key.toLowerCase() === 'w')) {
+      if ((event.key === 'Escape' && !typing && !event.defaultPrevented) || ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'w')) {
         event.preventDefault();
         window.close();
       }
@@ -141,7 +143,7 @@ export function Settings() {
                 <Segmented<Motion>
                   value={view?.motion}
                   options={[
-                    ['system', 'Like Windows'],
+                    ['system', MAC ? 'Like macOS' : 'Like Windows'],
                     ['reduce', 'Less'],
                     ['full', 'Full'],
                   ]}
@@ -363,14 +365,14 @@ function Winget() {
     <button
       className="command"
       onClick={() => {
-        void bridge.invoke('tools:copy', WINGET);
+        void bridge.invoke('tools:copy', INSTALL_FFMPEG);
         setCopied(true);
         setTimeout(() => setCopied(false), 1600);
       }}
       title="Copy, then paste it in a terminal"
       data-testid="copy-winget"
     >
-      <code>{WINGET}</code>
+      <code>{INSTALL_FFMPEG}</code>
       {copied ? <CheckIcon size={13} /> : <CopyIcon size={13} />}
       <span>{copied ? 'Copied' : 'Copy'}</span>
     </button>

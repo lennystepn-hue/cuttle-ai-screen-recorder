@@ -3,19 +3,20 @@ import { join, relative, resolve, sep } from 'node:path';
 import { MARKERS_VERSION, SEGMENTS_VERSION, TAKE_VERSION, takeTime, type Marker, type MarkersFile, type Segment, type SegmentsFile, type TakeFile } from '@cuttle/project';
 import { SILENCE_SECONDS, freezeEnd, freezeStart, micArgs, screenArgs, silenceStart, webcamArgs } from './args';
 import { claudeTranscriptDir, watchClaude, type ClaudeSignal } from './claude';
-import { devicesFor, windowsFor } from './devices';
+import { cameraModeFor, devicesFor, windowsFor } from './devices';
 import { RecorderError } from './errors';
 import { EventsWriter } from './events';
 import { spawnCapture, type CaptureProcess } from './ffmpeg';
+import { captureHelper, helperArgs, helperInput } from './mac-capture';
 import { startInput, type InputSource } from './input';
 import { joinSegments, mediaInfo, renameWhenFree } from './join';
-import { areaGeometry, checkDevice, micInput, micLatency, platformFor, resolveArea, screenInput, webcamInput, type Platform, type ScreenArea } from './sources';
+import { areaGeometry, checkDevice, micInput, micLatency, platformFor, resolveArea, screenFilter, screenInput, screenLatency, webcamInput, type CameraMode, type Platform, type ScreenArea } from './sources';
 import type { Bounds, RawInput, RecordOptions, Recording, RecorderEvent, StopOptions, StopReason, Take } from './types';
 
 const DEFAULT_COUNTDOWN_SECONDS = 3;
 /** Seconds kept after Claude's final answer, so the video shows it. */
 export const CLAUDE_TAIL_SECONDS = 2;
-/** Seconds a track may take to deliver its first frame or sample (a DirectShow device can be slow to open). */
+/** Seconds a track may take to deliver its first frame or sample (a DirectShow device can be slow to open, macOS may ask for access first). */
 const START_TIMEOUT_SECONDS = 20;
 const FILE_POLL_MS = 200;
 const IDLE_POLL_MS = 200;
@@ -167,10 +168,12 @@ async function prepareAndRecord(options: RecordOptions, control: Control, since:
   const platform = platformFor(options.backend);
   const projectDir = resolve(options.projectDir);
   checkOptions(options, projectDir);
+  if (platform === 'macos') await checkMacAccess(options);
   const devices = await devicesFor(platform, options.webcam !== undefined || options.mic !== undefined);
   let area = resolveArea(options.source, devices);
   if (options.webcam !== undefined) checkDevice('camera', options.webcam, devices);
   if (options.mic !== undefined) checkDevice('mic', options.mic, devices);
+  const cameraMode = options.webcam === undefined ? undefined : await cameraModeFor(platform, options.webcam);
   const reporter = new Reporter(options.onEvent);
   const claude = options.stop.untilClaude === undefined ? undefined : claudeTrigger(options.stop.untilClaude, since);
   try {
@@ -181,7 +184,7 @@ async function prepareAndRecord(options: RecordOptions, control: Control, since:
     if (control.reason !== undefined) throw cancelled('it started');
     // A window is captured where it is when the recording starts, not where it was before the countdown.
     if (options.source.kind === 'window') area = resolveArea(options.source, { ...devices, windows: await windowsFor(platform) });
-    return await recordTake({ options, control, platform, area, projectDir, dir: allocateTake(projectDir), reporter, claude });
+    return await recordTake({ options, control, platform, area, cameraMode, projectDir, dir: allocateTake(projectDir), reporter, claude });
   } finally {
     claude?.stop();
   }
@@ -192,6 +195,8 @@ interface TakeContext {
   control: Control;
   platform: Platform;
   area: ScreenArea;
+  /** The webcam's picture size, where the platform needs to ask for one (macOS). */
+  cameraMode: CameraMode | undefined;
   projectDir: string;
   /** The take folder, already created. */
   dir: string;
@@ -215,7 +220,7 @@ const all = (tracks: Tracks) => [tracks.screen, tracks.webcam, tracks.mic].filte
 /** A track's file in segment `k` of a paused take: `screen.2.mp4`. */
 const numbered = (file: string, k: number) => file.replace(/\.(mp4|m4a)$/, `.${k}.$1`);
 
-async function recordTake({ options, control, platform, area, projectDir, dir, reporter, claude }: TakeContext): Promise<Take> {
+async function recordTake({ options, control, platform, area, cameraMode, projectDir, dir, reporter, claude }: TakeContext): Promise<Take> {
   const path = (file: string) => join(dir, file);
   const rel = (file: string) => relative(projectDir, file).split(sep).join('/');
   /** The take's stretches between pauses; written to segments.json from the first pause on. */
@@ -305,18 +310,26 @@ async function recordTake({ options, control, platform, area, projectDir, dir, r
   };
 
   let micWarned = false;
+  // macOS: ScreenCaptureKit through the helper, which leaves out the app's own windows; avfoundation without it
+  const helper = platform === 'macos' ? captureHelper() : undefined;
+  if (platform === 'macos' && !helper && (options.hideWindowsOf?.length ?? 0) > 0) {
+    reporter.warn("Cuttle's own windows show in this take: the capture helper is missing (it is built by pnpm install with Xcode's command line tools)");
+  }
   /** The capture processes of segment `k` (the first writes the take's own file names). */
   const spawnTracks = (k: number): Tracks => {
     const file = (name: string) => path(k === 1 ? name : numbered(name, k));
-    const screen = spawnCapture('screen', screenArgs(screenInput(platform, area, options.drawMouse ?? false), file(FILES.screen), options.stop.untilIdleSeconds));
-    const webcam = options.webcam === undefined ? undefined : spawnCapture('webcam', webcamArgs(webcamInput(platform, options.webcam), file(FILES.webcam)));
+    const drawMouse = options.drawMouse ?? false;
+    const screen = helper
+      ? spawnCapture('screen', screenArgs(helperInput(area), file(FILES.screen), options.stop.untilIdleSeconds), { command: helper, args: helperArgs(area, drawMouse, options.hideWindowsOf ?? []) })
+      : spawnCapture('screen', screenArgs(screenInput(platform, area, drawMouse), file(FILES.screen), options.stop.untilIdleSeconds, screenFilter(platform, area)));
+    const webcam = options.webcam === undefined ? undefined : spawnCapture('webcam', webcamArgs(webcamInput(platform, options.webcam, cameraMode), file(FILES.webcam)));
     const mic = options.mic === undefined ? undefined : spawnCapture('mic', micArgs(micInput(platform, options.mic), file(FILES.mic)));
     // Rejects with the first capture that fails; `exited` only resolves after stop() was called.
     const failed: Promise<never> = Promise.race([screen, webcam, mic].filter((capture) => capture !== undefined).map((capture) => capture.exited)).then(() => new Promise<never>(() => {}));
     failed.catch(() => {});
     const tracks: Tracks = { screen, ...(webcam && { webcam }), ...(mic && { mic }), failed, frozen: false };
     captures.push(...all(tracks));
-    reporter.emit({ type: 'processes', pids: all(tracks).map((capture) => capture.pid).filter((pid): pid is number => pid !== undefined) });
+    reporter.emit({ type: 'processes', pids: all(tracks).flatMap((capture) => [capture.pid, capture.feederPid]).filter((pid): pid is number => pid !== undefined) });
     // A freeze that starts at 0 means the screen has not changed yet: untilIdleSeconds waits for one
     // after a change, and for the input to rest as long (someone pointing at a still chart is not idle).
     screen.onLine((line) => {
@@ -328,7 +341,8 @@ async function recordTake({ options, control, platform, area, projectDir, dir, r
       const start = silenceStart(line);
       if (start === undefined || start >= SILENCE_SECONDS || micWarned) return;
       micWarned = true;
-      reporter.warn(`the microphone "${options.mic}" records silence: it may be muted, or blocked for desktop apps (Windows: Settings > Privacy & security > Microphone)`);
+      const settings = platform === 'macos' ? 'macOS: System Settings > Privacy & Security > Microphone' : 'Windows: Settings > Privacy & security > Microphone';
+      reporter.warn(`the microphone "${options.mic}" records silence: it may be muted, or blocked for desktop apps (${settings})`);
     });
     return tracks;
   };
@@ -340,8 +354,10 @@ async function recordTake({ options, control, platform, area, projectDir, dir, r
    */
   const startSegment = async (k: number): Promise<{ tracks: Tracks; segment: Segment } | { tracks: Tracks; segment: undefined }> => {
     const tracks = spawnTracks(k);
-    const screenAt = await startedWithin(Promise.race([tracks.screen.started, tracks.failed, control.stopped().then(() => undefined)]), 'screen');
-    if (screenAt === undefined) return { tracks, segment: undefined };
+    const stamped = await startedWithin(Promise.race([tracks.screen.started, tracks.failed, control.stopped().then(() => undefined)]), 'screen');
+    if (stamped === undefined) return { tracks, segment: undefined };
+    // the first frame shows the screen as it was a moment before ffmpeg stamped it
+    const screenAt = stamped - screenLatency(platform, helper !== undefined);
     const starts: { webcam?: number; mic?: number } = {};
     void tracks.webcam?.started.then((at) => (starts.webcam = at), () => {});
     void tracks.mic?.started.then((at) => (starts.mic = at), () => {});
@@ -387,6 +403,7 @@ async function recordTake({ options, control, platform, area, projectDir, dir, r
       },
       (action) => (action === 'stop' ? control.request('hotkey') : action === 'pause' ? control.toggle() : control.marker()),
     );
+    if (input.warning) reporter.warn(input.warning);
 
     // The screen track's start is the take's clock: input, markers and maxSeconds count from it.
     const first = await startSegment(1);
@@ -568,6 +585,25 @@ function startTriggers(
     timer(() => existsSync(file) && control.request('file'), FILE_POLL_MS, true);
   }
   if (stop.untilIdleSeconds !== undefined) timer(() => idle() && control.request('idle'), IDLE_POLL_MS, true);
+}
+
+/**
+ * macOS asks the app the recorder runs in (the terminal, or Cuttle) for the screen, the camera and the
+ * microphone. Screen recording that is not allowed delivers no frame at all, so it fails here, with
+ * macOS's prompt shown the first time; a camera or a mic that was refused fails the same way. One not
+ * asked for yet is left to macOS, which asks when the capture opens it.
+ */
+async function checkMacAccess(options: RecordOptions): Promise<void> {
+  const { loadDarwin } = await import('./darwin');
+  const mac = await loadDarwin();
+  const where = (pane: string) => `allow the app that runs Cuttle (your terminal, or Cuttle) under System Settings > Privacy & Security > ${pane}`;
+  if (!mac.screenAccess()) {
+    mac.requestScreenAccess();
+    throw new RecorderError('permission-denied', `macOS does not let this app record the screen: ${where('Screen & System Audio Recording')}, then quit and reopen it`);
+  }
+  const refused = (kind: 'camera' | 'mic') => ['denied', 'restricted'].includes(mac.mediaAccess(kind));
+  if (options.webcam !== undefined && refused('camera')) throw new RecorderError('permission-denied', `macOS does not let this app use the camera: ${where('Camera')}`);
+  if (options.mic !== undefined && refused('mic')) throw new RecorderError('permission-denied', `macOS does not let this app use the microphone: ${where('Microphone')}`);
 }
 
 /** `promise`, or a `capture` failure when `track` has not started within START_TIMEOUT_SECONDS. */

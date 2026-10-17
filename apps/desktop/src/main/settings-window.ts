@@ -13,7 +13,7 @@ import { APP_ORIGIN, assetPath, bundlePath, serveApp } from './protocols';
 import { keyOf, listCamerasAndMics, recordingRuns } from './recording';
 import { loadSettings, sameDir, settingsView, updateSettings } from './settings';
 import { installTools, skillFolder, toolsStatus } from './tools';
-import { guard, lockDown, openEditorOrSay, showPill, webPreferences } from './windows';
+import { bringToFront, guard, lockDown, openEditorOrSay, showPill, titleBar, webPreferences } from './windows';
 
 const BACKGROUND = '#0c0c0f';
 /** As the editor's, so Windows' buttons are the same in both. */
@@ -51,8 +51,7 @@ async function viewNow(): Promise<SettingsView> {
 /** Shows the settings window (`welcome`: the first run), or brings it forward. */
 export async function openSettings(options: { welcome?: boolean } = {}): Promise<BrowserWindow> {
   if (current && !current.isDestroyed()) {
-    if (!HIDDEN) current.show();
-    current.focus();
+    bringToFront(current);
     return current;
   }
   const ses = session.fromPartition('settings');
@@ -65,9 +64,7 @@ export async function openSettings(options: { welcome?: boolean } = {}): Promise
     show: false,
     backgroundColor: BACKGROUND,
     title: options.welcome ? 'Welcome to Cuttle' : 'Cuttle settings',
-    // the page draws the title bar; Windows draws its buttons over it, in the app's colours
-    titleBarStyle: 'hidden',
-    titleBarOverlay: { color: BACKGROUND, symbolColor: '#9a9aa5', height: TITLE_BAR_HEIGHT },
+    ...titleBar(TITLE_BAR_HEIGHT),
     icon: assetPath('icon.png'),
     maximizable: false,
     fullscreenable: false,
@@ -156,9 +153,7 @@ export async function openSettings(options: { welcome?: boolean } = {}): Promise
   });
   // which projects are open changes while the window is away
   window.on('focus', () => void viewNow().then(changed));
-  window.once('ready-to-show', () => {
-    if (!HIDDEN) window.show();
-  });
+  window.once('ready-to-show', () => bringToFront(window));
   current = window;
   await window.loadURL(`${APP_ORIGIN}/settings.html${options.welcome ? '#welcome' : ''}`);
   return window;

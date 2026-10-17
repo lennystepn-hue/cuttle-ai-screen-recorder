@@ -40,12 +40,14 @@ export const SILENCE_SECONDS = 1;
 /**
  * The screen track. With `idleSeconds`, a small grey copy of the picture runs through
  * `freezedetect`, which logs `lavfi.freezedetect.freeze_start` once nothing changed for that long.
+ * `prefilter` comes first (macOS crops the captured display to a region or a window there).
  */
-export function screenArgs(input: readonly string[], file: string, idleSeconds?: number): string[] {
+export function screenArgs(input: readonly string[], file: string, idleSeconds?: number, prefilter?: string): string[] {
+  const source = prefilter === undefined ? '[0:v]' : `[0:v]${prefilter},`;
   const graph =
     idleSeconds === undefined
-      ? `[0:v]${VIDEO_CHAIN}[out]`
-      : `[0:v]split[rec][idle];[idle]scale=320:-2,format=gray,freezedetect=n=${IDLE_NOISE}:d=${idleSeconds},nullsink;[rec]${VIDEO_CHAIN}[out]`;
+      ? `${source}${VIDEO_CHAIN}[out]`
+      : `${source}split[rec][idle];[idle]scale=320:-2,format=gray,freezedetect=n=${IDLE_NOISE}:d=${idleSeconds},nullsink;[rec]${VIDEO_CHAIN}[out]`;
   return [...WALLCLOCK, ...input, '-filter_complex', graph, '-map', '[out]', ...VIDEO_CODEC, ...FRAGMENTED_MP4, '-y', file];
 }
 

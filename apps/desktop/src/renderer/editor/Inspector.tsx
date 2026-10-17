@@ -119,7 +119,7 @@ function TextInput({ value, onCommit, multiline, placeholder, testId }: { value:
     onBlur: commit,
     onKeyDown: (event: KeyboardEvent) => {
       event.stopPropagation();
-      if (event.key === 'Enter' && (!multiline || event.ctrlKey)) {
+      if (event.key === 'Enter' && (!multiline || event.ctrlKey || event.metaKey)) {
         event.preventDefault();
         commit();
       }

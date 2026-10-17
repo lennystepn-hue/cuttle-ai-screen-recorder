@@ -1,5 +1,5 @@
-// Input sources: the global mouse and keyboard hook with the pointer shape (Windows), or synthetic
-// input for the test backend. Both deliver wall-clock seconds and desktop pixels.
+// Input sources: the global mouse and keyboard hook with the pointer shape (Windows), an event tap
+// (macOS), or synthetic input for the test backend. All deliver wall-clock seconds and desktop pixels.
 import type { Platform } from './sources';
 import type { HotkeyAction, RawInput } from './types';
 
@@ -8,6 +8,8 @@ export interface InputSource {
   initial(time: number): RawInput[];
   /** Stops delivering input; calling it again does nothing. */
   stop(): void;
+  /** Why input is not logged (macOS without the Input Monitoring permission): the take warns. */
+  warning?: string;
 }
 
 export type InputSink = (input: RawInput) => void;
@@ -57,7 +59,8 @@ export function wheelInput(event: { x: number; y: number; rotation: number; dire
 }
 
 export async function startInput(platform: Platform, onInput: InputSink, onHotkey: HotkeySink): Promise<InputSource> {
-  return platform === 'test' ? startTestInput(onInput) : startWindowsInput(onInput, onHotkey);
+  if (platform === 'test') return startTestInput(onInput);
+  return platform === 'macos' ? startMacInput(onInput, onHotkey) : startWindowsInput(onInput, onHotkey);
 }
 
 /** How often the pointer shape is read (Windows has no event for it). */
@@ -131,6 +134,42 @@ async function startWindowsInput(onInput: InputSink, onHotkey: HotkeySink): Prom
       detach();
       if (--hookUsers === 0) uIOhook.stop();
     },
+  };
+}
+
+/** macOS virtual key codes of the hotkeys' letters (kVK_ANSI_S, _M, _P). */
+const MAC_HOTKEYS = new Map<number, HotkeyAction>([[0x01, 'stop'], [0x2e, 'marker'], [0x23, 'pause']]);
+const WHERE_INPUT_MONITORING = 'allow the app that runs Cuttle (your terminal, or Cuttle) under System Settings > Privacy & Security > Input Monitoring';
+
+/**
+ * macOS: an event tap of darwin.ts (see there why not uiohook) in desktop pixels; the pointer's shape
+ * stays the arrow. Without Input Monitoring only the mouse is logged (no key counts, no hotkeys).
+ */
+async function startMacInput(onInput: InputSink, onHotkey: HotkeySink): Promise<InputSource> {
+  const { loadDarwin } = await import('./darwin');
+  const mac = await loadDarwin();
+  const keyboard = mac.keyboardAccess();
+  // modifier keys come as flag changes, not as key presses: none to leave out
+  const keys = keyHandler(new Set(), MAC_HOTKEYS, onInput, onHotkey);
+  const tap = mac.watchInput(keyboard, (event) => {
+    const time = now();
+    if (event.type === 'key') {
+      const key = { keycode: event.keycode, ctrlKey: event.ctrl, shiftKey: event.shift, altKey: event.alt };
+      return event.down ? keys.down(key) : keys.up(key);
+    }
+    if (event.type === 'move') return onInput({ type: 'move', time, x: event.x, y: event.y });
+    if (event.type === 'down') return onInput({ type: 'click', time, x: event.x, y: event.y, button: event.button });
+    onInput({ type: 'scroll', time, x: event.x, y: event.y, dx: event.dx, dy: event.dy });
+  });
+  const warning = !tap
+    ? `the mouse and the keyboard are not logged (no clicks, no zooms on them, no hotkeys): ${WHERE_INPUT_MONITORING}`
+    : !keyboard
+      ? `the keyboard is not logged (no typing activity, no hotkeys): ${WHERE_INPUT_MONITORING}`
+      : undefined;
+  return {
+    initial: (time) => [{ type: 'move', time, ...mac.cursorPosition() }, { type: 'shape', time, shape: 'arrow' }],
+    stop: () => tap?.stop(),
+    ...(warning && { warning }),
   };
 }
 

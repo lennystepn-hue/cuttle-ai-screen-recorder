@@ -19,8 +19,10 @@ cuttle --version
 ```
 
 If the command is missing, {{INSTALL_CLI}}, and to open a new terminal. Recording and
-rendering also need ffmpeg on PATH (Windows: `winget install Gyan.FFmpeg`). Recording works on
-Windows for now.
+rendering also need ffmpeg on PATH (Windows: `winget install Gyan.FFmpeg`, macOS:
+`brew install ffmpeg`). Recording works on Windows and macOS. macOS asks the app that runs
+`cuttle` (the terminal) for Screen Recording, Microphone and Camera, and the input log needs Input
+Monitoring: a `permission-denied` error or an input warning names the setting to ask the user for.
 
 Give the project folder as an absolute path, `-C "<project>"`, for example
 `-C "$HOME/cuttle-demos/<name>"` (a `~` inside quotes is not expanded). Use `--json` for every
@@ -70,7 +72,8 @@ cuttle -C "<project>" record --monitor 0 --until-file "<project>/stop" --until-c
 - `--until-idle 5`: also ends once the screen and the input have rested 5 s.
 - `--max <seconds>` is the safety net (it counts recorded time, not pauses). The user can also stop
   with Ctrl+Shift+Alt+S, add a marker with Ctrl+Shift+Alt+M and pause or resume with
-  Ctrl+Shift+Alt+P (nothing is recorded while paused; the pieces are joined at the stop). Other
+  Ctrl+Shift+Alt+P (Alt is Option on a Mac; nothing is recorded while paused; the pieces are
+  joined at the stop). Other
   sources: `--window "<part of the title>"`, `--region x,y,w,h` (pixels of `--monitor`).
   `--countdown 3` is the default.
 - A project open in the Cuttle app is refused (`project-open`): the app records it itself

@@ -20,6 +20,7 @@ import { cutIfPending, recut, startPicking, takesBusy, undoRestart } from './rec
 import { deletableTakes, sizeText, trashName } from '../shared/takes';
 import { addRecent, loadSettings, motionSetting, updateSettings } from './settings';
 import { openSettings } from './settings-window';
+import { maskPrivacy } from './privacy';
 import { transcribeProject } from './speech';
 
 const BACKGROUND = '#0c0c0f';
@@ -216,6 +217,7 @@ async function editorWindow(dir: string, key: string, file: ProjectFile, release
     'project:takes': () => takesMenu(dir, window),
     'project:cut': () => void recut(dir),
     'project:transcribe': () => transcribeProject(dir, true),
+    'project:read-screen': () => maskPrivacy(dir, true),
     'project:undo-restart': (discarded) => void undoRestart(dir, discarded),
     'app:settings': () => void openSettings(),
     'project:save': ({ raw, base }) => editor.watch.save(raw, base),
@@ -296,6 +298,15 @@ export async function expectSuggest(dir: string, expecting: boolean): Promise<vo
 export async function expectSpeech(dir: string, expecting: boolean): Promise<void> {
   const editor = await editorOf(dir);
   if (editor) editor.watch.origin = expecting ? 'speech' : 'outside';
+}
+
+/** The next outside change of the project comes from the app's own privacy masks ("Cuttle's privacy masks"). */
+export async function expectPrivacy(dir: string, expecting: boolean): Promise<void> {
+  const editor = await editorOf(dir);
+  if (!editor) return;
+  // the cut's write may still wait for the watcher's look: it keeps its own origin
+  if (expecting) await editor.watch.settle();
+  editor.watch.origin = expecting ? 'privacy' : 'outside';
 }
 
 /** The window of a project's open editor, if there is one. */

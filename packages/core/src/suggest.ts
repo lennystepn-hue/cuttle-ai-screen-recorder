@@ -66,8 +66,8 @@ export interface SuggestResult {
   cuts?: RawCut[];
   /** Where the speech came from: the transcript, the mic's loudness, or none; and the cuts made for it. */
   speech: { from: 'transcript' | 'mic' | 'none'; fillers: number; pauses: number; retakes: number };
-  /** Whether the screen's text was there to mask from, and how many privacy masks were made. */
-  privacy: { read: boolean; masks: number };
+  /** Whether the screen's text was there to mask from, and how many privacy and notification masks were made. */
+  privacy: { read: boolean; masks: number; notifications: number };
   notes: string[];
   /** Where the markers came from. */
   markers: { from: 'take' | 'transcript' | 'none'; count: number };
@@ -250,19 +250,17 @@ export async function suggestProject(projectDir: string, args: SuggestOptions = 
   }
 
   // The privacy masks: what the screen showed that is private, from its text (read inside the new
-  // clips where it was not yet) and the person's words.
+  // clips where it was not yet) and the person's words; and the notifications while they were open.
   const words = [...new Set([...file.project.privacy.words, ...(args.maskWords ?? []).map((word) => word.trim()).filter(Boolean)])];
   let masks: RawMask[] | undefined;
-  let privacy = { read: false, masks: 0 };
+  let privacy = { read: false, masks: 0, notifications: 0 };
   if (args.privacy !== false && file.project.autoEdits.privacy) {
     const text = await screenTextFor(file.dir, screen, sources.screenText, clips, screenInfo, args, notes);
-    if (text) {
-      const result = withPrivacyMasks(file.raw, file.project, text.frames, screenInfo, words, taken);
-      notes.push(...result.notes);
-      masks = result.masks;
-      privacy = { read: true, masks: result.made };
-      if (text.made) file.raw.sources = { ...(file.raw.sources as object), screenText: text.made };
-    }
+    const result = withPrivacyMasks(file.raw, file.project, { ...(text && { frames: text.frames }), events, screen: screenInfo, words }, taken);
+    notes.push(...result.notes);
+    masks = result.masks;
+    privacy = { read: text !== undefined, masks: result.made, notifications: result.notifications };
+    if (text?.made) file.raw.sources = { ...(file.raw.sources as object), screenText: text.made };
   }
 
   const allZooms = [...kept, ...zooms].sort((a, b) => a.at - b.at);

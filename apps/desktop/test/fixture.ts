@@ -34,6 +34,25 @@ export function makeSpokenFixture(dir: string, mic: string): void {
   writeFileSync(join(dir, 'cuttle.json'), `${JSON.stringify(project, null, 2)}\n`);
 }
 
+/**
+ * A take whose screen shows an email address (drawn with Windows' Consolas: the app reads it with
+ * Windows' OCR), with a notification open from 3 to 5 s in its bottom right corner. One clip over
+ * the whole take, no mic.
+ */
+export function makePrivateFixture(dir: string): void {
+  const take = join(dir, 'takes', '1');
+  mkdirSync(take, { recursive: true });
+  // the drive's colon escaped for the option and again for the graph
+  const text = (value: string, y: number) => `drawtext=fontfile=C\\\\:/Windows/Fonts/consola.ttf:fontsize=28:fontcolor=white:x=80:y=${y}:text='${value}'`;
+  const graph = ['color=c=0x1e1e1e:s=1280x720:r=30:d=8', text('Signed in as lena.mueller@example.com', 80), text('npm run build', 300)].join(',');
+  ffmpeg(['-f', 'lavfi', '-i', graph, '-c:v', 'libx264', '-preset', 'ultrafast', '-g', '30', '-pix_fmt', 'yuv420p', join(take, 'screen.mp4')]);
+  const toast = (t: number, open: boolean) => ({ t, type: 'window', id: 7, kind: 'notification', rect: [880, 600, 380, 110], open });
+  writeFileSync(join(take, 'events.jsonl'), [toast(3, true), toast(5, false)].map((event) => `${JSON.stringify(event)}\n`).join(''));
+  writeFileSync(join(take, 'take.json'), JSON.stringify({ version: 1, tracks: { screen: { file: 'screen.mp4', start: 100 } } }));
+  const project = { version: 1, output: FIXTURE_OUTPUT, sources: { screen: 'takes/1/screen.mp4', events: 'takes/1/events.jsonl' }, scenes: [{ type: 'clip', id: 's1', from: 0, to: 8 }] };
+  writeFileSync(join(dir, 'cuttle.json'), `${JSON.stringify(project, null, 2)}\n`);
+}
+
 export function makeFixture(dir: string): void {
   const take = join(dir, 'takes', '1');
   mkdirSync(take, { recursive: true });

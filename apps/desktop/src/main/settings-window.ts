@@ -89,6 +89,9 @@ export async function openSettings(options: { welcome?: boolean } = {}): Promise
         if (change.motion !== undefined) settings.motion = change.motion;
         if (change.speechModel !== undefined) settings.speech.model = change.speechModel;
         if (change.speechLanguage !== undefined) settings.speech.language = change.speechLanguage;
+        if (change.privacyRead !== undefined) settings.privacy.read = change.privacyRead;
+        // each word once, as it was first written
+        if (change.privacyWords !== undefined) settings.privacy.words = change.privacyWords.filter((word, k, all) => all.findIndex((other) => other.toLowerCase() === word.toLowerCase()) === k);
       });
       if (change.launchAtLogin !== undefined) applyLoginItem(change.launchAtLogin);
       if (change.motion !== undefined) broadcastMotion(change.motion);

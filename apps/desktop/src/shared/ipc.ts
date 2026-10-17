@@ -111,8 +111,8 @@ export interface ProjectStatus {
   text?: string;
   /** `working`: cutting the take or transcribing it (a spinner); `failed`: it could not (Try again); `recording`: a new take records (the player pauses). */
   state?: 'working' | 'failed' | 'recording';
-  /** What Try again does after a failure: cut the take again (the default), or transcribe it again. */
-  retry?: 'cut' | 'speech';
+  /** What Try again does after a failure: cut the take again (the default), transcribe it again, or read the screen again. */
+  retry?: 'cut' | 'speech' | 'privacy';
 }
 
 /** The speech models (as @cuttle/core's MODEL_NAMES; a contract test keeps them alike). */
@@ -151,6 +151,10 @@ export interface ToolsStatus {
   pathLine?: string;
 }
 
+/** The words always masked (the settings' "Always mask"): how long each, and how many. */
+export const PRIVACY_WORD_MAX = 120;
+export const PRIVACY_WORDS_MAX = 50;
+
 /** How motion is set: the OS's "reduce motion", or always on, or always off. */
 export const MOTIONS = ['system', 'reduce', 'full'] as const;
 export type Motion = (typeof MOTIONS)[number];
@@ -166,6 +170,8 @@ export interface SettingsView {
   motion: Motion;
   /** Transcribing a take after its cut: the model (or off) and the language spoken. */
   speech: { model: SpeechModelName | 'off'; language: SpeechLanguage };
+  /** After a take's cut: read the screen's text to mask what it showed, and the words always masked. */
+  privacy: { read: boolean; words: string[] };
   /** `open`: the project is open in Cuttle, here (`here`) or on the computer named. */
   recent: { dir: string; name: string; opened: number; open?: string }[];
   version: string;
@@ -259,6 +265,8 @@ export const REQUESTS = {
     motion: z.enum(MOTIONS).optional(),
     speechModel: z.enum(['off', ...SPEECH_MODEL_NAMES]).optional(),
     speechLanguage: z.enum(SPEECH_LANGUAGES).optional(),
+    privacyRead: z.boolean().optional(),
+    privacyWords: z.array(z.string().trim().min(1).max(PRIVACY_WORD_MAX)).max(PRIVACY_WORDS_MAX).optional(),
   }),
   /** Asks for the projects folder (a folder dialog) and keeps it. */
   'settings:choose-folder': z.undefined(),
@@ -284,6 +292,8 @@ export const REQUESTS = {
   'speech:download': z.enum(SPEECH_MODEL_NAMES),
   'speech:cancel': z.undefined(),
   'speech:remove': z.enum(SPEECH_MODEL_NAMES),
+  /** Reads the screen's text of the project's take again and masks what it showed (the Auto tab, Try again). */
+  'project:read-screen': z.undefined(),
 } as const;
 
 export type Request = keyof typeof REQUESTS;
@@ -355,6 +365,8 @@ export interface Responses {
   'speech:download': SpeechStatus;
   'speech:cancel': void;
   'speech:remove': SpeechStatus;
+  /** Started (the title bar shows it), or why not. */
+  'project:read-screen': { started: true } | { problem: string };
 }
 
 /** A version of cuttle.json: as written, and the SHA-256 of its bytes. */
@@ -365,13 +377,14 @@ export interface ProjectVersion {
 
 /**
  * cuttle.json changed on disk, not by this window: a new version (`origin`: `suggest` when the app's
- * own suggest cut the take, `speech` when the app cut its filler words and pauses, else another
+ * own suggest cut the take, `speech` when the app cut its filler words and pauses, `privacy` when it
+ * masked what the screen showed, else another
  * program, Claude or the CLI), or one that does not parse.
  */
 export type ProjectFileEvent = (ProjectVersion & { origin: ChangeOrigin }) | { issues: string[] };
 
-/** Who changed cuttle.json outside the editor: another program, or the app's own cut or speech edits. */
-export type ChangeOrigin = 'outside' | 'suggest' | 'speech';
+/** Who changed cuttle.json outside the editor: another program, or the app's own cut, speech edits or privacy masks. */
+export type ChangeOrigin = 'outside' | 'suggest' | 'speech' | 'privacy';
 
 /** Events (main → window). */
 export interface Events {

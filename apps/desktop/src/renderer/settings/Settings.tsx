@@ -5,6 +5,7 @@ import type { Motion, RequestArgument, SettingsView, SpeechLanguage, SpeechModel
 import { bridge } from '../bridge';
 import { CheckIcon, CloseIcon, CopyIcon, FolderIcon, Mark, WarningIcon } from '../icons';
 import { Select } from '../Select';
+import { PrivacySettings } from './PrivacySettings';
 
 const MAC = navigator.userAgent.includes('Macintosh');
 /** The command that installs ffmpeg on this OS. */
@@ -123,6 +124,10 @@ export function Settings() {
               <SpeechSettings view={view} change={change} />
             </Section>
 
+            <Section title="Privacy">
+              <PrivacySettings view={view} change={change} />
+            </Section>
+
             <Section title="To record">
               <FfmpegLine tools={tools} setTools={setTools} />
             </Section>
@@ -179,7 +184,7 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
   );
 }
 
-function Row({ label, hint, stacked, children }: { label: string; hint?: ReactNode; stacked?: boolean; children: ReactNode }) {
+export function Row({ label, hint, stacked, children }: { label: string; hint?: ReactNode; stacked?: boolean; children: ReactNode }) {
   return (
     <div className={`row${stacked ? ' stacked' : ''}`}>
       <div className="row-text">

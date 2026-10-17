@@ -44,7 +44,8 @@ permission, 3 render, 130 cancelled.
   the user before `cuttle models download small` (488 MB, once). Tell them that a slip needs no
   new take: press Ctrl+Shift+Alt+X (or say "nochmal", "again") and do the bit again.
 - Ask the user to make text large (terminal font 16 px or more, or zoom the browser), to close
-  private windows and notifications, and to use a clean folder or browser profile.
+  private windows, to switch on Do not disturb (Cuttle masks the notifications it sees, but none is
+  better), and to use a clean folder or browser profile.
 - The project folder: a new one per demo (`record` creates it).
 
 ## 2. Record
@@ -149,8 +150,9 @@ stills in `preview/`; add `-o "<folder>"` to keep a set.
 
 Then refine `cuttle.json` ([project.md](project.md)) and preview again:
 
-- **Privacy first.** On Windows `suggest` reads the screen's text (Windows' own OCR, on this
-  computer) and masks what it finds: email addresses, keys and tokens, the value of a `…KEY=`,
+- **Privacy first.** `suggest` masks each notification (a toast, the notification centre) while it
+  was open (`auto: "notification"`). On Windows it also reads the screen's text (Windows' own OCR,
+  on this computer) and masks what it finds: email addresses, keys and tokens, the value of a `…KEY=`,
   `…TOKEN=` or `password:` line, IBANs, card and phone numbers (masks tagged `auto: "privacy"`,
   following text that scrolls). Pass the user's name and address once with
   `--mask "<word>"` (kept in cuttle.json). This is a help, not a guarantee: the OCR misses small

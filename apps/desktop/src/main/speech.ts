@@ -88,6 +88,14 @@ export async function removeSpeechModel(name: SpeechModelName): Promise<SpeechSt
 
 /** Projects being transcribed now (their folders, as given). */
 const transcribing = new Set<string>();
+/** Who waits for a project's speech step to end (its privacy step comes after it: one write at a time, each its own step to undo). */
+const waiting = new Map<string, (() => void)[]>();
+
+/** Resolves once the project's speech step, if one runs, has ended. */
+export function speechDone(dir: string): Promise<void> {
+  if (!transcribing.has(dir)) return Promise.resolve();
+  return new Promise((resolve) => waiting.set(dir, [...(waiting.get(dir) ?? []), resolve]));
+}
 
 /**
  * Transcribes the project's mic after its cut and cuts its retakes, filler words and pauses, when
@@ -131,6 +139,8 @@ export async function transcribeProject(dir: string, asked = false): Promise<{ s
       await setEditorStatus(dir, cancelled ? undefined : { text: `The speech could not be transcribed: ${(error as Error).message.split('\n')[0]}`, state: 'failed', retry: 'speech' });
     } finally {
       transcribing.delete(dir);
+      for (const resolve of waiting.get(dir) ?? []) resolve();
+      waiting.delete(dir);
     }
   })();
   return { started: true };

@@ -173,9 +173,11 @@ const MAC_HOTKEYS = new Map<number, HotkeyAction>([[0x01, 'stop'], [0x2e, 'marke
 const WHERE_INPUT_MONITORING = 'allow the app that runs Cuttle (your terminal, or Cuttle) under System Settings > Privacy & Security > Input Monitoring';
 
 /**
- * macOS: an event tap of darwin.ts (see there why not uiohook) in desktop pixels; the pointer's shape
- * stays the arrow, and there is no caret yet (zooms on typing follow what the screen changes). Without
- * Input Monitoring only the mouse is logged (no key counts, no hotkeys).
+ * macOS: an event tap of darwin.ts (see there why not uiohook) in desktop pixels, each event at its
+ * own timestamp (a caret read or a busy moment of this thread does not shift it); the pointer's
+ * shape stays the arrow. Without Input Monitoring only the mouse is logged (no key counts, no
+ * hotkeys, no caret); the caret also needs the Accessibility permission (without it, zooms on
+ * typing follow what the screen changes).
  */
 async function startMacInput(onInput: InputSink, onHotkey: HotkeySink): Promise<InputSource> {
   const { loadDarwin } = await import('./darwin');
@@ -183,10 +185,12 @@ async function startMacInput(onInput: InputSink, onHotkey: HotkeySink): Promise<
   const keyboard = mac.keyboardAccess();
   // modifier keys come as flag changes, not as key presses: none to leave out
   const keys = keyHandler(new Set(), MAC_HOTKEYS, onInput, onHotkey);
+  let typedAt = -Infinity;
   const tap = mac.watchInput(keyboard, (event) => {
-    const time = now();
+    const { time } = event;
     if (event.type === 'key') {
       const key = { keycode: event.keycode, ctrlKey: event.ctrl, shiftKey: event.shift, altKey: event.alt };
+      if (event.down) typedAt = time;
       return event.down ? keys.down(key) : keys.up(key);
     }
     if (event.type === 'move') return onInput({ type: 'move', time, x: event.x, y: event.y });
@@ -198,9 +202,15 @@ async function startMacInput(onInput: InputSink, onHotkey: HotkeySink): Promise<
     : !keyboard
       ? `the keyboard is not logged (no typing activity, no hotkeys): ${WHERE_INPUT_MONITORING}`
       : undefined;
+  // the caret, read as on Windows: a few times a second while keys come
+  const caret = caretWatch(() => mac.caret(), onInput);
+  const poll = tap && keyboard ? setInterval(() => caret(now(), typedAt), SHAPE_POLL_MS) : undefined;
   return {
     initial: (time) => [{ type: 'move', time, ...mac.cursorPosition() }, { type: 'shape', time, shape: 'arrow' }],
-    stop: () => tap?.stop(),
+    stop: () => {
+      clearInterval(poll);
+      tap?.stop();
+    },
     ...(warning && { warning }),
   };
 }

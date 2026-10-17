@@ -40,8 +40,10 @@ koffi (the OS APIs) for both, uiohook-napi (the input hook) for Windows.
 **macOS permissions.** macOS asks the app the recorder runs in: the terminal for the `cuttle`
 command, Cuttle (or "Electron" when it runs from this repository) for the app. Allow it under
 System Settings > Privacy & Security: *Screen & System Audio Recording* (needed; quit and reopen
-the app afterwards), *Microphone* and *Camera* (when a take uses them), and *Input Monitoring*
-(the clicks, scrolls, key counts and hotkeys; without it a take has no input log and warns).
+the app afterwards), *Microphone* and *Camera* (when a take uses them), *Input Monitoring*
+(the clicks, scrolls, key counts and hotkeys; without it a take has no input log and warns), and
+*Accessibility* (where text is typed, for zooms that follow typing; without it they follow what
+the screen changes).
 
 ## Development
 

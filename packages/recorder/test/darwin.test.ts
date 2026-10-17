@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { displayOf, pixelMapper } from '../src/darwin';
+import { displayOf, eventWallTime, pixelMapper } from '../src/darwin';
 
 // A 1440×900 point Retina display (2880×1800 pixels) with a 1920×1080 display at 1× to its right,
 // and one at 2× above it.
@@ -34,5 +34,25 @@ describe('displayOf', () => {
     expect(displayOf([retina, external], { x: 1300, y: 200, width: 400, height: 300 })).toBe(external);
     expect(displayOf([retina, external], { x: 1000, y: 200, width: 400, height: 300 })).toBe(retina);
     expect(displayOf([retina], { x: 5000, y: 5000, width: 10, height: 10 })).toBeUndefined();
+  });
+});
+
+describe('eventWallTime', () => {
+  // an M1's mach ticks: 125/3 ns each
+  const ticks = { numer: 125n, denom: 3n };
+  const now = { wall: 1_000_000, uptimeNs: 500_000_000_000n, machNs: 500_000_000_000n };
+
+  it('reads a timestamp in nanoseconds of the uptime clock', () => {
+    expect(eventWallTime(now.uptimeNs - 40_000_000n, now, ticks)).toBeCloseTo(now.wall - 0.04, 6);
+  });
+
+  it('reads a timestamp in mach ticks', () => {
+    const stamp = ((now.machNs - 150_000_000n) * ticks.denom) / ticks.numer;
+    expect(eventWallTime(stamp, now, ticks)).toBeCloseTo(now.wall - 0.15, 4);
+  });
+
+  it('takes the wall clock for an event without a timestamp or one that fits neither clock', () => {
+    expect(eventWallTime(0n, now, ticks)).toBe(now.wall);
+    expect(eventWallTime(now.uptimeNs + 1_000_000_000n, now, ticks)).toBe(now.wall);
   });
 });

@@ -27,6 +27,13 @@ export interface Darwin {
   /** Whether this process may watch the keyboard (Input Monitoring); the first call asks macOS for it. */
   keyboardAccess(): boolean;
   /**
+   * Where text is typed in the front app, in desktop pixels, through the Accessibility API: the
+   * selection's bounds, or the right edge of the character before the insertion point (macOS gives
+   * an empty range no bounds). Undefined without the Accessibility permission or where an app does
+   * not tell (most browsers and Electron apps).
+   */
+  caret(): { x: number; y: number; width: number; height: number } | undefined;
+  /**
    * Watches the mouse and, with `keys`, the keyboard: a listen-only event tap, serviced from this
    * thread every few milliseconds (libuiohook's tap needs the process's main dispatch queue, which
    * Node does not run). Undefined when macOS does not allow a tap.
@@ -36,12 +43,30 @@ export interface Darwin {
   mediaAccess(kind: 'camera' | 'mic'): 'not-determined' | 'restricted' | 'denied' | 'authorized';
 }
 
-/** An event from the tap: positions in desktop pixels; keys by macOS virtual key code. */
-export type TapEvent =
+/**
+ * An event from the tap: `time` in wall-clock seconds from the event's own timestamp (when macOS
+ * took it, not when this thread got to it); positions in desktop pixels; keys by macOS virtual key code.
+ */
+export type TapEvent = { time: number } & (
   | { type: 'move'; x: number; y: number }
   | { type: 'down'; x: number; y: number; button: 'left' | 'right' | 'middle' }
   | { type: 'scroll'; x: number; y: number; dx: number; dy: number }
-  | { type: 'key'; down: boolean; keycode: number; ctrl: boolean; shift: boolean; alt: boolean };
+  | { type: 'key'; down: boolean; keycode: number; ctrl: boolean; shift: boolean; alt: boolean }
+);
+
+/**
+ * The wall-clock seconds of an event's timestamp. CGEventTimestamp counts from startup, in
+ * nanoseconds of the uptime clock or in mach ticks (`ticks` to nanoseconds); whichever puts the
+ * event a moment ago is the one. Pure, for the tests: the clocks are read by the caller.
+ */
+export function eventWallTime(stamp: bigint, now: { wall: number; uptimeNs: bigint; machNs: bigint }, ticks: { numer: bigint; denom: bigint }): number {
+  if (stamp === 0n) return now.wall;
+  for (const ago of [now.uptimeNs - stamp, now.machNs - (stamp * ticks.numer) / ticks.denom]) {
+    const seconds = Number(ago) / 1e9;
+    if (seconds >= 0 && seconds < 5) return now.wall - seconds;
+  }
+  return now.wall;
+}
 
 interface Display {
   id: number;
@@ -172,7 +197,35 @@ async function create(): Promise<Darwin> {
   const CFRunLoopAddSource = cf.func('CFRunLoopAddSource', 'void', ['void *', 'void *', 'void *']);
   const CFRunLoopRemoveSource = cf.func('CFRunLoopRemoveSource', 'void', ['void *', 'void *', 'void *']);
   const CFRunLoopRunInMode = cf.func('CFRunLoopRunInMode', 'int32', ['void *', 'double', 'bool']);
-  void services; // ApplicationServices is loaded for the frameworks it brings along
+  const CGEventGetTimestamp = cg.func('CGEventGetTimestamp', 'uint64', ['void *']);
+  const system = koffi.load('/usr/lib/libSystem.B.dylib');
+  const mach_absolute_time = system.func('mach_absolute_time', 'uint64', []);
+  const clock_gettime_nsec_np = system.func('clock_gettime_nsec_np', 'uint64', ['uint32']);
+  const Timebase = koffi.struct(typeName('Timebase'), { numer: 'uint32', denom: 'uint32' });
+  const mach_timebase_info = system.func('mach_timebase_info', 'int32', [koffi.out(koffi.pointer(Timebase))]);
+  const timebase = { numer: 1, denom: 1 };
+  mach_timebase_info(timebase);
+  const ticks = { numer: BigInt(timebase.numer), denom: BigInt(timebase.denom || 1) };
+  const CLOCK_UPTIME_RAW = 8;
+  const eventTime = (event: unknown) =>
+    eventWallTime(
+      BigInt(CGEventGetTimestamp(event) as number | bigint),
+      { wall: Date.now() / 1000, uptimeNs: BigInt(clock_gettime_nsec_np(CLOCK_UPTIME_RAW) as number | bigint), machNs: (BigInt(mach_absolute_time() as number | bigint) * ticks.numer) / ticks.denom },
+      ticks,
+    );
+
+  // The Accessibility API (HIServices, in ApplicationServices): the front app's focused text
+  const CFRange = koffi.struct(typeName('CFRange'), { location: 'long', length: 'long' });
+  const AXIsProcessTrusted = services.func('AXIsProcessTrusted', 'bool', []);
+  const AXUIElementCreateApplication = services.func('AXUIElementCreateApplication', 'void *', ['int32']);
+  const AXUIElementSetMessagingTimeout = services.func('AXUIElementSetMessagingTimeout', 'int32', ['void *', 'float']);
+  const AXUIElementCopyAttributeValue = services.func('AXUIElementCopyAttributeValue', 'int32', ['void *', 'void *', koffi.out(koffi.pointer('void *'))]);
+  const AXUIElementCopyParameterizedAttributeValue = services.func('AXUIElementCopyParameterizedAttributeValue', 'int32', ['void *', 'void *', 'void *', koffi.out(koffi.pointer('void *'))]);
+  const AXValueCreate = services.func('AXValueCreate', 'void *', ['uint32', koffi.pointer(CFRange)]);
+  const AXValueGetRect = services.func('AXValueGetValue', 'bool', ['void *', 'uint32', koffi.out(koffi.pointer(CGRect))]);
+  const AXValueGetRange = services.func('AXValueGetValue', 'bool', ['void *', 'uint32', koffi.out(koffi.pointer(CFRange))]);
+  const AX_RECT = 3;
+  const AX_RANGE = 4;
 
   const CFRelease = cf.func('CFRelease', 'void', ['void *']);
   const CFArrayGetCount = cf.func('CFArrayGetCount', 'long', ['void *']);
@@ -316,6 +369,66 @@ async function create(): Promise<Darwin> {
   };
 
   const mediaTypes = { camera: cfString(MEDIA_TYPES.camera), mic: cfString(MEDIA_TYPES.mic) };
+  const AX = { focused: cfString('AXFocusedUIElement'), range: cfString('AXSelectedTextRange'), bounds: cfString('AXBoundsForRange') };
+
+  /** The app in front: the owner of the frontmost ordinary window (the system-wide element's focus often cannot be read). */
+  const frontPid = (): number | undefined => {
+    const array = CGWindowListCopyWindowInfo(kCGWindowListOptionOnScreenOnly | kCGWindowListExcludeDesktopElements, 0);
+    if (!array) return undefined;
+    try {
+      for (let i = 0; i < Number(CFArrayGetCount(array)); i++) {
+        const info = CFArrayGetValueAtIndex(array, i);
+        const pid = integerOf(CFDictionaryGetValue(info, KEYS.pid));
+        if (integerOf(CFDictionaryGetValue(info, KEYS.layer)) === 0 && pid !== undefined && pid !== process.pid) return pid;
+      }
+      return undefined;
+    } finally {
+      CFRelease(array);
+    }
+  };
+
+  /** The bounds (points) of a range of the focused text, or undefined. */
+  const boundsOf = (element: unknown, range: unknown) => {
+    const value: unknown[] = [null];
+    if (AXUIElementCopyParameterizedAttributeValue(element, AX.bounds, range, value) !== 0 || !value[0]) return undefined;
+    try {
+      const rect = { origin: { x: 0, y: 0 }, size: { width: 0, height: 0 } };
+      return AXValueGetRect(value[0], AX_RECT, rect) && rect.size.height > 0 ? rect : undefined;
+    } finally {
+      CFRelease(value[0]);
+    }
+  };
+
+  /** The caret in points: the selection's bounds, or a line at the right edge of the character before it. */
+  const caretPoints = () => {
+    if (!AXIsProcessTrusted()) return undefined;
+    const pid = frontPid();
+    const app = pid === undefined ? undefined : AXUIElementCreateApplication(pid);
+    if (!app) return undefined;
+    // an app that hangs must not hold up the recorder for long
+    AXUIElementSetMessagingTimeout(app, 0.25);
+    const focused: unknown[] = [null];
+    const selected: unknown[] = [null];
+    try {
+      if (AXUIElementCopyAttributeValue(app, AX.focused, focused) !== 0 || !focused[0]) return undefined;
+      if (AXUIElementCopyAttributeValue(focused[0], AX.range, selected) !== 0 || !selected[0]) return undefined;
+      const range = { location: 0, length: 0 };
+      if (!AXValueGetRange(selected[0], AX_RANGE, range)) return undefined;
+      if (range.length > 0) return boundsOf(focused[0], selected[0]);
+      const before = AXValueCreate(AX_RANGE, { location: Math.max(0, range.location - 1), length: 1 });
+      if (!before) return undefined;
+      try {
+        const char = boundsOf(focused[0], before);
+        if (!char) return undefined;
+        const x = range.location > 0 ? char.origin.x + char.size.width : char.origin.x;
+        return { origin: { x, y: char.origin.y }, size: { width: 0, height: char.size.height } };
+      } finally {
+        CFRelease(before);
+      }
+    } finally {
+      for (const ref of [selected[0], focused[0], app]) if (ref) CFRelease(ref);
+    }
+  };
   // A mode is matched by its name, so an equal string stands for the kCFRunLoopDefaultMode constant.
   const defaultMode = cfString('kCFRunLoopDefaultMode');
 
@@ -328,10 +441,12 @@ async function create(): Promise<Darwin> {
           if (port) CGEventTapEnable(port, true);
           return event;
         }
+        const time = eventTime(event);
         if (type === EVENT.keyDown || type === EVENT.keyUp) {
           if (type === EVENT.keyDown && Number(CGEventGetIntegerValueField(event, FIELD.keyAutorepeat)) !== 0) return event;
           const flags = BigInt(CGEventGetFlags(event) as number | bigint);
           onEvent({
+            time,
             type: 'key',
             down: type === EVENT.keyDown,
             keycode: Number(CGEventGetIntegerValueField(event, FIELD.keycode)),
@@ -345,12 +460,12 @@ async function create(): Promise<Darwin> {
         if (type === EVENT.scroll) {
           const dy = -Number(CGEventGetIntegerValueField(event, FIELD.scrollY));
           const dx = -Number(CGEventGetIntegerValueField(event, FIELD.scrollX));
-          if (dx !== 0 || dy !== 0) onEvent({ type: 'scroll', ...at, dx, dy });
+          if (dx !== 0 || dy !== 0) onEvent({ time, type: 'scroll', ...at, dx, dy });
         } else if (type === EVENT.leftDown || type === EVENT.rightDown || type === EVENT.otherDown) {
           const button = type === EVENT.leftDown ? 'left' : type === EVENT.rightDown ? 'right' : Number(CGEventGetIntegerValueField(event, FIELD.buttonNumber)) === 2 ? 'middle' : undefined;
-          if (button) onEvent({ type: 'down', ...at, button });
+          if (button) onEvent({ time, type: 'down', ...at, button });
         } else {
-          onEvent({ type: 'move', ...at });
+          onEvent({ time, type: 'move', ...at });
         }
       } catch {
         // an event must never throw into the tap
@@ -397,6 +512,13 @@ async function create(): Promise<Darwin> {
     screenAccess: () => CGPreflightScreenCaptureAccess(),
     requestScreenAccess: () => void CGRequestScreenCaptureAccess(),
     keyboardAccess: () => CGPreflightListenEventAccess() || (CGRequestListenEventAccess(), false),
+    caret() {
+      const rect = caretPoints();
+      if (!rect) return undefined;
+      const topLeft = toPixels(rect.origin);
+      const bottomRight = toPixels({ x: rect.origin.x + rect.size.width, y: rect.origin.y + rect.size.height });
+      return { ...topLeft, width: Math.max(1, bottomRight.x - topLeft.x), height: Math.max(1, bottomRight.y - topLeft.y) };
+    },
     watchInput,
     mediaAccess(kind) {
       const status = Number(sendWithObject(objc_getClass('AVCaptureDevice'), sel_registerName('authorizationStatusForMediaType:'), mediaTypes[kind]));

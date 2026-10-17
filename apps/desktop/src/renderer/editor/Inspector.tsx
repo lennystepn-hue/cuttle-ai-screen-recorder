@@ -25,7 +25,8 @@ import { outputTimesOf } from '../../shared/timeline-model';
 import { CardIcon, CopyIcon, FilmIcon, MaskIcon, PageIcon, TextIcon, TrashIcon, ZoomIcon } from '../icons';
 import { chooseImage, deleteSelection, duplicateSelection, LIST_OF, SPEEDS } from './actions';
 import { edit, preview } from './doc';
-import { setTool, store, type Selection, type Tool } from './session';
+import { engineAssets, setTool, store, type Selection, type Tool } from './session';
+import { swatches, type SwatchKey } from './swatches';
 import { useStore } from './store';
 
 const TABS = [
@@ -188,6 +189,63 @@ function Select<T extends string>({ value, options, names, onChange, testId }: {
         </option>
       ))}
     </select>
+  );
+}
+
+/** How smooth the cursor's path is: the steps the menu offers, and a value set in cuttle.json kept as it is. */
+const SMOOTHING: { value: number; name: string }[] = [
+  { value: 0, name: 'As recorded' },
+  { value: 0.3, name: 'Light smoothing' },
+  { value: 0.5, name: 'Smooth' },
+  { value: 0.8, name: 'Very smooth' },
+];
+
+function SmoothingSelect({ value }: { value: number }) {
+  const known = SMOOTHING.some((step) => step.value === value);
+  return (
+    <select
+      value={String(value)}
+      onChange={(event) => look(['cursor', 'smoothing'], Number(event.target.value), 'Cursor movement')}
+      onKeyDown={(event) => event.stopPropagation()}
+      title="The cursor glides instead of jittering; clicks stay exactly where they were"
+      data-testid="cursor-smoothing"
+    >
+      {!known && <option value={String(value)}>{value} (from cuttle.json)</option>}
+      {SMOOTHING.map((step) => (
+        <option key={step.value} value={String(step.value)}>
+          {step.name}
+        </option>
+      ))}
+    </select>
+  );
+}
+
+/** The engine's own pictures of the cursor or frame styles (drawn once), to pick one by sight. */
+function PictureSwatches<T extends string>({ label, kind, options, names, value, onPick }: { label: string; kind: 'cursor' | 'frame'; options: readonly T[]; names: Record<T, string>; value: T; onPick: (value: T) => void }) {
+  const [urls, setUrls] = useState<Map<SwatchKey, string>>();
+  useEffect(() => {
+    if (!engineAssets) return;
+    let live = true;
+    swatches(engineAssets).then(
+      (drawn) => live && setUrls(drawn),
+      () => {},
+    );
+    return () => {
+      live = false;
+    };
+  }, []);
+  return (
+    <div className="swatches picture-swatches" role="group" aria-label={label}>
+      {options.map((option) => {
+        const url = urls?.get(`${kind}:${option}` as SwatchKey);
+        return (
+          <button key={option} type="button" className="swatch-button picture" aria-pressed={value === option} title={names[option]} onClick={() => onPick(option)} data-testid={`${kind}-${option}`}>
+            {url ? <img src={url} alt="" draggable={false} /> : <i className="swatch-wait" aria-hidden />}
+            <span>{names[option]}</span>
+          </button>
+        );
+      })}
+    </div>
   );
 }
 
@@ -585,9 +643,14 @@ function LookPanel() {
       </Row>
       {current.frame.enabled && (
         <>
-          <Row label="Style">
-            <Select value={current.frame.style} options={FRAME_STYLES} names={FRAME_NAMES} onChange={(style) => look(['frame', 'style'], style, 'Frame style')} testId="frame-style" />
-          </Row>
+          <PictureSwatches
+            label="Frame style"
+            kind="frame"
+            options={FRAME_STYLES}
+            names={FRAME_NAMES}
+            value={current.frame.style}
+            onPick={(style) => look(['frame', 'style'], style, `Frame: ${FRAME_NAMES[style]}`)}
+          />
           <Row label="Title">
             <TextInput value={current.frame.title} placeholder="none" onCommit={(title) => look(['frame', 'title'], title, 'Frame title')} />
           </Row>
@@ -608,9 +671,14 @@ function LookPanel() {
       </Row>
       {current.cursor.enabled && (
         <>
-          <Row label="Style">
-            <Select value={current.cursor.style} options={CURSOR_STYLES} names={CURSOR_NAMES} onChange={(style) => look(['cursor', 'style'], style, 'Cursor style')} />
-          </Row>
+          <PictureSwatches
+            label="Cursor style"
+            kind="cursor"
+            options={CURSOR_STYLES}
+            names={CURSOR_NAMES}
+            value={current.cursor.style}
+            onPick={(style) => look(['cursor', 'style'], style, `Cursor: ${CURSOR_NAMES[style]}`)}
+          />
           <div className="grid2">
             <Row label="Size">
               <NumberInput value={current.cursor.size} min={0.5} max={4} step={0.25} onCommit={(value) => look(['cursor', 'size'], value, 'Cursor size')} />
@@ -621,6 +689,9 @@ function LookPanel() {
           </div>
           <Row label="Clicks">
             <Select value={current.cursor.clickEffect} options={CLICK_EFFECTS} names={CLICK_NAMES} onChange={(effect) => look(['cursor', 'clickEffect'], effect, 'Click effect')} />
+          </Row>
+          <Row label="Movement">
+            <SmoothingSelect value={current.cursor.smoothing} />
           </Row>
         </>
       )}

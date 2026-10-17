@@ -1,7 +1,7 @@
 // The editor's actions on the document (the timeline bar, the keys, the command menu and the tools
 // call these): each is one step to undo. Where the playhead stands decides where things go.
 import type { ClipScene, CuttleProject, Scene } from '@cuttle/project';
-import { sceneSpans, TEXT_FADE_SECONDS, type SceneSpan } from '@cuttle/timeline';
+import { clickZooms, sceneSpans, TEXT_FADE_SECONDS, type SceneSpan } from '@cuttle/timeline';
 import type { Command, ListName } from '../../shared/document';
 import { outputTimesOf } from '../../shared/timeline-model';
 import { bridge } from '../bridge';
@@ -128,6 +128,31 @@ export function addZoom(rect?: number[]): void {
   const duration = Math.min(NEW_OVERLAY_SECONDS * clip.speed, clip.to - place.source!);
   addAndSelect({ type: 'add', list: 'zooms', item: { at: place.source!, duration, rect: rect ?? [screen.width / 4, screen.height / 4, screen.width / 2, screen.height / 2] } }, 'zoom', 'Add zoom');
   setTool('zoom');
+}
+
+/** The labels of zooms made from the clicks: Auto-zoom replaces these, and only these. */
+export const CLICK_ZOOM_LABELS = ['Click', 'Clicks'];
+
+/**
+ * Zooms that follow the take's clicks (as `suggest` makes them), in place of the click zooms there
+ * are: one step to undo. Zooms made or changed by hand stay, and the new ones keep clear of them.
+ */
+export function autoZoomClicks(): void {
+  const { doc, media } = store.get();
+  const project = documentProject();
+  if (!doc || doc.issues || !media || !project) return;
+  if (media.events.length === 0) return toast('This take has no input recorded: there are no clicks to zoom on.', { tone: 'warning' });
+  const isClickZoom = (zoom: { label?: string }) => zoom.label !== undefined && CLICK_ZOOM_LABELS.includes(zoom.label);
+  const kept = project.zooms.filter((zoom) => !isClickZoom(zoom));
+  const clips = project.scenes.filter((scene): scene is ClipScene => scene.type === 'clip').map((clip) => ({ from: clip.from, to: clip.to, speed: clip.speed }));
+  const zooms = clickZooms(media.events, clips, screenSize(), kept);
+  const old = (doc.raw.zooms as { id: string; label?: string }[] | undefined) ?? [];
+  const commands: Command[] = [
+    ...old.filter(isClickZoom).map((zoom) => ({ type: 'delete', list: 'zooms', id: zoom.id }) as Command),
+    ...zooms.map((zoom) => ({ type: 'add', list: 'zooms', item: { label: zoom.clicks === 1 ? 'Click' : 'Clicks', at: zoom.at, duration: zoom.duration, rect: zoom.rect } }) as Command),
+  ];
+  if (commands.length === 0) return toast('No clicks to zoom on: none at normal speed, away from cuts and other zooms.');
+  if (edit(commands, 'Auto-zoom on clicks')) toast(zooms.length === 0 ? 'No clicks to zoom on any more: the click zooms are gone.' : `${zooms.length} zoom${zooms.length === 1 ? '' : 's'} on clicks.`, { undo: true });
 }
 
 /** A mask from the playhead to the clip's end; then the source view to place it. */

@@ -97,6 +97,8 @@ const BARS = '#5c5c68';
 interface DragView {
   guide?: number;
   insertAt?: number;
+  /** A scene being moved: its block follows the pointer, translucent (left and width in output seconds). */
+  ghost?: { left: number; width: number; label: string };
 }
 
 export function Timeline() {
@@ -306,11 +308,14 @@ export function Timeline() {
           preview(commands);
           return;
         }
-        // moving: the scene goes where the pointer is among the others' middles
+        // moving: the scene goes where the pointer is among the others' middles; a ghost of it follows the pointer
         const t = timeAt(moved.clientX);
         const rest = model.scenes.filter((other) => other.id !== block.id);
         insertAt = rest.filter((other) => (other.start + other.end) / 2 < t).length;
-        setDrag({ insertAt: insertAt === 0 ? (rest[0]?.start ?? 0) : rest[insertAt - 1]!.end });
+        setDrag({
+          insertAt: insertAt === 0 ? (rest[0]?.start ?? 0) : rest[insertAt - 1]!.end,
+          ghost: { left: block.start + deltaOut, width: block.end - block.start, label: block.title },
+        });
       },
       (moved) => {
         setDrag({});
@@ -500,6 +505,11 @@ export function Timeline() {
                   deps={[media, spans]}
                 />
                 {drag.guide !== undefined && <div className="snap-guide" style={{ left: drag.guide * pps }} />}
+                {drag.ghost && (
+                  <div className="scene-ghost" style={{ left: drag.ghost.left * pps, width: drag.ghost.width * pps, top: tops.video + 4, height: heights.video - 8 }}>
+                    <span>{drag.ghost.label}</span>
+                  </div>
+                )}
                 {drag.insertAt !== undefined && <div className="insert-mark" style={{ left: drag.insertAt * pps, top: tops.video, height: heights.video }} />}
                 <Playhead pps={pps} top={heights.markers - 8} scroller={scroller} />
               </>

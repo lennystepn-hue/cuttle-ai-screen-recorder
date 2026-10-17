@@ -1,6 +1,6 @@
 // The open project in an editor window: the document, its media, the player, the tool and the
 // selection, and the export.
-import { loadEngineAssets } from '@cuttle/engine';
+import { loadEngineAssets, type EngineAssets } from '@cuttle/engine';
 import { withFormat, type ExportFormat } from '@cuttle/export/formats';
 import type { CuttleProject } from '@cuttle/project';
 import type { Command, EditLimits } from '../../shared/document';
@@ -111,6 +111,7 @@ export async function openSession(canvas: HTMLCanvasElement): Promise<void> {
     const doc = openDocument(info.raw, info.hash, editLimits);
     store.set({ info, doc });
     const [media, assets] = await Promise.all([openProjectMedia(info, doc.project), loadEngineAssets()]);
+    engineAssets = assets;
     player = new Player({
       canvas,
       media,
@@ -190,6 +191,9 @@ function exposeCheckHook(canvas: HTMLCanvasElement): void {
     },
   });
 }
+
+/** The engine's fonts and images, once the project opened (the Look tab's swatches draw with them). */
+export let engineAssets: EngineAssets | undefined;
 
 let proxyInUse = false;
 

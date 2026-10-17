@@ -1,7 +1,7 @@
 // Everything the editor can do by name, with its keys: the command menu (Ctrl+K) lists these, and
 // the keyboard runs them. Keys are written as the menu shows them.
 import { bridge } from '../bridge';
-import { addCard, addMask, addPage, addZoom, cycleSpeed, deleteSelection, duplicateSelection, overlayBlocked, selectedOrCurrentClip, setSpeed, showRawTake, split } from './actions';
+import { addCard, addMask, addPage, addZoom, autoZoomClicks, cycleSpeed, deleteSelection, duplicateSelection, overlayBlocked, selectedOrCurrentClip, setSpeed, showRawTake, split } from './actions';
 import { redo, undo } from './doc';
 import { currentPlayer, openExport, select, setTool, store } from './session';
 
@@ -37,6 +37,7 @@ export function editorCommands(): EditorCommand[] {
     { id: 'speed-1', name: 'Normal speed (1×)', keywords: 'speed', group: 'Edit', run: () => setSpeed(1), blocked: needsClip },
     { id: 'raw', name: 'Show the raw take (one clip over all of it)', group: 'Edit', run: showRawTake },
     { id: 'add-zoom', name: 'Add a zoom at the playhead', group: 'Add', run: () => addZoom(), blocked: () => overlayBlocked() },
+    { id: 'auto-zoom', name: 'Auto-zoom on clicks', keywords: 'zoom clicks automatic follow', group: 'Add', run: autoZoomClicks },
     { id: 'add-mask', name: 'Add a mask at the playhead', group: 'Add', run: () => addMask(), blocked: () => overlayBlocked() },
     { id: 'add-caption', name: 'Add a caption at the playhead (type it on the video)', group: 'Add', run: () => setTool('caption'), blocked: () => overlayBlocked() },
     { id: 'add-card', name: 'Add a title card', group: 'Add', run: addCard },

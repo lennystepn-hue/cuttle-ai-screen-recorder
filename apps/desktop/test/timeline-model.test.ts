@@ -193,3 +193,44 @@ describe('format', () => {
     expect(plainIssue('scenes.2.to: Too small')).toBe('scenes.2.to: Too small');
   });
 });
+
+describe('cuts on the timeline', () => {
+  const cutProject = project({
+    scenes: [{ type: 'clip', id: 's1', label: 'Demo', from: 0, to: 10 }, { type: 'card', id: 's2', title: 'End', duration: 1 }],
+    cuts: [
+      { id: 'c1', label: 'Filler: ähm', from: 2, to: 2.5, auto: 'filler' },
+      { id: 'c2', label: 'Retake', from: 6, to: 8, auto: 'retake' },
+      { id: 'c3', from: 9, to: 9.5, enabled: false },
+    ],
+  });
+  const cutSpans = sceneSpans(cutProject.scenes, cutProject.cuts);
+  const model = timelineModel(cutProject, cutSpans);
+
+  it('shows a cut clip as one block, its pieces inside, and what the cuts took', () => {
+    expect(model.scenes.map((block) => [block.index, block.start, block.end])).toEqual([
+      [0, 0, 7.5],
+      [1, 7.5, 8.5],
+    ]);
+    expect(model.scenes[0]!.pieces).toEqual([
+      { start: 0, end: 2, from: 0 },
+      { start: 2, end: 5.5, from: 2.5 },
+      { start: 5.5, end: 7.5, from: 8 },
+    ]);
+    expect(model.scenes[0]!.detail).toBe('10 s → 7.5 s');
+  });
+
+  it('puts a notch where each cut is, and one for a cut that is off where it would be', () => {
+    expect(model.cuts).toEqual([
+      { t: 2, ids: ['c1'], enabled: true, auto: 'filler', title: 'Filler: ähm' },
+      { t: 5.5, ids: ['c2'], enabled: true, auto: 'retake', title: 'Retake' },
+      { t: 6.5, ids: ['c3'], enabled: false, title: 'Cut' },
+    ]);
+  });
+
+  it('finds the source second a cut block shows', async () => {
+    const { blockSourceAt } = await import('../src/shared/timeline-model');
+    expect(blockSourceAt(model.scenes[0]!, 1)).toBe(1);
+    expect(blockSourceAt(model.scenes[0]!, 3)).toBe(3.5);
+    expect(blockSourceAt(model.scenes[0]!, 6)).toBe(8.5);
+  });
+});

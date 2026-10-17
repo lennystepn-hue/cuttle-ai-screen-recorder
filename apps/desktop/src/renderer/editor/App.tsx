@@ -544,7 +544,7 @@ function VideoFrame({ canvas, size, output }: { canvas: React.RefObject<HTMLCanv
             className={`webcam-box${dragging ? ' dragging' : ''}`}
             style={{ left: bubble[0] * scale, top: bubble[1] * scale, width: bubble[2] * scale, height: bubble[3] * scale, borderRadius: bubbleRadius }}
             onPointerDown={(event) => dragBubble(event)}
-            onDoubleClick={() => store.set({ tab: 'look' })}
+            onDoubleClick={() => store.set({ tab: 'look', lookSection: 'camera' })}
             title="Drag the camera anywhere; drag a corner to resize it. A double click shows its look."
             data-testid="webcam-box"
           >

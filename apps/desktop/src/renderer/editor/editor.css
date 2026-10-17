@@ -333,6 +333,166 @@ button.chip-status:hover {
   font-size: var(--size-s);
   line-height: 1.5;
 }
+/* the Look tab: its parts as lines that say what each is now; one open at a time */
+.look-parts {
+  display: grid;
+  gap: 6px;
+}
+.look-part {
+  border-radius: 10px;
+  background: var(--raised);
+  border: 1px solid var(--line);
+}
+.look-part.open {
+  border-color: var(--line-strong);
+}
+.look-head {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 16px auto minmax(0, 1fr) 13px;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 10px 10px 12px;
+  color: var(--muted);
+  text-align: left;
+}
+.look-head:hover {
+  color: var(--text);
+}
+.look-head b {
+  color: var(--text);
+  font-weight: 600;
+}
+.look-summary {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--size-s);
+  text-align: right;
+}
+.look-head > svg:last-child {
+  transition: transform 120ms ease;
+}
+.look-part.open .look-head > svg:last-child {
+  transform: rotate(180deg);
+}
+.look-body {
+  display: grid;
+  gap: 10px;
+  padding: 2px 12px 12px;
+}
+/* switches that read as words: on is filled, with a tick */
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 28px;
+  padding: 0 11px;
+  border-radius: 14px;
+  border: 1px solid var(--line-strong);
+  color: var(--muted);
+  font-size: var(--size-s);
+}
+.chip:hover {
+  color: var(--text);
+}
+.chip[aria-pressed='true'] {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--text);
+}
+/* the camera's shapes, as tiles that show them */
+.shape-tiles {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+}
+.shape-tile {
+  display: grid;
+  justify-items: center;
+  gap: 6px;
+  padding: 10px 4px 8px;
+  border-radius: 8px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  color: var(--muted);
+  font-size: var(--size-xs);
+}
+.shape-tile[aria-pressed='true'] {
+  border-color: var(--accent);
+  color: var(--text);
+}
+.shape-tile i {
+  width: 28px;
+  height: 28px;
+  background: linear-gradient(160deg, #c9b2a4, #6c5a51);
+  box-shadow: 0 0 0 2px #fff;
+}
+.shape-tile.circle i {
+  border-radius: 50%;
+}
+.shape-tile.rounded i {
+  border-radius: 7px;
+}
+.shape-tile.squircle i {
+  border-radius: 34%;
+}
+.shape-tile.square i {
+  border-radius: 1px;
+}
+/* the camera's corner: a small screen with a spot in each corner */
+.corner-picker {
+  width: 64px;
+  height: 40px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  padding: 4px;
+  border-radius: 6px;
+  background: var(--panel);
+  border: 1px solid var(--line-strong);
+}
+.corner-picker button {
+  display: grid;
+  border-radius: 4px;
+}
+.corner-picker button i {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--line-strong);
+}
+.corner-picker .top-left i {
+  justify-self: start;
+  align-self: start;
+}
+.corner-picker .top-right i {
+  justify-self: end;
+  align-self: start;
+}
+.corner-picker .bottom-left i {
+  justify-self: start;
+  align-self: end;
+}
+.corner-picker .bottom-right i {
+  justify-self: end;
+  align-self: end;
+}
+.corner-picker button:hover i {
+  background: var(--muted);
+}
+.corner-picker button[aria-pressed='true'] i {
+  background: var(--accent);
+}
+.range {
+  width: 100%;
+  accent-color: var(--accent);
+}
 .section-title {
   color: var(--faint);
   font-size: var(--size-xs);

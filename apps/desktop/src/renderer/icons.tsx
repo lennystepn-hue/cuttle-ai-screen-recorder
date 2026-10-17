@@ -89,6 +89,12 @@ export const MicIcon = icon(
 export const WarningIcon = icon(<path d="M8 2.5 14 13H2zM8 6.5v3M8 11.2v.1" />);
 export const RecordIcon = icon(<circle cx="8" cy="8" r="5" />, true);
 export const ChevronIcon = icon(<path d="m4.5 6 3.5 3.5L11.5 6" />);
+// the look's parts
+export const BackgroundIcon = icon(<path d="M2.5 3.5h11v9h-11zM2.5 10l3.2-3 2.6 2.4L10.5 7.5l3 2.8" />);
+export const WindowIcon = icon(<path d="M2 3.5h12v9H2zM2 6h12M3.8 4.8h.1M5.3 4.8h.1" />);
+export const CameraIcon = icon(<path d="M8 8.2a2.3 2.3 0 1 0 0-4.6 2.3 2.3 0 0 0 0 4.6zM3.6 13.5c.6-2.3 2.3-3.5 4.4-3.5s3.8 1.2 4.4 3.5" />);
+export const SubtitlesIcon = icon(<path d="M2 3.5h12v9H2zM4.5 10h3M9 10h2.5M4.5 7.5h7" />);
+export const SoundIcon = icon(<path d="M2.5 6v4h2.5L8.5 13V3L5 6zM11 5.5a3.5 3.5 0 0 1 0 5M12.8 3.8a6 6 0 0 1 0 8.4" />);
 
 /** Cuttle's mark: an orange tile with a dark arrow. */
 /** Cuttle's mark: the cuttlefish of its icons (tools/icons.mjs) on the brand's orange tile. */

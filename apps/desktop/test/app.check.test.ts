@@ -544,8 +544,9 @@ describe.runIf(enabled)('the Cuttle app', () => {
     await choose('.inspector label.field:has-text("Style") .select-trigger', 'Blur');
     await savedWhen((file) => file.masks.find((item) => item.id === mask.id)!.style === 'blur');
     await shot('08-mask');
-    // the look: a background swatch
+    // the look: a background swatch (its part of the Look tab opened)
     await click(editor, '#tab-look');
+    await click(editor, '[data-testid=look-open-background]');
     await click(editor, '.swatch-button.bg-mesh');
     await savedWhen((file) => (file as unknown as { look: { background: { preset: string } } }).look.background.preset === 'mesh');
     await shot('08-look');
@@ -600,15 +601,19 @@ describe.runIf(enabled)('the Cuttle app', () => {
   it('draws the cursor and frame styles with the engine, and sets them and the cursor’s movement in the Look tab', async () => {
     const original = readFileSync(projectFile(), 'utf8');
     await click(editor, '#tab-look');
-    // the swatches are the engine's own pictures
+    // the swatches are the engine's own pictures: the window's part, then the cursor's
+    await click(editor, '[data-testid=look-open-window]');
     await editor.waitForSelector('[data-testid=frame-mac-light] img', { timeout: 20_000 });
-    await editor.waitForSelector('[data-testid=cursor-ring] img', { timeout: 20_000 });
     await shot('14-look-swatches');
+    await click(editor, '[data-testid=look-open-cursor]');
+    await editor.waitForSelector('[data-testid=cursor-ring] img', { timeout: 20_000 });
     await editor.waitForSelector('[data-testid=cursor-spotlight] img', { timeout: 20_000 });
     await editor.locator('[data-testid=cursor-spotlight]').scrollIntoViewIfNeeded();
     await shot('14b-look-cursors');
+    await click(editor, '[data-testid=look-open-window]');
     await click(editor, '[data-testid=frame-mac-light]');
     await savedWhen((file) => (file as unknown as { look: { frame: { style?: string } } }).look.frame.style === 'mac-light');
+    await click(editor, '[data-testid=look-open-cursor]');
     await choose('[data-testid=cursor-smoothing]', 'Very smooth');
     await savedWhen((file) => (file as unknown as { look: { cursor?: { smoothing?: number } } }).look.cursor?.smoothing === 1);
     await click(editor, '#tab-selection');
@@ -636,6 +641,7 @@ describe.runIf(enabled)('the Cuttle app', () => {
   it("uses Cuttle's own menus, none of the system's: the keys open, move, pick and close them", async () => {
     expect(await editor.evaluate(() => document.querySelectorAll('select').length)).toBe(0);
     await click(editor, '#tab-look');
+    await click(editor, '[data-testid=look-open-video]');
     await editor.focus('[data-testid=output-size]');
     await editor.keyboard.press('ArrowDown');
     await editor.waitForSelector('[data-testid=output-size-list]');
@@ -1446,6 +1452,7 @@ describe.runIf(enabled)('the Cuttle app', () => {
     await shotOf('28-transcript', '/editor.html', 'subtitled · Cuttle');
     // the Look tab: the subtitles' style, and the clean voice
     await click(page, '#tab-look');
+    await click(page, '[data-testid=look-open-subtitles]');
     await page.waitForSelector('[data-testid=captions-enabled][aria-checked=true]');
     await page.locator('[data-testid=captions-style]').evaluate((element) => (element as HTMLElement).click());
     await page.waitForSelector('.select-list [role=option]');
@@ -1454,7 +1461,9 @@ describe.runIf(enabled)('the Cuttle app', () => {
       (option as HTMLElement).click();
     });
     await expect.poll(() => saved().captions?.style).toBe('karaoke');
+    await click(page, '[data-testid=look-open-sound]');
     await click(page, '[data-testid=audio-cleanup]');
+    await click(page, '[data-testid=look-open-subtitles]');
     await expect.poll(() => saved().look?.audio?.cleanup).toBe(false);
     await page.evaluate((t) => (window as unknown as Hooked).__cuttleCheck.seek(t), words[index('zooms')]!.t + 0.1);
     await page.locator('[data-testid=captions-style]').evaluate((element) => element.scrollIntoView({ block: 'center' }));

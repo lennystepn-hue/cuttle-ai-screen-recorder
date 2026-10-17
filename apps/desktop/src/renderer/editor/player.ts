@@ -221,7 +221,7 @@ export class Player {
     const frame = this.frameOf(time);
     const state = this.timeline.frameAt(frame / this.fps);
     const held: HeldFrame[] = [];
-    const sources: FrameSources = { screens: new Map(), webcams: new Map(), stills: new Map() };
+    const sources: FrameSources = { screens: new Map(), webcams: new Map(), stills: new Map(), motion: new Map(), overlays: new Map() };
     const stills = this.stillsByIndex();
     try {
       for (const layer of state.layers) {

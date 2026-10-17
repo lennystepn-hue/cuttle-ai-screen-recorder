@@ -52,7 +52,7 @@ pnpm install
 pnpm exec playwright install chromium   # once: headless Chromium for the engine tests
 pnpm test                                # unit tests (Node) and engine golden images (Chromium)
 pnpm typecheck
-pnpm engine:electron                     # the engine goldens in a hidden Electron window
+pnpm engine:electron                     # the engine goldens in a hidden Electron window (Windows; skipped on macOS, see main.mjs)
 pnpm export:check                        # export a testsrc fixture to 16:9, 1:1, 9:16 and check it with ffprobe
 pnpm recorder:real                       # record 3 s of the primary monitor and first mic for real, check, delete
 pnpm cli:check                           # build the CLI; preview, capture-page and render through it in Electron

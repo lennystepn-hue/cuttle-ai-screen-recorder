@@ -215,16 +215,25 @@ export function clickZooms(events: readonly InputEvent[], clips: readonly ClipSp
   const result: ClickZoom[] = [];
   let lastEnd = -Infinity;
   for (const zoom of chains) {
-    const rect = zoomRectFor(boxOf(zoom.stations[0]!.points), screen);
-    if ((rect[2] * rect[3]) / (screen.width * screen.height) > MAX_AREA) continue;
-    if (avoid.some((other) => zoom.at < other.at + other.duration && other.at < zoom.end)) continue;
-    // one at a time, and not too often (the zooms already there count)
-    const start = outputAt(zoom.at, zoom.clip);
-    if (start < lastEnd || starts.some((other) => Math.abs(start - other) < MIN_OUTPUT_GAP)) continue;
-    const moves = zoom.stations.slice(1).map((station) => ({ at: round(station.at), rect: zoomRectFor(boxOf(station.points), screen) }));
-    result.push({ at: round(zoom.at), duration: round(zoom.end - zoom.at), rect, ...(moves.length > 0 && { moves }), clicks: zoom.clicks });
-    starts.push(start);
-    lastEnd = outputAt(zoom.end, zoom.clip);
+    const s = clips[zoom.clip]!.speed;
+    // a chain that cannot start where it does (another zoom starts near it, or is still on) starts at
+    // a later station: its first clicks go without, the work after them is still followed
+    for (let first = 0; first < zoom.stations.length; first++) {
+      const stations = zoom.stations.slice(first);
+      const at = stations[0]!.at;
+      if ((zoom.end - at) / s < MIN_SECONDS - 1e-9) break;
+      const rect = zoomRectFor(boxOf(stations[0]!.points), screen);
+      if ((rect[2] * rect[3]) / (screen.width * screen.height) > MAX_AREA) continue;
+      if (avoid.some((other) => at < other.at + other.duration && other.at < zoom.end)) continue;
+      // one at a time, and not too often (the zooms already there count)
+      const start = outputAt(at, zoom.clip);
+      if (start < lastEnd || starts.some((other) => Math.abs(start - other) < MIN_OUTPUT_GAP)) continue;
+      const moves = stations.slice(1).map((station) => ({ at: round(station.at), rect: zoomRectFor(boxOf(station.points), screen) }));
+      result.push({ at: round(at), duration: round(zoom.end - at), rect, ...(moves.length > 0 && { moves }), clicks: stations.reduce((sum, station) => sum + station.points.length, 0) });
+      starts.push(start);
+      lastEnd = outputAt(zoom.end, zoom.clip);
+      break;
+    }
   }
   return result;
 }

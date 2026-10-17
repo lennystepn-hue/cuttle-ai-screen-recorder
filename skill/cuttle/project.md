@@ -94,7 +94,10 @@ there are not two cursors.
 (`true`). The rect is widened to the screen's aspect and kept inside the screen. The zoom eases in
 and out over 0.6 output seconds each where it starts and ends on screen (a cut into its middle
 lands zoomed), so give it 2 output seconds or more (`2 × speed` source seconds over a sped-up
-clip).
+clip). A zoom that follows (a typing zoom from `suggest`) has `moves`: `[{ "at", "rect" }]`, each
+`at` (source seconds) after the one before and inside the zoom. It starts on `rect` and goes to each
+move's rect in turn, eased over 0.6 output seconds centred on the move's `at`. To move the whole
+path, change every rect by the same amount; without `moves` it holds still.
 
 `masks` hide private things: `from` and `to` (source seconds), `rect`, `style` (`fill`: the colour
 around it, safest for tokens and keys; `blur`) and `enabled` (`true`). Make the rect generous: a
@@ -140,6 +143,9 @@ it is yours and the next `suggest` keeps it (switching it on or off keeps the ta
   the grid; `frames/<t>s-grid.png` is the default file.
 - `takes/<n>/markers.json` lists the prompt, each tool call and Claude's answer in source seconds,
   and each press of the mistake key (kind `retake`).
+- `takes/<n>/events.jsonl` has the input: `move`, `click` and `scroll` with `x` and `y`, `keys`
+  (presses per half second, never which keys) and the pointer's `shape`; on Windows also `caret`
+  with a `rect` (where text is typed, while it is, where the app keeps a system caret).
 - `cuttle --json suggest` prints notes with source seconds (`sped up 112.9 s without input 12×
   (7.5–120.4 s)`).
 - To get from output to source seconds by hand, walk the scenes. A clip lasts

@@ -80,6 +80,9 @@ export class EventsWriter {
       case 'shape':
         this.flushMove();
         return this.emit({ t: at, type: 'shape', shape: input.shape });
+      case 'caret':
+        this.flushMove();
+        return this.emit({ t: at, type: 'caret', rect: [x, y, input.width, input.height] });
       case 'key': {
         const window = Math.floor(t / KEY_WINDOW);
         if (this.keys?.window === window) {

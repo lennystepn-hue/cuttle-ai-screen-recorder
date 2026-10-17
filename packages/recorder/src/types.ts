@@ -147,6 +147,8 @@ export type RawInput =
   | { type: 'click'; time: number; x: number; y: number; button: 'left' | 'right' | 'middle' }
   | { type: 'scroll'; time: number; x: number; y: number; dx: number; dy: number }
   | { type: 'shape'; time: number; shape: CursorShape }
-  | { type: 'key'; time: number };
+  | { type: 'key'; time: number }
+  /** The system caret (where text is typed), where the app keeps one. */
+  | { type: 'caret'; time: number; x: number; y: number; width: number; height: number };
 
 export type HotkeyAction = 'stop' | 'marker' | 'pause' | 'retake';

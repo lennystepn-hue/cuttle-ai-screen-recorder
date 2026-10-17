@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { copyFile, readdir, readFile, realpath, stat, writeFile } from 'node:fs/promises';
+import { copyFile, readdir, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises';
 import { basename, dirname, join, resolve } from 'node:path';
 import { app, BrowserWindow, dialog, Menu, screen, session, shell, type Session, type WebContents } from 'electron';
 import { PROJECT_FILE, backupFile, writeProjectFile, type ProjectFile } from '@cuttle/core';
@@ -16,7 +16,8 @@ import { ProjectMedia } from './media-service';
 import { LockedError, lockProject, openProjectFile, projectInfo } from './project';
 import { importImage, ProjectFileWatch } from './project-watch';
 import { APP_ORIGIN, assetPath, bundlePath, serveApp, serveMedia } from './protocols';
-import { cutIfPending, recut, startPicking, undoRestart } from './recording';
+import { cutIfPending, recut, startPicking, takesBusy, undoRestart } from './recording';
+import { deletableTakes, sizeText, trashName } from '../shared/takes';
 import { addRecent, loadSettings, motionSetting, updateSettings } from './settings';
 import { openSettings } from './settings-window';
 import { transcribeProject } from './speech';
@@ -365,6 +366,14 @@ async function takesMenu(dir: string, window: BrowserWindow): Promise<void> {
     )
   ).sort((a, b) => b.at - a.at);
   const time = (at: number) => new Date(at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  // every take but the one in use may go, with its size: what deleting it frees
+  const deletable = await Promise.all(
+    [
+      ...deletableTakes(names, current).map((take) => ({ rel: `takes/${take}`, label: `Take ${take}` })),
+      ...putAside.map((take) => ({ rel: `takes/.discarded/${take.name}`, label: `The take put aside at ${time(take.at)}` })),
+    ].map(async (take) => ({ ...take, bytes: await folderBytes(join(dir, take.rel)) })),
+  );
+  const busy = takesBusy(dir);
   Menu.buildFromTemplate([
     { label: `Take ${current ?? '?'} (now)`, enabled: false },
     ...(kept.length === 0
@@ -377,10 +386,77 @@ async function takesMenu(dir: string, window: BrowserWindow): Promise<void> {
           ...putAside.map((take) => ({ label: `Use the take from ${time(take.at)}`, click: () => void undoRestart(dir, ['takes', '.discarded', take.name].join('/')) })),
         ]
       : []),
+    ...(deletable.length > 0
+      ? [
+          { type: 'separator' as const },
+          {
+            label: 'Delete a take',
+            enabled: !busy,
+            submenu: deletable.map((take) => ({ label: `${take.label} · ${sizeText(take.bytes)}…`, click: () => void deleteTake(dir, take.rel, take.label, take.bytes) })),
+          },
+        ]
+      : []),
     { type: 'separator' },
     { label: 'Record a new take…', click: () => void startPicking(dir) },
   ]).popup({ window });
 }
+
+/** A folder's size in bytes, its files' sizes added up (0 when it cannot be read). */
+async function folderBytes(path: string): Promise<number> {
+  const entries = await readdir(path, { withFileTypes: true }).catch(() => []);
+  const sizes = await Promise.all(
+    entries.map(async (entry) => {
+      const child = join(path, entry.name);
+      if (entry.isDirectory()) return folderBytes(child);
+      return (await stat(child).catch(() => undefined))?.size ?? 0;
+    }),
+  );
+  return sizes.reduce((sum, size) => sum + size, 0);
+}
+
+/**
+ * Deletes a take folder (`takes/<n>`, or one a restart put aside) after the person confirmed it: it
+ * goes to the Trash (Recycle Bin on Windows), never away for good. Never the take the project uses
+ * now, nor while a take is recorded into the project or cut for it. The check confirms without a
+ * dialog and deletes for good (no check fills the Trash). Returns whether it was deleted.
+ */
+export async function deleteTake(dir: string, rel: string, label: string, bytes: number): Promise<boolean> {
+  const say = (message: string) => (HIDDEN ? console.error(message) : void dialog.showMessageBox({ type: 'warning', title: 'Cuttle', message }));
+  if (takesBusy(dir)) {
+    say('Cuttle is recording or cutting a take of this project: delete takes once it is done.');
+    return false;
+  }
+  const current = currentTake(await openProjectFile(dir).catch(() => ({ raw: {} })));
+  if (current !== undefined && rel === `takes/${current}`) {
+    say(`Take ${current} is the one this project uses: it cannot be deleted.`);
+    return false;
+  }
+  const trash = trashName(process.platform);
+  if (!HIDDEN) {
+    const { response } = await dialog.showMessageBox({
+      type: 'warning',
+      title: 'Cuttle',
+      message: `Delete ${label.charAt(0).toLowerCase()}${label.slice(1)}?`,
+      detail: `${sizeText(bytes)} in ${rel} go to the ${trash}. The take this project uses now stays.`,
+      buttons: ['Cancel', `Move to the ${trash}`],
+      defaultId: 0,
+      cancelId: 0,
+    });
+    if (response !== 1) return false;
+  }
+  try {
+    const path = join(dir, ...rel.split('/'));
+    if (CHECK) await rm(path, { recursive: true, force: true });
+    else await shell.trashItem(path);
+    return true;
+  } catch (error) {
+    say(`Cuttle could not delete ${label.toLowerCase()}: ${(error as Error).message}`);
+    return false;
+  }
+}
+
+// The check deletes takes as the menu does (a native menu cannot be clicked from a page).
+if (CHECK) (globalThis as { __deleteTake?: typeof deleteTake }).__deleteTake = deleteTake;
 
 /** Makes an earlier take the project's again, with the edit it had; the current one stays restorable. */
 async function backToTake(dir: string, take: string): Promise<void> {

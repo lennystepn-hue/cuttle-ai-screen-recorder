@@ -1043,6 +1043,18 @@ describe.runIf(enabled)('the Cuttle app', () => {
     expect(JSON.parse(readFileSync(join(dir, 'takes', '1', 'cuttle.json'), 'utf8')).sources.screen).toBe('takes/1/screen.mp4');
   }, 120_000);
 
+  it('deletes an earlier take from the take menu, never the one in use', async () => {
+    const dir = join(root, 'projects', readdirSync(join(root, 'projects'))[0]!);
+    const deleteTake = (rel: string) =>
+      app.evaluate((_electron, [project, take]) => (globalThis as unknown as { __deleteTake(dir: string, rel: string, label: string, bytes: number): Promise<boolean> }).__deleteTake(project, take, 'Take', 0), [dir, rel] as const);
+    expect(await deleteTake('takes/2')).toBe(false);
+    expect(existsSync(join(dir, 'takes', '2', 'screen.mp4'))).toBe(true);
+    expect(await deleteTake('takes/1')).toBe(true);
+    expect(existsSync(join(dir, 'takes', '1'))).toBe(false);
+    // the project still plays its take
+    expect(JSON.parse(readFileSync(join(dir, 'cuttle.json'), 'utf8')).sources.screen).toBe('takes/2/screen.mp4');
+  }, 30_000);
+
   it('keeps a take whose capture broke off: recover repairs it and the editor opens on it', async () => {
     const projects = join(root, 'projects');
     const before = new Set(readdirSync(projects));

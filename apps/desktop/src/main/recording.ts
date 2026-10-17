@@ -46,6 +46,12 @@ let writing: Promise<void> | undefined;
 /** The app quits: no recording starts any more, and a take written now is cut at its next open. */
 let quitting = false;
 
+/** Whether a take is being recorded into this project, or finished or cut for it: its takes stay as they are meanwhile. */
+export function takesBusy(dir: string): boolean {
+  const key = keyOf(dir);
+  return finishing.has(key) || (busy && pickingFor !== undefined && keyOf(pickingFor) === key);
+}
+
 /** A project's key, as the editors key it: the real path (a junction or a short name is the same folder). */
 export function keyOf(dir: string): string {
   let path = resolve(dir);

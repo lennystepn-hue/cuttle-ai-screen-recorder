@@ -40,7 +40,11 @@ describe.concurrent('record (test backend)', () => {
     const projectDir = project();
     const events: RecorderEvent[] = [];
     const recording = record({ ...test, projectDir, webcam: 'Test Camera', mic: 'Test Microphone', stop: { maxSeconds: 3 }, onEvent: (event) => events.push(event) });
-    setTimeout(() => recording.marker('one second'), 1000);
+    let markedAt = 0;
+    setTimeout(() => {
+      markedAt = Date.now() / 1000;
+      recording.marker('one second');
+    }, 1000);
     const take = await recording.done;
 
     expect(take).toEqual({
@@ -69,7 +73,9 @@ describe.concurrent('record (test backend)', () => {
     expect(input.slice(0, 2)).toEqual([expect.objectContaining({ t: 0, type: 'move' }), { t: 0, type: 'shape', shape: 'arrow' }]);
     expect(new Set(input.map((event) => event.type))).toEqual(new Set(['move', 'shape', 'click', 'scroll', 'keys']));
 
-    expect(markersOf(projectDir, take.markers)).toEqual([{ t: expect.closeTo(1, 0), kind: 'manual', label: 'one second' }]);
+    // Marker times count from the screen's first frame, which starts late on a loaded machine.
+    const markedSecond = markedAt - takeFile.take.tracks.screen.start;
+    expect(markersOf(projectDir, take.markers)).toEqual([{ t: expect.closeTo(markedSecond, 1), kind: 'manual', label: 'one second' }]);
     expect(events.map((event) => event.type)).toEqual(['recording', 'marker', 'stopping']);
   }, SLOW);
 

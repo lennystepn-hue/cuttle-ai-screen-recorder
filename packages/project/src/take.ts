@@ -20,6 +20,11 @@ const TrackStartSchema = z.strictObject({
  */
 export const TakeFileSchema = z.strictObject({
   version: z.literal(TAKE_VERSION),
+  /**
+   * The recorded display's pixels per point (2 on a Retina display, 1.5 at 150 %): zooms show as much
+   * of its interface as on a screen at 100 %. Takes recorded before it say nothing (1 is not assumed).
+   */
+  scale: z.number().positive().max(8).optional(),
   tracks: z.strictObject({
     screen: TrackStartSchema,
     webcam: TrackStartSchema.optional(),

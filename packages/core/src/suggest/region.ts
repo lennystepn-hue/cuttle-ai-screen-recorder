@@ -1,6 +1,6 @@
 // Where the screen changed between two moments: the zoom on Claude's answer.
 import type { Rect } from '@cuttle/project';
-import { fitZoomRect } from '@cuttle/timeline';
+import { fitZoomRect, minZoomWidth, type ZoomScreen } from '@cuttle/timeline';
 import type { Gray } from './media';
 
 /** A pixel counts as changed when its grey value moved more than this. */
@@ -41,7 +41,7 @@ export function changedRegion(before: Gray, after: Gray, minPixels = MIN_SHARE *
 
 /** Padding around the changed box, as a share of the screen's width. */
 const PADDING = 0.06;
-/** A zoom shows at least this share of the screen's width. */
+/** A zoom shows at least this share of the screen's width (as many points on a scaled display: `minZoomWidth`). */
 const MIN_WIDTH = 0.35;
 /** Above this share of the screen's area a zoom is no focus at all: none is made. */
 const MAX_AREA = 0.75;
@@ -51,16 +51,17 @@ const MAX_AREA = 0.75;
  * padded and at least `MIN_WIDTH` wide, inside the screen; undefined when it would cover most of it
  * once the timeline has fitted it to the screen's aspect (a tall, narrow box grows to full width).
  */
-export function zoomRect(region: { x: number; y: number; width: number; height: number }, grayWidth: number, screen: { width: number; height: number }): Rect | undefined {
+export function zoomRect(region: { x: number; y: number; width: number; height: number }, grayWidth: number, screen: ZoomScreen): Rect | undefined {
   const scale = screen.width / grayWidth;
   const pad = PADDING * screen.width;
   let x = region.x * scale - pad;
   let y = region.y * scale - pad;
   let width = region.width * scale + 2 * pad;
   let height = region.height * scale + 2 * pad;
-  if (width < MIN_WIDTH * screen.width) {
-    x -= (MIN_WIDTH * screen.width - width) / 2;
-    width = MIN_WIDTH * screen.width;
+  const least = minZoomWidth(screen, MIN_WIDTH);
+  if (width < least) {
+    x -= (least - width) / 2;
+    width = least;
   }
   width = Math.min(width, screen.width);
   height = Math.min(height, screen.height);

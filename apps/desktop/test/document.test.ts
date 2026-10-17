@@ -335,9 +335,12 @@ describe('a zoom that follows, in the document', () => {
     expect(none).not.toHaveProperty('moves');
   });
 
-  it('stretches its path with its clip\'s speed, holds still on request, and keeps its moves on the screen', () => {
-    const sped = applyCommand({ ...following, scenes: [{ type: 'clip', id: 's1', from: 0, to: 20 }] }, { type: 'speed', id: 's1', speed: 2 }, limits);
+  it('stretches its path with its clip\'s speed when made by hand, holds still on request, and keeps its moves on the screen', () => {
+    const long = { ...following, scenes: [{ type: 'clip', id: 's1', from: 0, to: 20 }] };
+    const sped = applyCommand({ ...long, zooms: [{ ...zoom(following), auto: undefined }] }, { type: 'speed', id: 's1', speed: 2 }, limits);
     expect(zoom(sped)).toMatchObject({ at: 4, duration: 8, moves: [{ at: 6 }, { at: 10 }] });
+    // made by suggest: it stays on the typing it follows
+    expect(zoom(applyCommand(long, { type: 'speed', id: 's1', speed: 2 }, limits))).toEqual(zoom(following));
     const still = zoom(applyCommand(following, { type: 'set', list: 'zooms', id: 'z1', fields: { moves: undefined } }, limits));
     expect(still).not.toHaveProperty('moves');
     expect(still.auto).toBeUndefined();

@@ -42,7 +42,7 @@ import {
 import { outputTimesOf } from '../../shared/timeline-model';
 import { BackgroundIcon, CameraIcon, CardIcon, CheckIcon, ChevronIcon, CopyIcon, CropIcon, FilmIcon, MaskIcon, PageIcon, SelectIcon, SoundIcon, SplitIcon, SubtitlesIcon, TextIcon, TrashIcon, WindowIcon, ZoomIcon } from '../icons';
 import { Select as StyledSelect } from '../Select';
-import { chooseImage, cutShownAt, deleteSelection, duplicateSelection, LIST_OF, playheadPlace, reveal, SPEEDS } from './actions';
+import { chooseImage, cutShownAt, deleteSelection, duplicateSelection, LIST_OF, playheadPlace, reveal, setSpeed, SPEEDS } from './actions';
 import { edit, preview } from './doc';
 import { currentPlayer, engineAssets, select, setTool, store, type LookSection, type Selection, type Tool } from './session';
 import { isColoured, swatch, type SwatchKey } from './swatches';
@@ -645,13 +645,13 @@ function Details({ project, selection }: { project: CuttleProject; selection: Se
             <span className="field-label">Speed</span>
             <div className="chips" role="group" aria-label="Speed">
               {SPEEDS.map((speed) => (
-                <button key={speed} type="button" aria-pressed={scene.speed === speed} onClick={() => edit([{ type: 'speed', id, speed }], `Speed ${speed}×`)}>
+                <button key={speed} type="button" aria-pressed={scene.speed === speed} onClick={() => setSpeed(speed, id)}>
                   {speed}×
                 </button>
               ))}
             </div>
             <span className="field-input narrow">
-              <NumberInput value={scene.speed} min={0.25} max={64} step={0.5} onCommit={(speed) => edit([{ type: 'speed', id, speed }], `Speed ${speed}×`)} testId="clip-speed" />
+              <NumberInput value={scene.speed} min={0.25} max={64} step={0.5} onCommit={(speed) => setSpeed(speed, id)} testId="clip-speed" />
               <em>× · {stretch ? formatDuration(stretch.end - stretch.start) : ''} in the video</em>
             </span>
           </div>

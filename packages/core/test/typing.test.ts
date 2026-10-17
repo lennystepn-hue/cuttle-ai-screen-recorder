@@ -47,6 +47,16 @@ describe('typingZooms', () => {
     ]);
   });
 
+  it('shows as much of the interface on a scaled display: 860 points across at least, else none', () => {
+    const events = [...keys(10, 15), ...typedLine(10.2, 10, 100, 240)];
+    // at 2 pixels a point the 1000-pixel screen is 500 points across: a view of all of it is no zoom
+    expect(typingZooms(input({ events, screen: { ...screen, scale: 2 } }))).toEqual([]);
+    // a 3000-pixel screen at 2 (1500 points): 1720 pixels, not 45 % of 3000
+    const wide = { width: 3000, height: 1500, scale: 2 };
+    const [zoom] = typingZooms(input({ events, screen: wide }));
+    expect(zoom?.rect.slice(2)).toEqual([1720, 860]);
+  });
+
   it('goes back left and down for the next line, at most one move in 0.8 s', () => {
     const events = [...keys(10, 17), ...typedLine(10.2, 10, 100, 240), { t: 15.1, type: 'caret', rect: [100, 290, 2, 20] }, { t: 15.4, type: 'caret', rect: [150, 290, 2, 20] }] as InputEvent[];
     const [zoom] = typingZooms(input({ events }));

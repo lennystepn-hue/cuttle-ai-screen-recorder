@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { InputEvent } from '@cuttle/project';
-import { clickZooms, shownClicks, zoomRectFor } from '../src/click-zooms';
+import { clickZooms, minZoomWidth, shownClicks, zoomRectFor } from '../src/click-zooms';
 
 const screen = { width: 1920, height: 1080 };
 const click = (t: number, x: number, y: number, button: 'left' | 'right' = 'left'): InputEvent => ({ t, type: 'click', x, y, button });
@@ -111,5 +111,20 @@ describe('zooms on clicks', () => {
 
   it('keeps a zoom on the screen at its edge', () => {
     expect(zoomRectFor({ left: 1900, top: 1070, right: 1910, bottom: 1075 }, screen)).toEqual([1056, 594, 864, 486]);
+  });
+
+  it('shows as much of the interface on a scaled display as on a 1920-pixel screen at 100 %', () => {
+    // a take that says no scale, and a 1920-pixel screen at 100 %: 45 % of the width, as before
+    expect(minZoomWidth(screen)).toBe(864);
+    expect(minZoomWidth({ ...screen, scale: 1 })).toBe(864);
+    // a Retina Mac (1440 × 900 points): 860 points, not 45 % of its 1440 (2.2× deeper into its larger interface)
+    const retina = { width: 2880, height: 1800, scale: 2 };
+    expect(minZoomWidth(retina)).toBe(1720);
+    expect(zoomRectFor({ left: 1400, top: 900, right: 1410, bottom: 905 }, retina)).toEqual([545, 365, 1720, 1075]);
+    // a laptop at 150 % (1280 points across); a share of it scales the points along (the answer's 35 %)
+    expect(minZoomWidth({ width: 1920, height: 1080, scale: 1.5 })).toBe(1290);
+    expect(minZoomWidth({ width: 1920, height: 1080, scale: 1.5 }, 0.35)).toBeCloseTo(1003.3, 1);
+    // never more than the screen: a small window on a Retina display gets no deeper view than all of it
+    expect(minZoomWidth({ width: 1200, height: 800, scale: 2 })).toBe(1200);
   });
 });

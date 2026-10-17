@@ -424,6 +424,7 @@ async function recordTake({ options, control, platform, area, cameraMode, projec
     const begun = first.segment;
     writeJson(path(FILES.take), {
       version: TAKE_VERSION,
+      ...(area.monitor.scale > 0 && { scale: area.monitor.scale }),
       tracks: {
         screen: { file: FILES.screen, start: screenAt },
         ...(begun.webcam && { webcam: { file: FILES.webcam, start: begun.webcam.start } }),
@@ -557,6 +558,7 @@ async function recordTake({ options, control, platform, area, cameraMode, projec
     const start = segments[0]!.screen.start;
     writeJson(path(FILES.take), {
       version: TAKE_VERSION,
+      ...(area.monitor.scale > 0 && { scale: area.monitor.scale }),
       tracks: {
         screen: { file: FILES.screen, start },
         ...(has.webcam && { webcam: { file: FILES.webcam, start } }),

@@ -31,4 +31,4 @@ export {
   type CaptionWord,
   type SpokenWord,
 } from './captions';
-export { clickZooms, shownClicks, zoomRectFor, type ClickZoom, type ClipSpan } from './click-zooms';
+export { clickZooms, MAX_AREA, minZoomWidth, shownClicks, zoomRectFor, type ClickZoom, type ClipSpan, type ZoomScreen } from './click-zooms';

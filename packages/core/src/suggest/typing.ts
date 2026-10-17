@@ -4,7 +4,7 @@
 // screen changes during the burst. Times are as people see them: output seconds, turned into source
 // seconds at the clip's speed. Pure: `suggest` reads the screen's changes for it.
 import type { InputEvent, Rect, ZoomMove } from '@cuttle/project';
-import type { ClipSpan } from '@cuttle/timeline';
+import { MAX_AREA, minZoomWidth, type ClipSpan, type ZoomScreen } from '@cuttle/timeline';
 
 export const TYPING_RULES = {
   /** Key counts (half seconds) that start at most this far apart are one burst: a pause under 1.5 s (output s)… */
@@ -67,7 +67,7 @@ export interface TypingZoom {
 export interface TypingInput {
   events: readonly InputEvent[];
   clips: readonly ClipSpan[];
-  screen: { width: number; height: number };
+  screen: ZoomScreen;
   /** The zooms already there (the answer zoom, zooms made by hand): none of these overlaps one. */
   avoid: readonly { at: number; duration: number }[];
   /** What the screen changed during the bursts without a caret (`screenChanges`). */
@@ -105,8 +105,11 @@ interface Focus {
   y: number;
 }
 
-/** The view's size: `width` of the screen, in its shape. */
-const viewOf = (screen: { width: number; height: number }, rules: typeof TYPING_RULES) => ({ width: rules.width * screen.width, height: rules.width * screen.height });
+/** The view's size: `width` of the screen (as many points on a scaled display), in its shape. */
+function viewOf(screen: ZoomScreen, rules: typeof TYPING_RULES): { width: number; height: number } {
+  const width = minZoomWidth(screen, rules.width);
+  return { width, height: (width * screen.height) / screen.width };
+}
 
 /** The stretch around a burst where the caret and the screen's changes count for it. */
 const aroundOf = (burst: Burst) => ({ from: burst.from - KEY_SLOT, to: burst.to + KEY_SLOT });
@@ -153,7 +156,7 @@ function focusOf(burst: Burst, input: TypingInput, rules: typeof TYPING_RULES): 
  * The camera's path over the focus points: it starts with the first second's points `lead` into the
  * view, and moves (so the point is `lead` in again) whenever a point leaves the view's middle.
  */
-function pathOf(points: readonly Focus[], speed: number, screen: { width: number; height: number }, rules: typeof TYPING_RULES): { rect: Rect; moves: ZoomMove[] } {
+function pathOf(points: readonly Focus[], speed: number, screen: ZoomScreen, rules: typeof TYPING_RULES): { rect: Rect; moves: ZoomMove[] } {
   const view = viewOf(screen, rules);
   const place = (x: number, y: number): Rect => [
     Math.round(Math.min(Math.max(x - rules.lead * view.width, 0), screen.width - view.width)),
@@ -186,7 +189,10 @@ function pathOf(points: readonly Focus[], speed: number, screen: { width: number
  * count for the 5 output seconds between zoom starts.
  */
 export function typingZooms(input: TypingInput, rules = TYPING_RULES): TypingZoom[] {
-  const { clips, avoid } = input;
+  const { clips, avoid, screen } = input;
+  // a view of (nearly) all of the screen barely zooms: none (a small window on a scaled display)
+  const view = viewOf(screen, rules);
+  if ((view.width * view.height) / (screen.width * screen.height) > MAX_AREA) return [];
   const outputAt = (t: number, index: number) => clips[index]!.start + (t - clips[index]!.from) / clips[index]!.speed;
   const starts = avoid.flatMap((other) => {
     const index = clips.findIndex((clip) => other.at >= clip.from && other.at < clip.to);

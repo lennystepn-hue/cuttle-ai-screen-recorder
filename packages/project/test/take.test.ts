@@ -19,6 +19,13 @@ describe('parseTakeJson', () => {
     expect(trackOffset(result.take, 'mic')).toBeCloseTo(-0.2);
   });
 
+  it('reads the display\'s scale when the take says one, and only a sensible one', () => {
+    const scaled = parseTakeJson(JSON.stringify({ ...take, scale: 2 }));
+    expect(scaled.ok && scaled.take.scale).toBe(2);
+    expect(parseTakeJson(JSON.stringify(take)).ok && (parseTakeJson(JSON.stringify(take)) as { take: { scale?: number } }).take.scale).toBeUndefined();
+    expect(parseTakeJson(JSON.stringify({ ...take, scale: 0 })).ok).toBe(false);
+  });
+
   it('has no offset for a track it does not list', () => {
     const result = parseTakeJson(JSON.stringify({ version: 1, tracks: { screen: take.tracks.screen } }));
     expect(result.ok && trackOffset(result.take, 'mic')).toBeUndefined();

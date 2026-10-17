@@ -1,11 +1,12 @@
 // The editor's actions on the document (the timeline bar, the keys, the command menu and the tools
 // call these): each is one step to undo. Where the playhead stands decides where things go.
 import type { ClipScene, CuttleProject, Scene } from '@cuttle/project';
-import { clickZooms, sceneSpans, shownClicks, TEXT_FADE_SECONDS, type SceneSpan } from '@cuttle/timeline';
+import { clickZooms, sceneSpans, shownClicks, TEXT_FADE_SECONDS, type SceneSpan, type ZoomScreen } from '@cuttle/timeline';
 import type { Command, ListName } from '../../shared/document';
 import { outputTimesOf } from '../../shared/timeline-model';
 import { bridge } from '../bridge';
-import { edit, toast } from './doc';
+import { edit, projectAfter, toast } from './doc';
+import { speedCommands } from '../../shared/speed';
 import { currentPlayer, documentProject, select, setTool, store, type Selection, type Tool } from './session';
 
 /** Output seconds a new zoom or caption lasts. */
@@ -60,7 +61,11 @@ export function chooseTool(tool: Tool): void {
   setTool(tool);
 }
 
-const screenSize = () => store.get().media?.screen.size ?? { width: 1920, height: 1080 };
+/** The screen's size, and its scale when the take says one (zooms on clicks are sized by it, as suggest sizes them). */
+const screenSize = (): ZoomScreen => {
+  const media = store.get().media;
+  return media ? { ...media.screen.size, ...(media.scale !== undefined && { scale: media.scale }) } : { width: 1920, height: 1080 };
+};
 
 /** Splits the clip under the playhead there (a continuous cut). */
 export function split(): void {
@@ -93,10 +98,12 @@ export function duplicateSelection(): void {
   edit([{ type: 'duplicate', list, id: selection.id, ...(list !== 'scenes' && { shift: 1 }) }], `Duplicate ${NAMES[list]}`);
 }
 
-/** Sets a clip's speed (the selected clip, else the one under the playhead). */
+/** Sets a clip's speed (the selected clip, else the one under the playhead), with its zooms on clicks placed for it. */
 export function setSpeed(speed: number, id = selectedOrCurrentClip()?.id): void {
   if (!id) return toast('Select a clip to change its speed.', { tone: 'warning' });
-  edit([{ type: 'speed', id, speed }], `Speed ${speed}×`);
+  const { media } = store.get();
+  const project = documentProject();
+  edit(project && media ? speedCommands(project, id, speed, media.events, screenSize(), projectAfter) : [{ type: 'speed', id, speed }], `Speed ${speed}×`);
 }
 
 /** R (`by` 1) and Shift+R (-1): the selected clip's (or the one at the playhead) next speed of the list. */

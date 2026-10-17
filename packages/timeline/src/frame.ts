@@ -44,6 +44,18 @@ export function createTimeline(project: CuttleProject, opts: TimelineOptions): T
   }
   const spans = sceneSpans(project.scenes);
   const duration = totalDuration(spans);
+  // Source seconds where the video jumps (a clip's edge that is not a continuous cut): the smoothed
+  // cursor keeps the two sides apart.
+  const cuts: number[] = [];
+  spans.forEach((span, i) => {
+    const scene = span.scene;
+    if (scene.type !== 'clip') return;
+    const before = spans[i - 1]?.scene;
+    const after = spans[i + 1]?.scene;
+    if (!(before?.type === 'clip' && before.to === scene.from)) cuts.push(scene.from);
+    if (!(after?.type === 'clip' && after.from === scene.to)) cuts.push(scene.to);
+  });
+  cuts.sort((a, b) => a - b);
   const full: Rect = [0, 0, opts.screenSize.width, opts.screenSize.height];
 
   // Where each zoom and text shows in output time, per span: their ramps run in output seconds.
@@ -78,7 +90,7 @@ export function createTimeline(project: CuttleProject, opts: TimelineOptions): T
     const pastEnd = t >= span.end || !inside(local);
     const sourceLocal = pastEnd ? clamp(lastFrameShown(span, inside) - span.start, 0, length) : local;
     const sourceTime = sourceTimeAt(scene, sourceLocal);
-    let cursor = project.look.cursor.enabled && opts.cursor ? cursorAt(opts.cursor, sourceTime, scene.speed, project.look.cursor.smoothing) : undefined;
+    let cursor = project.look.cursor.enabled && opts.cursor ? cursorAt(opts.cursor, sourceTime, scene.speed, project.look.cursor.smoothing, cuts) : undefined;
     if (cursor && project.look.cursor.clickEffect === 'none') cursor = { ...cursor, clicks: [] };
     // The output time this source frame belongs to (a held or frozen frame's, during a crossfade).
     const shownAt = span.start + (sourceTime - scene.from) / scene.speed;

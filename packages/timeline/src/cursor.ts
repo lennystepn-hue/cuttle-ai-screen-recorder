@@ -8,9 +8,17 @@ export const CLICK_EFFECT_SECONDS = 0.4;
 export const SMOOTH_RATE = 120;
 /** No move for this long is a rest: the cursor holds still, it is not smoothed across. */
 export const REST_SECONDS = 0.25;
-/** A move this far within one sample (at most `JUMP_SECONDS`) is a jump, not smoothed across. */
-export const JUMP_PX = 400;
-export const JUMP_SECONDS = 0.02;
+/**
+ * A step at least this far, and this many times faster than the steps on either side of it, is a
+ * jump (a program moved the pointer, or it crossed displays): not smoothed across. A hand's flick
+ * speeds up and slows down, so its fastest steps have fast neighbours; a jump comes out of nowhere.
+ */
+export const JUMP_PX = 200;
+export const JUMP_RATIO = 4;
+/** Below this speed (px/s) a neighbouring step counts as still. */
+const STILL_SPEED = 300;
+/** Smoothed paths kept per track (a few smoothings tried in the Look tab). */
+const KEPT_PATHS = 4;
 
 type Point = { t: number; x: number; y: number };
 
@@ -18,8 +26,8 @@ export interface CursorTrack {
   moves: Point[];
   clicks: { t: number; x: number; y: number; button: 'left' | 'right' | 'middle' }[];
   shapes: { t: number; shape: CursorShape }[];
-  /** Smoothed paths made so far, by smoothing (made on first use, kept for the track's life). */
-  smoothed?: Map<number, Point[]>;
+  /** Smoothed paths made so far, by smoothing and cuts (made on first use; the last few are kept). */
+  smoothed?: Map<string, Point[]>;
 }
 
 export interface CursorFrame {
@@ -31,7 +39,8 @@ export interface CursorFrame {
 
 export function createCursorTrack(events: readonly InputEvent[]): CursorTrack {
   const track: CursorTrack = { moves: [], clicks: [], shapes: [] };
-  for (const event of [...events].sort((a, b) => a.t - b.t)) {
+  // a click after the moves of the same moment: the cursor's last place at that time is the click's
+  for (const event of [...events].sort((a, b) => a.t - b.t || Number(a.type === 'click') - Number(b.type === 'click'))) {
     if (event.type === 'move') {
       track.moves.push({ t: event.t, x: event.x, y: event.y });
     } else if (event.type === 'click') {
@@ -47,27 +56,66 @@ export function createCursorTrack(events: readonly InputEvent[]): CursorTrack {
 /** The Gaussian's sigma in source seconds for a smoothing of 0–1 (0.5: 0.1 s). */
 export const smoothingSigma = (smoothing: number) => 0.02 + 0.16 * smoothing;
 
+/** The step into sample `i`: its length and its speed (px/s). */
+function step(moves: readonly Point[], i: number): { distance: number; speed: number } | undefined {
+  if (i <= 0 || i >= moves.length) return undefined;
+  const a = moves[i - 1]!;
+  const b = moves[i]!;
+  const distance = Math.hypot(b.x - a.x, b.y - a.y);
+  return { distance, speed: distance / Math.max(b.t - a.t, 0.001) };
+}
+
+/** Whether the step into sample `i` is a jump (see `JUMP_PX`). */
+export function isJump(moves: readonly Point[], i: number): boolean {
+  const here = step(moves, i);
+  if (!here || here.distance < JUMP_PX) return false;
+  const around = Math.max(STILL_SPEED, step(moves, i - 1)?.speed ?? 0, step(moves, i + 1)?.speed ?? 0);
+  return here.speed >= JUMP_RATIO * around;
+}
+
 /**
  * The indexes of `moves` where the path is cut into stretches that are smoothed on their own: the
  * first and last sample, every click (it must be exact), both sides of a rest (the cursor holds
- * still) and of a jump (a teleport is not smoothed across).
+ * still), of a jump (a teleport is not smoothed across) and of a cut (`pinned`: the video jumps
+ * there, so neither side may borrow from the other).
  */
-export function anchorsOf(moves: readonly Point[], clicks: readonly { t: number }[]): number[] {
-  const anchors = new Set<number>([0, moves.length - 1]);
+export function anchorsOf(moves: readonly Point[], clicks: readonly { t: number }[], pinned: ReadonlySet<number> = new Set()): number[] {
+  const anchors = new Set<number>([0, moves.length - 1, ...pinned]);
   const clickTimes = new Set(clicks.map((click) => click.t));
   for (let i = 0; i < moves.length; i++) {
     if (clickTimes.has(moves[i]!.t)) anchors.add(i);
     if (i === 0) continue;
-    const a = moves[i - 1]!;
-    const b = moves[i]!;
-    const rest = b.t - a.t >= REST_SECONDS;
-    const jump = b.t - a.t <= JUMP_SECONDS && Math.hypot(b.x - a.x, b.y - a.y) >= JUMP_PX;
-    if (rest || jump) {
+    if (moves[i]!.t - moves[i - 1]!.t >= REST_SECONDS || isJump(moves, i)) {
       anchors.add(i - 1);
       anchors.add(i);
     }
   }
   return [...anchors].sort((a, b) => a - b);
+}
+
+/** The moves with a sample of the recorded path at each cut inside them; and those samples' indexes. */
+function withCuts(moves: readonly Point[], cuts: readonly number[]): { moves: Point[]; pinned: Set<number> } {
+  const inside = [...new Set(cuts)].filter((t) => t > moves[0]!.t && t < moves.at(-1)!.t).sort((a, b) => a - b);
+  if (inside.length === 0) return { moves: [...moves], pinned: new Set() };
+  const out: Point[] = [];
+  const pinned = new Set<number>();
+  let next = 0;
+  for (let i = 0; i < moves.length; i++) {
+    const point = moves[i]!;
+    while (next < inside.length && inside[next]! <= point.t) {
+      const t = inside[next++]!;
+      if (t === point.t) {
+        pinned.add(out.length);
+        continue;
+      }
+      const previous = moves[i - 1]!;
+      const f = (t - previous.t) / (point.t - previous.t);
+      pinned.add(out.length);
+      out.push({ t, x: lerp(previous.x, point.x, f), y: lerp(previous.y, point.y, f) });
+    }
+    out.push(point);
+  }
+  return { moves: out, pinned };
 }
 
 /** The path between two samples, resampled at `SMOOTH_RATE` (its ends are the samples themselves). */
@@ -126,26 +174,34 @@ function smoothStretch(points: Point[], sigma: number): Point[] {
   });
 }
 
-/** The path the cursor draws at `smoothing` (0: as recorded), made once per track and smoothing. */
-export function smoothedPath(track: CursorTrack, smoothing: number): Point[] {
+/**
+ * The path the cursor draws at `smoothing` (0: as recorded), with the source seconds where the
+ * video cuts (`cuts`) kept apart. Made once per track, smoothing and cuts; the last few are kept.
+ */
+export function smoothedPath(track: CursorTrack, smoothing: number, cuts: readonly number[] = []): Point[] {
   if (smoothing <= 0 || track.moves.length < 3) return track.moves;
   track.smoothed ??= new Map();
-  const known = track.smoothed.get(smoothing);
+  const key = `${smoothing}|${cuts.join(',')}`;
+  const known = track.smoothed.get(key);
   if (known) return known;
   const sigma = smoothingSigma(Math.min(1, smoothing));
-  const anchors = anchorsOf(track.moves, track.clicks);
+  const { moves, pinned } = withCuts(track.moves, cuts);
+  const anchors = anchorsOf(moves, track.clicks, pinned);
   const path: Point[] = [];
   for (let k = 0; k + 1 < anchors.length; k++) {
     const from = anchors[k]!;
     const to = anchors[k + 1]!;
-    const a = track.moves[from]!;
-    const b = track.moves[to]!;
-    // between two anchors next to each other: a rest holds still until the next move, a jump jumps
-    const stretch =
-      to - from > 1 ? smoothStretch(resample(track.moves, from, to), sigma) : b.t - a.t >= REST_SECONDS ? [a, { t: b.t - 1 / SMOOTH_RATE, x: a.x, y: a.y }, b] : [a, b];
-    path.push(...(path.length > 0 ? stretch.slice(1) : stretch));
+    const a = moves[from]!;
+    const b = moves[to]!;
+    // Between two anchors next to each other the cursor holds still until the next sample, then is
+    // there: a rest (no move logged) or a jump. A cut's anchor next to a sample is a plain step.
+    const holds = b.t - a.t >= REST_SECONDS || isJump(moves, to);
+    const stretch = to - from > 1 ? smoothStretch(resample(moves, from, to), sigma) : holds && b.t - a.t > 1 / SMOOTH_RATE ? [a, { t: b.t - 1 / SMOOTH_RATE, x: a.x, y: a.y }, b] : [a, b];
+    // one by one: a long stretch has too many points for a spread
+    for (let i = path.length > 0 ? 1 : 0; i < stretch.length; i++) path.push(stretch[i]!);
   }
-  track.smoothed.set(smoothing, path);
+  if (track.smoothed.size >= KEPT_PATHS) track.smoothed.delete(track.smoothed.keys().next().value!);
+  track.smoothed.set(key, path);
   return path;
 }
 
@@ -168,10 +224,13 @@ function positionAt(moves: readonly Point[], t: number): { x: number; y: number 
   return { x: lerp(a.x, b.x, f), y: lerp(a.y, b.y, f) };
 }
 
-/** The cursor at a source time: on the path smoothed by `smoothing` (0, the default: as recorded). */
-export function cursorAt(track: CursorTrack, sourceTime: number, speed: number, smoothing = 0): CursorFrame | undefined {
+/**
+ * The cursor at a source time: on the path smoothed by `smoothing` (0, the default: as recorded),
+ * kept apart at `cuts` (source seconds where the video jumps).
+ */
+export function cursorAt(track: CursorTrack, sourceTime: number, speed: number, smoothing = 0, cuts: readonly number[] = []): CursorFrame | undefined {
   if (track.moves.length === 0) return undefined;
-  const { x, y } = positionAt(smoothedPath(track, smoothing), sourceTime);
+  const { x, y } = positionAt(smoothedPath(track, smoothing, cuts), sourceTime);
 
   let shape: CursorShape = 'arrow';
   for (const change of track.shapes) {

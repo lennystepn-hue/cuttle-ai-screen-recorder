@@ -66,8 +66,9 @@ smoothing)`), so the editor's Look tab can change it without opening the media a
 5. `cursorAt` reads the smoothed samples (linear between them). Shapes and click effects are as
    before.
 
-**Editor.** The Look tab's cursor section gets "Movement": As recorded, Light smoothing, Smooth,
-Very smooth (0, 0.3, 0.5, 0.8), and keeps an exact value set in cuttle.json.
+**Editor.** The Look tab's cursor section gets "Movement": As recorded, Smooth (the default), Very
+smooth (0, 0.5, 1; steps closer together look the same), and keeps an exact value set in
+cuttle.json.
 
 **Tests.** Unit: zero smoothing equals the recorded path; the path passes through every click
 exactly at its time; a rest holds still; a jump is not smoothed across; the jitter goes and a
@@ -82,6 +83,7 @@ smoothing 0, since smoothing would hold its cursor still through that rest.
 1. **Clicks considered:** left clicks inside a clip whose speed is at most 2 (waiting sped up is
    not zoomed), outside the answer zoom, and on the screen (not a click on the app's own HUD: those
    are not logged anyway).
+   Clicks under a zoom already there (the answer zoom, one made by hand) are left to it.
 2. **Clusters:** clicks in time order; a click joins the open cluster when it comes within 3 s of
    its last click and the cluster's bounding box with it stays within 40 % of the screen's width
    and height; otherwise it opens a new cluster.
@@ -91,10 +93,13 @@ smoothing 0, since smoothing would hold its cursor still through that rest.
    arrives as the click happens) and lasts until 1.2 s after the last one, at least 1.8 s. A
    cluster is within one clip.
 4. **Fewer, better:**
-   - Two zooms whose rectangles overlap by more than 60 % and that are less than 1.5 s apart
-     become one.
+   - Two zooms whose rectangles overlap by more than 60 %, that are less than 1.5 s apart, and
+     whose clicks together still fit one cluster's box become one.
    - A zoom that would cover more than 80 % of the screen is dropped: it would barely zoom.
-   - At most one zoom starts in any 5 s of output.
+   - At most one zoom starts in any 5 s of output, the zooms already there counted; a click zoom
+     ends where the next of those starts.
+   - The times are output seconds, as people see them: at 2× a zoom covers twice the source, and
+     scenes moved out of source order are spaced as they play.
    - Nothing within 1 s of its clip's cut (a cut and a zoom at once is too much): the zoom
      starts or ends a second inside, or is left out when that leaves less than 1.8 s.
 5. Zooms are labelled "Click" (one click) or "Clicks" (several), with ids like every other.
@@ -103,8 +108,9 @@ smoothing 0, since smoothing would hold its cursor still through that rest.
 
 - `cuttle suggest` adds them with the answer zoom; `--no-click-zooms` keeps the old behaviour,
   `--no-zoom` adds none.
-- The editor's command menu gets "Auto-zoom on clicks". It replaces the zooms labelled
-  Click/Clicks with a fresh set, as one step to undo.
+- The editor's command menu gets "Zoom on clicks". It adds the click zooms that fit around the
+  zooms there, as one step to undo; it never changes or removes a zoom (one made by suggest and
+  then adjusted is the person's), and its note says why when none fits.
 - Suggest's note says how many it added.
 
 **Tests.** Unit, over synthetic event logs:
@@ -126,11 +132,13 @@ The CLI's test: suggest on a take with clicks at 1× adds a "Clicks" zoom (and n
   - The Look tab shows the cursor styles (system, two arrows, dot, ring, spotlight) and the frame
     styles (mac-dark, mac-light, browser-light, none) as pictures the engine draws, instead of
     menus.
-  - The editor draws them once, when the Look tab first shows, with the engine's renderer on an
-    offscreen canvas: a one-clip project on a calm background. A frame shows its window's top-left
-    corner, enlarged. A cursor shows close up.
-- **A ghost under a dragged scene.** While a scene is dragged, a translucent copy of its block
-  follows the pointer; the insert mark still says where it lands.
+  - The editor draws each when the Look tab first asks for it, with the engine's renderer on an
+    offscreen canvas: a one-clip project on a calm background. A frame shows a narrow window's
+    whole title bar. A cursor shows close up; System as its arrow, hand and text beam, Spotlight
+    from further away, and the dot, ring and spotlight in the cursor's colour. The name is under
+    the picture.
+- **A ghost under a dragged scene.** While a scene is dragged, a lifted copy of its block follows
+  the pointer, the block itself dimmed where it was; the insert mark still says where it lands.
 
 ## Milestones
 

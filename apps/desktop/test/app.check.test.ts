@@ -520,10 +520,13 @@ describe.runIf(enabled)('the Cuttle app', () => {
     await editor.waitForSelector('[data-testid=frame-mac-light] img', { timeout: 20_000 });
     await editor.waitForSelector('[data-testid=cursor-ring] img', { timeout: 20_000 });
     await shot('14-look-swatches');
+    await editor.waitForSelector('[data-testid=cursor-spotlight] img', { timeout: 20_000 });
+    await editor.locator('[data-testid=cursor-spotlight]').scrollIntoViewIfNeeded();
+    await shot('14b-look-cursors');
     await click(editor, '[data-testid=frame-mac-light]');
     await savedWhen((file) => (file as unknown as { look: { frame: { style?: string } } }).look.frame.style === 'mac-light');
-    await editor.selectOption('[data-testid=cursor-smoothing]', '0.8');
-    await savedWhen((file) => (file as unknown as { look: { cursor?: { smoothing?: number } } }).look.cursor?.smoothing === 0.8);
+    await editor.selectOption('[data-testid=cursor-smoothing]', '1');
+    await savedWhen((file) => (file as unknown as { look: { cursor?: { smoothing?: number } } }).look.cursor?.smoothing === 1);
     await click(editor, '#tab-selection');
     await undoAll();
     expect(readFileSync(projectFile(), 'utf8')).toBe(original);
@@ -540,9 +543,9 @@ describe.runIf(enabled)('the Cuttle app', () => {
     // the fixture's clicks are too close to cuts or to the answer zoom for a zoom of their own
     await editor.keyboard.press('Control+K');
     await editor.keyboard.type('zoom on clicks');
-    await editor.waitForFunction(() => document.querySelector('.command-menu [aria-selected=true]')?.textContent?.includes('Auto-zoom on clicks'));
+    await editor.waitForFunction(() => document.querySelector('.command-menu [aria-selected=true]')?.textContent?.includes('Zoom on clicks'));
     await editor.keyboard.press('Enter');
-    await expect.poll(() => doc().then((state) => state.toast?.text ?? ''), { timeout: 5000 }).toContain('No clicks to zoom on');
+    await expect.poll(() => doc().then((state) => state.toast?.text ?? ''), { timeout: 5000 }).toContain('No zoom fits the click left');
     expect((await editor.evaluate(() => document.querySelector('.app')?.getAttribute('data-tool'))) ?? 'select').toBe('select');
   }, 30_000);
 

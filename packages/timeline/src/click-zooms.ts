@@ -1,10 +1,12 @@
 // Zooms that follow the clicks of a take: clicks close in time and place make one zoom that eases
 // in as the first click happens, stays while the work goes on there, and leaves. Fewer, better
 // zooms: never in waiting that is sped up, never one that would barely zoom, never two at once, and
-// at most one starting in any 5 output seconds. Pure; `suggest` and the editor share it.
+// at most one starting in any 5 output seconds (counting the zooms that are there). Times are as
+// people see them: output seconds, turned into source seconds at the clip's speed. Pure; `suggest`
+// and the editor share it.
 import type { InputEvent, Rect } from '@cuttle/project';
 
-/** A click joins the zoom being formed when it comes this soon after its last click (source s)… */
+/** A click joins the zoom being formed when it comes this soon after its last click (output s)… */
 export const CLUSTER_GAP_SECONDS = 3;
 /** …and the clicks' box with it stays within this share of the screen's width and height. */
 export const CLUSTER_SPAN = 0.4;
@@ -14,25 +16,31 @@ export const PAD = 0.1;
 export const MIN_WIDTH = 0.45;
 /** A zoom that would show more than this share of the screen's area barely zooms: none. */
 export const MAX_AREA = 0.8;
-/** The zoom starts this long before the first click (it eases in for 0.6 s)… */
+/** The zoom starts this long before the first click (it eases in for 0.6 s; output s)… */
 export const LEAD_SECONDS = 0.7;
-/** …and lasts until this long after the last one, at least `MIN_SECONDS`. */
+/** …and lasts until this long after the last one, at least `MIN_SECONDS` (output s). */
 export const TAIL_SECONDS = 1.2;
 export const MIN_SECONDS = 1.8;
 /** Clicks in clips faster than this are not zoomed (waiting sped up). */
 export const MAX_SPEED = 2;
-/** Two zooms that overlap this much (of the smaller) and are this close in time become one. */
+/**
+ * Two zooms that overlap this much (of the smaller), are this close (output s), and whose clicks
+ * together still fit in one cluster's box become one.
+ */
 export const MERGE_OVERLAP = 0.6;
 export const MERGE_GAP_SECONDS = 1.5;
 /** At most one zoom starts in any this many output seconds. */
 export const MIN_OUTPUT_GAP = 5;
-/** No zoom starts or ends this close to its clip's cut (a cut and a zoom at once is too much). */
+/** No zoom starts or ends this close to its clip's cut (a cut and a zoom at once is too much; output s). */
 export const EDGE_SECONDS = 1;
 
+/** A clip as the video shows it: its source range, its speed, and where it starts in the output. */
 export interface ClipSpan {
   from: number;
   to: number;
   speed: number;
+  /** Output seconds where the clip starts (scenes before it, cards and pages too, counted). */
+  start: number;
 }
 
 export interface ClickZoom {
@@ -51,6 +59,9 @@ const boxOf = (points: readonly { x: number; y: number }[]): Box => ({
   right: Math.max(...points.map((point) => point.x)),
   bottom: Math.max(...points.map((point) => point.y)),
 });
+
+/** Whether a box of clicks is small enough for one zoom (`CLUSTER_SPAN` of the screen each way). */
+const fits = (box: Box, screen: { width: number; height: number }) => box.right - box.left <= CLUSTER_SPAN * screen.width && box.bottom - box.top <= CLUSTER_SPAN * screen.height;
 
 /** A box padded, made at least `MIN_WIDTH` wide in the screen's aspect, and kept on the screen. */
 export function zoomRectFor(box: Box, screen: { width: number; height: number }): Rect {
@@ -77,25 +88,34 @@ function overlap(a: Rect, b: Rect): number {
   return (w * h) / Math.min(a[2] * a[3], b[2] * b[3]);
 }
 
+const isLeftClick = (event: InputEvent): event is Extract<InputEvent, { type: 'click' }> => event.type === 'click' && event.button === 'left';
+
+/** How many left clicks the video shows (inside `clips`), and of those outside `avoid` (the zooms there). */
+export function shownClicks(events: readonly InputEvent[], clips: readonly ClipSpan[], avoid: readonly { at: number; duration: number }[] = []): number {
+  return events.filter(
+    (event) => isLeftClick(event) && clips.some((clip) => event.t >= clip.from && event.t < clip.to) && !avoid.some((other) => event.t >= other.at && event.t < other.at + other.duration),
+  ).length;
+}
+
 /**
- * The zooms for a take's left clicks inside `clips` (in output order), in source seconds and
- * pixels. `avoid` are spans other zooms already take (the answer zoom): no click zoom overlaps one.
+ * The zooms for a take's left clicks inside `clips`, in source seconds and pixels. `avoid` are the
+ * zooms already there (the answer zoom, zooms made by hand): clicks under one are left to it, no
+ * click zoom overlaps one, and they count for the 5 output seconds between zoom starts.
  */
 export function clickZooms(events: readonly InputEvent[], clips: readonly ClipSpan[], screen: { width: number; height: number }, avoid: readonly { at: number; duration: number }[] = []): ClickZoom[] {
-  // output seconds where each clip starts, to space the zooms out as people see them
-  const starts: number[] = [];
-  let shown = 0;
-  for (const clip of clips) {
-    starts.push(shown);
-    shown += (clip.to - clip.from) / clip.speed;
-  }
   const clipOf = (t: number) => clips.findIndex((clip) => t >= clip.from && t < clip.to);
-  const outputAt = (t: number, index: number) => starts[index]! + (t - clips[index]!.from) / clips[index]!.speed;
+  const outputAt = (t: number, index: number) => clips[index]!.start + (t - clips[index]!.from) / clips[index]!.speed;
+  /** Output seconds where a zoom starts, when the video shows its source second. */
+  const shownAt = (t: number) => {
+    const index = clipOf(t);
+    return index < 0 ? undefined : outputAt(t, index);
+  };
+  const under = (t: number) => avoid.some((other) => t >= other.at && t < other.at + other.duration);
 
   const clicks = events
-    .filter((event): event is Extract<InputEvent, { type: 'click' }> => event.type === 'click' && event.button === 'left')
+    .filter(isLeftClick)
     .map((click) => ({ ...click, clip: clipOf(click.t) }))
-    .filter((click) => click.clip >= 0 && clips[click.clip]!.speed <= MAX_SPEED)
+    .filter((click) => click.clip >= 0 && clips[click.clip]!.speed <= MAX_SPEED && !under(click.t))
     .sort((a, b) => a.t - b.t);
 
   // clusters: close in time, within one clip, and in one part of the screen
@@ -103,29 +123,35 @@ export function clickZooms(events: readonly InputEvent[], clips: readonly ClipSp
   for (const click of clicks) {
     const open = clusters.at(-1);
     const last = open?.at(-1);
-    if (open && last && last.clip === click.clip && click.t - last.t <= CLUSTER_GAP_SECONDS) {
-      const box = boxOf([...open, click]);
-      if (box.right - box.left <= CLUSTER_SPAN * screen.width && box.bottom - box.top <= CLUSTER_SPAN * screen.height) {
-        open.push(click);
-        continue;
-      }
+    if (open && last && last.clip === click.clip && (click.t - last.t) / clips[click.clip]!.speed <= CLUSTER_GAP_SECONDS && fits(boxOf([...open, click]), screen)) {
+      open.push(click);
+      continue;
     }
     clusters.push([click]);
   }
 
+  // each cluster's zoom, timed in output seconds at its clip's speed, and over before a zoom there
   let zooms = clusters.flatMap((cluster) => {
     const clip = clips[cluster[0]!.clip]!;
-    const at = Math.max(cluster[0]!.t - LEAD_SECONDS, clip.from + EDGE_SECONDS);
-    const end = Math.min(Math.max(cluster.at(-1)!.t + TAIL_SECONDS, at + MIN_SECONDS), clip.to - EDGE_SECONDS);
-    if (end - at < MIN_SECONDS - 1e-9) return [];
+    const s = clip.speed;
+    const at = Math.max(cluster[0]!.t - LEAD_SECONDS * s, clip.from + EDGE_SECONDS * s);
+    const next = Math.min(...avoid.filter((other) => other.at > cluster.at(-1)!.t).map((other) => other.at));
+    const end = Math.min(Math.max(cluster.at(-1)!.t + TAIL_SECONDS * s, at + MIN_SECONDS * s), clip.to - EDGE_SECONDS * s, next);
+    if ((end - at) / s < MIN_SECONDS - 1e-9) return [];
     return [{ at, end, clip: cluster[0]!.clip, points: cluster.map(({ x, y }) => ({ x, y })), clicks: cluster.length }];
   });
 
-  // neighbours that show nearly the same spot become one
+  // neighbours that show nearly the same spot become one, while their clicks fit one zoom's box
   const merged: typeof zooms = [];
   for (const zoom of zooms) {
     const previous = merged.at(-1);
-    if (previous && previous.clip === zoom.clip && zoom.at - previous.end <= MERGE_GAP_SECONDS && overlap(zoomRectFor(boxOf(previous.points), screen), zoomRectFor(boxOf(zoom.points), screen)) >= MERGE_OVERLAP) {
+    if (
+      previous &&
+      previous.clip === zoom.clip &&
+      (zoom.at - previous.end) / clips[zoom.clip]!.speed <= MERGE_GAP_SECONDS &&
+      fits(boxOf([...previous.points, ...zoom.points]), screen) &&
+      overlap(zoomRectFor(boxOf(previous.points), screen), zoomRectFor(boxOf(zoom.points), screen)) >= MERGE_OVERLAP
+    ) {
       previous.end = Math.max(previous.end, zoom.end);
       previous.points.push(...zoom.points);
       previous.clicks += zoom.clicks;
@@ -133,21 +159,23 @@ export function clickZooms(events: readonly InputEvent[], clips: readonly ClipSp
     }
     merged.push({ ...zoom, points: [...zoom.points] });
   }
-  zooms = merged;
+  // in the order people see them (scenes can be moved out of source order)
+  zooms = merged.sort((a, b) => outputAt(a.at, a.clip) - outputAt(b.at, b.clip));
 
+  // where the zooms already there start, in output seconds
+  const starts = avoid.map((other) => shownAt(other.at)).filter((t): t is number => t !== undefined);
   const result: ClickZoom[] = [];
-  let lastStart = -Infinity;
   let lastEnd = -Infinity;
   for (const zoom of zooms) {
     const rect = zoomRectFor(boxOf(zoom.points), screen);
     if ((rect[2] * rect[3]) / (screen.width * screen.height) > MAX_AREA) continue;
     if (avoid.some((other) => zoom.at < other.at + other.duration && other.at < zoom.end)) continue;
-    // one at a time, and not too often
+    // one at a time, and not too often (the zooms already there count)
     const start = outputAt(zoom.at, zoom.clip);
-    if (zoom.at < lastEnd || start - lastStart < MIN_OUTPUT_GAP) continue;
+    if (start < lastEnd || starts.some((other) => Math.abs(start - other) < MIN_OUTPUT_GAP)) continue;
     result.push({ at: round(zoom.at), duration: round(zoom.end - zoom.at), rect, clicks: zoom.clicks });
-    lastStart = start;
-    lastEnd = zoom.end;
+    starts.push(start);
+    lastEnd = outputAt(zoom.end, zoom.clip);
   }
   return result;
 }

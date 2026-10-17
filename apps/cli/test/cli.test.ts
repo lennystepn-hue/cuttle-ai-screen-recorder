@@ -337,7 +337,7 @@ describe('cuttle suggest and recover', () => {
     expect(code).toBe(0);
     const zooms = (json as { zooms: { label: string; at: number; duration: number; rect: number[] }[] }).zooms;
     expect(zooms.find((zoom) => zoom.label === 'Clicks')).toMatchObject({ at: 5.3, duration: 2.5, rect: [127, 148, 576, 324] });
-    expect((json as { notes: string[] }).notes).toContain('1 zoom(s) on clicks');
+    expect((json as { notes: string[] }).notes).toContain('1 zoom on clicks');
     const without = await cli('--json', '-C', dir, 'suggest', '--dry-run', '--no-click-zooms');
     expect((without.json as { zooms: { label: string }[] }).zooms.map((zoom) => zoom.label)).not.toContain('Clicks');
   }, 30_000);

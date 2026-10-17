@@ -26,7 +26,7 @@ import { CardIcon, CopyIcon, FilmIcon, MaskIcon, PageIcon, TextIcon, TrashIcon, 
 import { chooseImage, deleteSelection, duplicateSelection, LIST_OF, SPEEDS } from './actions';
 import { edit, preview } from './doc';
 import { engineAssets, setTool, store, type Selection, type Tool } from './session';
-import { swatches, type SwatchKey } from './swatches';
+import { isColoured, swatch, type SwatchKey } from './swatches';
 import { useStore } from './store';
 
 const TABS = [
@@ -192,12 +192,14 @@ function Select<T extends string>({ value, options, names, onChange, testId }: {
   );
 }
 
-/** How smooth the cursor's path is: the steps the menu offers, and a value set in cuttle.json kept as it is. */
+/**
+ * How smooth the cursor's path is: the steps the menu offers (ones far enough apart to see), and a
+ * value set in cuttle.json kept as it is.
+ */
 const SMOOTHING: { value: number; name: string }[] = [
   { value: 0, name: 'As recorded' },
-  { value: 0.3, name: 'Light smoothing' },
-  { value: 0.5, name: 'Smooth' },
-  { value: 0.8, name: 'Very smooth' },
+  { value: 0.5, name: 'Smooth (default)' },
+  { value: 1, name: 'Very smooth' },
 ];
 
 function SmoothingSelect({ value }: { value: number }) {
@@ -207,7 +209,6 @@ function SmoothingSelect({ value }: { value: number }) {
       value={String(value)}
       onChange={(event) => look(['cursor', 'smoothing'], Number(event.target.value), 'Cursor movement')}
       onKeyDown={(event) => event.stopPropagation()}
-      title="The cursor glides instead of jittering; clicks stay exactly where they were"
       data-testid="cursor-smoothing"
     >
       {!known && <option value={String(value)}>{value} (from cuttle.json)</option>}
@@ -220,34 +221,78 @@ function SmoothingSelect({ value }: { value: number }) {
   );
 }
 
-/** The engine's own pictures of the cursor or frame styles (drawn once), to pick one by sight. */
-function PictureSwatches<T extends string>({ label, kind, options, names, value, onPick }: { label: string; kind: 'cursor' | 'frame'; options: readonly T[]; names: Record<T, string>; value: T; onPick: (value: T) => void }) {
-  const [urls, setUrls] = useState<Map<SwatchKey, string>>();
+/**
+ * A style's picture, drawn by the engine (see swatches.ts): undefined while it is drawn, false when
+ * it could not be. The engine's assets come with the project, so it is drawn once that is open; a
+ * coloured one is drawn again when the colour settles, the old picture showing meanwhile.
+ */
+function useSwatch(key: SwatchKey, color: string): string | false | undefined {
+  const ready = useStore(store, (state) => state.phase === 'ready');
+  const [picture, setPicture] = useState<string | false>();
+  const tint = isColoured(key) ? color : '';
   useEffect(() => {
-    if (!engineAssets) return;
+    if (!ready || !engineAssets) return;
+    const assets = engineAssets;
     let live = true;
-    swatches(engineAssets).then(
-      (drawn) => live && setUrls(drawn),
-      () => {},
+    const timer = setTimeout(
+      () =>
+        swatch(assets, key, tint).then(
+          (url) => live && setPicture(url),
+          () => live && setPicture(false),
+        ),
+      picture ? 150 : 0,
     );
     return () => {
       live = false;
+      clearTimeout(timer);
     };
-  }, []);
+  }, [ready, key, tint]);
+  return picture;
+}
+
+function PictureSwatch({ swatchKey, name, title, pressed, color, onPick }: { swatchKey: SwatchKey; name: string; title?: string; pressed: boolean; color: string; onPick: () => void }) {
+  const picture = useSwatch(swatchKey, color);
   return (
-    <div className="swatches picture-swatches" role="group" aria-label={label}>
-      {options.map((option) => {
-        const url = urls?.get(`${kind}:${option}` as SwatchKey);
-        return (
-          <button key={option} type="button" className="swatch-button picture" aria-pressed={value === option} title={names[option]} onClick={() => onPick(option)} data-testid={`${kind}-${option}`}>
-            {url ? <img src={url} alt="" draggable={false} /> : <i className="swatch-wait" aria-hidden />}
-            <span>{names[option]}</span>
-          </button>
-        );
-      })}
+    <button type="button" className="picture-swatch" aria-pressed={pressed} title={title ?? name} onClick={onPick} data-testid={swatchKey.replace(':', '-')}>
+      <span className="picture">{picture ? <img src={picture} alt="" draggable={false} /> : <i className={`swatch-wait${picture === false ? ' failed' : ''}`} aria-hidden />}</span>
+      <span className="name">{name}</span>
+    </button>
+  );
+}
+
+/** The engine's own pictures of the cursor or frame styles, to pick one by sight; the name under each. */
+function PictureSwatches<T extends string>({
+  label,
+  kind,
+  options,
+  names,
+  titles,
+  value,
+  color,
+  onPick,
+}: {
+  label: string;
+  kind: 'cursor' | 'frame';
+  options: readonly T[];
+  names: Record<T, string>;
+  titles?: Partial<Record<T, string>>;
+  value: T;
+  color: string;
+  onPick: (value: T) => void;
+}) {
+  return (
+    <div className={`swatches picture-swatches ${kind}s`} role="group" aria-label={label}>
+      {options.map((option) => (
+        <PictureSwatch key={option} swatchKey={`${kind}:${option}` as SwatchKey} name={names[option]} title={titles?.[option]} pressed={value === option} color={color} onPick={() => onPick(option)} />
+      ))}
     </div>
   );
 }
+
+const CURSOR_TITLES: Partial<Record<(typeof CURSOR_STYLES)[number], string>> = {
+  system: 'System: changes shape like the real pointer (arrow, hand, text beam…)',
+  spotlight: 'Spotlight: a light around the pointer, the rest of the screen dimmed',
+};
 
 function Toggle({ checked, onChange, label, testId, disabled }: { checked: boolean; onChange: (checked: boolean) => void; label: string; testId?: string; disabled?: boolean }) {
   return (
@@ -649,6 +694,7 @@ function LookPanel() {
             options={FRAME_STYLES}
             names={FRAME_NAMES}
             value={current.frame.style}
+            color={current.cursor.color}
             onPick={(style) => look(['frame', 'style'], style, `Frame: ${FRAME_NAMES[style]}`)}
           />
           <Row label="Title">
@@ -676,7 +722,9 @@ function LookPanel() {
             kind="cursor"
             options={CURSOR_STYLES}
             names={CURSOR_NAMES}
+            titles={CURSOR_TITLES}
             value={current.cursor.style}
+            color={current.cursor.color}
             onPick={(style) => look(['cursor', 'style'], style, `Cursor: ${CURSOR_NAMES[style]}`)}
           />
           <div className="grid2">
@@ -690,7 +738,7 @@ function LookPanel() {
           <Row label="Clicks">
             <Select value={current.cursor.clickEffect} options={CLICK_EFFECTS} names={CLICK_NAMES} onChange={(effect) => look(['cursor', 'clickEffect'], effect, 'Click effect')} />
           </Row>
-          <Row label="Movement">
+          <Row label="Movement" note="the pointer glides; clicks stay exact">
             <SmoothingSelect value={current.cursor.smoothing} />
           </Row>
         </>

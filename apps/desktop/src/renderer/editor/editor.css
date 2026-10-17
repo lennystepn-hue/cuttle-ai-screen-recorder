@@ -1234,25 +1234,43 @@ button.chip-status:hover {
 }
 
 /* a version a conflict set aside: offered back until answered */
-/* a scene being moved: a translucent copy follows the pointer, the insert mark says where it lands */
+/* A scene being moved: its block stays dimmed and dashed where it was, a lifted copy follows the
+   pointer (its name at the top, so it never runs into the names below it), and the insert mark,
+   the one accent, says where it lands. */
+.scene.moving > * {
+  opacity: 0.3;
+}
+.scene.moving::after {
+  box-shadow: none;
+  outline: 1.5px dashed rgba(255, 255, 255, 0.45);
+  outline-offset: -1.5px;
+}
 .scene-ghost {
   position: absolute;
-  border-radius: 6px;
-  background: rgba(255, 255, 255, 0.1);
+  border-radius: 7px;
+  background: var(--raised-active);
   box-shadow:
-    inset 0 0 0 1.5px var(--accent),
+    inset 0 0 0 1.5px rgba(255, 255, 255, 0.5),
     var(--shadow-float);
+  transform: translateY(-6px);
   pointer-events: none;
   z-index: 3;
   display: flex;
-  align-items: flex-end;
-  padding: 0 0 6px 8px;
+  align-items: flex-start;
   overflow: hidden;
 }
-.scene-ghost span {
-  font-size: var(--size-xs);
+.scene-ghost .lbl {
+  margin: 5px 0 0 7px;
+  background: rgba(10, 10, 12, 0.78);
+  padding: 1px 6px;
+  border-radius: 5px;
+  font-size: 11px;
+  color: #fff;
   font-weight: 600;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: calc(100% - 14px);
 }
 
 /* an empty lane says how to fill it; a missing track says so (never in the way of a click) */
@@ -1759,43 +1777,109 @@ button.chip-status:hover {
   color: rgba(255, 255, 255, 0.92);
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.7);
 }
+.swatch-button:hover {
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.28);
+}
 .swatch-button[aria-pressed='true'] {
   box-shadow:
     0 0 0 2px var(--accent),
     inset 0 0 0 1px rgba(0, 0, 0, 0.3);
 }
-/* the cursor and frame styles: the engine's own pictures, the name under them */
+/* focus shows on a swatch too: a ring with a gap, around the selection's ring when it has one */
+.swatch-button:focus-visible {
+  box-shadow:
+    var(--focus),
+    inset 0 0 0 1px var(--line-strong);
+}
+.swatch-button[aria-pressed='true']:focus-visible,
+.picture-swatch[aria-pressed='true']:focus-visible .picture {
+  box-shadow:
+    0 0 0 2px var(--accent),
+    0 0 0 4px var(--bg),
+    0 0 0 6px var(--accent);
+}
+/* the cursor and frame styles: the engine's own pictures, the name under them; frames in two
+   columns, wide enough to tell their title bars apart */
 .picture-swatches {
   margin: 2px 0 10px;
+  gap: 10px 8px;
 }
-.swatch-button.picture {
-  position: relative;
-  height: auto;
-  aspect-ratio: 16 / 9;
+.picture-swatches.frames {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.picture-swatch {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
   padding: 0;
-  background: var(--stage);
+  text-align: left;
 }
-.swatch-button.picture img,
-.swatch-button.picture .swatch-wait {
+.picture-swatch:focus-visible {
+  box-shadow: none;
+}
+.picture-swatch .picture {
+  position: relative;
+  aspect-ratio: 16 / 9;
+  border-radius: 6px;
+  overflow: hidden;
+  box-shadow: 0 0 0 1px var(--line-strong);
+  transition: box-shadow var(--fast);
+}
+.picture-swatch:hover .picture {
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.32);
+}
+.picture-swatch[aria-pressed='true'] .picture {
+  box-shadow: 0 0 0 2px var(--accent);
+}
+.picture-swatch:focus-visible .picture {
+  box-shadow: var(--focus);
+}
+.picture-swatch img,
+.picture-swatch .swatch-wait {
   position: absolute;
   inset: 0;
   width: 100%;
   height: 100%;
-  object-fit: cover;
+  display: block;
 }
-/* a frame shows by its window's top-left corner (the controls and the title), enlarged */
-.picture-swatches[aria-label='Frame style'] img {
-  transform: scale(3);
-  transform-origin: 6% 7%;
-}
-.swatch-button.picture span {
-  position: relative;
+.picture-swatch .name {
+  font-size: 11px;
+  color: var(--muted);
   white-space: nowrap;
-  margin: auto 0 0;
-  padding: 3px 6px;
-  width: 100%;
-  text-align: left;
-  background: linear-gradient(transparent, rgba(0, 0, 0, 0.55));
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: color var(--fast);
+}
+.picture-swatch[aria-pressed='true'] .name,
+.picture-swatch:hover .name {
+  color: var(--text);
+}
+/* while the engine draws a picture: a quiet sweep (none with reduced motion); flat when it failed */
+.swatch-wait {
+  background: linear-gradient(100deg, transparent 35%, rgba(255, 255, 255, 0.05) 50%, transparent 65%) var(--raised);
+  background-size: 250% 100%;
+  animation: sweep 1.6s linear infinite;
+}
+.swatch-wait.failed {
+  animation: none;
+  background: var(--raised);
+}
+@keyframes sweep {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: -150% 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  :root:not([data-motion='full']) .swatch-wait {
+    animation: none;
+  }
+}
+:root[data-motion='reduce'] .swatch-wait {
+  animation: none;
 }
 /* the swatches look like the engine's presets (packages/engine/src/presets/backgrounds.ts) */
 .bg-sunset-sky {

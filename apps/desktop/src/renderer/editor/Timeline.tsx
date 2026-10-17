@@ -97,8 +97,8 @@ const BARS = '#5c5c68';
 interface DragView {
   guide?: number;
   insertAt?: number;
-  /** A scene being moved: its block follows the pointer, translucent (left and width in output seconds). */
-  ghost?: { left: number; width: number; label: string };
+  /** A scene being moved: a copy of its block follows the pointer (left and width in output seconds), the block itself dimmed. */
+  ghost?: { id: string; left: number; width: number; label: string };
 }
 
 export function Timeline() {
@@ -285,6 +285,8 @@ export function Timeline() {
     if (!edge) seekTo(timeAt(event.clientX));
     const scene = project.scenes[block.index]!;
     const others = targets({ scene: block.id });
+    // where on the timeline the scene was taken (the ghost keeps that point under the pointer)
+    const pressedAt = timeAt(event.clientX);
     let commands: Command[] | undefined;
     let insertAt: number | undefined;
     follow(
@@ -314,7 +316,8 @@ export function Timeline() {
         insertAt = rest.filter((other) => (other.start + other.end) / 2 < t).length;
         setDrag({
           insertAt: insertAt === 0 ? (rest[0]?.start ?? 0) : rest[insertAt - 1]!.end,
-          ghost: { left: block.start + deltaOut, width: block.end - block.start, label: block.title },
+          // on the timeline, never past its ends
+          ghost: { id: block.id, left: Math.min(Math.max(0, block.start + (t - pressedAt)), duration - (block.end - block.start)), width: block.end - block.start, label: block.title },
         });
       },
       (moved) => {
@@ -440,7 +443,7 @@ export function Timeline() {
                 <Ruler duration={duration} pps={pps} view={view} top={tops.ruler} />
                 <div className="tl-row" style={{ position: 'absolute', top: tops.video, height: heights.video, left: 0, right: 0 }}>
                   {model.scenes.map((scene) => (
-                    <Scene key={scene.id} scene={scene} project={project} pps={pps} view={view} selected={isSelected(selection, 'scene', scene.id)} onPointerDown={(event) => pressScene(event, scene)} />
+                    <Scene key={scene.id} scene={scene} project={project} pps={pps} view={view} selected={isSelected(selection, 'scene', scene.id)} moving={drag.ghost?.id === scene.id} onPointerDown={(event) => pressScene(event, scene)} />
                   ))}
                 </div>
                 {!project.sources.mic && (
@@ -507,10 +510,11 @@ export function Timeline() {
                 {drag.guide !== undefined && <div className="snap-guide" style={{ left: drag.guide * pps }} />}
                 {drag.ghost && (
                   <div className="scene-ghost" style={{ left: drag.ghost.left * pps, width: drag.ghost.width * pps, top: tops.video + 4, height: heights.video - 8 }}>
-                    <span>{drag.ghost.label}</span>
+                    <span className="lbl">{drag.ghost.label}</span>
                   </div>
                 )}
-                {drag.insertAt !== undefined && <div className="insert-mark" style={{ left: drag.insertAt * pps, top: tops.video, height: heights.video }} />}
+                {/* at either end of the timeline the mark stays whole */}
+                {drag.insertAt !== undefined && <div className="insert-mark" style={{ left: Math.min(Math.max(drag.insertAt * pps, 2), duration * pps - 2), top: tops.video, height: heights.video }} />}
                 <Playhead pps={pps} top={heights.markers - 8} scroller={scroller} />
               </>
             )}
@@ -678,7 +682,7 @@ const Ruler = memo(function Ruler({ duration, pps, view, top }: { duration: numb
   );
 });
 
-function Scene(props: { scene: SceneBlock; project: CuttleProject; pps: number; view: { left: number; width: number }; selected: boolean; onPointerDown: (event: ReactPointerEvent<HTMLElement>) => void }) {
+function Scene(props: { scene: SceneBlock; project: CuttleProject; pps: number; view: { left: number; width: number }; selected: boolean; moving: boolean; onPointerDown: (event: ReactPointerEvent<HTMLElement>) => void }) {
   const { scene, project, pps, view, selected, onPointerDown } = props;
   const thumbState = useStore(store, (state) => state.mediaState.thumbnails.state);
   const thumbPath = useStore(store, (state) => state.mediaState.thumbnails.path);
@@ -712,7 +716,7 @@ function Scene(props: { scene: SceneBlock; project: CuttleProject; pps: number; 
   const scale = tileHeight / thumbHeight;
   return (
     <button
-      className={`scene${kindClass}${selected ? ' selected' : ''}`}
+      className={`scene${kindClass}${selected ? ' selected' : ''}${props.moving ? ' moving' : ''}`}
       style={{ left, width: Math.max(4, width - 2) }}
       title={`${name} · ${scene.detail} · drag to move, edges to trim`}
       data-id={scene.id}

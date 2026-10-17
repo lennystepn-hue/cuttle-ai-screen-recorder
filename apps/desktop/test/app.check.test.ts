@@ -92,6 +92,34 @@ async function waitForPage(app: ElectronApplication, test: (page: Page) => Promi
 
 /** Clicks an element in a page without a real mouse (the window is never shown). */
 const click = (page: Page, selector: string) => page.evaluate((target) => (document.querySelector(target) as HTMLElement).click(), selector);
+/**
+ * Picks the option labelled `label` (`prefix`: starting with it) from a select (Select.tsx): a click
+ * opens it, a click on the option picks it. A list closed again before the pick (a scroll still due
+ * from a panel that changed just before, as in a small window) is opened again.
+ */
+async function chooseIn(page: Page, trigger: string, label: string, prefix = false): Promise<void> {
+  for (let attempt = 1; ; attempt++) {
+    // a Playwright selector (it may use :has-text): the element's own click, as in a window never shown
+    await page.locator(trigger).evaluate((element) => (element as HTMLElement).click());
+    await page.waitForSelector('.select-list [role=option]');
+    const result = await page.evaluate(
+      ({ label, prefix }) => {
+        const options = [...document.querySelectorAll('.select-list [role=option]')];
+        if (options.length === 0) return 'closed';
+        const option = options.find((item) => {
+          const text = item.querySelector('.option-label')?.textContent ?? '';
+          return prefix ? text.startsWith(label) : text === label;
+        });
+        if (!option) return 'missing';
+        (option as HTMLElement).click();
+        return 'picked';
+      },
+      { label, prefix },
+    );
+    if (result === 'picked') return;
+    if (result === 'missing' || attempt === 5) throw new Error(`no option "${label}" in ${trigger} (${result})`);
+  }
+}
 
 /** cuttle.json of a project, once `ready` holds for it. */
 async function projectWhen(dir: string, ready: (project: { sources: { screen: string }; scenes: { id?: string }[] }) => boolean, timeout = 60_000) {
@@ -223,7 +251,9 @@ describe.runIf(enabled)('the Cuttle app', () => {
 
   beforeAll(async () => {
     // the real path: macOS's temporary folder is behind a link (/var is /private/var), the app keeps real paths
-    root = realpathSync(mkdtempSync(join(tmpdir(), 'cuttle-app-')));
+    // as the app resolves folders (fs/promises' realpath): macOS's /var is /private/var, and Windows'
+    // short names (C:\Users\RUNNER~1 on GitHub's runners) are written out
+    root = realpathSync.native(mkdtempSync(join(tmpdir(), 'cuttle-app-')));
     project = join(root, 'demo');
     mkdirSync(project);
     makeFixture(project);
@@ -452,17 +482,8 @@ describe.runIf(enabled)('the Cuttle app', () => {
       },
       { selector, by, from: options.from ?? [0.5, 0.5], hold: options.hold ?? false },
     );
-  /** Picks the option labelled `label` from a select (Select.tsx): a click opens it, a click on the option picks it. */
-  const choose = async (trigger: string, label: string) => {
-    // a Playwright selector (it may use :has-text): the element's own click, as in a window never shown
-    await editor.locator(trigger).evaluate((element) => (element as HTMLElement).click());
-    await editor.waitForSelector('.select-list [role=option]');
-    await editor.evaluate((label) => {
-      const option = [...document.querySelectorAll('.select-list [role=option]')].find((item) => item.querySelector('.option-label')?.textContent === label);
-      if (!option) throw new Error(`no option "${label}"`);
-      (option as HTMLElement).click();
-    }, label);
-  };
+  /** Picks the option labelled `label` from a select in the editor. */
+  const choose = (trigger: string, label: string) => chooseIn(editor, trigger, label);
   const release = (by: [number, number]) =>
     editor.evaluate((by) => {
       const at = (window as unknown as { __held: { x: number; y: number } }).__held;
@@ -1327,15 +1348,7 @@ describe.runIf(enabled)('the Cuttle app', () => {
     await settings.waitForSelector('[data-testid=speech-line]');
     const saved = () => JSON.parse(readFileSync(join(root, 'user-data', 'settings.json'), 'utf8')) as { speech?: { model: string; language: string } };
     const line = () => settings.locator('[data-testid=speech-line] .row-hint').textContent();
-    const choose = async (label: string) => {
-      await settings.locator('[data-testid=speech-model]').evaluate((element) => (element as HTMLElement).click());
-      await settings.waitForSelector('.select-list [role=option]');
-      await settings.evaluate((label) => {
-        const option = [...document.querySelectorAll('.select-list [role=option]')].find((item) => item.querySelector('.option-label')?.textContent?.startsWith(label));
-        if (!option) throw new Error(`no option "${label}"`);
-        (option as HTMLElement).click();
-      }, label);
-    };
+    const choose = (label: string) => chooseIn(settings, '[data-testid=speech-model]', label, true);
     // Good (small), the default: not downloaded here; its download breaks off, and says so
     expect(await line()).toBe('German and English, about 5× real time. 488 MB to download, once.');
     await click(settings, '[data-testid=speech-download]');
@@ -1472,12 +1485,7 @@ describe.runIf(enabled)('the Cuttle app', () => {
     await click(page, '#tab-look');
     await click(page, '[data-testid=look-open-subtitles]');
     await page.waitForSelector('[data-testid=captions-enabled][aria-checked=true]');
-    await page.locator('[data-testid=captions-style]').evaluate((element) => (element as HTMLElement).click());
-    await page.waitForSelector('.select-list [role=option]');
-    await page.evaluate(() => {
-      const option = [...document.querySelectorAll('.select-list [role=option]')].find((item) => item.querySelector('.option-label')?.textContent === 'Karaoke');
-      (option as HTMLElement).click();
-    });
+    await chooseIn(page, '[data-testid=captions-style]', 'Karaoke');
     await expect.poll(() => saved().captions?.style).toBe('karaoke');
     await click(page, '[data-testid=look-open-sound]');
     await click(page, '[data-testid=audio-cleanup]');

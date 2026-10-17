@@ -118,7 +118,7 @@ async function run(id: number, job: MediaJob): Promise<ThumbnailsMeta | undefine
       return undefined;
     }
     case 'speech-edits': {
-      await applySpeechEdits(job.input, { link: job.transcript });
+      await applySpeechEdits(job.input, { link: job.transcript, ...(job.cleanMic && { cleanMic: job.cleanMic }) });
       return undefined;
     }
     case 'peaks': {

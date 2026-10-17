@@ -306,3 +306,24 @@ describe('automatic items in the document', () => {
     expect(describeChange(project(tagged), project(cut))).toBe('1 cut added');
   });
 });
+
+describe('captions in the document', () => {
+  it('sets their fields, and fixes words: a fix takes the place of those it overlaps, and none leaves no list', () => {
+    const styled = applyCommand(base, { type: 'captions', field: 'style', value: 'karaoke' }, limits);
+    expect(styled.captions).toEqual({ style: 'karaoke' });
+    expect(describeChange(project(base), project(styled))).toBe('the subtitles changed');
+    const fixed = applyCommand(styled, { type: 'caption-fix', at: 3.1, end: 3.6, text: 'Holofish' }, limits);
+    const again = applyCommand(fixed, { type: 'caption-fix', at: 3.4, end: 4, text: 'Holofish App' }, limits);
+    expect((again.captions as Raw).fixes).toEqual([{ at: 3.4, end: 4, text: 'Holofish App' }]);
+    const both = applyCommand(fixed, { type: 'caption-fix', at: 1, end: 1.2, text: '' }, limits);
+    expect((both.captions as Raw).fixes).toEqual([{ at: 1, end: 1.2, text: '' }, { at: 3.1, end: 3.6, text: 'Holofish' }]);
+    const undone = applyCommand(fixed, { type: 'caption-fix', at: 3, end: 3.2, text: undefined }, limits);
+    expect(undone.captions).toEqual({ style: 'karaoke' });
+    expect(() => applyCommand(base, { type: 'caption-fix', at: 2, end: 2, text: 'x' }, limits)).toThrow(DocumentError);
+  });
+
+  it('says that a take was transcribed, not that it is another take', () => {
+    const transcribed = { ...base, sources: { ...(base.sources as Raw), transcript: 'takes/1/transcript.json' } };
+    expect(describeChange(project(base), project(transcribed))).toBe('the take was transcribed');
+  });
+});

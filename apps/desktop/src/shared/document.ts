@@ -3,6 +3,7 @@
 // valid values and checked with `parseProject`; a command whose item is gone throws, so a replay
 // on a newer version of the file can drop it with a note.
 import { newId, parseProject, usedIds, type AutoEdits, type CuttleProject, type IdList } from '@cuttle/project';
+import { takeKey } from './take';
 
 export type Raw = Record<string, unknown>;
 export type ListName = IdList;
@@ -39,6 +40,10 @@ export type Command =
   | { type: 'output'; width: number; height: number }
   /** Switches a kind of automatic edit on or off (`autoEdits`). */
   | { type: 'auto-edits'; kind: keyof AutoEdits; value: boolean }
+  /** Sets a field of the captions (the subtitles from the transcript). */
+  | { type: 'captions'; field: 'enabled' | 'style' | 'position' | 'size' | 'color'; value: unknown }
+  /** The words spoken in [at, end) read as `text` ("" for none); `undefined` takes the fixes there away. */
+  | { type: 'caption-fix'; at: number; end: number; text: string | undefined }
   /** Replaces every scene (Show raw take). */
   | { type: 'scenes'; scenes: Item[] };
 
@@ -272,6 +277,22 @@ export function applyCommand(raw: Raw, command: Command, limits: EditLimits = {}
       autoEdits[command.kind] = command.value;
       break;
     }
+    case 'captions': {
+      const captions = (next.captions && typeof next.captions === 'object' ? next.captions : (next.captions = {})) as Item;
+      captions[command.field] = structuredClone(command.value);
+      break;
+    }
+    case 'caption-fix': {
+      if (!(command.end > command.at)) throw new DocumentError('invalid', 'a fix must end after it starts');
+      const captions = (next.captions && typeof next.captions === 'object' ? next.captions : (next.captions = {})) as Item;
+      const fixes = (Array.isArray(captions.fixes) ? captions.fixes : []) as { at: number; end: number; text: string }[];
+      // a new fix takes the place of the fixes it overlaps
+      const kept = fixes.filter((fix) => !(fix.at < command.end && command.at < fix.end));
+      if (command.text !== undefined) kept.push({ at: command.at, end: command.end, text: command.text });
+      if (kept.length > 0) captions.fixes = kept.sort((a, b) => a.at - b.at);
+      else delete captions.fixes;
+      break;
+    }
     case 'scenes': {
       next.scenes = structuredClone(command.scenes);
       const ids = ensureIds(next);
@@ -375,6 +396,8 @@ function changeParts(before: CuttleProject, after: CuttleProject): string[] {
   if (JSON.stringify(before.look) !== JSON.stringify(after.look)) parts.push('the look changed');
   if (JSON.stringify(before.autoEdits) !== JSON.stringify(after.autoEdits)) parts.push('the automatic edits changed');
   if (JSON.stringify(before.output) !== JSON.stringify(after.output)) parts.push('the output size changed');
-  if (JSON.stringify(before.sources) !== JSON.stringify(after.sources)) parts.push('another take');
+  if (JSON.stringify(before.captions) !== JSON.stringify(after.captions)) parts.push('the subtitles changed');
+  if (takeKey(before.sources) !== takeKey(after.sources)) parts.push('another take');
+  else if (before.sources.transcript !== after.sources.transcript) parts.push(after.sources.transcript ? 'the take was transcribed' : 'the transcript was unlinked');
   return parts;
 }

@@ -32,6 +32,15 @@ Cuttle runs on **Windows and macOS**. A change made on one has to keep working o
 - **Whisper**: Windows transcribes with ffmpeg's `whisper` filter (Gyan's builds have it); no macOS
   ffmpeg does, so `speech/whisper.ts` runs whisper.cpp's `whisper-cli` with the filter's settings
   there (`whisperEngine()`). A change to how whisper runs changes both.
+- **What opens over the screen** (dialog zooms, notification masks, the crop to a page): Windows
+  tells them by window class (`windowKind` in `win32.ts`) and a page by Chromium's render widget;
+  macOS by CGWindowList level and shape (`macPopups` in `darwin.ts`: modal panels and centred
+  sheets are dialogs) and, through the Accessibility API, the Notification Center's banners and a
+  browser's page (`pageOf`). macOS hides notifications from screen recordings unless the person
+  allows them while sharing the screen.
+- **The screen's text**: Windows' own OCR through a PowerShell helper, macOS's Vision through
+  `cuttle-capture ocr`; both speak the protocol in `core/src/privacy/ocr.ts`. Vision's boxes jitter
+  around still text, which the privacy masks allow for (`MASK_RULES.jitter`).
 - **Words for people** name both ways: `winget install Gyan.FFmpeg` and `brew install ffmpeg`,
   Windows' Settings and macOS's System Settings (Privacy & Security for the screen, camera,
   microphone and Input Monitoring).

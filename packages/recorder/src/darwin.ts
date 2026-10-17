@@ -1,14 +1,15 @@
-// macOS APIs through koffi: displays in avfoundation's order, windows, the pointer, focus, the mouse
-// and the keyboard (an event tap) and the privacy permissions (screen recording, input monitoring,
-// camera and microphone).
+// macOS APIs through koffi: displays in avfoundation's order, windows (and the dialogs, menus and
+// notifications over them, and a browser's page in one), the pointer, focus, the mouse and the
+// keyboard (an event tap) and the privacy permissions (screen recording, input monitoring, camera and
+// microphone).
 //
 // macOS works in points; a take is in the display's backing pixels (2880×1800 for a 1440×900 point
 // Retina display). The recorder's desktop pixels on macOS: a display's top-left corner is its point
 // origin times the largest backing scale of all displays (so no two displays overlap however their
 // scales differ), and a point on it lies `scale` pixels apart from the next. `toPixels` maps a point,
 // as the input hook and CoreGraphics report it, onto the display that holds it.
-import type { CursorShape } from '@cuttle/project';
-import type { Monitor, WindowInfo } from './types';
+import type { CursorShape, WindowKind } from '@cuttle/project';
+import type { Bounds, Monitor, WindowInfo } from './types';
 
 export interface Darwin {
   /** Active displays, in the order of CGGetActiveDisplayList: avfoundation's "Capture screen <index>". */
@@ -46,6 +47,94 @@ export interface Darwin {
   watchInput(keys: boolean, onEvent: (event: TapEvent) => void): { stop(): void } | undefined;
   /** Camera or microphone access: AVAuthorizationStatus. */
   mediaAccess(kind: 'camera' | 'mic'): 'not-determined' | 'restricted' | 'denied' | 'authorized';
+  /** The front window (not this process's): its id and its frame, in desktop pixels. */
+  foreground(): { id: number; bounds: Bounds } | undefined;
+  /**
+   * A window's page (a browser's, through the Accessibility API): Safari's and Firefox's web area,
+   * or below a Chromium browser's toolbar (it shows no web area to the API). Looked for a few
+   * milliseconds at a time and kept for the window as it is: undefined until found, and for other
+   * windows and without the Accessibility permission. `hidden` is Windows' (a page not shown).
+   */
+  contentArea(id: number, hidden?: boolean): Bounds | undefined;
+  /**
+   * The dialogs, menus and notifications on the desktop now (not this process's own), in desktop
+   * pixels (see `macPopups`). A notification is each banner the Notification Center shows (through
+   * the Accessibility API, once it holds still), or without that permission the right side of its
+   * display, where banners and the centre open.
+   */
+  popups(): { id: number; kind: WindowKind; bounds: Bounds }[];
+}
+
+/** A window as CGWindowList gives it, in points: front to back, on the screen. */
+export interface ListedWindow {
+  id: number;
+  pid: number;
+  layer: number;
+  points: { x: number; y: number; width: number; height: number };
+  /** Its app's bundle identifier ('' when it has none). */
+  bundle: string;
+}
+
+/** CGWindowLevel values: ordinary windows, modal panels (alerts, save panels), pop-up menus. */
+export const LEVEL = { normal: 0, modalPanel: 8, popUpMenu: 101 };
+/** The app that shows notifications: banners and the notification centre. */
+export const NOTIFICATION_CENTER = 'com.apple.notificationcenterui';
+/** Points a sheet's centre may lie off its window's (macOS centres them). */
+const SHEET_SLACK = 2;
+
+/**
+ * What the windows over the desktop are, of `windows` (front to back, not this process's): a modal
+ * panel (an alert, a save panel) or a sheet (a smaller window of the same app centred inside the
+ * window right behind it) a dialog, a pop-up menu a menu, and the Notification Center's windows
+ * above the desktop a notification (where its banners are is asked of the Accessibility API). Pure.
+ */
+export function macPopups(windows: readonly ListedWindow[]): { window: ListedWindow; kind: WindowKind }[] {
+  const found: { window: ListedWindow; kind: WindowKind }[] = [];
+  windows.forEach((window, index) => {
+    if (window.bundle === NOTIFICATION_CENTER) {
+      if (window.layer > LEVEL.normal) found.push({ window, kind: 'notification' });
+      return;
+    }
+    if (window.layer === LEVEL.modalPanel) return void found.push({ window, kind: 'dialog' });
+    if (window.layer === LEVEL.popUpMenu) return void found.push({ window, kind: 'menu' });
+    if (window.layer !== LEVEL.normal) return;
+    const behind = windows.slice(index + 1).find((other) => other.layer === LEVEL.normal);
+    if (behind && isSheet(window.points, behind.points) && behind.pid === window.pid) found.push({ window, kind: 'dialog' });
+  });
+  return found;
+}
+
+/** Whether `sheet` lies inside `window`, smaller, centred across it (as macOS puts a sheet). */
+function isSheet(sheet: ListedWindow['points'], window: ListedWindow['points']): boolean {
+  const inside = sheet.x >= window.x - 1 && sheet.y >= window.y - 1 && sheet.x + sheet.width <= window.x + window.width + 1 && sheet.y + sheet.height <= window.y + window.height + 1;
+  const centre = Math.abs(sheet.x + sheet.width / 2 - (window.x + window.width / 2)) <= SHEET_SLACK;
+  return inside && centre && sheet.width * sheet.height < 0.9 * window.width * window.height;
+}
+
+/** Chromium browsers: they show the Accessibility API no web area, only their toolbar. */
+export const CHROMIUM_BROWSERS = new Set([
+  'com.google.Chrome', 'com.google.Chrome.beta', 'com.google.Chrome.canary', 'org.chromium.Chromium', 'com.microsoft.edgemac',
+  'com.brave.Browser', 'com.operasoftware.Opera', 'com.operasoftware.OperaGX', 'com.vivaldi.Vivaldi', 'company.thebrowser.Browser',
+]);
+
+/**
+ * A window's page from what its accessibility tree showed, in points: a web area (inside the window),
+ * or for a Chromium browser what lies below its toolbar; undefined for anything else. Pure.
+ */
+export function pageOf(window: ListedWindow['points'], found: { webArea?: ListedWindow['points']; toolbar?: ListedWindow['points'] }, chromium: boolean): ListedWindow['points'] | undefined {
+  const clip = (rect: ListedWindow['points']) => {
+    const x = Math.max(rect.x, window.x);
+    const y = Math.max(rect.y, window.y);
+    const width = Math.min(rect.x + rect.width, window.x + window.width) - x;
+    const height = Math.min(rect.y + rect.height, window.y + window.height) - y;
+    return width > 50 && height > 50 ? { x, y, width, height } : undefined;
+  };
+  if (found.webArea) return clip(found.webArea);
+  if (found.toolbar && chromium) {
+    const top = found.toolbar.y + found.toolbar.height;
+    return clip({ x: window.x, y: top, width: window.width, height: window.y + window.height - top });
+  }
+  return undefined;
 }
 
 /**
@@ -114,6 +203,14 @@ const FIELD = { buttonNumber: 3, keyAutorepeat: 8, keycode: 9, scrollY: 11, scro
 const FLAG = { shift: 0x20000n, control: 0x40000n, alternate: 0x80000n };
 /** How often the tap's run loop source is serviced. */
 const TAP_POLL_MS = 8;
+/** A window's page is looked for this long at each look (ms)… */
+const SEARCH_MS = 40;
+/** …in at most this many elements of its accessibility tree. */
+const SEARCH_ELEMENTS = 400;
+/** The roles a page or a toolbar may be inside (lists, tables and controls are not walked). */
+const CONTAINERS = new Set(['AXWindow', 'AXGroup', 'AXSplitGroup', 'AXScrollArea', 'AXTabGroup', 'AXLayoutArea', 'AXUnknown']);
+/** Without the Accessibility permission a notification is masked this wide on the right of its display (points). */
+const NOTIFICATION_SIDE = 400;
 
 /**
  * System cursors by hotspot and image size (points), as macOS 26 and 27 draw them: NSCursor's own
@@ -246,6 +343,10 @@ async function create(): Promise<Darwin> {
   const AXValueCreate = services.func('AXValueCreate', 'void *', ['uint32', koffi.pointer(CFRange)]);
   const AXValueGetRect = services.func('AXValueGetValue', 'bool', ['void *', 'uint32', koffi.out(koffi.pointer(CGRect))]);
   const AXValueGetRange = services.func('AXValueGetValue', 'bool', ['void *', 'uint32', koffi.out(koffi.pointer(CFRange))]);
+  const AXValueGetPoint = services.func('AXValueGetValue', 'bool', ['void *', 'uint32', koffi.out(koffi.pointer(CGPoint))]);
+  const AXValueGetSize = services.func('AXValueGetValue', 'bool', ['void *', 'uint32', koffi.out(koffi.pointer(CGSize))]);
+  const AX_POINT = 1;
+  const AX_SIZE = 2;
   const AX_RECT = 3;
   const AX_RANGE = 4;
 
@@ -269,6 +370,7 @@ async function create(): Promise<Darwin> {
   const objc_autoreleasePoolPush = objc.func('objc_autoreleasePoolPush', 'void *', []);
   const objc_autoreleasePoolPop = objc.func('objc_autoreleasePoolPop', 'void', ['void *']);
   const sendWithObject = objc.func('objc_msgSend', 'long', ['void *', 'void *', 'void *']);
+  const sendString = objc.func('objc_msgSend', 'str', ['void *', 'void *']);
 
   /** A CFString that lives as long as the process (keys and constants). */
   const cfString = (text: string) => CFStringCreateWithCString(null, text, kCFStringEncodingUTF8);
@@ -376,6 +478,58 @@ async function create(): Promise<Darwin> {
       CFRelease(array);
     }
     return found;
+  };
+
+  /** An app's bundle identifier by its pid ('' for none), kept: every look at the windows asks. */
+  const bundles = new Map<number, string>();
+  const bundleOf = (pid: number): string => {
+    let bundle = bundles.get(pid);
+    if (bundle !== undefined) return bundle;
+    const pool = objc_autoreleasePoolPush();
+    try {
+      const app = sendWithPid(objc_getClass('NSRunningApplication'), sel_registerName('runningApplicationWithProcessIdentifier:'), pid);
+      const id = app ? sendObject(app, sel_registerName('bundleIdentifier')) : null;
+      bundle = id ? ((sendString(id, sel_registerName('UTF8String')) as string | null) ?? '') : '';
+    } finally {
+      objc_autoreleasePoolPop(pool);
+    }
+    if (bundles.size > 500) bundles.clear();
+    bundles.set(pid, bundle);
+    return bundle;
+  };
+
+  /** The windows on the screen at every level above the desktop, front to back, in points; not this process's. */
+  const listed = (): ListedWindow[] => {
+    const array = CGWindowListCopyWindowInfo(kCGWindowListOptionOnScreenOnly | kCGWindowListExcludeDesktopElements, 0);
+    if (!array) return [];
+    const found: ListedWindow[] = [];
+    try {
+      const rect = { origin: { x: 0, y: 0 }, size: { width: 0, height: 0 } };
+      for (let i = 0; i < Number(CFArrayGetCount(array)); i++) {
+        const info = CFArrayGetValueAtIndex(array, i);
+        if ((doubleOf(CFDictionaryGetValue(info, KEYS.alpha)) ?? 1) <= 0) continue;
+        const pid = integerOf(CFDictionaryGetValue(info, KEYS.pid)) ?? 0;
+        const id = integerOf(CFDictionaryGetValue(info, KEYS.number));
+        const bounds = CFDictionaryGetValue(info, KEYS.bounds);
+        if (pid === process.pid || id === undefined || !bounds || !CGRectMakeWithDictionaryRepresentation(bounds, rect)) continue;
+        if (rect.size.width < 2 || rect.size.height < 2) continue;
+        const layer = integerOf(CFDictionaryGetValue(info, KEYS.layer)) ?? 0;
+        found.push({ id, pid, layer, points: { x: rect.origin.x, y: rect.origin.y, width: rect.size.width, height: rect.size.height }, bundle: bundleOf(pid) });
+      }
+    } finally {
+      CFRelease(array);
+    }
+    return found;
+  };
+
+  /** A rect in points as desktop pixels, on the display that holds most of it (undefined on none). */
+  const rectToPixels = (points: ListedWindow['points'], list = displays()): Bounds | undefined => {
+    const display = displayOf(list, points);
+    if (!display) return undefined;
+    const map = pixelMapper(list);
+    const topLeft = map.toPixels(points.x, points.y, display);
+    const bottomRight = map.toPixels(points.x + points.width, points.y + points.height, display);
+    return { x: topLeft.x, y: topLeft.y, width: bottomRight.x - topLeft.x, height: bottomRight.y - topLeft.y };
   };
 
   const pointer = () => {
@@ -487,6 +641,185 @@ async function create(): Promise<Darwin> {
       for (const ref of [selected[0], focused[0], app]) if (ref) CFRelease(ref);
     }
   };
+  // The accessibility trees of other apps: what is copied out is released by whoever copied it.
+  const AXT = {
+    windows: cfString('AXWindows'), focusedWindow: cfString('AXFocusedWindow'), children: cfString('AXChildren'), role: cfString('AXRole'),
+    subrole: cfString('AXSubrole'), position: cfString('AXPosition'), size: cfString('AXSize'),
+  };
+  /** An attribute's value, copied (the caller releases it), or undefined. */
+  const copied = (element: unknown, name: unknown): unknown => {
+    const value: unknown[] = [null];
+    return AXUIElementCopyAttributeValue(element, name, value) === 0 && value[0] ? value[0] : undefined;
+  };
+  const textOf = (element: unknown, name: unknown): string => {
+    const value = copied(element, name);
+    if (!value) return '';
+    try {
+      return stringOf(value) ?? '';
+    } finally {
+      CFRelease(value);
+    }
+  };
+  /** An element's frame in points (global, as CoreGraphics gives windows'), or undefined. */
+  const frameOf = (element: unknown): ListedWindow['points'] | undefined => {
+    const position = copied(element, AXT.position);
+    const size = copied(element, AXT.size);
+    try {
+      const point = { x: 0, y: 0 };
+      const extent = { width: 0, height: 0 };
+      if (!position || !size || !AXValueGetPoint(position, AX_POINT, point) || !AXValueGetSize(size, AX_SIZE, extent)) return undefined;
+      return { x: point.x, y: point.y, width: extent.width, height: extent.height };
+    } finally {
+      if (position) CFRelease(position);
+      if (size) CFRelease(size);
+    }
+  };
+  /** The elements of a CFArray (they live as long as the array). */
+  const elementsOf = (array: unknown): unknown[] => Array.from({ length: Number(CFArrayGetCount(array)) }, (_, i) => CFArrayGetValueAtIndex(array, i));
+  /** Whether two frames are one window's (an accessibility window and a listed one). */
+  const near = (a: ListedWindow['points'], b: ListedWindow['points']) => Math.abs(a.x - b.x) <= 2 && Math.abs(a.y - b.y) <= 2 && Math.abs(a.width - b.width) <= 2 && Math.abs(a.height - b.height) <= 2;
+  /** An app's accessibility element, answering within `timeout` seconds or not at all. */
+  const appElement = (pid: number, timeout: number): unknown => {
+    const app = AXUIElementCreateApplication(pid);
+    if (app) AXUIElementSetMessagingTimeout(app, timeout);
+    return app;
+  };
+
+  /**
+   * Where the Notification Center (`pid`) shows banners now, in points: its elements whose subrole
+   * says so (AXNotificationCenterBanner, …), not what is inside them. Undefined without the
+   * Accessibility permission.
+   */
+  const bannersOf = (pid: number): ListedWindow['points'][] | undefined => {
+    if (!AXIsProcessTrusted()) return undefined;
+    const app = appElement(pid, 0.1);
+    if (!app) return undefined;
+    const owned: unknown[] = [app];
+    const found: ListedWindow['points'][] = [];
+    try {
+      const windows = copied(app, AXT.windows);
+      if (!windows) return found;
+      owned.push(windows);
+      let level = elementsOf(windows);
+      let visited = 0;
+      for (let depth = 0; depth < 8 && level.length > 0 && visited < 80; depth++) {
+        const next: unknown[] = [];
+        for (const element of level) {
+          if (++visited > 80) break;
+          if (textOf(element, AXT.subrole).startsWith('AXNotificationCenter')) {
+            const frame = frameOf(element);
+            if (frame && frame.width > 20 && frame.height > 20) found.push(frame);
+            continue;
+          }
+          const children = copied(element, AXT.children);
+          if (!children) continue;
+          owned.push(children);
+          next.push(...elementsOf(children));
+        }
+        level = next;
+      }
+    } finally {
+      for (const ref of owned) CFRelease(ref);
+    }
+    return found;
+  };
+
+  // Notifications: a banner counts once it held still for two looks (it slides in); one id per place.
+  let lastBanners = new Set<string>();
+  let bannerless = 0;
+  /** Whether the centre showed a banner since it came up: once it did, a look without one is its fading out. */
+  let showedBanner = false;
+  const bannerIds = new Map<string, number>();
+  /** Banner ids lie above any window number. */
+  const BANNER_IDS = 2_000_000_000;
+  const notificationPopups = (centre: ListedWindow[], list: Display[]): { id: number; kind: WindowKind; bounds: Bounds }[] => {
+    if (centre.length === 0) {
+      lastBanners = new Set();
+      bannerless = 0;
+      showedBanner = false;
+      return [];
+    }
+    const banners = bannersOf(centre[0]!.pid);
+    // without the permission, or when the centre shows something without banners: the right side of
+    // its display, where banners and the notification centre open
+    const side = () =>
+      centre.flatMap((window) => {
+        const width = Math.min(window.points.width, NOTIFICATION_SIDE);
+        const bounds = rectToPixels({ x: window.points.x + window.points.width - width, y: window.points.y, width, height: window.points.height }, list);
+        return bounds ? [{ id: window.id, kind: 'notification' as const, bounds }] : [];
+      });
+    if (!banners) return side();
+    if (banners.length === 0) return ++bannerless >= 2 && !showedBanner ? side() : [];
+    bannerless = 0;
+    showedBanner = true;
+    const keyOf = (rect: ListedWindow['points']) => [rect.x, rect.y, rect.width, rect.height].map(Math.round).join(',');
+    const now = new Set(banners.map(keyOf));
+    const settled = banners.filter((banner) => lastBanners.has(keyOf(banner)));
+    lastBanners = now;
+    if (bannerIds.size > 200) bannerIds.clear();
+    return settled.flatMap((banner) => {
+      const key = keyOf(banner);
+      if (!bannerIds.has(key)) bannerIds.set(key, BANNER_IDS + bannerIds.size);
+      const bounds = rectToPixels(banner, list);
+      return bounds ? [{ id: bannerIds.get(key)!, kind: 'notification' as const, bounds }] : [];
+    });
+  };
+
+  // A window's page: its accessibility tree walked breadth first, a few milliseconds at each look,
+  // for the window as it is (its number and frame); what is copied is released once it is done.
+  type Search = { key: string; window: ListedWindow; queue: unknown[]; owned: unknown[]; visited: number; webArea?: ListedWindow['points']; toolbar?: ListedWindow['points']; done: boolean; page?: ListedWindow['points'] };
+  let search: Search | undefined;
+  const finish = (current: Search) => {
+    current.done = true;
+    current.page = pageOf(current.window.points, current, CHROMIUM_BROWSERS.has(current.window.bundle));
+    for (const ref of current.owned) CFRelease(ref);
+    current.owned = [];
+    current.queue = [];
+  };
+  const startSearch = (window: ListedWindow, key: string): Search => {
+    const current: Search = { key, window, queue: [], owned: [], visited: 0, done: false };
+    const app = appElement(window.pid, 0.1);
+    if (!app) return (finish(current), current);
+    current.owned.push(app);
+    const windows = copied(app, AXT.windows);
+    if (windows) {
+      current.owned.push(windows);
+      // the accessibility window with the window's frame
+      const match = elementsOf(windows).find((element) => {
+        const frame = frameOf(element);
+        return frame !== undefined && near(frame, window.points);
+      });
+      if (match) current.queue.push(match);
+    }
+    if (current.queue.length === 0) finish(current);
+    return current;
+  };
+  const stepSearch = (current: Search) => {
+    const until = performance.now() + SEARCH_MS;
+    const chromium = CHROMIUM_BROWSERS.has(current.window.bundle);
+    while (current.queue.length > 0 && performance.now() < until && current.visited < SEARCH_ELEMENTS) {
+      const element = current.queue.shift();
+      current.visited++;
+      const role = textOf(element, AXT.role);
+      if (role === 'AXWebArea') {
+        current.webArea = frameOf(element);
+        if (current.webArea) return finish(current);
+        continue;
+      }
+      if (role === 'AXToolbar' && !current.toolbar) {
+        current.toolbar = frameOf(element);
+        if (chromium && current.toolbar) return finish(current);
+        continue;
+      }
+      if (!CONTAINERS.has(role)) continue;
+      const children = copied(element, AXT.children);
+      if (!children) continue;
+      current.owned.push(children);
+      current.queue.push(...elementsOf(children));
+    }
+    if (current.queue.length === 0 || current.visited >= SEARCH_ELEMENTS) finish(current);
+  };
+
   // A mode is matched by its name, so an equal string stands for the kCFRunLoopDefaultMode constant.
   const defaultMode = cfString('kCFRunLoopDefaultMode');
 
@@ -586,6 +919,46 @@ async function create(): Promise<Darwin> {
     mediaAccess(kind) {
       const status = Number(sendWithObject(objc_getClass('AVCaptureDevice'), sel_registerName('authorizationStatusForMediaType:'), mediaTypes[kind]));
       return AUTHORIZATION[status] ?? 'not-determined';
+    },
+    foreground() {
+      const windows = listed().filter((window) => window.layer === LEVEL.normal);
+      // the front app's focused window (an app's small panels may lie in front of it), else its front one
+      let front = windows[0];
+      if (front && AXIsProcessTrusted()) {
+        const app = appElement(front.pid, 0.1);
+        const focused = app && copied(app, AXT.focusedWindow);
+        const frame = focused ? frameOf(focused) : undefined;
+        if (focused) CFRelease(focused);
+        if (app) CFRelease(app);
+        front = (frame && windows.find((window) => window.pid === front!.pid && near(window.points, frame))) || front;
+      }
+      const bounds = front && rectToPixels(front.points);
+      return front && bounds ? { id: front.id, bounds } : undefined;
+    },
+    contentArea(id) {
+      const window = listed().find((candidate) => candidate.id === id && candidate.layer === LEVEL.normal);
+      if (!window || !AXIsProcessTrusted()) return undefined;
+      const key = `${id}:${[window.points.x, window.points.y, window.points.width, window.points.height].map(Math.round).join(',')}`;
+      if (search?.key !== key) {
+        if (search && !search.done) finish(search);
+        search = startSearch(window, key);
+      }
+      if (!search.done) stepSearch(search);
+      return search.page && rectToPixels(search.page);
+    },
+    popups() {
+      const list = displays();
+      const found: { id: number; kind: WindowKind; bounds: Bounds }[] = [];
+      const centre: ListedWindow[] = [];
+      for (const { window, kind } of macPopups(listed())) {
+        if (kind === 'notification') {
+          centre.push(window);
+          continue;
+        }
+        const bounds = rectToPixels(window.points, list);
+        if (bounds) found.push({ id: window.id, kind, bounds });
+      }
+      return [...found, ...notificationPopups(centre, list)];
     },
   };
 }

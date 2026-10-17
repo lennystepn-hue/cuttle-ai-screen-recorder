@@ -1,0 +1,52 @@
+# Typecheck and unit tests on Windows and macOS, so a change made on one platform cannot quietly
+# break the other. The recorder's tests use its test backend (ffmpeg test sources), which runs on
+# both; the platform tests (DXGI and Win32 on Windows, CoreGraphics on macOS) run on their own runner.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      # the version from package.json's packageManager
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: ffmpeg (Windows)
+        if: runner.os == 'Windows'
+        run: choco install ffmpeg -y --no-progress
+
+      - name: ffmpeg (macOS)
+        if: runner.os == 'macOS'
+        run: brew install ffmpeg
+
+      # also downloads Electron and, on macOS, builds the screen capture helper with Xcode's Swift
+      - run: pnpm install --frozen-lockfile
+
+      - run: pnpm typecheck
+
+      # one retry: a few recorder tests time real captures, which a busy runner can stretch
+      - run: pnpm exec vitest run --project node --retry 1

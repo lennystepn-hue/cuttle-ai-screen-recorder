@@ -2267,6 +2267,33 @@ button.chip-status:hover {
 .auto-empty p {
   margin: 0;
 }
+/* the mic not transcribed yet, at the top of the Auto tab */
+.speech-note {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 4px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--raised);
+  color: var(--muted);
+  font-size: var(--size-s);
+  line-height: 1.5;
+}
+.speech-note p {
+  margin: 0;
+}
+.speech-note b {
+  color: var(--text);
+  font-weight: 600;
+}
+.speech-problem {
+  color: var(--card);
+}
+.speech-actions {
+  display: flex;
+  gap: 6px;
+}
 /* "Made by Cuttle for …" under an automatic item's name */
 .auto-note {
   margin: -4px 0 0;

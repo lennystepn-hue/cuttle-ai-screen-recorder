@@ -14,6 +14,7 @@ export const WINDOW_CHANNELS = {
       'project:record',
       'project:takes',
       'project:cut',
+      'project:transcribe',
       'project:save',
       'project:import-image',
       'project:draft',
@@ -56,8 +57,12 @@ export const WINDOW_CHANNELS = {
       'recent:reveal',
       'recent:forget',
       'recent:rename',
+      'speech:status',
+      'speech:download',
+      'speech:cancel',
+      'speech:remove',
     ],
-    events: ['settings:changed', 'app:motion'],
+    events: ['settings:changed', 'speech:status', 'app:motion'],
   },
 } as const satisfies Record<string, { requests: readonly Request[]; events: readonly Event[] }>;
 

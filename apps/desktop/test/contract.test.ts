@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
+import { MODEL_NAMES } from '@cuttle/core';
 import { WINDOW_CHANNELS } from '../src/shared/channels';
-import { REQUESTS } from '../src/shared/ipc';
+import { REQUESTS, SPEECH_MODEL_NAMES } from '../src/shared/ipc';
+import { takeKey } from '../src/shared/take';
 import { MAX_THUMBS, PeakFolder, PEAKS_RATE, PEAKS_SAMPLE_RATE, progressOf, proxyArgs, thumbnailsArgs, thumbnailsMeta } from '../src/shared/media-jobs';
 
 describe('the IPC contract', () => {
@@ -21,6 +23,18 @@ describe('the IPC contract', () => {
     expect(REQUESTS['pill:open'].safeParse({ dir: 'C:\\demo' }).success).toBe(true);
     expect(REQUESTS['pill:open'].safeParse({ dir: '' }).success).toBe(false);
     expect(REQUESTS['project:info'].safeParse({ any: 1 }).success).toBe(false);
+    expect(REQUESTS['speech:download'].safeParse('small').success).toBe(true);
+    expect(REQUESTS['speech:download'].safeParse('../../evil').success).toBe(false);
+  });
+
+  it('names the speech models as @cuttle/core does (the windows cannot import it)', () => {
+    expect(SPEECH_MODEL_NAMES).toEqual(MODEL_NAMES);
+  });
+
+  it('takes a transcript linked to the take for the same take', () => {
+    const take = { screen: 'takes/1/screen.mp4', mic: 'takes/1/mic.m4a' };
+    expect(takeKey({ ...take, transcript: 'takes/1/transcript.json' })).toBe(takeKey(take));
+    expect(takeKey({ ...take, mic: 'takes/2/mic.m4a' })).not.toBe(takeKey(take));
   });
 });
 

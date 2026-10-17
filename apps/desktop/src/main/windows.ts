@@ -8,6 +8,7 @@ import { parseProject } from '@cuttle/project';
 import { plainIssue } from '../shared/format';
 import type { Event, Events, ExportEnd, ProjectFileEvent, ProjectStatus } from '../shared/ipc';
 import { isInside } from '../shared/media-path';
+import { takeKey } from '../shared/take';
 import { CHECK, CHECK_IMAGE, HIDDEN } from './check';
 import { ExportRun, exportPath } from './export-service';
 import { bindRequests, send } from './ipc';
@@ -18,6 +19,7 @@ import { APP_ORIGIN, assetPath, bundlePath, serveApp, serveMedia } from './proto
 import { cutIfPending, recut, startPicking, undoRestart } from './recording';
 import { addRecent, loadSettings, motionSetting, updateSettings } from './settings';
 import { openSettings } from './settings-window';
+import { transcribeProject } from './speech';
 
 const BACKGROUND = '#0c0c0f';
 const TITLE_BAR_HEIGHT = 44;
@@ -146,7 +148,7 @@ async function editorWindow(dir: string, key: string, file: ProjectFile, release
   function onFileChange(event: ProjectFileEvent): void {
     if ('raw' in event) {
       const parsed = parseProject(event.raw);
-      if (parsed.ok && JSON.stringify(parsed.project.sources) !== JSON.stringify(editor.media.sources)) {
+      if (parsed.ok && takeKey(parsed.project.sources) !== takeKey(editor.media.sources)) {
         editor.media.dispose();
         editor.media = newMedia(parsed.project);
         void editor.media.start();
@@ -188,6 +190,7 @@ async function editorWindow(dir: string, key: string, file: ProjectFile, release
     'project:record': () => void startPicking(dir),
     'project:takes': () => takesMenu(dir, window),
     'project:cut': () => void recut(dir),
+    'project:transcribe': () => transcribeProject(dir, true),
     'project:undo-restart': (discarded) => void undoRestart(dir, discarded),
     'app:settings': () => void openSettings(),
     'project:save': ({ raw, base }) => editor.watch.save(raw, base),
@@ -264,6 +267,12 @@ async function editorOf(dir: string): Promise<Editor | undefined> {
 export async function expectSuggest(dir: string, expecting: boolean): Promise<void> {
   const editor = await editorOf(dir);
   if (editor) editor.watch.origin = expecting ? 'suggest' : 'outside';
+}
+
+/** The next outside change of the project comes from the app's own speech edits ("Cuttle's speech edits"). */
+export async function expectSpeech(dir: string, expecting: boolean): Promise<void> {
+  const editor = await editorOf(dir);
+  if (editor) editor.watch.origin = expecting ? 'speech' : 'outside';
 }
 
 /** The window of a project's open editor, if there is one. */

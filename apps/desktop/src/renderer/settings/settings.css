@@ -52,6 +52,8 @@
   min-height: 56px;
 }
 .row + .row,
+.row + .tool,
+.tool + .row,
 .tool + .tool,
 .tool + .tools-actions {
   border-top: 1px solid var(--line);
@@ -288,6 +290,26 @@
 .tools-actions .row-hint {
   flex: 1;
   margin: 0;
+}
+
+/* a model's download */
+progress.download {
+  flex: 1;
+  min-width: 120px;
+  height: 6px;
+  border: none;
+  border-radius: 3px;
+  overflow: hidden;
+  background: var(--raised);
+  appearance: none;
+}
+progress.download::-webkit-progress-bar {
+  background: var(--raised);
+}
+progress.download::-webkit-progress-value {
+  background: var(--accent);
+  border-radius: 3px;
+  transition: width var(--normal) var(--ease-out);
 }
 
 /* recent projects */

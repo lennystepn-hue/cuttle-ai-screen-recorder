@@ -1,7 +1,7 @@
 // The settings window, and the first run in the same window (#welcome): ffmpeg, the cuttle command
 // and the Claude skill, then the pill. Every change is kept at once; there is no Save.
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
-import type { Motion, RequestArgument, SettingsView, ToolsStatus } from '../../shared/ipc';
+import type { Motion, RequestArgument, SettingsView, SpeechLanguage, SpeechModelName, SpeechStatus, ToolsStatus } from '../../shared/ipc';
 import { bridge } from '../bridge';
 import { CheckIcon, CloseIcon, CopyIcon, FolderIcon, Mark, WarningIcon } from '../icons';
 import { Select } from '../Select';
@@ -117,6 +117,10 @@ export function Settings() {
               </Row>
             </Section>
 
+            <Section title="Speech">
+              <SpeechSettings view={view} change={change} />
+            </Section>
+
             <Section title="To record">
               <FfmpegLine tools={tools} setTools={setTools} />
             </Section>
@@ -228,6 +232,99 @@ function DeviceSelect({ kind, value, devices, onChange }: { kind: 'camera' | 'mi
   );
 }
 
+const megabytes = (bytes: number) => `${Math.round(bytes / 1e6)} MB`;
+
+/**
+ * Transcribing a take after its cut: the model (or off), its download (progress, cancel, checksum)
+ * or removal, and the language spoken. Everything runs on this computer.
+ */
+function SpeechSettings({ view, change }: { view: SettingsView | undefined; change: (next: RequestArgument<'settings:set'>) => void }) {
+  const [status, setStatus] = useState<SpeechStatus>();
+  useEffect(() => {
+    void bridge.invoke('speech:status').then(setStatus);
+    return bridge.on('speech:status', setStatus);
+  }, []);
+  const chosen = view?.speech.model;
+  const model = status?.models.find((entry) => entry.name === chosen);
+  const download = status?.download;
+  const failed = status?.failure?.name === chosen ? status?.failure : undefined;
+  // one download at a time: the line shows it whichever model is chosen, so it can be cancelled
+  const fetching = download !== undefined;
+  const fetched = status?.models.find((entry) => entry.name === download?.name);
+  const percent = fetching ? Math.floor((download.received / download.total) * 100) : 0;
+  return (
+    <>
+      <Row label="Transcribe after a take" hint="Cuttle cuts filler words and pauses where the picture rests. It runs on this computer: nothing is uploaded.">
+        <Select<SpeechModelName | 'off'>
+          value={chosen}
+          options={[
+            { value: 'off', label: 'Off' },
+            ...(status?.models ?? []).map((entry) => ({ value: entry.name, label: `${entry.label} (${entry.name})`, note: entry.installed ? 'downloaded' : megabytes(entry.bytes) })),
+          ]}
+          onChange={(speechModel) => change({ speechModel })}
+          disabled={status === undefined}
+          label="Speech model"
+          className="device"
+          testId="speech-model"
+        />
+      </Row>
+      {model && (
+        <ToolLine
+          state={failed ? 'failed' : model.installed ? (status?.whisper === false ? 'warn' : 'ok') : fetching ? 'unknown' : 'off'}
+          name={`The ${model.label} model`}
+          detail={
+            failed
+              ? `The download failed: ${failed.message}`
+              : fetching
+                ? download.name === chosen
+                  ? `Downloading… ${percent} % of ${megabytes(download.total)}`
+                  : `The ${fetched?.label} model is downloading (${percent} % of ${megabytes(download.total)}): one download at a time.`
+                : model.installed
+                  ? status?.whisper === false
+                    ? 'Downloaded, but this ffmpeg cannot transcribe: it needs version 8 or later (winget upgrade Gyan.FFmpeg, or on macOS brew upgrade ffmpeg).'
+                    : `Downloaded: ${model.note}.`
+                  : `${model.note[0]!.toUpperCase()}${model.note.slice(1)}. ${megabytes(model.bytes)} to download, once.`
+          }
+          title={status?.dir}
+          testid="speech-line"
+          busy={fetching}
+          plain
+        >
+          {fetching ? (
+            <>
+              <progress className="download" max={download.total} value={download.received} aria-label={`Downloading the ${fetched?.label} model`} />
+              <button className="ghost" onClick={() => void bridge.invoke('speech:cancel')} data-testid="speech-cancel">
+                Cancel
+              </button>
+            </>
+          ) : model.installed ? (
+            <button className="ghost" onClick={() => void bridge.invoke('speech:remove', model.name).then(setStatus)} data-testid="speech-remove">
+              Remove
+            </button>
+          ) : (
+            <button className="primary" onClick={() => void bridge.invoke('speech:download', model.name).then(setStatus)} data-testid="speech-download">
+              {failed ? 'Try again' : `Download (${megabytes(model.bytes)})`}
+            </button>
+          )}
+        </ToolLine>
+      )}
+      <Row label="Language" hint="What is spoken in your takes. Auto finds out by itself.">
+        <Segmented<SpeechLanguage>
+          value={view?.speech.language}
+          options={[
+            ['auto', 'Auto'],
+            ['de', 'Deutsch'],
+            ['en', 'English'],
+          ]}
+          onChange={(speechLanguage) => change({ speechLanguage })}
+          label="Language"
+          testid="speech-language"
+        />
+      </Row>
+    </>
+  );
+}
+
 /** ffmpeg: found (its version and where), or how to install it and look again. */
 function FfmpegLine({ tools, setTools }: { tools: ToolsStatus | undefined; setTools: (tools: ToolsStatus) => void }) {
   const [looking, setLooking] = useState(false);
@@ -335,7 +432,8 @@ function ClaudeTools({ tools, setTools, welcome }: { tools: ToolsStatus | undefi
 
 type ToolState = 'unknown' | 'ok' | 'off' | 'warn' | 'failed';
 
-function ToolLine({ state, name, detail, title, testid, children }: { state: ToolState; name: string; detail: string; title?: string; testid: string; children?: ReactNode }) {
+/** A tool or a model: a mark, its name, and a line on it (a path, in monospace, once it is there; `plain`: words). */
+function ToolLine({ state, name, detail, title, testid, busy, plain, children }: { state: ToolState; name: string; detail: string; title?: string; testid: string; busy?: boolean; plain?: boolean; children?: ReactNode }) {
   return (
     <div className="tool" data-state={state === 'ok' ? 'ok' : state === 'unknown' ? 'unknown' : 'missing'} data-testid={testid}>
       <span className={`tool-mark ${state}`} aria-hidden>
@@ -343,8 +441,8 @@ function ToolLine({ state, name, detail, title, testid, children }: { state: Too
       </span>
       <div className="tool-text">
         <div className="row-label">{name}</div>
-        <div className={`row-hint${state === 'ok' ? ' path-text' : ''}${state === 'failed' ? ' error-inline' : ''}`} title={title ?? detail} role={state === 'failed' ? 'alert' : undefined}>
-          {state === 'unknown' ? 'Looking…' : detail}
+        <div className={`row-hint${state === 'ok' && !plain ? ' path-text' : ''}${state === 'failed' ? ' error-inline' : ''}`} title={title ?? detail} role={state === 'failed' ? 'alert' : undefined}>
+          {state === 'unknown' && !busy ? 'Looking…' : detail}
         </div>
         {children && <div className="tool-extra">{children}</div>}
       </div>

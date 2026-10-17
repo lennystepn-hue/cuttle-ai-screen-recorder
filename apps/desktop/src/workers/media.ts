@@ -3,7 +3,7 @@
 // the main process queues them.
 import { spawn, type ChildProcess } from 'node:child_process';
 import { rename, rm, writeFile } from 'node:fs/promises';
-import { ffmpegPath, probeScreen, streamSeconds, suggestProject } from '@cuttle/core';
+import { applySpeechEdits, ffmpegPath, probeScreen, streamSeconds, suggestProject, transcribeTake } from '@cuttle/core';
 import {
   PEAKS_SAMPLE_RATE,
   PeakFolder,
@@ -27,6 +27,8 @@ interface ParentPort {
 const port = (process as unknown as { parentPort: ParentPort }).parentPort;
 const running = new Map<number, ChildProcess>();
 const cancelled = new Set<number>();
+/** The jobs that run ffmpeg through @cuttle/core, stopped by their signal. */
+const controllers = new Map<number, AbortController>();
 
 const reply = (message: WorkerReply) => port.postMessage(message);
 
@@ -101,7 +103,22 @@ async function run(id: number, job: MediaJob): Promise<ThumbnailsMeta | undefine
       return meta;
     }
     case 'suggest': {
-      await suggestProject(job.input, { onStatus: () => reply({ id, progress: 0 }) });
+      // the app transcribes after the cut, as a step of its own (`transcribe`, `speech-edits`)
+      await suggestProject(job.input, { transcribe: false, onStatus: () => reply({ id, progress: 0 }) });
+      return undefined;
+    }
+    case 'transcribe': {
+      const controller = new AbortController();
+      controllers.set(id, controller);
+      try {
+        await transcribeTake(job.input, { model: job.model, language: job.language, link: false, signal: controller.signal, onProgress: (progress) => reply({ id, progress }) });
+      } finally {
+        controllers.delete(id);
+      }
+      return undefined;
+    }
+    case 'speech-edits': {
+      await applySpeechEdits(job.input, { link: job.transcript });
       return undefined;
     }
     case 'peaks': {
@@ -125,6 +142,7 @@ port.on('message', ({ data }) => {
   if (data.cancel) {
     cancelled.add(data.id);
     running.get(data.id)?.kill();
+    controllers.get(data.id)?.abort();
     return;
   }
   const { id, ...job } = data;

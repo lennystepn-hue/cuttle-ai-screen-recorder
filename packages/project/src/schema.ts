@@ -54,6 +54,8 @@ const SourcesSchema = z.strictObject({
   transcript: z.string().min(1).optional(),
   /** The mic cleaned up (made with the transcription): less noise, even loudness, in step with the mic. */
   cleanMic: z.string().min(1).optional(),
+  /** The screen's text, read where the picture changed (the privacy masks are made from it). */
+  screenText: z.string().min(1).optional(),
 });
 
 // Cross-field checks live on the object they belong to, so zod reports them in the same pass
@@ -193,11 +195,26 @@ const MaskSchema = z
     from: seconds,
     to: seconds,
     rect: RectSchema,
+    /** A mask that follows (text that scrolls): from `rect` it goes to each move's rect in turn. */
+    moves: z.array(ZoomMoveSchema).optional(),
     style: z.enum(MASK_STYLES).default('fill'),
     enabled: z.boolean().default(true),
     auto: autoKind,
   })
-  .refine((mask) => mask.to > mask.from, { message: '"to" must be greater than "from"', path: ['to'] });
+  .superRefine((mask, ctx) => {
+    if (!(mask.to > mask.from)) ctx.addIssue({ code: 'custom', message: '"to" must be greater than "from"', path: ['to'] });
+    let previous = mask.from;
+    (mask.moves ?? []).forEach((move, index) => {
+      if (!(move.at > previous)) ctx.addIssue({ code: 'custom', message: index === 0 ? 'a move must come after the mask starts ("from")' : 'moves must be in time order', path: ['moves', index, 'at'] });
+      else if (!(move.at < mask.to)) ctx.addIssue({ code: 'custom', message: 'a move must come before the mask ends ("to")', path: ['moves', index, 'at'] });
+      previous = move.at;
+    });
+  });
+
+/** The privacy guard's words: masked wherever the screen shows them (a name, an address). */
+const PrivacySchema = z.strictObject({
+  words: z.array(z.string().trim().min(1).max(100)).default([]),
+});
 
 /** A fix the person made to the transcript: the words spoken in [at, end) (source seconds) read as `text` ("" for none). */
 const CaptionFixSchema = z
@@ -263,6 +280,7 @@ export const ProjectSchema = z
     cuts: z.array(CutSchema).default([]),
     autoEdits: AutoEditsSchema.prefault({}),
     captions: CaptionsSchema.prefault({}),
+    privacy: PrivacySchema.prefault({}),
   })
   // Runs once everything else is valid (see the note above BackgroundSchema).
   .superRefine((project, ctx) => {

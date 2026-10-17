@@ -3,7 +3,7 @@
 // channel, which carries the answer back and a cancel in; progress and warnings go to stderr.
 // Loaded by bootstrap.ts, which handles uncaught exceptions.
 import { app } from 'electron';
-import { exportProject, isExportFormat, renderStills, type EncoderPreference, type ExportFormat } from '@cuttle/export';
+import { SUBTITLE_FORMATS, exportProject, isExportFormat, renderStills, type EncoderPreference, type ExportFormat, type SubtitleFormat } from '@cuttle/export';
 import { capturePage } from './capture-page';
 import { failure, finish } from './finish';
 import { decodeRequest, type CancelMessage, type ElectronRequest, type ElectronResponse } from './protocol';
@@ -43,6 +43,12 @@ function exportFormat(format: string | undefined): { format?: ExportFormat } {
   return { format };
 }
 
+function subtitleFormats(formats: readonly string[]): SubtitleFormat[] {
+  const unknown = formats.find((format) => !(SUBTITLE_FORMATS as readonly string[]).includes(format));
+  if (unknown !== undefined) throw Object.assign(new Error(`unknown subtitle format "${unknown}" (srt or vtt)`), { code: 'usage' });
+  return formats as SubtitleFormat[];
+}
+
 async function handle(request: ElectronRequest): Promise<unknown> {
   switch (request.command) {
     case 'render':
@@ -51,6 +57,8 @@ async function handle(request: ElectronRequest): Promise<unknown> {
         out: request.out,
         ...exportFormat(request.format),
         ...(request.encoder !== undefined && { encoder: request.encoder as EncoderPreference }),
+        ...(request.captions !== undefined && { captions: request.captions }),
+        ...(request.subtitles && { subtitles: subtitleFormats(request.subtitles) }),
         signal: cancel.signal,
         onProgress: progress('frames', request.quiet),
       });

@@ -86,6 +86,39 @@ describe.runIf(enabled)('cuttle in Electron', () => {
     expect(probe(json.out as string).split(/\r?\n/).slice(0, 2)).toEqual(['h264,1080,1080', 'aac']);
   }, 120_000);
 
+  it('burns the captions in, writes them as SRT and VTT, and leaves them out on --no-captions', () => {
+    const file = join(project, 'cuttle.json');
+    const before = readFileSync(file, 'utf8');
+    const raw = JSON.parse(before) as { sources: Record<string, string> };
+    writeFileSync(join(project, 'takes', '1', 'transcript.json'), JSON.stringify({ version: 1, language: 'en', model: 'small', words: [{ t: 0.4, end: 0.8, text: 'Hello' }, { t: 0.8, end: 1.6, text: 'captions.' }] }));
+    writeFileSync(file, JSON.stringify({ ...raw, sources: { ...raw.sources, transcript: 'takes/1/transcript.json' } }));
+    try {
+      const out = join(project, 'out', 'captions.mp4');
+      const { code, json } = cuttle('-C', project, 'render', '-o', out, '--srt', '--vtt');
+      expect(code).toBe(0);
+      expect(json.subtitles).toEqual([join(project, 'out', 'captions.srt'), join(project, 'out', 'captions.vtt')]);
+      expect(readFileSync(join(project, 'out', 'captions.srt'), 'utf8')).toBe('1\n00:00:00,400 --> 00:00:02,200\nHello captions.\n');
+      expect(readFileSync(join(project, 'out', 'captions.vtt'), 'utf8')).toBe('WEBVTT\n\n00:00:00.400 --> 00:00:02.200\nHello captions.\n');
+      // a frame with the caption differs from the same frame without it, at the bottom only
+      const frame = (extra: string[]) => {
+        const still = cuttle('-C', project, 'preview', '--at', '1', '-o', join(project, `frame-${extra.length}`), ...extra);
+        return PNG.sync.read(readFileSync((still.json.stills as { file: string }[])[0]!.file));
+      };
+      const shown = frame([]);
+      writeFileSync(file, JSON.stringify({ ...raw, sources: { ...raw.sources, transcript: 'takes/1/transcript.json' }, captions: { enabled: false } }));
+      const hidden = frame(['--sheet']);
+      const differs = (top: number, bottom: number) => {
+        for (let y = top; y < bottom; y++) for (let x = 0; x < shown.width; x += 4) if (shown.data[(y * shown.width + x) * 4] !== hidden.data[(y * shown.width + x) * 4]) return true;
+        return false;
+      };
+      expect(differs(shown.height - 200, shown.height)).toBe(true);
+      expect(differs(0, shown.height / 2)).toBe(false);
+      expect(cuttle('-C', project, 'render', '-o', join(project, 'out', 'plain.mp4'), '--no-captions').code).toBe(0);
+    } finally {
+      writeFileSync(file, before);
+    }
+  }, 240_000);
+
   it('fails on an unknown format before rendering, and on a page that does not exist', () => {
     expect(cuttle('-C', project, 'render', '--format', '4:3').code).toBe(1);
     expect(cuttle('-C', project, 'capture-page', join(project, 'missing.html')).code).toBe(1);

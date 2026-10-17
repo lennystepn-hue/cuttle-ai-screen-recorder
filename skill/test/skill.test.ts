@@ -66,26 +66,44 @@ async function help(command: string): Promise<string> {
   return out;
 }
 
+/** `--flag` as a whole option in a help text (not `--until` inside `--until-file`). */
+const hasFlag = (text: string, flag: string) => new RegExp(`${flag}(?![\\w-])`).test(text);
+const COMMANDS = ['devices', 'record', 'suggest', 'preview', 'frame', 'capture-page', 'render', 'recover'];
+
 describe('the cuttle commands in the skill', () => {
-  // `cuttle [-C dir] [--json] <command> … --flags` in code blocks and inline code: what Claude runs.
+  // Code blocks and inline code: what Claude runs.
   const code = docs.flatMap((text) => [...text.matchAll(/```[a-z]*\n([\s\S]*?)```|`([^`\n]+)`/g)].map((match) => match[1] ?? match[2]!));
+  // `cuttle [-C dir] [--json] <command> … --flags`, up to the end of the line, a `&&`, `;`, `|` or the next cuttle.
   const uses = code.flatMap((snippet) =>
-    [...snippet.matchAll(/(?:^|\s)cuttle((?: (?:-C "[^"]*"|-C \S+|--json))*) ([a-z][a-z-]*)([^\n]*)/g)].map(([, , command, rest]) => ({
-      command: command!,
-      flags: [...rest!.matchAll(/(?:^|\s)(--[a-z-]+)/g)].map((flag) => flag[1]!).filter((flag) => !GLOBAL.includes(flag)),
-    })),
+    [...snippet.matchAll(/(?:^|\s)cuttle((?: (?:-C "[^"]*"|-C \S+|--json))*) ([a-z][a-z-]*)((?:(?!&&|;|\||\bcuttle )[^\n])*)/g)].map(
+      ([, , command, rest]) => ({
+        command: command!,
+        flags: [...rest!.matchAll(/(?:^|\s)(--[a-z-]+)/g)].map((flag) => flag[1]!).filter((flag) => !GLOBAL.includes(flag)),
+      }),
+    ),
   );
+  // An option on its own (`--until-file "<project>/stop"`): it must belong to some command.
+  const loose = code.flatMap((snippet) => (/^--[a-z-]+/.exec(snippet)?.[0] ?? []) as string[]);
 
   it('covers the workflow', () => {
-    expect(new Set(uses.map((use) => use.command))).toEqual(new Set(['devices', 'record', 'suggest', 'preview', 'frame', 'capture-page', 'render', 'recover']));
+    expect(new Set(uses.map((use) => use.command))).toEqual(new Set(COMMANDS));
+    expect(loose.length).toBeGreaterThan(5);
   });
 
   it('uses only commands and options the CLI has', async () => {
     for (const { command, flags } of uses) {
       const text = await help(command);
       expect(text, `cuttle ${command}`).toContain(`Usage: cuttle ${command}`);
-      for (const flag of flags) expect(text, `cuttle ${command} ${flag}`).toMatch(new RegExp(`${flag}\\b`));
+      for (const flag of flags) expect(hasFlag(text, flag), `cuttle ${command} ${flag}`).toBe(true);
     }
+    const all = (await Promise.all(COMMANDS.map(help))).join('\n');
+    for (const flag of loose.filter((flag) => !GLOBAL.includes(flag))) expect(hasFlag(all, flag), flag).toBe(true);
+  });
+
+  it('catches an option the CLI does not have, and a prefix of one', () => {
+    expect(hasFlag('  --until-file <path>  stop when …', '--until-file')).toBe(true);
+    expect(hasFlag('  --until-file <path>  stop when …', '--until')).toBe(false);
+    expect(hasFlag('  --until-file <path>  stop when …', '--until-flie')).toBe(false);
   });
 });
 
@@ -96,10 +114,27 @@ describe('project.md', () => {
     expect(parsed.ok ? [] : parsed.issues).toEqual([]);
   });
 
-  it('lists every value the schema accepts', () => {
-    const lists = { BACKGROUND_PRESETS, FRAME_STYLES, CURSOR_STYLES, CLICK_EFFECTS, WEBCAM_SHAPES, WEBCAM_CORNERS, STILL_MOTIONS, EASES, MASK_STYLES, TEXT_STYLES, TEXT_POSITIONS };
-    for (const [name, values] of Object.entries(lists)) {
-      for (const value of values) expect(reference, `${name}: ${value}`).toContain(`\`${value}\``);
+  it('lists every value the schema accepts, where its field is described', () => {
+    /** The table row or paragraph that starts with `start`. */
+    const where = (start: string) => {
+      const from = reference.indexOf(start);
+      expect(from, start).toBeGreaterThanOrEqual(0);
+      const end = reference.indexOf('\n\n', from);
+      return reference.slice(from, end < 0 ? undefined : end).split('\n| `').at(0)!;
+    };
+    const fields: [string, readonly string[]][] = [
+      ['| `background.preset`', BACKGROUND_PRESETS],
+      ['| `frame` |', FRAME_STYLES],
+      ['| `cursor` |', [...CURSOR_STYLES, ...CLICK_EFFECTS]],
+      ['| `webcam` |', [...WEBCAM_SHAPES, ...WEBCAM_CORNERS]],
+      ['| `still` |', [...STILL_MOTIONS, ...FRAME_STYLES]],
+      ['`zooms`:', EASES],
+      ['`masks` hide', MASK_STYLES],
+      ['`texts`:', [...TEXT_STYLES, ...TEXT_POSITIONS]],
+    ];
+    for (const [start, values] of fields) {
+      const text = where(start);
+      for (const value of values) expect(text, `${start}: ${value}`).toContain(`\`${value}\``);
     }
   });
 });
@@ -132,5 +167,17 @@ describe('skill/install.mjs', () => {
     expect(refused.stderr).toMatch(/was not installed by this script/);
     expect(install(config, '--uninstall').status).toBe(0);
     expect(readFileSync(join(target, 'SKILL.md'), 'utf8')).toBe('mine');
+  });
+
+  it('removes only plain Markdown names from its own folder, whatever the marker lists', () => {
+    const config = temp();
+    const target = join(config, 'skills', 'cuttle');
+    mkdirSync(target, { recursive: true });
+    writeFileSync(join(config, 'skills', 'victim.md'), 'not ours');
+    writeFileSync(join(target, '.cuttle-skill.json'), JSON.stringify({ files: ['../victim.md', 'SKILL.md'] }));
+    writeFileSync(join(target, 'SKILL.md'), 'ours');
+    expect(install(config, '--uninstall').status).toBe(0);
+    expect(readFileSync(join(config, 'skills', 'victim.md'), 'utf8')).toBe('not ours');
+    expect(existsSync(target)).toBe(false);
   });
 });

@@ -2,14 +2,16 @@
 
 `cuttle.json` is the only file to edit. `cuttle record` and `cuttle suggest` write it, you refine
 it by hand, check it with `cuttle preview` and export it with `cuttle render`. Unknown fields are
-errors, and every command names the path of a problem (`scenes.2.to: "to" must be greater than
-"from"`).
+errors, and every command names the path of a problem, counting from 0
+(`scenes[1].to: "to" must be greater than "from"`). A clip must end inside the take.
 
 ## Times and pixels
 
 - **Source seconds** are seconds of the take's screen track (`takes/<n>/screen.mp4`). Scenes cut
   and speed them up. `zooms`, `masks` and `texts` use source seconds too, so they stay on their
-  content; they show only while a clip scene covers that source time.
+  content; they show only while a clip scene covers that source time. In a clip at speed `s`, `d`
+  source seconds last `d / s` output seconds: a 3 s caption over a 12× clip is on screen for a
+  quarter second, so give it `"duration": 36` there.
 - **Output seconds** are seconds of the rendered video. `cuttle preview --at` and the times on the
   contact sheet are output seconds; each still in `preview`'s JSON also has the `source` second it
   shows.
@@ -42,7 +44,7 @@ errors, and every command names the path of a problem (`scenes.2.to: "to" must b
   ],
   "zooms": [{ "at": 121, "duration": 4, "rect": [0, 600, 1400, 788] }],
   "masks": [{ "from": 0, "to": 128, "rect": [2200, 0, 360, 40], "style": "fill" }],
-  "texts": [{ "at": 2, "duration": 3, "text": "One prompt", "style": "pill", "position": "top" }]
+  "texts": [{ "at": 2, "duration": 3, "text": "One prompt", "style": "pill", "position": "bottom" }]
 }
 ```
 
@@ -79,14 +81,17 @@ there are not two cursors.
 
 `zooms`: `at` and `duration` (source seconds), `rect`, `ease` (`smooth`, `linear`) and `enabled`
 (`true`). The rect is widened to the screen's aspect and kept inside the screen. The zoom eases in
-and out (0.6 s each), so give it 2 s or more.
+and out over 0.6 output seconds each, so give it 2 output seconds or more (`2 × speed` source
+seconds over a sped-up clip).
 
 `masks` hide private things: `from` and `to` (source seconds), `rect`, `style` (`fill`: the colour
 around it, safest for tokens and keys; `blur`) and `enabled` (`true`). Make the rect generous: a
-few pixels too small leaves letters readable.
+few pixels too small leaves letters readable. Masks cover clips only, not still scenes (a captured
+page).
 
 `texts`: `at` and `duration` (source seconds), `text`, `style` (`pill`, `lower-third`, `caption`),
-`position` (`top`, `center`, `bottom`) and `enabled` (`true`).
+`position` (`top`, `center`, `bottom`) and `enabled` (`true`). A `top` text sits over the window's
+title bar; `bottom` keeps the title visible.
 
 ## Finding source seconds and rects
 

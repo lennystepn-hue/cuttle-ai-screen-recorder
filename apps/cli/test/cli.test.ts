@@ -4,8 +4,6 @@ import { rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import type { Scene } from '@cuttle/project';
-import { sourceSecond } from '../src/commands/preview';
 import { VERSION, runCli } from '../src/main';
 
 const dirs: string[] = [];
@@ -178,6 +176,18 @@ describe('cuttle devices and record (test backend)', () => {
     expect((json as { take: { stopReason: string; seconds: number } }).take).toMatchObject({ stopReason: 'stop' });
     expect((json as { take: { seconds: number } }).take.seconds).toBeLessThan(10);
     expect(process.listenerCount('SIGBREAK')).toBe(listeners);
+  }, 30_000);
+
+  it('stops when the stop file appears and removes it, so the next take can use it again', async () => {
+    const dir = join(temp(), 'demo');
+    const stopFile = join(dir, 'stop');
+    const running = cli('--json', '-C', dir, 'record', '--backend', 'test', '--until-file', stopFile, '--max', '20', '--countdown', '0');
+    while (!existsSync(join(dir, 'takes', '1', 'take.json'))) await new Promise((done) => setTimeout(done, 50));
+    writeFileSync(stopFile, '');
+    const { code, json } = await running;
+    expect(code).toBe(0);
+    expect((json as { take: { stopReason: string } }).take.stopReason).toBe('file');
+    expect(existsSync(stopFile)).toBe(false);
   }, 30_000);
 });
 
@@ -368,26 +378,34 @@ const pngSize = (file: string) => {
   return [bytes.readUInt32BE(16), bytes.readUInt32BE(20)];
 };
 
-describe('cuttle frame and the source seconds of stills', () => {
+describe('cuttle frame', () => {
   it('writes a source frame at full size, with a numbered grid on request', async () => {
     const dir = temp();
     takeFixture(dir);
     const plain = await cli('--json', '-C', dir, 'frame', '10');
     expect(stable(plain.json, dir)).toEqual({ t: 10, file: '<project>/frames/10.00s.png', width: 1280, height: 720, grid: false, labels: false });
     expect(pngSize(join(dir, 'frames', '10.00s.png'))).toEqual([1280, 720]);
-    const grid = await cli('--json', '-C', dir, 'frame', '10', '--grid', '-o', join(dir, 'grid.png'));
-    expect(grid.json).toMatchObject({ grid: true, labels: process.platform === 'win32' }); // Windows always has Arial
-    expect(pngSize(join(dir, 'grid.png'))).toEqual([1280, 720]);
-    const past = await cli('--json', '-C', dir, 'frame', '25');
-    expect((past.json as { error: { code: string; message: string } }).error).toEqual({ code: 'usage', message: 'the screen track is 20.00 s long; 25 s is past its end' });
+    // A path ffmpeg's image writer could read as a frame-number pattern (%d) is written as it is.
+    const out = join(dir, 'pct 100%d', 'grid.png');
+    const grid = await cli('--json', '-C', dir, 'frame', '10', '--grid', '-o', out);
+    expect(grid.json).toMatchObject({ grid: true, labels: expect.any(Boolean) });
+    if (process.platform === 'win32') expect((grid.json as { labels: boolean }).labels).toBe(true); // Windows always has Arial
+    expect(pngSize(out)).toEqual([1280, 720]);
   });
 
-  it('maps an output second to the source second a clip shows', () => {
-    const scenes = [
-      { type: 'clip', from: 0, to: 2, speed: 1 },
-      { type: 'clip', from: 10, to: 18, speed: 4 },
-      { type: 'card', title: 'The end', duration: 2 },
-    ] as const satisfies readonly Scene[];
-    expect([sourceSecond(scenes, 1), sourceSecond(scenes, 3), sourceSecond(scenes, 5)]).toEqual([1, 14, undefined]);
+  it('refuses a time without a frame instead of handing back an old file, and a missing screen track', async () => {
+    const dir = temp();
+    takeFixture(dir);
+    const past = await cli('--json', '-C', dir, 'frame', '25');
+    expect((past.json as { error: unknown }).error).toEqual({ code: 'usage', message: 'the screen track is 20.00 s long; 25 s is past its end' });
+    // 19.99 s is inside the last frame (it starts at 19.967 s): ffmpeg writes nothing for it.
+    const stale = join(dir, 'stale.png');
+    writeFileSync(stale, 'an older frame');
+    const inside = await cli('--json', '-C', dir, 'frame', '19.99', '-o', stale);
+    expect((inside.json as { error: { code: string; message: string } }).error.message).toMatch(/^no frame starts at or after 19\.99 s/);
+    expect(existsSync(stale)).toBe(false);
+    rmSync(join(dir, 'takes', '1', 'screen.mp4'));
+    const missing = await cli('--json', '-C', dir, 'frame', '1');
+    expect((missing.json as { error: { code: string } }).error.code).toBe('missing-file');
   });
 });

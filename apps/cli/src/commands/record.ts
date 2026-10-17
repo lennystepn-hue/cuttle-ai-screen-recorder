@@ -1,3 +1,4 @@
+import { rm } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { HOTKEYS, listDevices, record, type Backend, type CaptureSource, type Take } from '@cuttle/recorder';
 import type { Rect } from '@cuttle/project';
@@ -74,6 +75,8 @@ export async function recordCommand(projectDir: string, args: RecordArgs, output
   } finally {
     signal.removeEventListener('abort', stop);
   }
+  // The stop file did its job; left there it would refuse the next take (it must not exist at the start).
+  if (take.stopReason === 'file' && args.untilFile !== undefined) await rm(resolve(args.untilFile), { force: true }).catch(() => {});
 
   const backup = await useTake(file, take);
   if (args.drawMouse) {

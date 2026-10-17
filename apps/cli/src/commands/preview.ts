@@ -1,6 +1,5 @@
 import { join, resolve } from 'node:path';
-import type { Scene } from '@cuttle/project';
-import { sceneSpans, sourceTimeAt, spanAt, totalDuration } from '@cuttle/timeline';
+import { sceneSpans, totalDuration } from '@cuttle/timeline';
 import { CliError } from '../errors';
 import { runInElectron } from '../electron-runner';
 import type { Output } from '../output';
@@ -15,9 +14,12 @@ export interface PreviewArgs {
   out?: string;
 }
 
-/** What @cuttle/export's renderStills returns, with the source second of each still. */
+/** What @cuttle/export's renderStills returns. */
 export interface PreviewResult {
-  /** `source`: the source second shown (clip scenes only), for placing masks, zooms and texts. */
+  /**
+   * `source`: the source second the still shows (the most visible clip of its frame; absent on a
+   * still or card scene), for placing masks, zooms and texts.
+   */
   stills: { t: number; file: string; source?: number }[];
   sheet?: string;
   width: number;
@@ -39,28 +41,15 @@ export async function previewCommand(projectDir: string, args: PreviewArgs, outp
   const sheet = args.sheet ?? !(args.at && args.at.length > 0);
   const outDir = args.out ? resolve(args.out) : join(file.dir, 'preview');
   output.info(`rendering ${times.length} still(s) into ${outDir} …`);
-  const rendered = await runInElectron<PreviewResult>(
+  const result = await runInElectron<PreviewResult>(
     { command: 'preview', projectDir: file.dir, outDir, times, quiet: output.json, clean: args.out === undefined, ...(args.format !== undefined && { format: args.format }), ...(sheet && { sheet: {} }) },
     signal,
   );
-  // Masks, zooms and texts are placed in source seconds: each still says which one it shows.
-  const stills = rendered.stills.map((still) => {
-    const source = sourceSecond(file.project.scenes, still.t);
-    return { ...still, ...(source !== undefined && { source }) };
-  });
-  const result: PreviewResult = { ...rendered, stills };
   output.result(result, () =>
     [
-      ...stills.map((still) => `${still.t.toFixed(2)} s${still.source !== undefined ? ` (source ${still.source.toFixed(2)} s)` : ''}  ${still.file}`),
+      ...result.stills.map((still) => `${still.t.toFixed(2)} s${still.source !== undefined ? ` (source ${still.source.toFixed(2)} s)` : ''}  ${still.file}`),
       ...(result.sheet ? [`sheet  ${result.sheet}`] : []),
     ].join('\n'),
   );
   return result;
-}
-
-/** The source second a clip scene shows at output time `t`; undefined on a still or card scene. */
-export function sourceSecond(scenes: readonly Scene[], t: number): number | undefined {
-  const span = spanAt(sceneSpans(scenes), t);
-  if (span?.scene.type !== 'clip') return undefined;
-  return Math.round(sourceTimeAt(span.scene, t - span.start) * 1000) / 1000;
 }

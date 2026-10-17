@@ -25,31 +25,38 @@ function installed() {
   }
 }
 
-function removeOurs() {
-  const previous = installed();
-  if (!previous) return false;
-  for (const name of previous.files ?? []) rmSync(join(target, name), { force: true });
-  rmSync(marker, { force: true });
-  if (readdirSync(target).length === 0) rmSync(target, { recursive: true });
-  return true;
+/** Only plain Markdown names in the folder itself: the marker's list is never trusted with a path. */
+const ours = (name) => typeof name === 'string' && /^[^/\\]+\.md$/.test(name);
+
+function removeFiles(previous) {
+  for (const name of (Array.isArray(previous.files) ? previous.files : []).filter(ours)) rmSync(join(target, name), { force: true });
 }
 
 if (process.argv.includes('--uninstall')) {
-  console.log(removeOurs() ? `removed the cuttle skill from ${target}` : `no cuttle skill installed by this script in ${target}`);
+  const previous = installed();
+  if (previous) {
+    removeFiles(previous);
+    rmSync(marker, { force: true });
+    if (readdirSync(target).length === 0) rmSync(target, { recursive: true });
+  }
+  console.log(previous ? `removed the cuttle skill from ${target}` : `no cuttle skill installed by this script in ${target}`);
   process.exit(0);
 }
 
-if (existsSync(target) && !installed()) {
+const previous = installed();
+if (existsSync(target) && !previous) {
   console.error(`${target} exists and was not installed by this script; move it away first`);
   process.exit(1);
 }
-removeOurs(); // files of an older version
+if (previous) removeFiles(previous); // files of an older version
 mkdirSync(target, { recursive: true });
-const files = readdirSync(source).filter((name) => name.endsWith('.md'));
-for (const name of files) {
-  const text = readFileSync(join(source, name), 'utf8').replaceAll('{{REPO}}', repo.replace(/\\/g, '/'));
-  writeFileSync(join(target, name), text);
-}
+const files = readdirSync(source).filter(ours);
+// The marker first: an install cut short still belongs to us (install again, or uninstall).
 writeFileSync(marker, `${JSON.stringify({ repo, files }, null, 2)}\n`);
+const repoPath = repo.replace(/\\/g, '/');
+for (const name of files) {
+  // A function, so `$&` or `$'` in the path stays as it is.
+  writeFileSync(join(target, name), readFileSync(join(source, name), 'utf8').replaceAll('{{REPO}}', () => repoPath));
+}
 console.log(`installed the cuttle skill in ${target} (${files.join(', ')})`);
 console.log('Claude Code uses it when you ask for a demo or type /cuttle (a session that was already running may need /reload-skills); it needs the cuttle command: pnpm cli:install');

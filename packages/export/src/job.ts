@@ -73,6 +73,8 @@ export interface PageFailure {
 export interface PageStillsSuccess {
   ok: true;
   stills: number;
+  /** Per time: the source second the still shows (its frame's most visible clip), null on a still or card. */
+  sources: (number | null)[];
   width: number;
   height: number;
   gpu: string;

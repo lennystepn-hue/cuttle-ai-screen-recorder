@@ -78,7 +78,7 @@ export function createTimeline(project: CuttleProject, opts: TimelineOptions): T
     const pastEnd = t >= span.end || !inside(local);
     const sourceLocal = pastEnd ? clamp(lastFrameShown(span, inside) - span.start, 0, length) : local;
     const sourceTime = sourceTimeAt(scene, sourceLocal);
-    let cursor = project.look.cursor.enabled && opts.cursor ? cursorAt(opts.cursor, sourceTime, scene.speed) : undefined;
+    let cursor = project.look.cursor.enabled && opts.cursor ? cursorAt(opts.cursor, sourceTime, scene.speed, project.look.cursor.smoothing) : undefined;
     if (cursor && project.look.cursor.clickEffect === 'none') cursor = { ...cursor, clicks: [] };
     // The output time this source frame belongs to (a held or frozen frame's, during a crossfade).
     const shownAt = span.start + (sourceTime - scene.from) / scene.speed;

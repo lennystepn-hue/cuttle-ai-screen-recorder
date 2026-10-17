@@ -48,3 +48,53 @@ describe('cursorAt', () => {
     expect(cursorAt(createCursorTrack([]), 1, 1)).toBeUndefined();
   });
 });
+
+describe('the smoothed path', () => {
+  /** A hand's move: 60 samples a second with jitter (deterministic), a click at 1 s, a rest, a jump. */
+  const jittery: InputEvent[] = [];
+  for (let i = 0; i <= 60; i++) {
+    const t = i / 60;
+    jittery.push({ t, type: 'move', x: 100 + 400 * t + (i % 2 ? 6 : -6), y: 300 + (i % 3) * 5 });
+  }
+  jittery.push({ t: 1, type: 'click', x: 500, y: 300, button: 'left' });
+  for (let i = 1; i <= 30; i++) jittery.push({ t: 1 + i / 60, type: 'move', x: 500 + 10 * i + (i % 2 ? 4 : -4), y: 300 });
+  // a rest of 2 s, then a jump to the other side of the screen
+  jittery.push({ t: 3.5, type: 'move', x: 801, y: 301 });
+  jittery.push({ t: 3.51, type: 'move', x: 1800, y: 900 });
+  jittery.push({ t: 3.6, type: 'move', x: 1810, y: 905 });
+  const hand = createCursorTrack(jittery);
+
+  it('is the recorded path at smoothing 0', () => {
+    expect(cursorAt(hand, 0.5, 1, 0)).toMatchObject(cursorAt(hand, 0.5, 1)!);
+    expect(cursorAt(hand, 0.51, 1, 0)!.x).toBeCloseTo(100 + 400 * 0.51 + (Math.round(0.51 * 60) % 2 ? 6 : -6) - 0, -1);
+  });
+
+  it('is exactly at every click, at its time, whatever the smoothing', () => {
+    for (const smoothing of [0.3, 0.5, 1]) expect(cursorAt(hand, 1, 1, smoothing)).toMatchObject({ x: 500, y: 300 });
+  });
+
+  it('takes the jitter out without lagging behind the hand', () => {
+    const at = (t: number, smoothing: number) => cursorAt(hand, t, 1, smoothing)!;
+    // the jitter (±6 px every sample) is gone: neighbouring frames differ by the move's own step
+    const steps = (smoothing: number) => Array.from({ length: 40 }, (_, i) => Math.abs(at(0.2 + (i + 1) / 120, smoothing).x - at(0.2 + i / 120, smoothing).x));
+    expect(Math.max(...steps(0.5))).toBeLessThan(5);
+    expect(Math.max(...steps(0))).toBeGreaterThan(5);
+    // zero-phase: in the middle of a steady move the smoothed cursor is where the hand is on average
+    expect(at(0.5, 0.5).x).toBeCloseTo(100 + 400 * 0.5, -1);
+  });
+
+  it('holds still through a rest, and jumps where the pointer jumped', () => {
+    const rested = cursorAt(hand, 1.5, 1, 0.5)!;
+    expect(cursorAt(hand, 2.5, 1, 0.5)).toMatchObject({ x: rested.x, y: rested.y });
+    expect(cursorAt(hand, 3.4, 1, 0.5)).toMatchObject({ x: rested.x, y: rested.y });
+    expect(cursorAt(hand, 3.51, 1, 0.5)).toMatchObject({ x: 1800, y: 900 });
+    expect(cursorAt(hand, 3.6, 1, 0.5)).toMatchObject({ x: 1810, y: 905 });
+  });
+
+  it('is made once per smoothing and track', () => {
+    cursorAt(hand, 0.3, 1, 0.8);
+    const first = hand.smoothed!.get(0.8);
+    cursorAt(hand, 0.7, 1, 0.8);
+    expect(hand.smoothed!.get(0.8)).toBe(first);
+  });
+});

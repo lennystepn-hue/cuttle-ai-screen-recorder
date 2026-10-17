@@ -3,7 +3,7 @@ import { sceneSpans, totalDuration } from '@cuttle/timeline';
 import { CliError } from '../errors';
 import { runInElectron } from '../electron-runner';
 import type { Output } from '../output';
-import { readProjectFile } from '../project-file';
+import { readProjectFile } from '@cuttle/core';
 
 export interface PreviewArgs {
   /** Output seconds; without them, a sheet of `SHEET_STILLS` evenly spaced stills. */

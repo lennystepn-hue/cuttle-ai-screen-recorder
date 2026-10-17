@@ -2,7 +2,7 @@ import { basename, extname, join, relative, sep } from 'node:path';
 import { CliError } from '../errors';
 import { runInElectron } from '../electron-runner';
 import type { Output } from '../output';
-import { readProjectFile, writeProjectFile } from '../project-file';
+import { readProjectFile, writeProjectFile } from '@cuttle/core';
 
 export interface CaptureArgs {
   /** The whole page, for a scrolling still scene. */
@@ -48,6 +48,8 @@ export async function capturePageCommand(projectDir: string, target: string, arg
   let scene: CaptureResult['scene'];
   if (args.add) {
     if (signal.aborted) throw new CliError('cancelled', 'cancelled: the page was captured, but no scene was added');
+    // Read again: the capture took a while, and the project may have been saved meanwhile.
+    const latest = await readProjectFile(projectDir);
     scene = {
       type: 'still',
       image: relative(file.dir, out).split(sep).join('/'),
@@ -55,8 +57,8 @@ export async function capturePageCommand(projectDir: string, target: string, arg
       motion: args.scroll ? 'scroll' : 'none',
       frame: 'browser-light',
     };
-    file.raw.scenes = [...((file.raw.scenes as unknown[] | undefined) ?? []), scene];
-    await writeProjectFile(file);
+    latest.raw.scenes = [...((latest.raw.scenes as unknown[] | undefined) ?? []), scene];
+    await writeProjectFile(latest, 'capture-page');
   }
   const result: CaptureResult = { project: file.path, ...shot, ...(scene && { scene }) };
   output.result(result, () => `captured ${shot.file} (${shot.width}×${shot.height})${scene ? `; appended a ${scene.duration} s still scene` : ''}`);

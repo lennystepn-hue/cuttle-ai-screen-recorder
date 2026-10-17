@@ -1,5 +1,5 @@
 // What suggest needs from the screen track, read with ffmpeg.
-import { CliError } from '../errors';
+import { CoreError } from '../errors';
 import { runFfmpeg } from '../ffmpeg';
 import type { Span } from './spans';
 
@@ -63,7 +63,7 @@ export async function streamSeconds(path: string, stream: 'v' | 'a'): Promise<nu
     const last = [...stderr.matchAll(/time=(\d+):(\d\d):(\d\d(?:\.\d+)?)/g)].at(-1);
     return last ? Number(last[1]) * 3600 + Number(last[2]) * 60 + Number(last[3]) : 0;
   } catch (error) {
-    if (error instanceof CliError && error.code === 'ffmpeg-missing') throw error;
+    if (error instanceof CoreError && error.code === 'ffmpeg-missing') throw error;
     return 0;
   }
 }

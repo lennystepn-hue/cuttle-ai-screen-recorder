@@ -1,0 +1,13 @@
+/** Why a project operation failed; the CLI maps the code to its exit code, the app shows the message. */
+export type CoreErrorCode = 'usage' | 'invalid-project' | 'missing-file' | 'invalid-media' | 'ffmpeg-missing' | 'conflict';
+
+/** A failure of a project operation (reading a project, running ffmpeg, a take that cannot be used). */
+export class CoreError extends Error {
+  readonly code: CoreErrorCode;
+
+  constructor(code: CoreErrorCode, message: string, options?: ErrorOptions) {
+    super(message, options);
+    this.name = 'CoreError';
+    this.code = code;
+  }
+}

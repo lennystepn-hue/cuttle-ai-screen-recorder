@@ -46,6 +46,8 @@ export interface SuggestedClip {
   from: number;
   to: number;
   speed: number;
+  /** What the clip shows, for people: "Prompt", "Claude at work", "Waiting", "Answer". */
+  label?: string;
 }
 
 export interface Suggestion {
@@ -92,7 +94,23 @@ export function suggestClips(input: SuggestInput): Suggestion {
 
   const clips: SuggestedClip[] = [];
   for (const kept of gaps(cuts, start, end)) clips.push(...withSpeedUps(kept, inputSpans, answer, notes));
-  return { clips: clips.map((clip) => ({ from: ms(clip.from), to: ms(clip.to), speed: clip.speed })), notes, ...(answer !== undefined && { answer }) };
+  return {
+    clips: clips.map((clip) => {
+      const label = labelOf(clip, prompt, answer, turn);
+      return { from: ms(clip.from), to: ms(clip.to), speed: clip.speed, ...(label !== undefined && { label }) };
+    }),
+    notes,
+    ...(answer !== undefined && { answer }),
+  };
+}
+
+/** A name for a clip from Claude's markers: a speed-up during Claude's turn, other waiting, the clip with the answer or the prompt. */
+function labelOf(clip: SuggestedClip, prompt: number | undefined, answer: number | undefined, turn: readonly Span[]): string | undefined {
+  const holds = (t: number | undefined) => t !== undefined && clip.from <= t && t < clip.to;
+  if (clip.speed > 1) return turn.some((span) => span.from < clip.to && clip.from < span.to) ? 'Claude at work' : 'Waiting';
+  if (holds(answer)) return 'Answer';
+  if (holds(prompt)) return 'Prompt';
+  return undefined;
 }
 
 /** `kept` as 1× clips, with every long stretch without input sped up. */

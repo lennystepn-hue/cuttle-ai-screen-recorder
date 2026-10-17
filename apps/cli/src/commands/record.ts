@@ -4,8 +4,7 @@ import { HOTKEYS, listDevices, record, type Backend, type CaptureSource, type Ta
 import type { Rect } from '@cuttle/project';
 import { CliError } from '../errors';
 import type { Output } from '../output';
-import { newProjectFile, projectExists, readProjectFile, writeProjectFile } from '../project-file';
-import { useTake } from '../use-take';
+import { newProjectFile, projectExists, readProjectFile, useTake, writeProjectFile } from '@cuttle/core';
 
 export interface RecordArgs {
   monitor?: number;
@@ -41,11 +40,12 @@ export async function recordCommand(projectDir: string, args: RecordArgs, output
   const source = captureSource(args, devices.monitors.find((monitor) => monitor.primary)?.index ?? devices.monitors[0]?.index ?? 0);
   const webcam = deviceName('camera', args.webcam, devices.cameras);
   const mic = deviceName('microphone', args.mic, devices.mics);
-  const file = projectExists(projectDir) ? await readProjectFile(projectDir) : await writeProjectFile(newProjectFile(projectDir));
+  // Read (or created) now, so a broken project stops the command before anything is recorded.
+  const before = projectExists(projectDir) ? await readProjectFile(projectDir) : await writeProjectFile(newProjectFile(projectDir), 'record');
   if (signal.aborted) throw new CliError('cancelled', 'stopped before the recording started');
 
   const recording = record({
-    projectDir: file.dir,
+    projectDir: before.dir,
     source,
     ...(webcam !== undefined && { webcam }),
     ...(mic !== undefined && { mic }),
@@ -78,6 +78,8 @@ export async function recordCommand(projectDir: string, args: RecordArgs, output
   // The stop file did its job; left there it would refuse the next take (it must not exist at the start).
   if (take.stopReason === 'file' && args.untilFile !== undefined) await rm(resolve(args.untilFile), { force: true }).catch(() => {});
 
+  // Read again: the project may have been edited during the take; that version switches to the take.
+  const file = await readProjectFile(projectDir);
   const backup = await useTake(file, take);
   if (args.drawMouse) {
     // The real pointer is in the video: the engine's cursor would be a second one.
@@ -87,7 +89,7 @@ export async function recordCommand(projectDir: string, args: RecordArgs, output
     // Left from an earlier --draw-mouse take, this take would show no pointer at all.
     output.warn('look.cursor.enabled is false (from an earlier --draw-mouse take?): this take has no pointer in the video, so set it to true to show one');
   }
-  await writeProjectFile(file);
+  await writeProjectFile(file, 'record');
   const result: RecordResult = { project: file.path, take, ...(backup && { backup }) };
   output.result(result, () =>
     [

@@ -51,9 +51,9 @@ describe('suggestClips', () => {
     const result = suggestClips({ duration: 50, events: keys(2, 2.5, 3), markers, still: [{ from: 0, to: 1.5 }, { from: 41, to: 50 }] });
     // Start: 2 s before the prompt. Waiting: no input from 3.3 s; the speed-up ends 1.5 s before the answer.
     expect(result.clips).toEqual([
-      { from: 1, to: 4.3, speed: 1 },
-      { from: 4.3, to: 38.5, speed: 8 },
-      { from: 38.5, to: 42.5, speed: 1 },
+      { from: 1, to: 4.3, speed: 1, label: 'Prompt' },
+      { from: 4.3, to: 38.5, speed: 8, label: 'Claude at work' },
+      { from: 38.5, to: 42.5, speed: 1, label: 'Answer' },
     ]);
     expect(result.answer).toBe(40);
     expect(result.notes).toContain('sped up 34.2 s without input 8× (4.3–38.5 s)');
@@ -70,10 +70,10 @@ describe('suggestClips', () => {
     const still = [{ from: 0, to: 5 }, { from: 6.1, to: 64 }, { from: 65.2, to: 137 }, { from: 138.1, to: 152 }];
     const result = suggestClips({ duration: 153.3, events: [], markers, still });
     // 145.6 s without input from 5.5 to 151.1 s: about a twelfth of it, so 12×.
-    expect(result.clips).toEqual([
+    expect(result.clips).toStrictEqual([
       { from: 4.5, to: 5.5, speed: 1 },
-      { from: 5.5, to: 151.1, speed: 12 },
-      { from: 151.1, to: 153.3, speed: 1 },
+      { from: 5.5, to: 151.1, speed: 12, label: 'Claude at work' },
+      { from: 151.1, to: 153.3, speed: 1, label: 'Answer' },
     ]);
     expect(result.notes.some((note) => note.startsWith('cut'))).toBe(false);
   });
@@ -86,11 +86,12 @@ describe('suggestClips', () => {
     ];
     const result = suggestClips({ duration: 62, events: keys(2, 2.5, 3), markers, still: [{ from: 0, to: 1.5 }, { from: 60, to: 62 }] });
     // Waiting 3.3–61 s without input: sped up before the answer (to 18.5 s) and after it (from 22.5 s).
-    expect(result.clips).toEqual([
-      { from: 1, to: 4.3, speed: 1 },
-      { from: 4.3, to: 18.5, speed: 4 },
-      { from: 18.5, to: 22.5, speed: 1 },
-      { from: 22.5, to: 60, speed: 12 },
+    // The speed-up after the answer is no longer Claude's turn: "Waiting".
+    expect(result.clips).toStrictEqual([
+      { from: 1, to: 4.3, speed: 1, label: 'Prompt' },
+      { from: 4.3, to: 18.5, speed: 4, label: 'Claude at work' },
+      { from: 18.5, to: 22.5, speed: 1, label: 'Answer' },
+      { from: 22.5, to: 60, speed: 12, label: 'Waiting' },
       { from: 60, to: 61, speed: 1 },
     ]);
   });

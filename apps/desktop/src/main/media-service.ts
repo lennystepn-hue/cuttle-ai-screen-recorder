@@ -113,6 +113,11 @@ class Worker {
   stop(): void {
     this.process?.kill();
   }
+
+  /** Ends the worker while it has nothing to do, so the next one starts with the environment as it is now. */
+  refresh(): void {
+    if (this.pending.size === 0) this.process?.kill();
+  }
 }
 
 export const mediaWorker = new Worker();

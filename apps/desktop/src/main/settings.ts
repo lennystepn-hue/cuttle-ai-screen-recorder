@@ -1,7 +1,10 @@
+import { readFileSync } from 'node:fs';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { app } from 'electron';
 import { z } from 'zod';
+import { MOTIONS, type Motion, type SettingsView } from '../shared/ipc';
 
 const RECENT_MAX = 10;
 
@@ -19,7 +22,13 @@ const SettingsSchema = z.object({
   countdown: z.union([z.literal(0), z.literal(3), z.literal(5)]).catch(3).default(3),
   /** Projects whose take was written while the app quit: cut by suggest when they open next. */
   uncut: z.array(z.string()).catch([]).default([]),
-  /** The picker bar's choices, kept between recordings. */
+  /** The first run was seen to its end (ffmpeg, the cuttle command and the skill). */
+  welcomed: z.boolean().catch(false).default(false),
+  /** Start with the computer (the OS's login item). */
+  launchAtLogin: z.boolean().catch(false).default(false),
+  /** Motion in the app's windows: the OS's "reduce motion" (system), or always reduced, or always full. */
+  motion: z.enum(MOTIONS).catch('system').default('system'),
+  /** The picker bar's choices, kept between recordings (the camera and mic are the defaults in the settings). */
   record: z
     .object({ camera: z.string().optional(), mic: z.string().optional(), stop: z.enum(['none', 'claude', 'idle']).default('none'), claudeFolder: z.string().optional() })
     .catch({ stop: 'none' as const })
@@ -47,6 +56,22 @@ export async function loadSettings(): Promise<Settings> {
 }
 
 let writing = Promise.resolve();
+
+/**
+ * Replaces `to` with `from`. Windows refuses a rename over a file another program has open for a
+ * moment (a reader, a scanner, OneDrive): it is tried again for about a second.
+ */
+async function replace(from: string, to: string): Promise<void> {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await rename(from, to);
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (attempt >= 12 || (code !== 'EPERM' && code !== 'EBUSY' && code !== 'EACCES')) throw error;
+      await new Promise((resolve) => setTimeout(resolve, 20 * attempt));
+    }
+  }
+}
 const listeners = new Set<(settings: Settings) => void>();
 
 /** Calls `listener` after every change of the settings. */
@@ -62,20 +87,53 @@ export async function updateSettings(change: (settings: Settings) => void): Prom
   writing = writing.then(async () => {
     await mkdir(dirname(file()), { recursive: true });
     await writeFile(`${file()}.part`, text);
-    await rename(`${file()}.part`, file());
+    await replace(`${file()}.part`, file());
   }).catch(() => {});
   await writing;
   for (const listener of listeners) listener(settings);
   return settings;
 }
 
+/**
+ * The app's version: the packaged app's, else apps/desktop/package.json's (run from the repository,
+ * Electron reports its own version).
+ */
+export function appVersion(): string {
+  if (app.isPackaged) return app.getVersion();
+  try {
+    return (JSON.parse(readFileSync(fileURLToPath(new URL('../../package.json', import.meta.url)), 'utf8')) as { version: string }).version;
+  } catch {
+    return app.getVersion();
+  }
+}
+
+/** How motion is set, once the settings were loaded (the windows get it when they are made). */
+export const motionSetting = (): Motion => cached?.motion ?? 'system';
+
+/** The settings as the settings window shows them. */
+export async function settingsView(): Promise<SettingsView> {
+  const settings = await loadSettings();
+  return {
+    projectsFolder: settings.projectsFolder,
+    countdown: settings.countdown,
+    ...(settings.record.camera !== undefined && { camera: settings.record.camera }),
+    ...(settings.record.mic !== undefined && { mic: settings.record.mic }),
+    launchAtLogin: settings.launchAtLogin,
+    motion: settings.motion,
+    recent: settings.recent,
+    version: appVersion(),
+  };
+}
+
+/** The same folder, as Windows compares paths (case) and wherever it is written (separators, a trailing one). */
+export const sameDir = (a: string, b: string) => {
+  const key = (dir: string) => dir.replace(/[\\/]+$/, '').replace(/\\/g, '/');
+  return process.platform === 'win32' ? key(a).toLowerCase() === key(b).toLowerCase() : key(a) === key(b);
+};
+
 /** Puts a project at the top of the recent list. */
 export function addRecent(dir: string): Promise<Settings> {
   return updateSettings((settings) => {
-    const key = process.platform === 'win32' ? dir.toLowerCase() : dir;
-    settings.recent = [
-      { dir, name: basename(dir), opened: Date.now() },
-      ...settings.recent.filter((entry) => (process.platform === 'win32' ? entry.dir.toLowerCase() : entry.dir) !== key),
-    ].slice(0, RECENT_MAX);
+    settings.recent = [{ dir, name: basename(dir), opened: Date.now() }, ...settings.recent.filter((entry) => !sameDir(entry.dir, dir))].slice(0, RECENT_MAX);
   });
 }

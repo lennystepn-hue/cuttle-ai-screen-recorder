@@ -6,7 +6,7 @@ import { app, BrowserWindow, dialog, Menu, screen, session, shell, type Session,
 import { PROJECT_FILE, backupFile, writeProjectFile, type ProjectFile } from '@cuttle/core';
 import { parseProject } from '@cuttle/project';
 import { plainIssue } from '../shared/format';
-import type { ExportEnd, ProjectFileEvent, ProjectStatus } from '../shared/ipc';
+import type { Event, Events, ExportEnd, ProjectFileEvent, ProjectStatus } from '../shared/ipc';
 import { isInside } from '../shared/media-path';
 import { CHECK, CHECK_IMAGE, HIDDEN } from './check';
 import { ExportRun, exportPath } from './export-service';
@@ -15,8 +15,9 @@ import { ProjectMedia } from './media-service';
 import { LockedError, lockProject, openProjectFile, projectInfo } from './project';
 import { importImage, ProjectFileWatch } from './project-watch';
 import { APP_ORIGIN, assetPath, bundlePath, serveApp, serveMedia } from './protocols';
-import { cutIfPending, recut, startPicking } from './recording';
-import { addRecent, loadSettings, updateSettings } from './settings';
+import { cutIfPending, recut, startPicking, undoRestart } from './recording';
+import { addRecent, loadSettings, motionSetting, updateSettings } from './settings';
+import { openSettings } from './settings-window';
 
 const BACKGROUND = '#0c0c0f';
 const TITLE_BAR_HEIGHT = 44;
@@ -39,6 +40,8 @@ export function guard(contents: WebContents): void {
 
 export const webPreferences = (preload: string, ses: Session) => ({
   preload: bundlePath('preload', preload),
+  // how motion is set when the window is made (`app:motion` changes it later)
+  additionalArguments: [`--cuttle-motion=${motionSetting()}`],
   session: ses,
   sandbox: true,
   contextIsolation: true,
@@ -185,6 +188,8 @@ async function editorWindow(dir: string, key: string, file: ProjectFile, release
     'project:record': () => void startPicking(dir),
     'project:takes': () => takesMenu(dir, window),
     'project:cut': () => void recut(dir),
+    'project:undo-restart': (discarded) => void undoRestart(dir, discarded),
+    'app:settings': () => void openSettings(),
     'project:save': ({ raw, base }) => editor.watch.save(raw, base),
     'project:draft': ({ raw }) => writeFile(join(dir, DRAFT_FILE), `${JSON.stringify(raw, null, 2)}\n`),
     // contents.reload() from here is not a navigation the page started (guard() refuses those)
@@ -268,6 +273,12 @@ export async function editorWindowOf(dir: string): Promise<BrowserWindow | undef
 }
 
 /** Shows what the main process does to a project (`undefined`: nothing) in its editor's title bar. */
+/** Sends an event to the project's editor, when one is open. */
+export async function sendToEditor<E extends Event>(dir: string, channel: E, payload: Events[E]): Promise<void> {
+  const editor = await editorOf(dir);
+  if (editor && !editor.window.isDestroyed()) send(editor.contents, channel, payload);
+}
+
 export async function setEditorStatus(dir: string, status: ProjectStatus | undefined): Promise<void> {
   const editor = await editorOf(dir);
   if (!editor) return;
@@ -450,6 +461,7 @@ export async function createPill(): Promise<BrowserWindow> {
           : recent.map((entry) => ({ label: recentLabel(entry), toolTip: entry.dir, click: () => void openEditorOrSay(entry.dir) }))),
         { type: 'separator' },
         { label: 'Open folder…', click: () => void chooseAndOpen() },
+        { label: 'Settings…', click: () => void openSettings() },
       ]).popup({ window });
     },
   });

@@ -1,6 +1,7 @@
 // The Cuttle app's main process: one instance, a tray icon and the pill; editors per project.
-// `--open <folder>` (also from a second launch) opens a project. The end-to-end check passes
-// --cuttle-check with CUTTLE_HIDDEN=1 (no window is shown); CUTTLE_USER_DATA moves the settings.
+// `--open <folder>` (also from a second launch) opens a project, `--settings` the settings; the
+// first plain start shows the first run. The end-to-end check passes --cuttle-check with
+// CUTTLE_HIDDEN=1 (no window is shown); CUTTLE_USER_DATA moves the settings.
 import { resolve } from 'node:path';
 import { app, globalShortcut, Menu, session } from 'electron';
 import { HIDDEN } from './check';
@@ -9,6 +10,8 @@ import { recorderHost } from './recorder-host';
 import { startPicking, stopForQuit, recordingRuns } from './recording';
 import { assetPath, registerSchemes } from './protocols';
 import { loadSettings, onSettingsChange } from './settings';
+import { openSettings } from './settings-window';
+import { findFfmpeg } from './tools';
 import { createTray, updateTray, type TrayActions } from './tray';
 import { chooseAndOpen, createPill, lockDown, openEditorOrSay, showPill } from './windows';
 
@@ -35,12 +38,14 @@ if (!app.requestSingleInstanceLock()) {
     record: () => void startPicking(),
     showPill: () => void showPill(),
     open: (dir) => void (dir ? openEditorOrSay(dir) : chooseAndOpen()),
+    settings: () => void openSettings(),
     quit: () => app.quit(),
   };
 
   app.on('second-instance', (_event, argv, workingDirectory) => {
     const dir = openArgument(argv, workingDirectory);
     if (dir) void openEditorOrSay(dir);
+    else if (argv.includes('--settings')) void openSettings();
     else void showPill();
   });
 
@@ -74,7 +79,12 @@ if (!app.requestSingleInstanceLock()) {
     if (!HIDDEN) globalShortcut.register('Control+Shift+Alt+R', () => void startPicking());
     const dir = openArgument(process.argv, process.cwd());
     if (dir) await openEditorOrSay(dir);
+    else if (process.argv.includes('--settings')) await openSettings();
+    // the first plain start welcomes (ffmpeg, the cuttle command and the skill), then the pill
+    else if (!settings.welcomed) await openSettings({ welcome: true });
     else await showPill();
+    // ffmpeg where the OS has it now (installed since the last login, say): the helpers start with it
+    void findFfmpeg().catch(() => undefined);
     onSettingsChange((latest) => updateTray(latest.recent, actions));
   });
 }

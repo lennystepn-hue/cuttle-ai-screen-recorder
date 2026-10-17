@@ -4,7 +4,7 @@ import type { EngineAssets } from './assets';
 import { CAPTION_LOOKS, drawCaption } from './captions';
 import { createRenderTarget, deleteRenderTarget, type RenderTarget } from './gl/target';
 import { createTexture, sourceSize, uploadPixels, uploadTexture } from './gl/texture';
-import { placeBadge, placeOverlay, stillCrop, unitFor, uvRect, webcamRect, windowLayout, type Size, type WindowLayout } from './layout';
+import { placeBadge, placeOverlay, stillCrop, unitFor, uvRect, webcamRect, type Size, type WindowLayout } from './layout';
 import { BackgroundPass } from './passes/background';
 import { ContentPass } from './passes/content';
 import { CursorPass } from './passes/cursor';
@@ -12,9 +12,10 @@ import { MaskPass } from './passes/masks';
 import { SpritePass } from './passes/sprite';
 import { WebcamPass } from './passes/webcam';
 import { WindowPass } from './passes/window';
-import { FRAME_CHROME, type FrameChrome } from './presets/frames';
+import type { FrameChrome } from './presets/frames';
 import { BADGE_STYLE, CARD_SUBTITLE_STYLE, CARD_TITLE_STYLE, TEXT_LABELS } from './presets/labels';
 import { SpriteCache } from './sprites';
+import { frameLayout } from './view';
 
 /** A motion page's frame: premultiplied RGBA, top row first (drawn over the whole output). */
 export interface MotionPixels {
@@ -160,8 +161,7 @@ export function createRenderer(canvas: HTMLCanvasElement | OffscreenCanvas, proj
 
   /** The window for a frame style; `aspect` is the content's (a clip's crop, else the screen's). */
   function frame(style: FrameStyle | null, aspect = screenAspect): { chrome: FrameChrome | null; layout: WindowLayout } {
-    const chrome = style ? FRAME_CHROME[style] : null;
-    return { chrome, layout: windowLayout(output, aspect, chrome ? { titleBar: chrome.titleBar, radius: look.frame.radius } : null) };
+    return frameLayout(output, look, style, aspect);
   }
 
   /** `avoid`: rects the texts move clear of (the webcam bubble, the badge). */

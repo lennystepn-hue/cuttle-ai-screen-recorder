@@ -12,6 +12,7 @@ import {
   webcamRect,
   windowLayout,
 } from '../src/layout';
+import { clipView } from '../src/view';
 
 const HD = { width: 1920, height: 1080 };
 
@@ -227,5 +228,23 @@ describe('stillCrop', () => {
     expect(h).toBeCloseTo(800 / 1.08);
     expect(x + w / 2).toBeCloseTo(640);
     expect(y + h / 2).toBeCloseTo(400);
+  });
+});
+
+describe('clipView', () => {
+  const output = { width: 1920, height: 1080 };
+  const screen = { width: 2560, height: 1440 };
+  const look = (enabled: boolean) => ({ frame: { enabled, style: 'mac-dark' as const, title: '', radius: 14, shadow: true } });
+
+  it('is the whole screen over the whole output without a frame, and the window content with one', () => {
+    expect(clipView(output, look(false), {}, screen)).toEqual({ zoom: [0, 0, 2560, 1440], content: [0, 0, 1920, 1080] });
+    const framed = clipView(output, look(true), {}, screen);
+    expect(framed.content).toEqual(windowLayout(output, 2560 / 1440, { titleBar: 36, radius: 14 }).content);
+  });
+
+  it('takes the layer’s zoom and a crop’s shape', () => {
+    const view = clipView(output, look(false), { zoom: [100, 100, 1280, 720], aspect: 4 / 3 }, screen);
+    expect(view.zoom).toEqual([100, 100, 1280, 720]);
+    expect(view.content).toEqual([240, 0, 1440, 1080]);
   });
 });

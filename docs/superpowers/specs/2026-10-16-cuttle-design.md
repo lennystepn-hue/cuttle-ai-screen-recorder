@@ -253,15 +253,29 @@ Look rules (fixed in M2):
 |---|---|
 | `cuttle init [dir]` | New project folder with a default `cuttle.json` |
 | `cuttle devices` | Monitors (index, size, position), windows, cameras, mics |
-| `cuttle record [--monitor N \| --region x,y,w,h \| --window "title"] [--webcam] [--mic] [--until-claude [cwd]] [--until-file p] [--until-idle s] [--max s] [--countdown s] [--draw-mouse]` | Record a take into the project |
-| `cuttle suggest` | From markers, events and the Claude transcript, propose scenes (trim idle start/end, speed up waiting, zoom on key moments) and write them to `cuttle.json` |
-| `cuttle preview [--at t…] [--sheet]` | Stills or a contact sheet PNG with timestamps, for checking |
-| `cuttle capture-page <url\|file> [--scroll]` | Headless capture of a page as a still or scroll scene |
-| `cuttle render [--format 16:9\|1:1\|9:16] [-o file]` | Export |
-| `cuttle recover <take>` | Repair a take after a crash |
+| `cuttle record [--monitor N] [--region x,y,w,h] [--window "title"] [--webcam [name]] [--mic [name]] [--until-claude [cwd]] [--until-file p] [--until-idle s] [--max s] [--countdown s] [--draw-mouse]` | Record a take into the project (created when missing) and use it: `sources` point at the take, one clip scene covers it; scenes and overlays of the previous take are dropped (the old file stays as `cuttle.json.bak`) |
+| `cuttle suggest [--claude [cwd]] [--no-zoom] [--dry-run]` | From markers, events and the screen, propose scenes (trim the quiet start and end, cut idle stretches, speed up waiting) and a zoom on Claude's answer, and write them to `cuttle.json` (old file as `.bak`); `--claude` reads the transcript for a take without Claude markers |
+| `cuttle preview [--at t…] [--sheet] [--format f] [-o dir]` | PNG stills of the output; without `--at` 12 evenly spaced stills and a contact sheet with timestamps, for checking |
+| `cuttle capture-page <url\|file> [--scroll] [--add] [--duration s] [--wait ms] [--width px] [--height px] [--name n]` | Capture a page (offscreen Chromium, scale 1) into `stills/`; `--add` appends a still scene (browser frame, scrolling with `--scroll`) |
+| `cuttle render [--format 16:9\|1:1\|9:16] [-o file] [--encoder auto\|hardware\|software]` | Export (default `out/<format>.mp4` in the project) |
+| `cuttle recover <take>` | Repair a take after a crash and use it: checks the tracks, drops a cut-off events line, rewrites a missing or broken markers.json or take.json |
 
-Every command supports `--json` for machine-readable output. Exit codes: 0 ok, 1 usage or
-validation error, 2 device or permission error, 3 render error.
+Every command takes `-C <dir>` (the project folder, default the current one) and `--json`: exactly
+one JSON document on stdout (the result, or `{ "error": { "code", "message" } }`), everything else
+on stderr. Exit codes: 0 ok, 1 usage or validation error, 2 device or permission error, 3 render
+error, 130 cancelled. Ctrl+C stops a recording (the take is kept) and cancels a render, preview or
+capture (nothing is written); a second Ctrl+C quits at once. `render`, `preview` and `capture-page`
+run in Electron, started by the Node CLI; the answer and a cancel travel over Node's IPC channel
+(on Windows Electron has no console, so the console's Ctrl+C would not reach it).
+
+`suggest` works in seconds of the take. Activity is input (±0.3 s per event), a changing screen and
+Claude's turn (from its first prompt or tool call to the answer; never cut, because the screen
+often shows only a spinner). It keeps 0.5 s before the first activity (2 s before a prompt) and
+1 s after the last (2.5 s after the answer), cuts stretches without activity of 3 s or more down to
+0.5 s on each side, and speeds up stretches without input of 8 s or more (1 s at 1× on each side,
+the answer at 1×) to about a twelfth of their length, 3–10 s of video, at 2, 3, 4, 6, 8, 12, 16, 24,
+32, 48 or 64×. The zoom frames what changed on screen around the answer; when that is most of the
+screen, there is none and a note says so.
 
 ## Skill (`skill/` → `~/.claude/skills/cuttle/`)
 

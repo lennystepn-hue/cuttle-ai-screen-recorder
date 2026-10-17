@@ -1,4 +1,5 @@
 import type { CuttleProject, Ease, Mask, Rect } from '@cuttle/project';
+import { applyCaptionFixes, captionAt, captionCues, captionWords, type ActiveCaption, type CaptionCue, type SpokenWord } from './captions';
 import { cursorAt, type CursorFrame, type CursorTrack } from './cursor';
 import { clamp } from './easing';
 import { occurrences, rampAmount, type Occurrence } from './occurrences';
@@ -30,17 +31,25 @@ export interface SceneFrame {
 export interface RenderState {
   t: number;
   layers: SceneFrame[];
+  /** The caption shown over the frame, when captions are on and someone speaks. */
+  caption?: ActiveCaption;
 }
 
 export interface Timeline {
   duration: number;
   spans: SceneSpan[];
+  /** The captions of the transcript (output seconds), also when the project does not show them. */
+  cues: CaptionCue[];
   frameAt(t: number): RenderState;
 }
 
 export interface TimelineOptions {
   screenSize: { width: number; height: number };
   cursor?: CursorTrack;
+  /** The take's transcript (source seconds), for the captions. */
+  transcript?: readonly SpokenWord[];
+  /** Show the captions (default: `captions.enabled`); an export without them passes false. */
+  captions?: boolean;
 }
 
 export function createTimeline(project: CuttleProject, opts: TimelineOptions): Timeline {
@@ -63,6 +72,9 @@ export function createTimeline(project: CuttleProject, opts: TimelineOptions): T
   });
   cuts.sort((a, b) => a - b);
   const full: Rect = [0, 0, opts.screenSize.width, opts.screenSize.height];
+  const { captions } = project;
+  const cues = opts.transcript ? captionCues(captionWords(applyCaptionFixes(opts.transcript, captions.fixes), spans), captions.style) : [];
+  const showCaptions = (opts.captions ?? captions.enabled) && cues.length > 0;
 
   // Where each zoom and text shows in output time, per span: their ramps run in output seconds.
   const zoomShown = new Map(project.zooms.map((zoom) => [zoom, occurrences(spans, zoom.at, zoom.at + zoom.duration)]));
@@ -121,6 +133,12 @@ export function createTimeline(project: CuttleProject, opts: TimelineOptions): T
 
   function frameAt(t: number): RenderState {
     const time = Number.isNaN(t) ? 0 : clamp(t, 0, duration);
+    const state = layersAt(time);
+    const caption = showCaptions ? captionAt(cues, time) : undefined;
+    return caption ? { ...state, caption } : state;
+  }
+
+  function layersAt(time: number): RenderState {
     let span = spanAt(spans, time);
     if (!span) return { t: time, layers: [] };
     // Span ends are rounded to the microsecond, so a frame can fall inside a clip while its source
@@ -153,5 +171,5 @@ export function createTimeline(project: CuttleProject, opts: TimelineOptions): T
     return { t: time, layers: [sceneFrame(span, time, 1)] };
   }
 
-  return { duration, spans, frameAt };
+  return { duration, spans, cues, frameAt };
 }

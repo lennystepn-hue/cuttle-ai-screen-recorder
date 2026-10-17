@@ -47,6 +47,7 @@ export {
   type TextPosition,
   type TextStyle,
   type Zoom,
+  type ZoomMove,
 } from './schema';
 export { formatPath, parseProject, parseProjectJson, type ParseResult, type ProjectIssue } from './parse';
 export { defaultProject } from './defaults';

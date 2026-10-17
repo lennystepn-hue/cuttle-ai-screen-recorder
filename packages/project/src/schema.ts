@@ -163,15 +163,29 @@ const CardSceneSchema = z.strictObject({
 
 const SceneSchema = z.discriminatedUnion('type', [ClipSceneSchema, StillSceneSchema, CardSceneSchema]);
 
-const ZoomSchema = z.strictObject({
-  ...named,
-  at: seconds,
-  duration: positiveSeconds,
-  rect: RectSchema,
-  ease: z.enum(EASES).default('smooth'),
-  enabled: z.boolean().default(true),
-  auto: autoKind,
-});
+/** A point on a zoom's path: from `at` (source seconds) the zoom shows `rect`. */
+const ZoomMoveSchema = z.strictObject({ at: seconds, rect: RectSchema });
+
+const ZoomSchema = z
+  .strictObject({
+    ...named,
+    at: seconds,
+    duration: positiveSeconds,
+    rect: RectSchema,
+    /** A zoom that follows (typing): from `rect` it moves to each move's rect in turn. */
+    moves: z.array(ZoomMoveSchema).optional(),
+    ease: z.enum(EASES).default('smooth'),
+    enabled: z.boolean().default(true),
+    auto: autoKind,
+  })
+  .superRefine((zoom, ctx) => {
+    let previous = zoom.at;
+    (zoom.moves ?? []).forEach((move, index) => {
+      if (!(move.at > previous)) ctx.addIssue({ code: 'custom', message: index === 0 ? 'a move must come after the zoom starts ("at")' : 'moves must be in time order', path: ['moves', index, 'at'] });
+      else if (!(move.at < zoom.at + zoom.duration)) ctx.addIssue({ code: 'custom', message: 'a move must come before the zoom ends ("at" + "duration")', path: ['moves', index, 'at'] });
+      previous = move.at;
+    });
+  });
 
 const MaskSchema = z
   .strictObject({
@@ -274,6 +288,8 @@ export const InputEventSchema = z.discriminatedUnion('type', [
   z.strictObject({ type: z.literal('scroll'), ...point, dx: z.number(), dy: z.number() }),
   z.strictObject({ type: z.literal('shape'), t: seconds, shape: z.enum(CURSOR_SHAPES) }),
   z.strictObject({ type: z.literal('keys'), t: seconds, count: z.number().int().positive() }),
+  // where text is typed: the system caret, where the app keeps one (a fact, not input)
+  z.strictObject({ type: z.literal('caret'), t: seconds, rect: RectSchema }),
 ]);
 
 export type InputEvent = z.output<typeof InputEventSchema>;
@@ -297,6 +313,7 @@ export type ClipScene = Extract<Scene, { type: 'clip' }>;
 export type StillScene = Extract<Scene, { type: 'still' }>;
 export type CardScene = Extract<Scene, { type: 'card' }>;
 export type Zoom = CuttleProject['zooms'][number];
+export type ZoomMove = NonNullable<Zoom['moves']>[number];
 export type Mask = CuttleProject['masks'][number];
 export type TextOverlay = CuttleProject['texts'][number];
 export type Cut = CuttleProject['cuts'][number];

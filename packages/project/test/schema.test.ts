@@ -114,6 +114,16 @@ describe('ProjectSchema', () => {
 
   it('rejects zero-sized rects and a speed of zero', () => {
     expect(pathsOf({ ...minimal, zooms: [{ at: 0, duration: 1, rect: [0, 0, 0, 10] }] })).toContain('zooms.0.rect.2');
+  });
+
+  it('takes a zoom that follows: its moves come in time order, inside the zoom', () => {
+    const zoom = { at: 2, duration: 4, rect: [0, 0, 800, 450] };
+    const moves = [{ at: 3, rect: [100, 0, 800, 450] }, { at: 4.5, rect: [100, 200, 800, 450] }];
+    expect(ProjectSchema.parse({ ...minimal, zooms: [{ ...zoom, moves }] }).zooms[0]!.moves).toEqual(moves);
+    expect(pathsOf({ ...minimal, zooms: [{ ...zoom, moves: [{ at: 2, rect: [0, 0, 8, 4] }] }] })).toEqual(['zooms.0.moves.0.at']);
+    expect(pathsOf({ ...minimal, zooms: [{ ...zoom, moves: [moves[1], moves[0]] }] })).toEqual(['zooms.0.moves.1.at']);
+    expect(pathsOf({ ...minimal, zooms: [{ ...zoom, moves: [{ at: 6, rect: [0, 0, 8, 4] }] }] })).toEqual(['zooms.0.moves.0.at']);
+    expect(pathsOf({ ...minimal, zooms: [{ ...zoom, moves: [{ at: 3, rect: [0, 0, 0, 4] }] }] })).toEqual(['zooms.0.moves.0.rect.2']);
     expect(pathsOf({ ...minimal, scenes: [{ type: 'clip', from: 0, to: 1, speed: 0 }] })).toContain('scenes.0.speed');
   });
 

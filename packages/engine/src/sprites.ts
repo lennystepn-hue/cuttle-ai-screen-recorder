@@ -84,10 +84,14 @@ export class SpriteCache {
   ) {}
 
   label(text: string, style: LabelStyle, unit: number, maxWidth: number): Sprite {
-    const key = JSON.stringify([text, style, unit, maxWidth]);
+    return this.drawn(JSON.stringify([text, style, unit, maxWidth]), () => drawLabel(text, style, unit, maxWidth));
+  }
+
+  /** A sprite drawn by `draw` once per `key` (anything else drawn into a canvas: a caption). */
+  drawn(key: string, draw: () => { canvas: OffscreenCanvas; margin: number }): Sprite {
     let sprite = this.sprites.get(key);
     if (!sprite) {
-      const { canvas, margin } = drawLabel(text, style, unit, maxWidth);
+      const { canvas, margin } = draw();
       const texture = createTexture(this.gl, false);
       uploadTexture(this.gl, texture, canvas, false);
       sprite = {

@@ -168,13 +168,14 @@ async function startWindowsInput(onInput: InputSink, onHotkey: HotkeySink): Prom
   };
 }
 
-/** macOS virtual key codes of the hotkeys' letters (kVK_ANSI_S, _M, _P). */
-const MAC_HOTKEYS = new Map<number, HotkeyAction>([[0x01, 'stop'], [0x2e, 'marker'], [0x23, 'pause']]);
+/** macOS virtual key codes of the hotkeys' letters (kVK_ANSI_S, _M, _P, _X). */
+const MAC_HOTKEYS = new Map<number, HotkeyAction>([[0x01, 'stop'], [0x2e, 'marker'], [0x23, 'pause'], [0x07, 'retake']]);
 const WHERE_INPUT_MONITORING = 'allow the app that runs Cuttle (your terminal, or Cuttle) under System Settings > Privacy & Security > Input Monitoring';
 
 /**
  * macOS: an event tap of darwin.ts (see there why not uiohook) in desktop pixels; the pointer's shape
- * stays the arrow. Without Input Monitoring only the mouse is logged (no key counts, no hotkeys).
+ * stays the arrow, and there is no caret yet (zooms on typing follow what the screen changes). Without
+ * Input Monitoring only the mouse is logged (no key counts, no hotkeys).
  */
 async function startMacInput(onInput: InputSink, onHotkey: HotkeySink): Promise<InputSource> {
   const { loadDarwin } = await import('./darwin');

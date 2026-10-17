@@ -1,0 +1,35 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <style>
+      html, body { margin: 0; background: transparent; width: 640px; height: 360px; overflow: hidden; font: 600 40px system-ui, sans-serif; color: white; }
+      .card { position: absolute; left: 60px; top: 120px; padding: 16px 28px; border-radius: 16px; background: rgba(217, 119, 87, 0.9); animation: rise 1s ease-out both; }
+      @keyframes rise { from { transform: translateY(80px); opacity: 0; } to { transform: none; opacity: 1; } }
+      .bar { position: absolute; left: 60px; top: 230px; height: 10px; width: 0; background: white; transition: width 1.5s linear; }
+      canvas { position: absolute; right: 40px; top: 40px; }
+    </style>
+  </head>
+  <body>
+    <div class="card">Hello from code</div>
+    <div class="bar" id="bar"></div>
+    <canvas id="c" width="160" height="160"></canvas>
+    <script>
+      // a requestAnimationFrame loop drawing by the clock (as Three.js or a canvas chart would)
+      const ctx = document.getElementById('c').getContext('2d');
+      const start = performance.now();
+      function draw(now) {
+        const t = (now - start) / 1000;
+        ctx.clearRect(0, 0, 160, 160);
+        ctx.fillStyle = '#4fd1c5';
+        ctx.beginPath();
+        ctx.arc(80 + 50 * Math.cos(t * Math.PI), 80 + 50 * Math.sin(t * Math.PI), 18, 0, Math.PI * 2);
+        ctx.fill();
+        requestAnimationFrame(draw);
+      }
+      requestAnimationFrame(draw);
+      // a CSS transition started from script after 0.5 s (setTimeout on the clock)
+      setTimeout(() => (document.getElementById('bar').style.width = '400px'), 500);
+    </script>
+  </body>
+</html>

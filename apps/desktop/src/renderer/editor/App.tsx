@@ -1,5 +1,8 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ComponentType, type PointerEvent as ReactPointerEvent } from 'react';
+import { webcamRect } from '@cuttle/engine';
 import type { Rect } from '@cuttle/project';
+import { HANDLES, movedBubble, resizedBubble, type Handle } from '../../shared/bubble';
+import type { Command } from '../../shared/document';
 import { formatDuration, formatSource, formatTime, plainIssue } from '../../shared/format';
 import type { MediaState } from '../../shared/ipc';
 import { bridge } from '../bridge';
@@ -24,7 +27,7 @@ import {
 } from '../icons';
 import { captionCommand, captionPositionsAt, chooseTool, cycleSpeed, freeCaptionPosition, deleteSelection, duplicateSelection, overlayBlocked, reveal, showRawTake, split, type CaptionPosition } from './actions';
 import { CommandMenu, closeMenu, openMenu } from './CommandMenu';
-import { cancelGesture } from './gesture';
+import { beginGesture, cancelGesture } from './gesture';
 import { dismissDraft, dismissRestart, dismissToast, edit, preview, redo, retrySave, undo, useDraft } from './doc';
 import { ExportSheet } from './ExportSheet';
 import { Inspector } from './Inspector';
@@ -419,7 +422,8 @@ const bandOf = (y: number): CaptionPosition => (y < 1 / 3 ? 'top' : y > 2 / 3 ? 
 
 /**
  * The video, with what the tools do on it: Select picks a caption by clicking it (a double click
- * edits its text), Caption types a new one where it is clicked.
+ * edits its text) and moves the webcam bubble (its corners resize it), Caption types a new one
+ * where it is clicked.
  */
 function VideoFrame({ canvas, size, output }: { canvas: React.RefObject<HTMLCanvasElement | null>; size: { width: number; height: number }; output: { width: number; height: number } }) {
   const tool = useStore(store, (state) => state.tool);
@@ -456,6 +460,60 @@ function VideoFrame({ canvas, size, output }: { canvas: React.RefObject<HTMLCanv
     else if (selection?.kind === 'caption') select(undefined);
   };
 
+  // The webcam bubble: dragged anywhere (snapping to a corner's place or the middle, with a guide),
+  // resized at its corners; previewed while dragging, one edit at the end.
+  const project = shownProject();
+  const webcam = project?.look.webcam;
+  const bubble = tool === 'select' && scale > 0 && webcam?.enabled && project?.sources.webcam ? webcamRect(output, webcam) : undefined;
+  const [guides, setGuides] = useState<{ x?: number; y?: number }>({});
+  const [dragging, setDragging] = useState(false);
+  const dragBubble = (event: ReactPointerEvent<HTMLElement>, handle?: Handle) => {
+    if (event.button !== 0 || !bubble || !webcam) return;
+    event.stopPropagation();
+    const target = event.currentTarget;
+    try {
+      target.setPointerCapture(event.pointerId);
+    } catch {
+      // a synthetic pointer (the check) has nothing to capture
+    }
+    const from = { x: event.clientX, y: event.clientY };
+    let commands: Command[] | undefined;
+    const detach = () => {
+      target.removeEventListener('pointermove', move);
+      target.removeEventListener('pointerup', up);
+      target.removeEventListener('pointercancel', up);
+      preview(undefined);
+      setGuides({});
+      setDragging(false);
+    };
+    const end = beginGesture('stage', detach);
+    const move = (moved: PointerEvent) => {
+      const dx = (moved.clientX - from.x) / scale;
+      const dy = (moved.clientY - from.y) / scale;
+      if (handle) {
+        commands = [{ type: 'look', path: ['webcam', 'size'], value: resizedBubble(output, bubble, handle, dx, dy) }];
+      } else {
+        const place = movedBubble(output, bubble, dx, dy, (corner) => webcamRect(output, { corner, size: webcam.size }));
+        commands =
+          'corner' in place
+            ? [{ type: 'look', path: ['webcam', 'corner'], value: place.corner }, { type: 'look', path: ['webcam', 'position'], value: undefined }]
+            : [{ type: 'look', path: ['webcam', 'position'], value: place.position }];
+        setGuides('guides' in place ? place.guides : {});
+      }
+      preview(commands);
+    };
+    const up = () => {
+      end();
+      detach();
+      if (commands) edit(commands, handle ? 'Webcam size' : 'Move webcam');
+    };
+    setDragging(true);
+    target.addEventListener('pointermove', move);
+    target.addEventListener('pointerup', up);
+    target.addEventListener('pointercancel', up);
+  };
+  const bubbleRadius = webcam?.shape === 'circle' ? '50%' : webcam?.shape === 'square' ? '0' : webcam?.shape === 'squircle' ? '30%' : '22%';
+
   // The boxes of the captions on the frame now: the selected one outlined, the one under the pointer too.
   void drawnFrame;
   const drawn = scale > 0 && tool === 'select' ? (currentPlayer()?.drawnTexts() ?? []) : [];
@@ -481,6 +539,22 @@ function VideoFrame({ canvas, size, output }: { canvas: React.RefObject<HTMLCanv
         {outlined.map(({ overlay, rect }) => (
           <div key={overlay.id} className={`caption-box${selection?.id === overlay.id ? ' selected' : ''}`} style={toStage(rect)} />
         ))}
+        {bubble && (
+          <div
+            className={`webcam-box${dragging ? ' dragging' : ''}`}
+            style={{ left: bubble[0] * scale, top: bubble[1] * scale, width: bubble[2] * scale, height: bubble[3] * scale, borderRadius: bubbleRadius }}
+            onPointerDown={(event) => dragBubble(event)}
+            onDoubleClick={() => store.set({ tab: 'look' })}
+            title="Drag the camera anywhere; drag a corner to resize it. A double click shows its look."
+            data-testid="webcam-box"
+          >
+            {(Object.keys(HANDLES) as Handle[]).map((handle) => (
+              <i key={handle} className={`handle ${handle}`} onPointerDown={(event) => dragBubble(event, handle)} data-testid={`webcam-handle-${handle}`} />
+            ))}
+          </div>
+        )}
+        {guides.x !== undefined && <div className="guide across" style={{ left: guides.x * scale }} />}
+        {guides.y !== undefined && <div className="guide down" style={{ top: guides.y * scale }} />}
       </div>
       {tool === 'caption' && <CaptionBar position={position} onPosition={setPosition} />}
     </>

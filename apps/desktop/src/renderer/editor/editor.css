@@ -993,6 +993,71 @@ button.chip-status:hover {
   box-shadow: 0 0 0 1px rgba(79, 209, 161, 0.7);
   pointer-events: none;
 }
+/* the webcam bubble on the video: dragged to move, its corners resize it */
+.webcam-box {
+  position: absolute;
+  cursor: grab;
+  touch-action: none;
+}
+.webcam-box:hover,
+.webcam-box.dragging {
+  box-shadow:
+    0 0 0 2px var(--accent),
+    0 0 0 6px var(--accent-soft);
+}
+.webcam-box.dragging {
+  cursor: grabbing;
+}
+.webcam-box .handle {
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  background: #fff;
+  box-shadow: 0 0 0 1.5px var(--accent);
+  opacity: 0;
+}
+.webcam-box:hover .handle,
+.webcam-box.dragging .handle {
+  opacity: 1;
+}
+/* the handles sit on the box's corners (outside a circle's curve) */
+.webcam-box .handle.nw {
+  left: -5px;
+  top: -5px;
+  cursor: nwse-resize;
+}
+.webcam-box .handle.ne {
+  right: -5px;
+  top: -5px;
+  cursor: nesw-resize;
+}
+.webcam-box .handle.sw {
+  left: -5px;
+  bottom: -5px;
+  cursor: nesw-resize;
+}
+.webcam-box .handle.se {
+  right: -5px;
+  bottom: -5px;
+  cursor: nwse-resize;
+}
+/* where a dragged bubble snapped: the middle across or down */
+.guide {
+  position: absolute;
+  background: var(--accent);
+  pointer-events: none;
+}
+.guide.across {
+  top: 0;
+  bottom: 0;
+  width: 1px;
+}
+.guide.down {
+  left: 0;
+  right: 0;
+  height: 1px;
+}
 .caption-box.selected {
   box-shadow:
     0 0 0 2px var(--caption),

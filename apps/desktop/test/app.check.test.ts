@@ -930,6 +930,28 @@ describe.runIf(enabled)('the Cuttle app', () => {
     await undoAll();
   }, 60_000);
 
+  it('moves the webcam bubble on the video, resizes it at a corner, and snaps it back into its corner', async () => {
+    type Webcam = { corner: string; size?: number; position?: { x: number; y: number } };
+    const webcam = () => (onDisk() as unknown as { look: { webcam: Webcam } }).look.webcam;
+    await editor.keyboard.press('Escape');
+    await editor.keyboard.press('v');
+    await editor.waitForSelector('[data-testid=webcam-box]');
+    // anywhere on the video: its centre as a share of it
+    await drag('[data-testid=webcam-box]', [240, -120]);
+    await savedWhen(() => webcam().position !== undefined);
+    expect(webcam().position!.x).toBeGreaterThan(0.1);
+    expect(webcam().position!.y).toBeLessThan(0.9);
+    // a corner's handle makes it larger, around its centre
+    const before = webcam().position!;
+    await drag('[data-testid=webcam-handle-se]', [30, 30]);
+    await savedWhen(() => (webcam().size ?? 0.18) > 0.18);
+    expect(webcam().position).toEqual(before);
+    // dragged back near where it came from: it snaps into its corner, the position goes
+    await drag('[data-testid=webcam-box]', [-240, 120]);
+    await savedWhen(() => webcam().position === undefined && webcam().corner === 'bottom-left');
+    await undoAll();
+  }, 30_000);
+
   it('ends a drawing with Esc: nothing is added', async () => {
     await seek(1);
     await editor.keyboard.press('z');
@@ -1256,6 +1278,8 @@ describe.runIf(enabled)('the Cuttle app', () => {
     // the login item (the check only notes what it would register)
     await click(settings, '[data-testid=launch-at-login]');
     await expect.poll(() => app.evaluate(() => (globalThis as { __loginItem?: boolean }).__loginItem)).toBe(true);
+    // the switch shows it before it is pressed again (a press reads the state it shows)
+    await settings.waitForSelector('[data-testid=launch-at-login][aria-checked=true]');
     await click(settings, '[data-testid=launch-at-login]');
     await expect.poll(() => saved().launchAtLogin).toBe(false);
     // demo is open in its editor: Rename is off there, and the main process refuses it too

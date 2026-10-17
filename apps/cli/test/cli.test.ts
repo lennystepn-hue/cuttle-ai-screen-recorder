@@ -58,6 +58,12 @@ describe('cuttle init and errors', () => {
   it('maps usage and project errors to exit code 1, with one JSON error on stdout', async () => {
     const dir = temp();
     expect((await cli('nonsense')).code).toBe(1);
+    // commander's own usage errors (explained on stderr) still give one JSON document with --json
+    for (const argv of [['--json', 'nonsense'], ['--json', 'record', '--monitor', 'x'], ['recover', '--json']]) {
+      const usage = await cli(...argv);
+      expect(usage.code, argv.join(' ')).toBe(1);
+      expect((usage.json as { error: { code: string } }).error.code, argv.join(' ')).toBe('usage');
+    }
     const missing = await cli('--json', '-C', dir, 'suggest');
     expect(missing.code).toBe(1);
     expect((missing.json as { error: { code: string } }).error.code).toBe('invalid-project');
@@ -143,6 +149,28 @@ describe('cuttle devices and record (test backend)', () => {
     });
     expect(project.scenes).toEqual([{ type: 'clip', from: 0, to: Math.floor(result.take.seconds * 1000) / 1000 }]);
   }, 20_000);
+
+  it('takes a region split at its commas (as PowerShell passes it) and hides the drawn cursor with --draw-mouse', async () => {
+    const dir = join(temp(), 'demo');
+    const { code, json } = await cli('--json', '-C', dir, 'record', '--backend', 'test', '--region', '0', '0', '640', '360', '--draw-mouse', '--max', '1', '--countdown', '0');
+    expect(code).toBe(0);
+    expect((json as { take: { screenSize: unknown } }).take.screenSize).toEqual({ width: 640, height: 360 });
+    expect(JSON.parse(readFileSync(join(dir, 'cuttle.json'), 'utf8')).look).toEqual({ cursor: { enabled: false } });
+  }, 20_000);
+
+  it('stops the recording on Ctrl+C, keeps the take and removes its handlers', async () => {
+    const dir = join(temp(), 'demo');
+    const listeners = process.listenerCount('SIGBREAK');
+    const running = cli('--json', '-C', dir, 'record', '--backend', 'test', '--max', '20', '--countdown', '0');
+    // take.json appears once every track runs; SIGBREAK is Ctrl+Break, handled like Ctrl+C.
+    while (!existsSync(join(dir, 'takes', '1', 'take.json'))) await new Promise((done) => setTimeout(done, 50));
+    process.emit('SIGBREAK');
+    const { code, json } = await running;
+    expect(code).toBe(0);
+    expect((json as { take: { stopReason: string; seconds: number } }).take).toMatchObject({ stopReason: 'stop' });
+    expect((json as { take: { seconds: number } }).take.seconds).toBeLessThan(10);
+    expect(process.listenerCount('SIGBREAK')).toBe(listeners);
+  }, 30_000);
 });
 
 /**
@@ -238,6 +266,25 @@ describe('cuttle suggest and recover', () => {
     expect(readFileSync(join(dir, 'cuttle.json'), 'utf8')).toBe(before);
   }, 30_000);
 
+  it('keeps still and card scenes, and older versions of cuttle.json as rotating backups', async () => {
+    const dir = temp();
+    cpSync(fixture, dir, { recursive: true });
+    const path = join(dir, 'cuttle.json');
+    const original = readFileSync(path, 'utf8');
+    const card = { type: 'card', title: 'The end', duration: 2 };
+    writeFileSync(path, JSON.stringify({ ...JSON.parse(original), scenes: [{ type: 'clip', from: 0, to: 5 }, card] }));
+    const edited = readFileSync(path, 'utf8');
+    const first = await cli('--json', '-C', dir, 'suggest', '--no-zoom');
+    expect((first.json as { scenes: unknown[] }).scenes.at(-1)).toEqual(card);
+    expect((first.json as { notes: string[] }).notes).toContain('kept 1 still or card scene(s) after the clips');
+    const suggested = readFileSync(path, 'utf8');
+    await cli('--json', '-C', dir, 'suggest', '--no-zoom'); // the same suggestion again
+    // .bak holds the version before the last run; the one before it moved to .bak.1
+    expect(readFileSync(`${path}.bak`, 'utf8')).toBe(suggested);
+    expect(readFileSync(`${path}.bak.1`, 'utf8')).toBe(edited);
+    expect(existsSync(`${path}.bak.2`)).toBe(false);
+  }, 30_000);
+
   it('repairs a crashed take and uses it', async () => {
     const dir = temp();
     cpSync(fixture, dir, { recursive: true });
@@ -249,11 +296,12 @@ describe('cuttle suggest and recover', () => {
     expect(code).toBe(0);
     expect(stable(json, dir)).toMatchInlineSnapshot(`
       {
+        "keptEdit": false,
         "project": "<project>/cuttle.json",
         "repaired": [
           "events.jsonl: kept 1 events, dropped 1 broken or cut-off line(s) (old file: events.jsonl.bak)",
           "markers.json was missing: written empty",
-          "take.json was missing: written with the tracks starting together",
+          "take.json was missing: written with the tracks starting together at an unknown time",
         ],
         "seconds": 20,
         "take": "takes/1",
@@ -264,13 +312,39 @@ describe('cuttle suggest and recover', () => {
     `);
     expect(readFileSync(join(take, 'events.jsonl'), 'utf8')).toBe('{"t":1,"type":"keys","count":1}\n');
     expect(JSON.parse(readFileSync(join(take, 'take.json'), 'utf8'))).toEqual({ version: 1, tracks: { screen: { file: 'screen.mp4', start: 0 } } });
+    // Recovering the take the project uses keeps the edit.
+    const path = join(dir, 'cuttle.json');
+    const text = { at: 2, duration: 2, text: 'hello' };
+    writeFileSync(path, JSON.stringify({ ...JSON.parse(readFileSync(path, 'utf8')), texts: [text] }));
     const recovered = await cli('--json', '-C', dir, 'recover', 'takes/1');
-    expect((recovered.json as { repaired: string[] }).repaired).toEqual([]); // nothing left to repair
+    expect(recovered.json).toMatchObject({ repaired: [], keptEdit: true }); // nothing left to repair
+    expect(JSON.parse(readFileSync(path, 'utf8')).texts).toEqual([text]);
+  }, 30_000);
+
+  it('keeps readable start times of a broken take.json, and touches nothing when cuttle.json is broken', async () => {
+    const dir = temp();
+    cpSync(fixture, dir, { recursive: true });
+    const take = join(dir, 'takes', '1');
+    const broken = JSON.stringify({ version: 1, tracks: { screen: { file: 'screen.mp4', start: 1792189686.2 } }, note: 'unknown key' });
+    writeFileSync(join(take, 'take.json'), broken);
+    const { code, json } = await cli('--json', '-C', dir, 'recover', 'takes/1');
+    expect(code).toBe(0);
+    expect((json as { repaired: string[] }).repaired).toEqual(["take.json was broken (old file: take.json.bak): rewritten with the screen's start time"]);
+    expect(JSON.parse(readFileSync(join(take, 'take.json'), 'utf8')).tracks.screen.start).toBe(1792189686.2);
+    expect(readFileSync(join(take, 'take.json.bak'), 'utf8')).toBe(broken);
+
+    writeFileSync(join(dir, 'cuttle.json'), '{ "version": 1 }');
+    rmSync(join(take, 'markers.json'));
+    const refused = await cli('--json', '-C', dir, 'recover', 'takes/1');
+    expect((refused.json as { error: { code: string } }).error.code).toBe('invalid-project');
+    expect(existsSync(join(take, 'markers.json'))).toBe(false);
   }, 30_000);
 
   it('refuses a take outside the project and one without video', async () => {
     const dir = temp();
-    expect((await cli('--json', '-C', dir, 'recover', '..')).code).toBe(1);
+    const outside = await cli('--json', '-C', dir, 'recover', '..');
+    expect(outside.code).toBe(1);
+    expect((outside.json as { error: { code: string } }).error.code).toBe('usage');
     mkdirSync(join(dir, 'takes', '9'), { recursive: true });
     const empty = await cli('--json', '-C', dir, 'recover', 'takes/9');
     expect(empty.code).toBe(1);

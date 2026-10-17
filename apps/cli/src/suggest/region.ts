@@ -1,5 +1,6 @@
 // Where the screen changed between two moments: the zoom on Claude's answer.
 import type { Rect } from '@cuttle/project';
+import { fitZoomRect } from '@cuttle/timeline';
 import type { Gray } from './media';
 
 /** A pixel counts as changed when its grey value moved more than this. */
@@ -44,8 +45,8 @@ const MAX_AREA = 0.75;
 
 /**
  * The zoom rect (screen pixels) for a changed box found in grey pictures `grayWidth` pixels wide,
- * padded and at least `MIN_WIDTH` wide, inside the screen; undefined when it would cover most of it.
- * The timeline fits it to the screen's aspect.
+ * padded and at least `MIN_WIDTH` wide, inside the screen; undefined when it would cover most of it
+ * once the timeline has fitted it to the screen's aspect (a tall, narrow box grows to full width).
  */
 export function zoomRect(region: { x: number; y: number; width: number; height: number }, grayWidth: number, screen: { width: number; height: number }): Rect | undefined {
   const scale = screen.width / grayWidth;
@@ -62,6 +63,7 @@ export function zoomRect(region: { x: number; y: number; width: number; height: 
   height = Math.min(height, screen.height);
   x = Math.min(Math.max(0, x), screen.width - width);
   y = Math.min(Math.max(0, y), screen.height - height);
-  if (width * height > MAX_AREA * screen.width * screen.height) return undefined;
-  return [Math.round(x), Math.round(y), Math.round(width), Math.round(height)];
+  const rect: Rect = [Math.round(x), Math.round(y), Math.round(width), Math.round(height)];
+  const [, , shownWidth, shownHeight] = fitZoomRect(rect, [0, 0, screen.width, screen.height]);
+  return shownWidth * shownHeight > MAX_AREA * screen.width * screen.height ? undefined : rect;
 }

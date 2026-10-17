@@ -1,4 +1,4 @@
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, readdir, rename, rm, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { app } from 'electron';
 import { ExportError } from '../errors';
@@ -15,8 +15,14 @@ export interface StillsOptions {
   format?: ExportFormat;
   /** Output seconds to render; a time past the end shows the last frame. */
   times: number[];
-  /** Folder for the PNGs (created when missing; files with the same names are replaced). */
+  /**
+   * Folder for the PNGs (created when missing; files with the same names are replaced). They are
+   * rendered into a work folder inside it and moved there only when every still is done, so a
+   * cancelled or failed run adds nothing.
+   */
   outDir: string;
+  /** Also removes stills of earlier runs from `outDir` (`NN-<t>s.png` and `sheet.png`), for a folder that holds only stills. */
+  clean?: boolean;
   /** Also writes `sheet.png`: every still, smaller, in a grid with its time (default 4 columns). */
   sheet?: { columns?: number };
   /** Called after each rendered frame. */
@@ -46,6 +52,10 @@ export function stillName(n: number, t: number): string {
   return `${String(n + 1).padStart(2, '0')}-${t.toFixed(2)}s.png`;
 }
 
+const SHEET_NAME = 'sheet.png';
+/** Names `stillName` gives; `clean` removes only these and the sheet. */
+const STILL_FILE = /^\d{2,}-\d+\.\d{2}s\.png$/;
+
 /**
  * Renders single output frames of a project to PNGs with the export's engine and decoders (for
  * checking a project without exporting it), optionally with a contact sheet. Runs in Electron's
@@ -74,13 +84,15 @@ export async function renderStills(opts: StillsOptions): Promise<StillsResult> {
     times: opts.times,
     ...(columns !== undefined && { sheet: { columns } }),
   };
+  // The page writes into a work folder; the PNGs move to outDir only when every one is done.
+  const work = join(outDir, `.cuttle-stills-${process.pid}`);
   try {
-    await mkdir(outDir, { recursive: true });
+    await mkdir(work, { recursive: true });
   } catch (error) {
     throw new ExportError('invalid-project', `cannot create the folder ${outDir}: ${(error as Error).message}`, { cause: error });
   }
-  const files = new Map(opts.times.map((t, n) => [`still-${n}`, join(outDir, stillName(n, t))]));
-  if (columns !== undefined) files.set('sheet', join(outDir, 'sheet.png'));
+  const names = new Map(opts.times.map((t, n) => [`still-${n}`, stillName(n, t)]));
+  if (columns !== undefined) names.set('sheet', SHEET_NAME);
 
   const cancel = whenCancelled(opts.signal);
   const guard = watchdog();
@@ -101,22 +113,24 @@ export async function renderStills(opts: StillsOptions): Promise<StillsResult> {
     ipc.handle(CHANNELS.write, () => {
       throw new Error('a stills job writes no video');
     });
-    ipc.handle(CHANNELS.writeStill, async (_event, name: string, data: Uint8Array) => {
-      const file = files.get(name);
-      if (file === undefined || !(data instanceof Uint8Array) || data.byteLength > MAX_PNG_BYTES) {
-        throw new Error(`the export page sent an unexpected still "${name}"`);
+    ipc.handle(CHANNELS.writeStill, async (_event, key: string, data: Uint8Array) => {
+      const name = names.get(key);
+      if (name === undefined || !(data instanceof Uint8Array) || data.byteLength > MAX_PNG_BYTES) {
+        throw new Error(`the export page sent an unexpected still "${key}"`);
       }
       guard.alive();
-      await writeFile(file, data);
+      await writeFile(join(work, name), data);
     });
     ipc.on(CHANNELS.progress, (_event, done: number, total: number) => {
       guard.progress(done);
       opts.onProgress?.(done, total);
     });
     const page = await runPage<PageStillsSuccess>(window, guard.stalled, cancel.promise);
+    if (opts.signal?.aborted) throw cancelledError();
+    await publish(work, outDir, [...names.values()], opts.clean ?? false);
     return {
-      stills: opts.times.map((t, n) => ({ t, file: files.get(`still-${n}`)! })),
-      ...(columns !== undefined && { sheet: files.get('sheet')! }),
+      stills: opts.times.map((t, n) => ({ t, file: join(outDir, names.get(`still-${n}`)!) })),
+      ...(columns !== undefined && { sheet: join(outDir, SHEET_NAME) }),
       width: page.width,
       height: page.height,
       stats: { gpu: page.gpu, totalMs: Math.round(performance.now() - started) },
@@ -129,5 +143,16 @@ export async function renderStills(opts: StillsOptions): Promise<StillsResult> {
     cancel.dispose();
     if (window && !window.win.isDestroyed()) window.win.destroy();
     await host.close();
+    await rm(work, { recursive: true, force: true, maxRetries: 3 });
   }
+}
+
+/** Moves the finished PNGs from the work folder into `outDir`, after removing older stills there when `clean`. */
+async function publish(work: string, outDir: string, names: string[], clean: boolean): Promise<void> {
+  if (clean) {
+    for (const name of await readdir(outDir)) {
+      if (STILL_FILE.test(name) || name === SHEET_NAME) await rm(join(outDir, name), { force: true });
+    }
+  }
+  for (const name of names) await rename(join(work, name), join(outDir, name));
 }

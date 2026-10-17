@@ -18,12 +18,18 @@ const onCancel = () => {
   cancel.abort();
 };
 process.on('message', (message: CancelMessage) => message?.type === 'cancel' && onCancel());
+// The CLI went away (killed): stop instead of rendering on for nobody. (On Windows the CLI's job
+// object takes Electron with it anyway.)
+process.on('disconnect', () => {
+  if (!cancel.signal.aborted) cancel.abort();
+});
 for (const signal of ['SIGINT', 'SIGTERM', 'SIGBREAK'] as const) process.on(signal, onCancel);
 
-/** Progress for people on stderr, every 10 %. */
-function progress(label: string): (done: number, total: number) => void {
+/** Progress for people on stderr, every 10 %; nothing for --json. */
+function progress(label: string, quiet: boolean | undefined): (done: number, total: number) => void {
   let shown = -1;
   return (done, total) => {
+    if (quiet) return;
     const percent = Math.floor((done / total) * 10) * 10;
     if (percent === shown) return;
     shown = percent;
@@ -46,20 +52,21 @@ async function handle(request: ElectronRequest): Promise<unknown> {
         ...exportFormat(request.format),
         ...(request.encoder !== undefined && { encoder: request.encoder as EncoderPreference }),
         signal: cancel.signal,
-        onProgress: progress('frames'),
+        onProgress: progress('frames', request.quiet),
       });
     case 'preview':
       return renderStills({
         projectDir: request.projectDir,
         outDir: request.outDir,
+        clean: request.clean ?? false,
         times: request.times,
         ...exportFormat(request.format),
         ...(request.sheet && { sheet: request.sheet }),
         signal: cancel.signal,
-        onProgress: progress('stills'),
+        onProgress: progress('stills', request.quiet),
       });
     case 'capture-page':
-      return capturePage(request);
+      return capturePage(request, cancel.signal);
   }
 }
 

@@ -101,12 +101,22 @@ function withSpeedUps(kept: Span, inputSpans: readonly Span[], answer: number | 
   for (const wait of gaps(inputSpans, kept.from, kept.to)) {
     if (length(wait) < RULES.waitMin) continue;
     const inner = { from: wait.from + RULES.waitKeep, to: wait.to - RULES.waitKeep };
-    if (answer !== undefined && answer > inner.from && answer < wait.to) inner.to = Math.min(inner.to, answer - RULES.answerLead);
-    const target = Math.min(RULES.waitLongest, Math.max(RULES.waitShortest, length(inner) * RULES.waitShare));
-    const speed = SPEEDS.filter((candidate) => candidate <= length(inner) / target).at(-1);
-    if (speed === undefined) continue;
-    fast.push({ ...inner, speed });
-    notes.push(`sped up ${length(inner).toFixed(1)} s without input ${speed}× (${range(inner)})`);
+    // Claude's answer stays at 1×: a wait around it is sped up before and after it.
+    const pieces =
+      answer !== undefined && answer >= wait.from && answer < wait.to
+        ? [
+            { from: inner.from, to: Math.min(inner.to, answer - RULES.answerLead) },
+            { from: answer + RULES.answerTail, to: inner.to },
+          ]
+        : [inner];
+    for (const piece of pieces) {
+      if (length(piece) <= 0) continue;
+      const target = Math.min(RULES.waitLongest, Math.max(RULES.waitShortest, length(piece) * RULES.waitShare));
+      const speed = SPEEDS.filter((candidate) => candidate <= length(piece) / target).at(-1);
+      if (speed === undefined) continue;
+      fast.push({ ...piece, speed });
+      notes.push(`sped up ${length(piece).toFixed(1)} s without input ${speed}× (${range(piece)})`);
+    }
   }
   const clips: SuggestedClip[] = [];
   let at = kept.from;

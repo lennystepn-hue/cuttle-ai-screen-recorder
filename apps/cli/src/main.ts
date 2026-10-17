@@ -7,7 +7,7 @@ import { recordCommand } from './commands/record';
 import { recoverCommand } from './commands/recover';
 import { renderCommand } from './commands/render';
 import { suggestCommand } from './commands/suggest';
-import { EXIT, toCliError } from './errors';
+import { CliError, EXIT, toCliError } from './errors';
 import { createOutput, type Output, type Streams } from './output';
 
 export const VERSION = '0.1.0';
@@ -27,7 +27,18 @@ const integer = (value: string): number => {
   if (!Number.isInteger(parsed) || parsed < 0) throw new InvalidArgumentError('expected a whole number, 0 or more');
   return parsed;
 };
+const pixels = (value: string): number => {
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < 1 || parsed > 16_384) throw new InvalidArgumentError('expected whole pixels from 1 to 16384');
+  return parsed;
+};
 const collect = (value: string, previous: number[] = []): number[] => [...previous, seconds(value)];
+
+/** `--json` before a `--`: usage errors then answer in JSON too. */
+const wantsJson = (argv: readonly string[]): boolean => {
+  const end = argv.indexOf('--');
+  return (end < 0 ? argv : argv.slice(0, end)).includes('--json');
+};
 
 /**
  * Ctrl+C (and SIGTERM, SIGBREAK) as an AbortSignal for the commands that can stop cleanly; a second
@@ -95,7 +106,7 @@ export async function runCli(argv: readonly string[], streams?: Streams): Promis
     .command('record')
     .description('record a take into the project and use it')
     .option('--monitor <n>', 'monitor index from "cuttle devices" (default: the primary monitor)', integer)
-    .option('--region <x,y,w,h>', 'a region of the monitor, in its pixels')
+    .option('--region <x,y,w,h...>', 'a region of the monitor in its pixels, e.g. 0,0,1920,1080')
     .option('--window <title>', 'a window, by (part of) its title')
     .option('--webcam [name]', 'record a webcam (default: the first one)')
     .option('--mic [name]', 'record a microphone (default: the first one)')
@@ -137,8 +148,8 @@ export async function runCli(argv: readonly string[], streams?: Streams): Promis
     .command('capture-page <target>')
     .description('a web page (URL or file) as a PNG in stills/, optionally as a still scene')
     .option('--scroll', 'the whole page, shown as a scrolling still')
-    .option('--width <px>', 'viewport width (default: the output width)', integer)
-    .option('--height <px>', 'viewport height (default: the output height)', integer)
+    .option('--width <px>', 'viewport width (default: the output width)', pixels)
+    .option('--height <px>', 'viewport height (default: the output height)', pixels)
     .option('--name <name>', 'file name in stills/ (default: from the URL or file)')
     .option('--add', 'append a still scene that shows it')
     .option('--duration <seconds>', 'length of that scene (default 4)', positive)
@@ -169,8 +180,11 @@ export async function runCli(argv: readonly string[], streams?: Streams): Promis
   try {
     await program.parseAsync(argv, { from: 'user' });
   } catch (error) {
-    if (error instanceof CommanderError) return error.exitCode === 0 ? EXIT.ok : EXIT.usage; // help, version, or a usage error
-    throw error;
+    if (!(error instanceof CommanderError)) throw error;
+    if (error.exitCode === 0) return EXIT.ok; // help or version
+    // A usage error: commander already explained it on stderr; with --json stdout still gets one document.
+    if (wantsJson(argv)) createOutput(true, streams).error(new CliError('usage', error.message.replace(/^error: /, '')));
+    return EXIT.usage;
   }
   return exitCode;
 }

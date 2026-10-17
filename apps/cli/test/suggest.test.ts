@@ -78,6 +78,23 @@ describe('suggestClips', () => {
     expect(result.notes.some((note) => note.startsWith('cut'))).toBe(false);
   });
 
+  it('also speeds up waiting after the answer, which stays at 1×', () => {
+    // A prompt at 3 s, the answer at 20 s, and the screen keeps changing until 60 s without input.
+    const markers: Marker[] = [
+      { t: 3, kind: 'prompt' },
+      { t: 20, kind: 'answer' },
+    ];
+    const result = suggestClips({ duration: 62, events: keys(2, 2.5, 3), markers, still: [{ from: 0, to: 1.5 }, { from: 60, to: 62 }] });
+    // Waiting 3.3–61 s without input: sped up before the answer (to 18.5 s) and after it (from 22.5 s).
+    expect(result.clips).toEqual([
+      { from: 1, to: 4.3, speed: 1 },
+      { from: 4.3, to: 18.5, speed: 4 },
+      { from: 18.5, to: 22.5, speed: 1 },
+      { from: 22.5, to: 60, speed: 12 },
+      { from: 60, to: 61, speed: 1 },
+    ]);
+  });
+
   it('keeps the whole take when nothing happened', () => {
     expect(suggestClips({ duration: 5, events: [], markers: [], still: [{ from: 0, to: 5 }] }).clips).toEqual([{ from: 0, to: 5, speed: 1 }]);
   });
@@ -120,5 +137,7 @@ describe('changedRegion and zoomRect', () => {
     // A narrow box grows to 35 % of the screen's width around its centre.
     expect(zoomRect({ x: 200, y: 100, width: 10, height: 10 }, 480, screen)).toEqual([484, 285, 672, 270]);
     expect(zoomRect({ x: 0, y: 0, width: 470, height: 260 }, 480, screen)).toBeUndefined();
+    // Tall and narrow: 830×1080 is 43 % of the screen, but the timeline widens it to 16:9, the whole screen.
+    expect(zoomRect({ x: 200, y: 0, width: 150, height: 270 }, 480, screen)).toBeUndefined();
   });
 });

@@ -42,11 +42,12 @@ export async function capturePageCommand(projectDir: string, target: string, arg
   const out = join(file.dir, 'stills', `${name}.png`);
   output.info(`capturing ${target} …`);
   const shot = await runInElectron<{ file: string; width: number; height: number }>(
-    { command: 'capture-page', target, out, width: Math.round(width), height: Math.round(height), fullPage: args.scroll ?? false, waitMs: Math.round(args.wait ?? 1000) },
+    { command: 'capture-page', target, out, width: Math.round(width), height: Math.round(height), fullPage: args.scroll ?? false, waitMs: Math.round(args.wait ?? 1000), quiet: output.json },
     signal,
   );
   let scene: CaptureResult['scene'];
   if (args.add) {
+    if (signal.aborted) throw new CliError('cancelled', 'cancelled: the page was captured, but no scene was added');
     scene = {
       type: 'still',
       image: relative(file.dir, out).split(sep).join('/'),

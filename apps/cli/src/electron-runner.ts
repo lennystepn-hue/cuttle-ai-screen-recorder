@@ -52,7 +52,9 @@ function electronBinary(): string {
  */
 export function runInElectron<T>(request: ElectronRequest, signal: AbortSignal): Promise<T> {
   return new Promise((resolve, reject) => {
-    const child = spawn(electronBinary(), [electronEntry(), encodeRequest(request)], { stdio: ['ignore', 'pipe', 'inherit', 'ipc'], windowsHide: true });
+    const binary = electronBinary(); // may download Electron first
+    if (signal.aborted) return reject(new CliError('cancelled', 'cancelled before Electron started'));
+    const child = spawn(binary, [electronEntry(), encodeRequest(request)], { stdio: ['ignore', 'pipe', 'inherit', 'ipc'], windowsHide: true });
     child.stdout?.pipe(process.stderr);
     let response: ElectronResponse | undefined;
     child.on('message', (message: ResponseMessage) => {

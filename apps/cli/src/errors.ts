@@ -48,5 +48,5 @@ export function toCliError(error: unknown): CliError {
   const code = typeof (error as { code?: unknown })?.code === 'string' ? (error as { code: string }).code : undefined;
   const message = error instanceof Error ? error.message : String(error);
   if (code !== undefined && code in EXIT_CODES) return new CliError(code, message, { cause: error });
-  return new CliError('internal', error instanceof Error && error.stack ? error.stack : message, { cause: error });
+  return new CliError('internal', message, { cause: error }); // the output adds the stack on stderr
 }

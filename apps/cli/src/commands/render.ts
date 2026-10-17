@@ -25,6 +25,7 @@ export async function renderCommand(projectDir: string, args: RenderArgs, output
   const result = await runInElectron<RenderResult>(
     {
       command: 'render',
+      quiet: output.json,
       projectDir: file.dir,
       out,
       ...(args.format !== undefined && { format: args.format }),

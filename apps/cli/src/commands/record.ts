@@ -8,8 +8,8 @@ import { useTake } from '../use-take';
 
 export interface RecordArgs {
   monitor?: number;
-  /** "x,y,w,h" in pixels of `monitor` (default: the primary monitor). */
-  region?: string;
+  /** "x,y,w,h" in pixels of `monitor` (default: the primary monitor); PowerShell passes it split at the commas. */
+  region?: string | string[];
   window?: string;
   /** A camera name, or true for the first camera. */
   webcam?: string | true;
@@ -41,6 +41,7 @@ export async function recordCommand(projectDir: string, args: RecordArgs, output
   const webcam = deviceName('camera', args.webcam, devices.cameras);
   const mic = deviceName('microphone', args.mic, devices.mics);
   const file = projectExists(projectDir) ? await readProjectFile(projectDir) : await writeProjectFile(newProjectFile(projectDir));
+  if (signal.aborted) throw new CliError('cancelled', 'stopped before the recording started');
 
   const recording = record({
     projectDir: file.dir,
@@ -66,6 +67,7 @@ export async function recordCommand(projectDir: string, args: RecordArgs, output
   });
   const stop = () => void recording.stop().catch(() => {});
   signal.addEventListener('abort', stop, { once: true });
+  if (signal.aborted) stop(); // Ctrl+C while the recorder was being set up
   let take: Take;
   try {
     take = await recording.done;
@@ -74,6 +76,11 @@ export async function recordCommand(projectDir: string, args: RecordArgs, output
   }
 
   const backup = await useTake(file, take);
+  if (args.drawMouse) {
+    // The real pointer is in the video: the engine's cursor would be a second one.
+    const look = (file.raw.look ?? {}) as Record<string, unknown>;
+    file.raw.look = { ...look, cursor: { ...((look.cursor as Record<string, unknown> | undefined) ?? {}), enabled: false } };
+  }
   await writeProjectFile(file);
   const result: RecordResult = { project: file.path, take, ...(backup && { backup }) };
   output.result(result, () =>
@@ -81,7 +88,8 @@ export async function recordCommand(projectDir: string, args: RecordArgs, output
       `recorded ${take.dir}: ${take.seconds.toFixed(1)} s, ${take.screenSize.width}×${take.screenSize.height} (${take.stopReason})`,
       ...take.warnings.map((warning) => `warning: ${warning}`),
       `${file.path} now uses this take${backup ? ` (previous version: ${backup})` : ''}`,
-      'next: cuttle suggest, then cuttle preview --sheet',
+      ...(args.drawMouse ? ['look.cursor.enabled is now false: the pointer is in the video'] : []),
+      'next: cuttle suggest, then cuttle preview',
     ].join('\n'),
   );
   return result;
@@ -94,9 +102,10 @@ function captureSource(args: RecordArgs, primary: number): CaptureSource {
   }
   const monitor = args.monitor ?? primary;
   if (args.region === undefined) return { kind: 'monitor', index: monitor };
-  const parts = args.region.split(',').map((part) => Number(part.trim()));
+  const region = [args.region].flat().join(',');
+  const parts = region.split(/[\s,]+/).filter((part) => part !== '').map(Number);
   if (parts.length !== 4 || !parts.every(Number.isFinite)) {
-    throw new CliError('usage', `--region needs x,y,w,h in pixels of the monitor, e.g. 0,0,1920,1080 (got "${args.region}"; in PowerShell quote it)`);
+    throw new CliError('usage', `--region needs x,y,w,h in pixels of the monitor, e.g. 0,0,1920,1080 (got "${region}")`);
   }
   return { kind: 'region', rect: parts as Rect, monitor };
 }

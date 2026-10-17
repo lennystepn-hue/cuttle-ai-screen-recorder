@@ -1,4 +1,5 @@
 // What suggest needs from the screen track, read with ffmpeg.
+import { CliError } from '../errors';
 import { runFfmpeg } from '../ffmpeg';
 import type { Span } from './spans';
 
@@ -46,14 +47,16 @@ export function parseAnalysis(log: string): ScreenAnalysis {
 
 /**
  * Seconds of the first video (`v`) or audio (`a`) stream of a file, read by copying its packets
- * (fast: nothing is decoded); 0 when the file has no such stream or nothing readable.
+ * (fast: nothing is decoded); 0 when the file has no such stream or nothing readable. A missing
+ * ffmpeg is an error, not an empty file.
  */
 export async function streamSeconds(path: string, stream: 'v' | 'a'): Promise<number> {
   try {
     const { stderr } = await runFfmpeg(['-i', path, '-map', `0:${stream}:0`, '-c', 'copy', '-f', 'null', '-']);
     const last = [...stderr.matchAll(/time=(\d+):(\d\d):(\d\d(?:\.\d+)?)/g)].at(-1);
     return last ? Number(last[1]) * 3600 + Number(last[2]) * 60 + Number(last[3]) : 0;
-  } catch {
+  } catch (error) {
+    if (error instanceof CliError && error.code === 'ffmpeg-missing') throw error;
     return 0;
   }
 }

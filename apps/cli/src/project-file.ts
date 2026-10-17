@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs';
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { CURRENT_VERSION, parseProject, parseProjectJson, type CuttleProject } from '@cuttle/project';
 import { CliError } from './errors';
@@ -57,8 +57,48 @@ export async function writeProjectFile(file: ProjectFile): Promise<ProjectFile> 
   await mkdir(file.dir, { recursive: true });
   const temp = `${file.path}.${process.pid}.tmp`;
   await writeFile(temp, `${JSON.stringify(file.raw, null, 2)}\n`);
-  await rename(temp, file.path);
+  try {
+    await renameWhenFree(temp, file.path);
+  } catch (error) {
+    await rm(temp, { force: true });
+    throw new CliError('invalid-project', `cannot write ${file.path}: ${(error as Error).message}`, { cause: error });
+  }
   return { ...file, project };
+}
+
+/** Backups kept per file: `<file>.bak` is the newest, then `<file>.bak.1` … `<file>.bak.4`. */
+export const BACKUPS = 5;
+
+/**
+ * Copies `path` to `<path>.bak` before a command changes it, moving older backups one step down
+ * (`.bak` → `.bak.1` …, the oldest is dropped). A backup with the same bytes is not repeated, so
+ * running a command twice keeps the older versions. Returns the backup's path.
+ */
+export async function backupFile(path: string): Promise<string> {
+  const bak = `${path}.bak`;
+  const current = await readFile(path);
+  if (existsSync(bak)) {
+    if ((await readFile(bak)).equals(current)) return bak;
+    for (let n = BACKUPS - 1; n >= 1; n--) {
+      const from = n === 1 ? bak : `${bak}.${n - 1}`;
+      if (existsSync(from)) await renameWhenFree(from, `${bak}.${n}`);
+    }
+  }
+  await writeFile(bak, current);
+  return bak;
+}
+
+/** A rename that waits a moment for a file another program holds (OneDrive, a virus scanner, an editor). */
+async function renameWhenFree(from: string, to: string): Promise<void> {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await rename(from, to);
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (attempt >= 5 || (code !== 'EPERM' && code !== 'EBUSY' && code !== 'EACCES')) throw error;
+      await new Promise((done) => setTimeout(done, 100 * attempt));
+    }
+  }
 }
 
 function parse(raw: unknown): CuttleProject {

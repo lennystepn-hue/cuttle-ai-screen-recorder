@@ -38,7 +38,7 @@ export async function previewCommand(projectDir: string, args: PreviewArgs, outp
   const outDir = args.out ? resolve(args.out) : join(file.dir, 'preview');
   output.info(`rendering ${times.length} still(s) into ${outDir} …`);
   const result = await runInElectron<PreviewResult>(
-    { command: 'preview', projectDir: file.dir, outDir, times, ...(args.format !== undefined && { format: args.format }), ...(sheet && { sheet: {} }) },
+    { command: 'preview', projectDir: file.dir, outDir, times, quiet: output.json, clean: args.out === undefined, ...(args.format !== undefined && { format: args.format }), ...(sheet && { sheet: {} }) },
     signal,
   );
   output.result(result, () =>

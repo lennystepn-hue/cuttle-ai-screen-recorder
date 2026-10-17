@@ -4,6 +4,7 @@ import { rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { PNG } from 'pngjs';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 /**
@@ -52,18 +53,25 @@ describe.runIf(enabled)('cuttle in Electron', () => {
 
   it('captures a whole page and appends it as a scrolling still scene', () => {
     const page = join(project, 'page.html');
-    writeFileSync(page, '<!doctype html><body style="margin:0"><div style="height:3000px;background:linear-gradient(#08f,#f80)"></div></body>');
+    // A full-height hero (100vh) must stay one viewport tall in a whole-page capture.
+    writeFileSync(
+      page,
+      '<!doctype html><body style="margin:0"><div style="height:100vh;background:#f00"></div><div style="height:2000px;background:#00f"></div></body>',
+    );
     const { code, json } = cuttle('-C', project, 'capture-page', page, '--scroll', '--add', '--duration', '3');
     expect(code).toBe(0);
-    expect(json).toMatchObject({ width: 1920, height: 3000, scene: { type: 'still', image: 'stills/page.png', duration: 3, motion: 'scroll', frame: 'browser-light' } });
-    expect(pngSize(json.file as string)).toEqual([1920, 3000]);
+    expect(json).toMatchObject({ width: 1920, height: 3080, scene: { type: 'still', image: 'stills/page.png', duration: 3, motion: 'scroll', frame: 'browser-light' } });
+    const png = PNG.sync.read(readFileSync(json.file as string));
+    expect([png.width, png.height]).toEqual([1920, 3080]);
+    const red = (y: number) => png.data[(y * png.width + 960) * 4] === 255 && png.data[(y * png.width + 960) * 4 + 2] === 0;
+    expect([red(1070), red(1090)]).toEqual([true, false]);
   }, 120_000);
 
   it('renders the project with its still scene to 1:1', () => {
     const { code, json } = cuttle('-C', project, 'render', '--format', '1:1');
     expect(code).toBe(0);
     const seconds = json.seconds as number;
-    expect(seconds).toBeGreaterThan(5.5); // the 3 s take plus the 3 s still, less one crossfade
+    expect(seconds).toBeGreaterThan(5.9); // the 3 s take plus the 3 s still (the crossfade between them does not shorten it)
     expect(probe(json.out as string).split(/\r?\n/).slice(0, 2)).toEqual(['h264,1080,1080', 'aac']);
   }, 120_000);
 

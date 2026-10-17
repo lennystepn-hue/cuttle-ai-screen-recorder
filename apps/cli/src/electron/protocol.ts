@@ -2,10 +2,14 @@
 // answer and a cancel go over Node's IPC channel (Electron's main process reads no stdin on
 // Windows, and the console's Ctrl+C does not reach it). Pure: both sides import it.
 
-export type ElectronRequest =
+export type ElectronRequest = (
   | { command: 'render'; projectDir: string; out: string; format?: string; encoder?: string }
-  | { command: 'preview'; projectDir: string; outDir: string; times: number[]; format?: string; sheet?: { columns?: number } }
-  | { command: 'capture-page'; target: string; out: string; width: number; height: number; fullPage: boolean; waitMs: number };
+  | { command: 'preview'; projectDir: string; outDir: string; times: number[]; format?: string; sheet?: { columns?: number }; clean?: boolean }
+  | { command: 'capture-page'; target: string; out: string; width: number; height: number; fullPage: boolean; waitMs: number }
+) & {
+  /** No progress lines on stderr (--json). */
+  quiet?: boolean;
+};
 
 export type ElectronResponse = { ok: true; result: unknown } | { ok: false; error: { code: string; message: string } };
 

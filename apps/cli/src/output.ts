@@ -40,6 +40,8 @@ export function createOutput(json: boolean, streams: Streams = processStreams): 
     error(error) {
       if (json) streams.stdout(`${JSON.stringify({ error: { code: error.code, message: error.message } }, null, 2)}\n`);
       else streams.stderr(`error: ${error.message}\n`);
+      // An unexpected failure: its stack helps a bug report and stays out of the JSON.
+      if (error.code === 'internal' && error.cause instanceof Error && error.cause.stack) streams.stderr(`${error.cause.stack}\n`);
     },
   };
 }

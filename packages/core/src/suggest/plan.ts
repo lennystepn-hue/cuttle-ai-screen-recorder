@@ -40,6 +40,8 @@ export interface SuggestInput {
   markers: readonly Marker[];
   /** Where the screen did not change. */
   still: readonly Span[];
+  /** Where someone speaks (the transcript's words, or the mic's loud stretches): kept, and never sped up. */
+  speech?: readonly Span[];
 }
 
 export interface SuggestedClip {
@@ -75,7 +77,10 @@ export function suggestClips(input: SuggestInput): Suggestion {
   // spinner now and then (a still screen), and the speed-up shows it working.
   const turnStart = answer === undefined ? undefined : input.markers.filter((marker) => marker.kind !== 'manual' && marker.t <= answer).at(0)?.t;
   const turn = turnStart !== undefined && answer !== undefined && answer > turnStart ? [{ from: turnStart, to: answer }] : [];
-  const active = union([...inputSpans, ...gaps(input.still, 0, duration), ...turn]);
+  const speechSpans = union(
+    (input.speech ?? []).map((span) => ({ from: Math.max(0, span.from - RULES.inputPad), to: Math.min(duration, span.to + RULES.inputPad) })),
+  );
+  const active = union([...inputSpans, ...speechSpans, ...gaps(input.still, 0, duration), ...turn]);
   if (active.length === 0 || duration <= 0) {
     return { clips: duration > 0 ? [{ from: 0, to: ms(duration), speed: 1 }] : [], notes: ['nothing happened on screen or at the keyboard: the whole take, unchanged'] };
   }
@@ -93,7 +98,9 @@ export function suggestClips(input: SuggestInput): Suggestion {
   for (const cut of cuts) notes.push(`cut ${length(cut).toFixed(1)} s of idle screen (${range(cut)})`);
 
   const clips: SuggestedClip[] = [];
-  for (const kept of gaps(cuts, start, end)) clips.push(...withSpeedUps(kept, inputSpans, answer, notes));
+  // Speech is never sped up: a wait is a stretch without input and without speech.
+  const busy = union([...inputSpans, ...speechSpans]);
+  for (const kept of gaps(cuts, start, end)) clips.push(...withSpeedUps(kept, busy, answer, notes));
   return {
     clips: clips.map((clip) => {
       const label = labelOf(clip, prompt, answer, turn);
@@ -113,10 +120,10 @@ function labelOf(clip: SuggestedClip, prompt: number | undefined, answer: number
   return undefined;
 }
 
-/** `kept` as 1× clips, with every long stretch without input sped up. */
-function withSpeedUps(kept: Span, inputSpans: readonly Span[], answer: number | undefined, notes: string[]): SuggestedClip[] {
+/** `kept` as 1× clips, with every long stretch without input (and speech) sped up. */
+function withSpeedUps(kept: Span, busy: readonly Span[], answer: number | undefined, notes: string[]): SuggestedClip[] {
   const fast: SuggestedClip[] = [];
-  for (const wait of gaps(inputSpans, kept.from, kept.to)) {
+  for (const wait of gaps(busy, kept.from, kept.to)) {
     if (length(wait) < RULES.waitMin) continue;
     const inner = { from: wait.from + RULES.waitKeep, to: wait.to - RULES.waitKeep };
     // Claude's answer stays at 1×: a wait around it is sped up before and after it.

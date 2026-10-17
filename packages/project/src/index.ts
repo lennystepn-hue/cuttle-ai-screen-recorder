@@ -46,6 +46,15 @@ export {
 } from './schema';
 export { formatPath, parseProject, parseProjectJson, type ParseResult, type ProjectIssue } from './parse';
 export { defaultProject } from './defaults';
+export {
+  TRANSCRIPT_VERSION,
+  TranscriptFileSchema,
+  TranscriptWordSchema,
+  parseTranscriptJson,
+  type TranscriptFile,
+  type TranscriptParseResult,
+  type TranscriptWord,
+} from './transcript';
 export { ID_PREFIXES, newId, usedIds, type IdList } from './ids';
 export { parseEventsJsonl } from './events';
 export { SEGMENTS_VERSION, SegmentsFileSchema, parseSegmentsJson, segmentOffsets, takeTime, type Segment, type SegmentsFile, type SegmentsFileParseResult } from './segments';

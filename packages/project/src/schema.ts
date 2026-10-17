@@ -48,6 +48,8 @@ const SourcesSchema = z.strictObject({
   mic: z.string().min(1).optional(),
   events: z.string().min(1).optional(),
   markers: z.string().min(1).optional(),
+  /** What the mic said, word by word (`cuttle transcribe`, the app after a take). */
+  transcript: z.string().min(1).optional(),
 });
 
 // Cross-field checks live on the object they belong to, so zod reports them in the same pass

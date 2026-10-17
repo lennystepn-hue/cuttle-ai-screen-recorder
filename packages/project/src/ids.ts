@@ -1,5 +1,5 @@
 /** The lists whose items carry ids, and the prefix of the ids Cuttle gives their new items. */
-export const ID_PREFIXES = { scenes: 's', zooms: 'z', masks: 'm', texts: 't' } as const;
+export const ID_PREFIXES = { scenes: 's', zooms: 'z', masks: 'm', texts: 't', cuts: 'c' } as const;
 
 export type IdList = keyof typeof ID_PREFIXES;
 

@@ -3807,3 +3807,58 @@ Expected: exits with code 0.
 
 Run: `git status --short`
 Expected: no output.
+
+## Changes during execution
+
+The code blocks above are the original plan. Its tasks were replayed mechanically on two fresh clones
+(the second byte-identical to the prototype) and those commits were pushed. Two reviews followed: one
+of the code, and one that tried to break the cuts, ramps and sound with probes (random splits at
+24–60 fps, speeds 0.25–64, chains of continuous cuts, real ffmpeg). They found the problems below;
+all are fixed in the commits after the plan's. The repo is the source of truth.
+
+- **A held frame at splits (timeline).** `sceneSpans` rounds span ends to the microsecond. When an end
+  rounded up past a frame time, that frame still fell inside the first clip with its source time at
+  the clip's end, and `sceneFrame` held the frame before it: about a third of the splits made at a
+  frame time (24, 30, 60 fps) showed one frozen frame. `frameAt` now hands such a frame to the next
+  clip at a continuous cut. A test splits a clip at every frame of its first 3 s at 24, 25, 29, 30
+  and 60 fps and compares the frames around each split with the whole clip.
+- **Gaps and clicks in the sound at continuous cuts (export).** Each segment had its own trim and
+  `atempo`, so a split at a speed other than 1× left up to 19 ms of silence or a phase jump at the
+  cut, and splits within the 1 ms tolerance, or at times finer than a sample, skipped or doubled
+  samples; all without a fade. `planAudio` now makes one segment of each run of clips joined by
+  continuous cuts and heard at one speed: one trim, one `atempo`, fades only at the run's ends (the
+  planned "no fade where the speed stays" falls out of it). The ffmpeg check compares a split clip
+  with the whole clip at 1×, 0.5×, 2× and 3×.
+- **Overlay ends inside a sub-millisecond gap (timeline).** A zoom or text whose start or end lay
+  between `a.to` and `b.from` of a continuous cut popped in or out. `rampIn` and `rampOut` now allow
+  the cut's 1 ms tolerance. `rampAmount` returns 0 for an occurrence without length (it was NaN).
+- **Two writes from one process (core).** Writes shared one temp name (`<file>.<pid>.tmp`) and nothing
+  ordered them: two saves of one read could both pass the check, and one save's temp file could be
+  renamed with the other's bytes. `writeProjectFile` now:
+  - runs one write at a time per file within a process, with a unique temp name;
+  - checks the hash again before each retry of the rename (a held file can take a second);
+  - makes the backup after the check (`{ backup: true }`), so `suggest` and `recover` no longer
+    rotate the backups for a write that is then refused;
+  - returns a new `ProjectFile` (`{ file, backup }`) instead of changing its argument.
+
+  `useTake` writes no backup any more; it says whether the project had an edit worth keeping.
+  `CoreError` carries the `path` of a conflict, and `projectHash` is exported for the app's watcher.
+- **Ids of replaced items (core).** `suggest` took the smallest free numbers, so the ids of the clips
+  and zoom it replaced went to new items, and an undo step or a replay that holds `z1` would hit
+  the new zoom. `suggest` now counts every id of the file it read as taken; a second run gives
+  `s4`… and `z2`.
+- **`record` after a take (CLI).** When `cuttle.json` was invalid, deleted or saved at the moment of
+  the write, the take was recorded but not linked, and the message said to run the whole command
+  again. It now says where the take is and to run `cuttle recover takes/<n>`. A test edits the
+  project during a take and checks that the edit is kept.
+- **Messages and docs.** Two messages had lost their option names (`-o` for `frame`, `--claude` for
+  `suggest`). `project.md` promised no dip in the sound at every continuous cut; a speed change keeps
+  a 10 ms fade. SKILL.md said every clip of `suggest` has a label; only those Claude's markers
+  explain do.
+- **The marker tests.** The two recorder tests that set a marker by a timer now set it from the
+  `recording` event (after the screen started): a late screen start dropped or shifted their marker.
+- **One crossfade rule.** The timeline and the export's sound each computed the half crossfade;
+  `crossfadeHalf` in `@cuttle/timeline` is now the one rule.
+
+After the fixes: `pnpm test` 406 passed (5 skipped), `pnpm typecheck`, `pnpm export:check` and
+`pnpm cli:check` pass.

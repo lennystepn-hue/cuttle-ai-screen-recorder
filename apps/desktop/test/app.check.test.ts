@@ -10,7 +10,7 @@ import { PNG } from 'pngjs';
 import { whisperCliPath } from '@cuttle/core';
 import { _electron, type ElectronApplication, type Page } from 'playwright';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { FIXTURE_OUTPUT, makeFixture, makeSpokenFixture } from './fixture';
+import { FIXTURE_OUTPUT, makeFixture, makePrivateFixture, makeSpokenFixture } from './fixture';
 
 /**
  * The app end to end, its windows never shown: open a project, play, scrub, select, compare the
@@ -260,7 +260,8 @@ describe.runIf(enabled)('the Cuttle app', () => {
     if (SHOTS) mkdirSync(SHOTS, { recursive: true });
     // New recordings go into a folder of the check's own.
     mkdirSync(join(root, 'user-data'));
-    writeFileSync(join(root, 'user-data', 'settings.json'), JSON.stringify({ projectsFolder: join(root, 'projects') }));
+    // The screen is read after a take's cut only where the check asks for it (it says so in the settings).
+    writeFileSync(join(root, 'user-data', 'settings.json'), JSON.stringify({ projectsFolder: join(root, 'projects'), privacy: { read: false } }));
     models = createServer((request, response) => {
       if (request.url === '/ggml-base.bin' && BASE_MODEL) return void response.end(readFileSync(BASE_MODEL));
       if (request.url === '/ggml-small.bin') return void response.end('not a model');
@@ -283,6 +284,8 @@ describe.runIf(enabled)('the Cuttle app', () => {
         CUTTLE_USER_DATA: join(root, 'user-data'),
         CUTTLE_RECORDER_BACKEND: 'test',
         CUTTLE_COUNTDOWN: '0',
+        // the app reads the screen (the settings above say when)
+        CUTTLE_OCR: '',
         // the check's own models folder (empty at first), and the models from the check's server
         CUTTLE_MODELS_DIR: join(root, 'models'),
         CUTTLE_MODELS_URL: `http://127.0.0.1:${(models.address() as { port: number }).port}/`,
@@ -1507,6 +1510,79 @@ describe.runIf(enabled)('the Cuttle app', () => {
     expect(srt.startsWith('1\n00:00:00,100 --> ')).toBe(true);
     expect(srt).toContain('Cuttle!');
     await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find((window) => window.getTitle() === 'subtitled · Cuttle')?.close());
+  }, 180_000);
+
+  it.runIf(process.platform === 'win32')('reads the screen after a take when the settings say so, and from the Auto tab: what it shows that is private and the notifications masked as one step', async () => {
+    // the settings: reading is off in this check; switched on, each new take is read after its cut
+    await launchAgain(['--settings']);
+    const settings = await waitForPage(app, async (page) => page.url().includes('/settings.html') && (await page.locator('[data-testid=settings-page-privacy]').count()) === 1);
+    await click(settings, '[data-testid=settings-page-privacy]');
+    await settings.waitForSelector('[data-testid=privacy-read]');
+    const saved = () => (JSON.parse(readFileSync(join(root, 'user-data', 'settings.json'), 'utf8')) as { privacy?: { read: boolean; words: string[] } }).privacy;
+    await settings.waitForSelector('[data-testid=privacy-read][aria-checked=false]');
+    await click(settings, '[data-testid=privacy-read]');
+    await expect.poll(() => saved()?.read).toBe(true);
+    // words always masked: Enter adds them (commas between), the cross takes one away
+    await settings.fill('[data-testid=privacy-word-input]', 'Lena Müller, ACME');
+    await settings.press('[data-testid=privacy-word-input]', 'Enter');
+    await expect.poll(() => saved()?.words).toEqual(['Lena Müller', 'ACME']);
+    await settings.waitForSelector('[data-testid=privacy-words] .word:nth-child(2) button');
+    await click(settings, '[data-testid=privacy-words] .word:nth-child(2) button');
+    await expect.poll(() => saved()?.words).toEqual(['Lena Müller']);
+    await settings.locator('[data-testid=privacy-read]').evaluate((element) => element.scrollIntoView({ block: 'center' }));
+    await shotOf('34-privacy-settings', '/settings.html');
+
+    // a new take: read after its cut, linked as one step ("Cuttle's privacy masks")
+    const before = new Set(existsSync(join(root, 'projects')) ? readdirSync(join(root, 'projects')) : []);
+    await recordThroughPicker(pillRecord, { stop: 'none', camera: undefined }, false);
+    const hud = await runningHud();
+    await wait(1500);
+    await click(hud, '[data-testid=hud-stop]');
+    const recorded = await newProject(before);
+    await projectWhen(recorded, (written) => (written.sources as { screenText?: string }).screenText === 'takes/1/screen-text.jsonl', 90_000);
+    const title = `${basename(recorded)} · Cuttle`;
+    const opened = await waitForPage(app, async (page) => page.url().includes('/editor.html') && (await page.title()) === title);
+    await expect.poll(() => opened.evaluate(() => (window as unknown as Hooked).__cuttleCheck.doc().undo), { timeout: 15_000 }).toBe("Cuttle's privacy masks");
+    await app.evaluate(({ BrowserWindow }, title) => BrowserWindow.getAllWindows().find((window) => window.getTitle() === title)?.close(), title);
+    await click(settings, '[data-testid=privacy-read]');
+    await expect.poll(() => saved()?.read).toBe(false);
+    await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find((window) => window.webContents.getURL().includes('/settings.html'))?.close());
+
+    // a take whose screen shows an email address, with a notification from 3 to 5 s: the Auto tab offers to read it
+    const dir = join(root, 'private');
+    makePrivateFixture(dir);
+    const page = await openEditor(dir);
+    await click(page, '#tab-auto');
+    await page.waitForSelector('[data-testid=privacy-note]');
+    await click(page, '[data-testid=read-screen]');
+    type Saved = { sources: { screenText?: string }; masks?: { label?: string; auto?: string; from: number; to: number; rect: number[] }[]; privacy?: { words: string[] } };
+    const file = () => JSON.parse(readFileSync(join(dir, 'cuttle.json'), 'utf8')) as Saved;
+    await expect.poll(() => file().sources.screenText, { timeout: 60_000 }).toBe('takes/1/screen-text.jsonl');
+    const masks = file().masks ?? [];
+    expect(masks.map((mask) => [mask.label, mask.auto])).toEqual([
+      ['Email address', 'privacy'],
+      ['Notification', 'notification'],
+    ]);
+    expect(masks[0]!.rect[1]).toBeLessThan(130);
+    expect(masks[1]).toMatchObject({ from: 2.7, to: 5.3, rect: [874, 594, 392, 122] });
+    // the settings' words go into the project
+    expect(file().privacy?.words).toEqual(['Lena Müller']);
+    await page.waitForSelector('[data-testid=privacy-note]', { state: 'detached' });
+    await page.waitForSelector('[data-testid=auto-group-privacy]');
+    expect(await page.locator('[data-testid=auto-group-privacy] .auto-count').textContent()).toBe('2 on');
+    const pageDoc = () => page.evaluate(() => (window as unknown as Hooked).__cuttleCheck.doc());
+    await expect.poll(async () => (await pageDoc()).undo).toBe("Cuttle's privacy masks");
+    expect((await pageDoc()).toast?.text).toBe('Cuttle masked 1 private thing the screen showed and 1 notification: check them in the Auto tab.');
+    expect(await page.locator('[data-testid=project-status]').count()).toBe(0);
+    await click(page, '[data-testid=auto-group-privacy] .auto-toggle');
+    await page.evaluate((t) => (window as unknown as Hooked).__cuttleCheck.seek(t), 4);
+    await shotOf('35-privacy-read', '/editor.html', 'private · Cuttle');
+    // one step to undo: the masks and the link go together
+    await page.keyboard.press('Control+Z');
+    await expect.poll(() => file().masks ?? []).toEqual([]);
+    expect(file().sources.screenText).toBeUndefined();
+    await page.waitForSelector('[data-testid=privacy-note]');
+    await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find((window) => window.getTitle() === 'private · Cuttle')?.close());
   }, 180_000);
 
   it('had no unhandled rejection in the main process, and no error in the editor', async () => {

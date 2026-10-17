@@ -1,3 +1,4 @@
+import { basename } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { CURSOR_SHAPES } from '@cuttle/project';
 import { RENDER_WIDGET, SHELL_CLASSES, loadWin32, windowKind } from '../src/win32';
@@ -113,9 +114,13 @@ describe.runIf(process.platform === 'win32')('win32', () => {
     expect(windowKind('Chrome_WidgetWin_1', true, box(240, 400))).toBe('menu');
     expect(windowKind('Chrome_WidgetWin_1', false, box(1600, 900))).toBeUndefined();
     expect(windowKind('Notepad', false, box(800, 600))).toBeUndefined();
+    // the shell's toasts and notification centre; another app's CoreWindow is none
+    expect(windowKind('Windows.UI.Core.CoreWindow', false, box(364, 120), 'ShellExperienceHost.exe')).toBe('notification');
+    expect(windowKind('Windows.UI.Core.CoreWindow', false, box(800, 600), 'SearchHost.exe')).toBeUndefined();
     const win = await loadWin32();
+    expect(win.processName(process.pid).toLowerCase()).toBe(basename(process.execPath).toLowerCase());
     for (const popup of win.popups()) {
-      expect(['dialog', 'menu']).toContain(popup.kind);
+      expect(['dialog', 'menu', 'notification']).toContain(popup.kind);
       expect(popup.bounds.width).toBeGreaterThanOrEqual(2);
     }
     const front = win.foreground();

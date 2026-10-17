@@ -25,18 +25,26 @@ export interface Win32 {
    * page in one), visible unless `hidden` counts too; undefined without one.
    */
   contentArea(id: number, hidden?: boolean): Bounds | undefined;
-  /** The dialogs and menus on the desktop now (not this process's own). */
+  /** A process's executable's name (`node.exe`); '' when it cannot be read. */
+  processName(pid: number): string;
+  /** The dialogs, menus and notifications on the desktop now (not this process's own). */
   popups(): { id: number; kind: WindowKind; bounds: Bounds }[];
 }
 
 /** Chromium and Electron draw a page in a child window of this class: its rect is the page's. */
 export const RENDER_WIDGET = 'Chrome_RenderWidgetHostHWND';
 
+/** The shell's own windows: notifications (toasts) and the notification centre, among its flyouts. */
+const SHELL_HOST = 'shellexperiencehost.exe';
+
 /**
  * What a top-level window is, by its class: `#32770` a dialog, `#32768` a menu, and a Chromium popup
- * that has an owner a dialog when it is at least 320 × 200, else a menu (a dropdown, a tooltip).
+ * that has an owner a dialog when it is at least 320 × 200, else a menu (a dropdown, a tooltip). The
+ * shell's `Windows.UI.Core.CoreWindow`s (`process`: ShellExperienceHost.exe) are notifications: the
+ * toasts and the notification centre (its other flyouts are masked with them, which is safe).
  */
-export function windowKind(className: string, owned: boolean, bounds: Bounds): WindowKind | undefined {
+export function windowKind(className: string, owned: boolean, bounds: Bounds, process = ''): WindowKind | undefined {
+  if (className === 'Windows.UI.Core.CoreWindow' && process.toLowerCase() === SHELL_HOST) return 'notification';
   if (className === '#32770') return 'dialog';
   if (className === '#32768') return 'menu';
   if (className === 'Chrome_WidgetWin_1' && owned) return bounds.width >= 320 && bounds.height >= 200 ? 'dialog' : 'menu';
@@ -149,6 +157,10 @@ async function create(): Promise<Win32> {
   const MonitorFromWindow = user32.func('__stdcall', 'MonitorFromWindow', 'void *', ['void *', 'uint32']);
   const GetConsoleWindow = kernel32.func('__stdcall', 'GetConsoleWindow', 'void *', []);
   const GetConsoleTitleW = kernel32.func('__stdcall', 'GetConsoleTitleW', 'uint32', ['void *', 'uint32']);
+  const OpenProcess = kernel32.func('__stdcall', 'OpenProcess', 'void *', ['uint32', 'int', 'uint32']);
+  const QueryFullProcessImageNameW = kernel32.func('__stdcall', 'QueryFullProcessImageNameW', 'int', ['void *', 'uint32', 'void *', koffi.inout(koffi.pointer('uint32'))]);
+  const CloseHandle = kernel32.func('__stdcall', 'CloseHandle', 'int', ['void *']);
+  const PROCESS_QUERY_LIMITED_INFORMATION = 0x1000;
   const DwmGetWindowAttribute = dwmapi.func('__stdcall', 'DwmGetWindowAttribute', 'long', ['void *', 'uint32', 'void *', 'uint32']);
   const GetDpiForMonitor = shcore.func('__stdcall', 'GetDpiForMonitor', 'long', ['void *', 'int', koffi.out(koffi.pointer('uint32')), koffi.out(koffi.pointer('uint32'))]);
   const CreateDXGIFactory1 = dxgi.func('__stdcall', 'CreateDXGIFactory1', 'long', [koffi.pointer(GUID), koffi.out(koffi.pointer('void *'))]);
@@ -261,6 +273,26 @@ async function create(): Promise<Win32> {
   const point = { x: 0, y: 0 };
   const info = { cbSize: koffi.sizeof(CURSORINFO), flags: 0, hCursor: null as unknown, ptScreenPos: { x: 0, y: 0 } };
   const rect = () => ({ left: 0, top: 0, right: 0, bottom: 0 });
+  /** A process's executable's name (`ShellExperienceHost.exe`), kept per process id; '' when it cannot be read. */
+  const processNames = new Map<number, string>();
+  const processName = (pid: number): string => {
+    let name = processNames.get(pid);
+    if (name !== undefined) return name;
+    name = '';
+    const handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+    if (handle) {
+      try {
+        const buffer = Buffer.alloc(1040);
+        const size = [520];
+        if (QueryFullProcessImageNameW(handle, 0, buffer, size)) name = buffer.toString('utf16le', 0, size[0]! * 2).split('\\').pop() ?? '';
+      } finally {
+        CloseHandle(handle);
+      }
+    }
+    if (processNames.size > 500) processNames.clear();
+    processNames.set(pid, name);
+    return name;
+  };
   /** A window id (32 bits, unsigned) as the handle Windows takes. */
   const handleOf = (id: number) => (id >= 2 ** 31 ? id - 2 ** 32 : id);
   const idOf = (hwnd: unknown) => Number(BigInt.asUintN(32, koffi.address(hwnd)));
@@ -290,6 +322,7 @@ async function create(): Promise<Win32> {
       if (!GetCursorInfo(info) || info.hCursor === null) return 'arrow';
       return cursorShapes.get(koffi.address(info.hCursor)) ?? 'arrow';
     },
+    processName,
     foreground() {
       const hwnd = GetForegroundWindow();
       const bounds = hwnd ? frame(hwnd) : undefined;
@@ -322,7 +355,8 @@ async function create(): Promise<Win32> {
         if (pid[0] === process.pid) return 1;
         if (DwmGetWindowAttribute(hwnd, DWMWA_CLOAKED, cloaked, 4) >= 0 && cloaked.readUInt32LE(0) !== 0) return 1;
         const bounds = frame(hwnd);
-        const kind = bounds && windowKind(className(hwnd), GetWindow(hwnd, GW_OWNER) !== null, bounds);
+        const kindOf = className(hwnd);
+        const kind = bounds && windowKind(kindOf, GetWindow(hwnd, GW_OWNER) !== null, bounds, kindOf === 'Windows.UI.Core.CoreWindow' ? processName(pid[0]!) : '');
         if (bounds && kind && bounds.width >= 2 && bounds.height >= 2) found.push({ id: idOf(hwnd), kind, bounds });
         return 1;
       }, koffi.pointer(WNDENUMPROC));

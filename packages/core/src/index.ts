@@ -29,5 +29,6 @@ export { SECRET_KINDS, SECRET_LABELS, findSecrets, lineSecrets, type Secret, typ
 export { MASK_RULES, privacyMasks, type PrivacyMask } from './privacy/masks';
 export { ScreenReader } from './privacy/ocr';
 export { READ_RULES, SCREEN_TEXT_FILE, framesToRead, readFrames, writeScreenText } from './privacy/read';
-export { readScreenText, withPrivacyMasks, type PrivacyMasksResult, type RawMask } from './privacy/apply';
+export { applyPrivacy, readScreenTake, readScreenText, withPrivacyMasks, type PrivacyInput, type PrivacyMasksResult, type PrivacyResult, type RawMask } from './privacy/apply';
+export { NOTIFICATION_RULES, notificationMasks, type NotificationMask } from './privacy/notifications';
 export { CLEAN_MIC_FILE, cleanMic, cleanupFilter, denoiseLatency } from './speech/cleanup';

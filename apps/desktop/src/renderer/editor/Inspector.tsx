@@ -47,6 +47,7 @@ import { edit, preview } from './doc';
 import { currentPlayer, engineAssets, select, setTool, store, type LookSection, type Selection, type Tool } from './session';
 import { isColoured, swatch, type SwatchKey } from './swatches';
 import { useStore } from './store';
+import { PrivacyNote } from './PrivacyNote';
 import { SpeechNote, TranscriptPanel } from './Transcript';
 
 const TABS = [
@@ -444,6 +445,7 @@ function AutoPanel() {
     return (
       <div className="auto-empty" data-testid="auto-empty">
         <SpeechNote />
+        <PrivacyNote />
         <p>
           <b>Nothing automatic yet.</b>
         </p>
@@ -462,6 +464,7 @@ function AutoPanel() {
     <div className="auto-panel" data-testid="auto-panel">
       <p className="hint auto-intro">What Cuttle did on its own. Switch a kind off and it leaves the video and is not made again; change an item and it is yours.</p>
       <SpeechNote />
+      <PrivacyNote />
       {groups.map(({ group, items }) => {
         const on = items.filter((item) => item.enabled).length;
         const kindOn = group.key ? project.autoEdits[group.key] : on > 0;

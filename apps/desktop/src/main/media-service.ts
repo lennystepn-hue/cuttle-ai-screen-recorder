@@ -60,7 +60,7 @@ class Worker {
       if ('progress' in message) return job.onProgress(message.progress);
       this.finish(message.id);
       if ('done' in message) job.resolve(message.meta);
-      else job.reject(Object.assign(new Error(message.error), { cancelled: message.cancelled === true }));
+      else job.reject(Object.assign(new Error(message.error), { cancelled: message.cancelled === true, ...(message.code && { code: message.code }) }));
     });
     child.on('exit', () => {
       // a worker let go by refresh(): the new one's jobs are not its own

@@ -3,7 +3,7 @@
 // the main process queues them.
 import { spawn, type ChildProcess } from 'node:child_process';
 import { rename, rm, writeFile } from 'node:fs/promises';
-import { applySpeechEdits, ffmpegPath, probeScreen, streamSeconds, suggestProject, transcribeTake } from '@cuttle/core';
+import { applyPrivacy, applySpeechEdits, ffmpegPath, probeScreen, readScreenTake, streamSeconds, suggestProject, transcribeTake } from '@cuttle/core';
 import {
   PEAKS_SAMPLE_RATE,
   PeakFolder,
@@ -122,6 +122,20 @@ async function run(id: number, job: MediaJob): Promise<ThumbnailsMeta | undefine
       await applySpeechEdits(job.input, { link: job.transcript, ...(job.cleanMic && { cleanMic: job.cleanMic }) });
       return undefined;
     }
+    case 'read-screen': {
+      const controller = new AbortController();
+      controllers.set(id, controller);
+      try {
+        await readScreenTake(job.input, { signal: controller.signal, onProgress: (progress) => reply({ id, progress }) });
+      } finally {
+        controllers.delete(id);
+      }
+      return undefined;
+    }
+    case 'privacy-edits': {
+      await applyPrivacy(job.input, { ...(job.link && { link: job.link }), words: job.words });
+      return undefined;
+    }
     case 'peaks': {
       const seconds = await streamSeconds(job.input, 'a');
       const folder = new PeakFolder();
@@ -149,6 +163,7 @@ port.on('message', ({ data }) => {
   const { id, ...job } = data;
   run(id, job as MediaJob).then(
     (meta) => reply({ id, done: true, ...(meta && { meta }) }),
-    (error: Error) => reply({ id, error: error.message, ...(cancelled.has(id) && { cancelled: true }) }),
+    // the core's error code too (`ocr-missing`: the screen cannot be read here)
+    (error: Error & { code?: unknown }) => reply({ id, error: error.message, ...(cancelled.has(id) && { cancelled: true }), ...(typeof error.code === 'string' && { code: error.code }) }),
   );
 });

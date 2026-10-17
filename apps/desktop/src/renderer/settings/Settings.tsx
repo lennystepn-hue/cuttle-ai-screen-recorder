@@ -3,8 +3,9 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ComponentType, type KeyboardEvent, type ReactNode } from 'react';
 import type { Motion, RequestArgument, SettingsPage, SettingsView, SpeechLanguage, SpeechModelName, SpeechStatus, ToolsStatus } from '../../shared/ipc';
 import { bridge } from '../bridge';
-import { CheckIcon, CloseIcon, CopyIcon, FolderIcon, GearIcon, Mark, MicIcon, RecordIcon, TerminalIcon, WarningIcon } from '../icons';
+import { CheckIcon, CloseIcon, CopyIcon, FolderIcon, GearIcon, Mark, MaskIcon, MicIcon, RecordIcon, TerminalIcon, WarningIcon } from '../icons';
 import { Select } from '../Select';
+import { PrivacySettings } from './PrivacySettings';
 
 const MAC = navigator.userAgent.includes('Macintosh');
 /** The command that installs ffmpeg on this OS. */
@@ -54,6 +55,7 @@ const TRAY = MAC ? 'menu bar' : 'tray';
 const PAGES: { id: SettingsPage; title: string; icon: ComponentType<{ size?: number }> }[] = [
   { id: 'recording', title: 'Recording', icon: RecordIcon },
   { id: 'speech', title: 'Speech', icon: MicIcon },
+  { id: 'privacy', title: 'Privacy', icon: MaskIcon },
   { id: 'claude', title: 'Claude Code', icon: TerminalIcon },
   { id: 'projects', title: 'Projects', icon: FolderIcon },
   { id: 'general', title: 'General', icon: GearIcon },
@@ -115,96 +117,104 @@ export function Settings() {
             <div className="settings-page" data-page={page}>
               {page === 'recording' && (
                 <>
-                <Section title="Recording">
-                  <Row label="Projects folder" hint="Every new recording gets a folder here, named by its date and time." stacked>
-                    <div className="path-row">
-                      <span className="path" title={view?.projectsFolder} data-testid="projects-folder">
-                        {view ? middlePath(shortPath(view.projectsFolder)) : ''}
-                      </span>
-                      <button className="ghost" onClick={() => void bridge.invoke('settings:choose-folder').then(setView)} data-testid="choose-folder">
-                        Change…
-                      </button>
-                    </div>
-                  </Row>
-                  <Row label="Countdown" hint="Counts down over the recorded area before recording starts.">
-                    <Segmented
-                      value={view?.countdown}
-                      options={[
-                        [0, 'Off'],
-                        [3, '3 s'],
-                        [5, '5 s'],
-                      ]}
-                      onChange={(countdown) => change({ countdown })}
-                      label="Countdown"
-                      testid="countdown"
-                    />
-                  </Row>
-                  <Row label="Camera" hint={devices?.problem ?? 'Shown as a bubble in the corner. The picker can change it for one recording.'}>
-                    <DeviceSelect kind="camera" value={view?.camera} devices={devices?.cameras} onChange={(camera) => change({ camera })} />
-                  </Row>
-                  <Row label="Microphone">
-                    <DeviceSelect kind="mic" value={view?.mic} devices={devices?.mics} onChange={(mic) => change({ mic })} />
-                  </Row>
-                </Section>
-                <Section title="To record">
-                  <FfmpegLine tools={tools} setTools={setTools} />
-                </Section>
+                  <Section title="Recording">
+                    <Row label="Projects folder" hint="Every new recording gets a folder here, named by its date and time." stacked>
+                      <div className="path-row">
+                        <span className="path" title={view?.projectsFolder} data-testid="projects-folder">
+                          {view ? middlePath(shortPath(view.projectsFolder)) : ''}
+                        </span>
+                        <button className="ghost" onClick={() => void bridge.invoke('settings:choose-folder').then(setView)} data-testid="choose-folder">
+                          Change…
+                        </button>
+                      </div>
+                    </Row>
+                    <Row label="Countdown" hint="Counts down over the recorded area before recording starts.">
+                      <Segmented
+                        value={view?.countdown}
+                        options={[
+                          [0, 'Off'],
+                          [3, '3 s'],
+                          [5, '5 s'],
+                        ]}
+                        onChange={(countdown) => change({ countdown })}
+                        label="Countdown"
+                        testid="countdown"
+                      />
+                    </Row>
+                    <Row label="Camera" hint={devices?.problem ?? 'Shown as a bubble in the corner. The picker can change it for one recording.'}>
+                      <DeviceSelect kind="camera" value={view?.camera} devices={devices?.cameras} onChange={(camera) => change({ camera })} />
+                    </Row>
+                    <Row label="Microphone">
+                      <DeviceSelect kind="mic" value={view?.mic} devices={devices?.mics} onChange={(mic) => change({ mic })} />
+                    </Row>
+                  </Section>
+                  <Section title="To record">
+                    <FfmpegLine tools={tools} setTools={setTools} />
+                  </Section>
                 </>
               )}
 
               {page === 'speech' && (
                 <>
-                <Section title="Speech">
-                  <SpeechSettings view={view} change={change} />
-                </Section>
+                  <Section title="Speech">
+                    <SpeechSettings view={view} change={change} />
+                  </Section>
+                </>
+              )}
+
+              {page === 'privacy' && (
+                <>
+                  <Section title="Privacy">
+                    <PrivacySettings view={view} change={change} />
+                  </Section>
                 </>
               )}
 
               {page === 'claude' && (
                 <>
-                <Section title="For Claude Code">
-                  <ClaudeTools tools={tools} setTools={setTools} />
-                </Section>
+                  <Section title="For Claude Code">
+                    <ClaudeTools tools={tools} setTools={setTools} />
+                  </Section>
                 </>
               )}
 
               {page === 'general' && (
                 <>
-                <Section title="App">
-                  <Row label="Start Cuttle when you sign in" hint={<>It waits in the {TRAY}; <Keys keys="Ctrl+Shift+Alt+R" /> starts a recording.</>}>
-                    <button
-                      className="toggle"
-                      role="switch"
-                      aria-checked={view?.launchAtLogin ?? false}
-                      aria-label="Start Cuttle when you sign in"
-                      onClick={() => view && change({ launchAtLogin: !view.launchAtLogin })}
-                      data-testid="launch-at-login"
-                    >
-                      <i />
-                    </button>
-                  </Row>
-                  <Row label="Motion" hint="Animations in Cuttle's windows. The video is not affected.">
-                    <Segmented<Motion>
-                      value={view?.motion}
-                      options={[
-                        ['system', MAC ? 'Like macOS' : 'Like Windows'],
-                        ['reduce', 'Less'],
-                        ['full', 'Full'],
-                      ]}
-                      onChange={(motion) => change({ motion })}
-                      label="Motion"
-                      testid="motion"
-                    />
-                  </Row>
-                </Section>
+                  <Section title="App">
+                    <Row label="Start Cuttle when you sign in" hint={<>It waits in the {TRAY}; <Keys keys="Ctrl+Shift+Alt+R" /> starts a recording.</>}>
+                      <button
+                        className="toggle"
+                        role="switch"
+                        aria-checked={view?.launchAtLogin ?? false}
+                        aria-label="Start Cuttle when you sign in"
+                        onClick={() => view && change({ launchAtLogin: !view.launchAtLogin })}
+                        data-testid="launch-at-login"
+                      >
+                        <i />
+                      </button>
+                    </Row>
+                    <Row label="Motion" hint="Animations in Cuttle's windows. The video is not affected.">
+                      <Segmented<Motion>
+                        value={view?.motion}
+                        options={[
+                          ['system', MAC ? 'Like macOS' : 'Like Windows'],
+                          ['reduce', 'Less'],
+                          ['full', 'Full'],
+                        ]}
+                        onChange={(motion) => change({ motion })}
+                        label="Motion"
+                        testid="motion"
+                      />
+                    </Row>
+                  </Section>
                 </>
               )}
 
               {page === 'projects' && (
                 <>
-                <Section title="Recent projects">
-                  <Recent view={view} />
-                </Section>
+                  <Section title="Recent projects">
+                    <Recent view={view} />
+                  </Section>
                 </>
               )}
             </div>
@@ -224,7 +234,7 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
   );
 }
 
-function Row({ label, hint, stacked, children }: { label: string; hint?: ReactNode; stacked?: boolean; children: ReactNode }) {
+export function Row({ label, hint, stacked, children }: { label: string; hint?: ReactNode; stacked?: boolean; children: ReactNode }) {
   return (
     <div className={`row${stacked ? ' stacked' : ''}`}>
       <div className="row-text">

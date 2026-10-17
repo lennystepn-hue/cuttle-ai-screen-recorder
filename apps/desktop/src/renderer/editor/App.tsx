@@ -120,12 +120,12 @@ function TitleBar() {
       {status?.state === 'failed' ? (
         <button
           className="chip-status warn"
-          onClick={() => void bridge.invoke(status.retry === 'speech' ? 'project:transcribe' : 'project:cut')}
+          onClick={() => void bridge.invoke(status.retry === 'speech' ? 'project:transcribe' : status.retry === 'privacy' ? 'project:read-screen' : 'project:cut')}
           title={`${status.text}. Click to try again.`}
           data-testid="project-status"
         >
           <WarningIcon size={14} />
-          <span className="chip-text">{status.retry === 'speech' ? 'The speech could not be transcribed' : 'The take could not be cut'}</span> · Try again
+          <span className="chip-text">{status.retry === 'speech' ? 'The speech could not be transcribed' : status.retry === 'privacy' ? 'The screen could not be read' : 'The take could not be cut'}</span> · Try again
         </button>
       ) : (
         status && (

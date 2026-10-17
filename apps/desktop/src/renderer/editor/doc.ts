@@ -184,7 +184,7 @@ function restore(raw: Raw): void {
 const sourcesOf = (raw: Raw) => takeKey(raw.sources);
 
 /** The undo step of a change made outside the editor, by who made it. */
-const ORIGIN_LABELS: Record<ChangeOrigin, string> = { outside: 'the outside change', suggest: "Cuttle's cut", speech: "Cuttle's speech edits" };
+const ORIGIN_LABELS: Record<ChangeOrigin, string> = { outside: 'the outside change', suggest: "Cuttle's cut", speech: "Cuttle's speech edits", privacy: "Cuttle's privacy masks" };
 
 /** What the app's speech edits did, said once they arrive. */
 function speechToast(project: CuttleProject): string {
@@ -197,6 +197,16 @@ function speechToast(project: CuttleProject): string {
   if (fillers + pauses === 0) return `Cuttle cut ${slips}.`;
   const parts = [fillers > 0 && `${fillers} filler word${fillers === 1 ? '' : 's'}`, pauses > 0 && `${pauses} pause${pauses === 1 ? '' : 's'}`].filter(Boolean);
   return `Cuttle cut ${slips ? `${slips}, and ` : ''}${parts.join(' and ')} where the picture rests.`;
+}
+
+/** What the app's privacy masks did, said once they arrive. */
+function privacyToast(project: CuttleProject): string {
+  const count = (kind: 'privacy' | 'notification') => project.masks.filter((mask) => mask.auto === kind && mask.enabled).length;
+  const found = count('privacy');
+  const notifications = count('notification');
+  if (found + notifications === 0) return 'Cuttle read the screen: nothing private to mask.';
+  const parts = [found > 0 && `${found} private thing${found === 1 ? '' : 's'} the screen showed`, notifications > 0 && `${notifications} notification${notifications === 1 ? '' : 's'}`].filter(Boolean);
+  return `Cuttle masked ${parts.join(' and ')}: check them in the Auto tab.`;
 }
 
 /** The editor opens anew on another take (its media); the main process reloads it (a page cannot). */
@@ -373,6 +383,13 @@ export async function outsideChange(event: ProjectFileEvent): Promise<void> {
   redoStack.length = 0;
   setDoc({ raw, project, hash: event.hash, preview: undefined });
   const show = firstChanged(before.project, project);
-  const said = event.origin === 'suggest' ? 'Cuttle cut the take.' : event.origin === 'speech' ? speechToast(project) : `Changed outside the app: ${describeChange(before.project, project)}`;
+  const said =
+    event.origin === 'suggest'
+      ? 'Cuttle cut the take.'
+      : event.origin === 'speech'
+        ? speechToast(project)
+        : event.origin === 'privacy'
+          ? privacyToast(project)
+          : `Changed outside the app: ${describeChange(before.project, project)}`;
   toast(said, { undo: true, ...(show && event.origin === 'outside' && { show }) });
 }

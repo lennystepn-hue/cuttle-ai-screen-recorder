@@ -60,10 +60,18 @@ describe.runIf(model !== undefined && whisper)(`speech on a spoken take (${model
     expect(result.scenes.length).toBeGreaterThan(0);
     const fillers = (result.cuts ?? []).filter((cut) => cut.auto === 'filler');
     const pauses = (result.cuts ?? []).filter((cut) => cut.auto === 'pause');
-    // "Uh" at 2.22 s and "Um" at 7.755 s of the screen
-    for (const at of [2.22, 7.755]) expect(fillers.some((cut) => cut.from - 0.15 <= at && at <= cut.to), `a filler cut at ${at}`).toBe(true);
+    // "Uh" at 2.22 s of the screen
+    expect(fillers.some((cut) => cut.from - 0.15 <= 2.22 && 2.22 <= cut.to), 'a filler cut at 2.22').toBe(true);
     expect(pauses.length).toBeGreaterThan(0);
     expect(result.notes.some((note) => /^cut \d+ filler words? and \d+ pauses?/.test(note))).toBe(true);
+    // "Um, it zooms on clicks. Again. It zooms on every click": the slip goes, from the pause before
+    // "Um" (7.755 s of the screen) through "Again" (10.49 s) to the repeat ("It" at 11.85 s)
+    const retakes = (result.cuts ?? []).filter((cut) => cut.auto === 'retake');
+    expect(result.speech.retakes).toBe(1);
+    expect(retakes).toEqual([expect.objectContaining({ label: 'Retake: “Again”' })]);
+    expect(retakes[0]!.from).toBeLessThan(7.755);
+    expect(retakes[0]!.to).toBeGreaterThan(10.49 + 0.3);
+    expect(retakes[0]!.to).toBeLessThanOrEqual(11.85);
 
     // the app's step once the transcript arrives: the same cuts again, nothing else touched
     const before = readFileSync(join(dir, 'cuttle.json'), 'utf8');

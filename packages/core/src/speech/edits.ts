@@ -197,7 +197,12 @@ export interface RawCut {
  * the place of a replaced one of its kind (overlapping at least half of the shorter) keeps its id,
  * and stays off when the person had switched that one off; the others get unused ids from `taken`.
  */
-export function mergeCuts(raw: readonly RawCut[], made: readonly SpeechCut[], kinds: readonly string[], taken: Set<string>): { cuts: RawCut[]; added: RawCut[]; kept: number } {
+export function mergeCuts(
+  raw: readonly RawCut[],
+  made: readonly { from: number; to: number; auto: string; label: string }[],
+  kinds: readonly string[],
+  taken: Set<string>,
+): { cuts: RawCut[]; added: RawCut[]; kept: number } {
   const ours = (cut: RawCut) => cut.auto !== undefined && kinds.includes(cut.auto);
   const kept = raw.filter((cut) => !ours(cut));
   const replaced = raw.filter(ours);

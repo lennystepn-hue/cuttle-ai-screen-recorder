@@ -1,6 +1,6 @@
 import { readFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
-import { newId, parseEventsJsonl, parseMarkersJson, parseProject, parseTakeJson, usedIds, type InputEvent, type Marker, type Rect, type TranscriptFile } from '@cuttle/project';
+import { newId, parseEventsJsonl, parseProject, parseTakeJson, usedIds, type InputEvent, type Marker, type Rect, type TranscriptFile } from '@cuttle/project';
 import { clickZooms, sceneSpans, shownClicks } from '@cuttle/timeline';
 import { CoreError } from './errors';
 import { readProjectFile, writeProjectFile } from './project-file';
@@ -8,7 +8,7 @@ import { analyseScreen, grabGray } from './suggest/media';
 import { suggestClips } from './suggest/plan';
 import { changedRegion, zoomRect } from './suggest/region';
 import { takeClock, transcriptMarkers } from './suggest/transcript';
-import { speechActivity, withSpeechCuts } from './speech/apply';
+import { readMarkers, speechActivity, withSpeechCuts, wordStretches } from './speech/apply';
 import type { RawCut } from './speech/edits';
 import { chooseModel } from './speech/models';
 import { readTranscript, transcribeTake } from './speech/transcribe';
@@ -47,7 +47,7 @@ export interface SuggestResult {
   /** Every cut of the file afterwards, when the speech edits were made (a transcript was there). */
   cuts?: RawCut[];
   /** Where the speech came from: the transcript, the mic's loudness, or none; and the cuts made for it. */
-  speech: { from: 'transcript' | 'mic' | 'none'; fillers: number; pauses: number };
+  speech: { from: 'transcript' | 'mic' | 'none'; fillers: number; pauses: number; retakes: number };
   notes: string[];
   /** Where the markers came from. */
   markers: { from: 'take' | 'transcript' | 'none'; count: number };
@@ -98,7 +98,7 @@ export async function suggestProject(projectDir: string, args: SuggestOptions = 
   }
   let markers = sources.markers ? await readMarkers(resolve(file.dir, sources.markers)) : [];
   let from: SuggestResult['markers']['from'] = markers.length > 0 ? 'take' : 'none';
-  if (args.claude !== undefined && !markers.some((marker) => marker.kind !== 'manual')) {
+  if (args.claude !== undefined && !markers.some(fromClaude)) {
     const cwd = args.claude === true ? process.cwd() : resolve(args.claude);
     await screenStart(dirname(screen)); // refuses a take without take.json
     const clock = await takeClock(dirname(screen));
@@ -137,15 +137,19 @@ export async function suggestProject(projectDir: string, args: SuggestOptions = 
     notes.push(`kept ${before.length + after.length} still or card scene(s)${before.length > 0 ? `, ${before.length} before the clips` : ''}`);
   }
   const scenes = [...before, ...clips, ...after];
-  // The filler words and pauses, inside the new 1× clips, where the picture rests.
+  // The retakes, then the filler words and pauses inside the new 1× clips, where the picture rests.
   let cuts: RawCut[] | undefined;
-  let made = { fillers: 0, pauses: 0 };
-  if (transcript) {
-    const atNormalSpeed = suggestion.clips.filter((clip) => clip.speed === 1).map(({ from: start, to }) => ({ from: start, to }));
-    const result = withSpeechCuts(file.raw, file.project, transcript, { still: screenInfo.still, events, clips: atNormalSpeed }, taken);
+  let made = { fillers: 0, pauses: 0, retakes: 0 };
+  const hasRetakes = markers.some((marker) => marker.kind === 'retake') || ((file.raw.cuts as RawCut[] | undefined) ?? []).some((cut) => cut.auto === 'retake');
+  // the mistake key's retakes are cut even with the speech left out (then 5 s back)
+  if (transcript || hasRetakes) {
+    // the pauses before a slip: between the words, or between the mic's loud stretches
+    const pauses = transcript ? wordStretches(transcript) : speech.from === 'mic' ? speech.spans : [];
+    const clips = suggestion.clips.map(({ from: start, to, speed }) => ({ from: start, to, speed }));
+    const result = withSpeechCuts(file.raw, file.project, { ...(transcript && { transcript }), markers, speech: pauses, still: screenInfo.still, events, clips }, taken);
     notes.push(...result.notes);
     cuts = result.cuts;
-    made = { fillers: result.fillers, pauses: result.pauses };
+    made = { fillers: result.fillers, pauses: result.pauses, retakes: result.retakes };
   }
   // The zooms suggest made before are replaced; the others stay, and the new ones avoid them.
   const rawZooms = (file.raw.zooms as SuggestedZoom[] | undefined) ?? [];
@@ -270,15 +274,13 @@ function staysOff(zoom: SuggestedZoom, off: readonly { at: number; duration: num
   });
 }
 
+/** A marker Claude Code's session made (not the person's own, nor the mistake key's). */
+const fromClaude = (marker: Marker) => marker.kind === 'prompt' || marker.kind === 'tool' || marker.kind === 'answer';
+
 /** The events of events.jsonl; undefined when the file cannot be read. */
 async function readEvents(path: string): Promise<InputEvent[] | undefined> {
   const text = await readFile(path, 'utf8').catch(() => undefined);
   return text === undefined ? undefined : parseEventsJsonl(text).events;
-}
-
-async function readMarkers(path: string): Promise<Marker[]> {
-  const parsed = parseMarkersJson(await readFile(path, 'utf8').catch(() => ''));
-  return parsed.ok ? parsed.markers : [];
 }
 
 /** The screen track's start (wall-clock seconds) from the take.json next to it. */

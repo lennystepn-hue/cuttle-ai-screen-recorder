@@ -32,3 +32,4 @@ export {
   type SpokenWord,
 } from './captions';
 export { clickZooms, shownClicks, zoomRectFor, type ClickZoom, type ClipSpan } from './click-zooms';
+export { TYPING_RULES, clickSamples, keyPresses, mixTyping, typingClicks, type KeyPress, type TypingClick } from './typing';

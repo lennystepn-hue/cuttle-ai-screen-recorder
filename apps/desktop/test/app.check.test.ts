@@ -60,7 +60,7 @@ interface CheckState {
 interface Check {
   state(): CheckState;
   seek(t: number): Promise<void>;
-  playback(): { drawn: number; restarts: number; clock: number };
+  playback(): { drawn: number; restarts: number; clicks: number; clock: number };
   pixels(): string;
   useProxy(): Promise<boolean>;
   doc(): { hash: string; saving: boolean; problem?: string; issues?: string[]; toast?: { text: string; undo?: boolean }; draftNote?: string; undo?: string; redo?: string };
@@ -366,6 +366,8 @@ describe.runIf(enabled)('the Cuttle app', () => {
     expect(stats.clock - playing.t).toBeLessThan(0.7);
     // and plays as a movie, not a slideshow: at least half the frame rate per second of the clock
     expect(stats.drawn / stats.clock).toBeGreaterThan(FIXTURE_OUTPUT.fps / 2);
+    // the six keys typed at 2.4 s click a second before the clock gets there
+    expect(stats.clicks).toBeGreaterThanOrEqual(4);
     const paused = await state();
     expect(paused.playing).toBe(false);
     await editor.waitForTimeout(300);
@@ -1448,7 +1450,7 @@ describe.runIf(enabled)('the Cuttle app', () => {
     const path = join(dir, 'cuttle.json');
     const raw = JSON.parse(readFileSync(path, 'utf8')) as { sources: Record<string, string> };
     writeFileSync(path, JSON.stringify({ ...raw, sources: { ...raw.sources, transcript: 'takes/1/transcript.json', cleanMic: 'takes/1/mic.clean.m4a' } }, null, 2));
-    type Saved = { cuts?: { label?: string }[]; captions?: { style?: string; fixes?: { at: number; end: number; text: string }[] }; look?: { audio?: { cleanup?: boolean } } };
+    type Saved = { cuts?: { label?: string }[]; captions?: { style?: string; fixes?: { at: number; end: number; text: string }[] }; look?: { audio?: { cleanup?: boolean; typing?: boolean; typingVolume?: number } } };
     const saved = () => JSON.parse(readFileSync(path, 'utf8')) as Saved;
     const page = await openEditor(dir);
     const pageState = () => page.evaluate(() => (window as unknown as Hooked).__cuttleCheck.state());
@@ -1495,8 +1497,22 @@ describe.runIf(enabled)('the Cuttle app', () => {
     await expect.poll(() => saved().captions?.style).toBe('karaoke');
     await click(page, '[data-testid=look-open-sound]');
     await click(page, '[data-testid=audio-cleanup]');
-    await click(page, '[data-testid=look-open-subtitles]');
     await expect.poll(() => saved().look?.audio?.cleanup).toBe(false);
+    // the typing sounds: their volume on a slider (let go at 30 %), and a switch
+    await page.locator('[data-testid=audio-typing-volume]').evaluate((element) => {
+      const input = element as HTMLInputElement;
+      // React sees a value set through the element's own setter
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, '30');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    await expect.poll(() => saved().look?.audio?.typingVolume).toBe(0.3);
+    await page.locator('[data-testid=audio-typing]').evaluate((element) => element.scrollIntoView({ block: 'center' }));
+    await shotOf('29b-typing-sounds', '/editor.html', 'subtitled · Cuttle');
+    await click(page, '[data-testid=audio-typing]');
+    await expect.poll(() => saved().look?.audio?.typing).toBe(false);
+    await page.waitForSelector('[data-testid=audio-typing-volume]', { state: 'detached' });
+    await click(page, '[data-testid=look-open-subtitles]');
     await page.evaluate((t) => (window as unknown as Hooked).__cuttleCheck.seek(t), words[index('zooms')]!.t + 0.1);
     await page.locator('[data-testid=captions-style]').evaluate((element) => element.scrollIntoView({ block: 'center' }));
     await shotOf('29-subtitles-karaoke', '/editor.html', 'subtitled · Cuttle');

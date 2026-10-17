@@ -968,7 +968,7 @@ function LookPanel() {
         ? `${WEBCAM_SHAPE_NAMES[webcam.shape]} · ${webcam.position ? 'moved' : CORNER_NAMES[webcam.corner].toLowerCase()} · ${Math.round(webcam.size * 100)} %`
         : 'Off',
     subtitles: captions.enabled ? CAPTION_STYLE_NAMES[captions.style] : sources.transcript ? 'Off' : 'Not transcribed yet',
-    sound: current.audio.enabled ? (sources.cleanMic && current.audio.cleanup ? 'Mic · clean voice' : 'Mic') : 'Muted',
+    sound: current.audio.enabled ? [sources.cleanMic && current.audio.cleanup ? 'Mic · clean voice' : 'Mic', current.audio.typing && 'key clicks'].filter(Boolean).join(' · ') : 'Muted',
     video: `${size?.name ?? `${output.width} × ${output.height}`} · ${output.fps} fps${current.transition.enabled ? ' · crossfades' : ''}`,
   };
   return (
@@ -1114,6 +1114,24 @@ function LookPanel() {
         {current.audio.enabled && sources.cleanMic && (
           <Row label="Clean voice" inline note="less noise">
             <Toggle checked={current.audio.cleanup} label="Clean voice" onChange={(on) => look(['audio', 'cleanup'], on, on ? 'Clean voice on' : 'Clean voice off')} testId="audio-cleanup" />
+          </Row>
+        )}
+        {current.audio.enabled && (
+          <Row label="Typing sounds" inline note="a click per key">
+            <Toggle checked={current.audio.typing} label="Typing sounds" onChange={(on) => look(['audio', 'typing'], on, on ? 'Typing sounds on' : 'Typing sounds off')} testId="audio-typing" />
+          </Row>
+        )}
+        {current.audio.enabled && current.audio.typing && (
+          <Row label={`Typing volume · ${Math.round(current.audio.typingVolume * 100)} %`}>
+            <RangeInput
+              value={Math.round(current.audio.typingVolume * 100)}
+              min={0}
+              max={100}
+              label="Typing volume"
+              toCommand={(value) => ({ type: 'look', path: ['audio', 'typingVolume'], value: value / 100 }) as Command}
+              commitLabel="Typing volume"
+              testId="audio-typing-volume"
+            />
           </Row>
         )}
         {current.audio.enabled && (

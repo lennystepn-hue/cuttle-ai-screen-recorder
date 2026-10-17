@@ -15,6 +15,8 @@ export interface ProjectSources {
   webcam?: { path: string; offset: number };
   mic?: { path: string; offset: number };
   events?: InputEvent[];
+  /** The take's key counts, for the typing sounds (loaded whether the cursor shows or not). */
+  keys?: InputEvent[];
   /** The take's transcript (source seconds), for captions and subtitle files. */
   transcript?: TranscriptWord[];
   stills: Record<number, string>;
@@ -122,11 +124,14 @@ export async function loadSources(projectDir: string): Promise<ProjectSources> {
     const clean = look.audio.cleanup && sources.cleanMic ? await existing(projectDir, sources.cleanMic, 'cleaned-up mic (sources.cleanMic)') : undefined;
     result.mic = { path: clean ?? path, offset: offsetFor(take, 'mic', path, screen) };
   }
-  if (look.cursor.enabled && sources.events) {
+  const typing = look.audio.enabled && look.audio.typing;
+  if ((look.cursor.enabled || typing) && sources.events) {
     const path = await existing(projectDir, sources.events, 'input events (sources.events)', false);
     const events = parseEventsJsonl(await readFile(path, 'utf8'));
     if (events.issues.length > 0) throw new ExportError('invalid-project', `${path} is invalid:\n${issuesText(events.issues)}`);
-    result.events = events.events;
+    // the page draws the cursor from them only while it shows
+    if (look.cursor.enabled) result.events = events.events;
+    if (typing) result.keys = events.events.filter((event) => event.type === 'keys');
   }
   if (sources.transcript) {
     // without it the video has no captions: worth a warning, not a failed export

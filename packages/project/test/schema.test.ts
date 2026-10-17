@@ -29,7 +29,7 @@ describe('ProjectSchema', () => {
     expect(p.look.frame).toEqual({ enabled: true, style: 'mac-dark', title: '', radius: 14, shadow: true });
     expect(p.look.cursor).toEqual({ enabled: true, style: 'system', size: 1, color: '#D97757', clickEffect: 'ripple', smoothing: 0.5 });
     expect(p.look.webcam).toEqual({ enabled: false, shape: 'circle', corner: 'bottom-left', size: 0.18, border: true, shadow: true, mirror: false });
-    expect(p.look.audio).toEqual({ enabled: true, muteSpedUp: true, cleanup: true });
+    expect(p.look.audio).toEqual({ enabled: true, muteSpedUp: true, cleanup: true, typing: true, typingVolume: 0.5 });
     expect(p.look.transition).toEqual({ enabled: true, duration: 0.3 });
     expect(p.scenes).toEqual([]);
     expect(p.zooms).toEqual([]);

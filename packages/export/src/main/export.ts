@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, readdir, rename, rm, stat, writeFile } from 'node:fs/pr
 import { tmpdir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { applyCaptionFixes, captionCues, captionWords, sceneSpans, toSrt, toVtt } from '@cuttle/timeline';
+import { applyCaptionFixes, captionCues, captionWords, sceneSpans, toSrt, toVtt, typingClicks } from '@cuttle/timeline';
 import { app } from 'electron';
 import { INLINE_GRAPH_LIMIT, audioFilterGraph, muxArgs, planAudio } from '../audio';
 import { ExportError } from '../errors';
@@ -12,6 +12,7 @@ import { CHANNELS, type EncoderPreference, type ExportJob, type PageResult, type
 import { checkFfmpeg, runFfmpeg } from './ffmpeg';
 import { FileHost } from './files';
 import { loadSources, samePath } from './sources';
+import { writeTypingTrack } from './typing-track';
 import { openExportWindow, type ExportWindow } from './window';
 
 export interface ExportOptions {
@@ -263,12 +264,17 @@ export async function exportProject(opts: ExportOptions): Promise<ExportResult> 
 
     const audioStarted = performance.now();
     const seconds = page.frames / project.output.fps;
-    const segments = planAudio({ spans: sceneSpans(project.scenes, project.cuts), look: project.look, mic: sources.mic !== undefined, seconds });
+    const spans = sceneSpans(project.scenes, project.cuts);
+    const segments = planAudio({ spans, look: project.look, mic: sources.mic !== undefined, seconds });
     const usesMic = segments.some((segment) => segment.mic !== undefined);
-    const graph = audioFilterGraph(segments, sources.mic?.offset ?? 0);
+    // the typing sounds: a track of their own on the video's timeline, mixed in after the mic
+    const clicks = typingClicks(spans, sources.keys ?? [], project.look.audio);
+    const typing = clicks.length > 0 ? join(work, 'typing.wav') : undefined;
+    if (typing) await writeTypingTrack(typing, clicks, project.look.audio.typingVolume, seconds);
+    const graph = audioFilterGraph(segments, sources.mic?.offset ?? 0, 1, typing ? (usesMic ? 2 : 1) : undefined);
     const graphFile = graph.length > INLINE_GRAPH_LIMIT ? join(work, 'audio.graph') : undefined;
     if (graphFile) await writeFile(graphFile, graph);
-    await runFfmpeg(muxArgs({ video, mic: usesMic ? sources.mic?.path : undefined, graph, graphFile, out: partial }), signal);
+    await runFfmpeg(muxArgs({ video, mic: usesMic ? sources.mic?.path : undefined, typing, graph, graphFile, out: partial }), signal);
     throwIfCancelled();
     try {
       await rename(partial, out);

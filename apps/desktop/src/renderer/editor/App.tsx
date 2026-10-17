@@ -96,6 +96,8 @@ function TitleBar() {
   const media = useStore(store, (state) => state.media);
   const status = useStore(store, (state) => state.status);
   useStore(store, (state) => state.doc?.project);
+  // the player takes a new version a moment after the document: its length comes with its state
+  useStore(store, (state) => state.player.duration);
   const duration = currentPlayer()?.duration ?? 0;
   const recorded = media ? media.screen.end - media.screen.start : 0;
   return (
@@ -113,9 +115,14 @@ function TitleBar() {
       {phase === 'ready' && <RestartChip />}
       <div className="grow" />
       {status?.state === 'failed' ? (
-        <button className="chip-status warn" onClick={() => void bridge.invoke('project:cut')} title={`${status.text}. Click to try again.`} data-testid="project-status">
+        <button
+          className="chip-status warn"
+          onClick={() => void bridge.invoke(status.retry === 'speech' ? 'project:transcribe' : 'project:cut')}
+          title={`${status.text}. Click to try again.`}
+          data-testid="project-status"
+        >
           <WarningIcon size={14} />
-          <span className="chip-text">The take could not be cut</span> · Try again
+          <span className="chip-text">{status.retry === 'speech' ? 'The speech could not be transcribed' : 'The take could not be cut'}</span> · Try again
         </button>
       ) : (
         status && (
@@ -686,6 +693,7 @@ function Transport() {
   const format = useStore(store, (state) => state.format);
   const output = useStore(store, (state) => state.doc?.project.output);
   const own = ownFormat(output);
+  useStore(store, (state) => state.player.duration);
   const duration = currentPlayer()?.duration ?? 0;
   return (
     <div className="transport">

@@ -251,6 +251,54 @@ function takeFixture(projectDir: string, take = 'takes/1'): void {
   );
 }
 
+describe('cuttle models and transcribe', () => {
+  it('lists the speech models, none downloaded here', async () => {
+    const { code, json } = await cli('--json', 'models');
+    expect(code).toBe(0);
+    const list = json as { dir: string; models: { name: string; installed: boolean; default: boolean; bytes: number }[] };
+    // the tests' own empty folder (vitest.config.ts), never the user's
+    expect(list.dir).toBe(process.env.CUTTLE_MODELS_DIR);
+    expect(list.models.map((model) => [model.name, model.installed, model.default, Math.round(model.bytes / 1e6)])).toEqual([
+      ['base', false, false, 148],
+      ['small', false, true, 488],
+      ['large-v3-turbo-q5_0', false, false, 574],
+    ]);
+    const text = await cli('models');
+    expect(text.stdout).toContain('download one: cuttle models download small');
+    expect((await cli('--json', 'models', 'download', 'huge')).json).toEqual({
+      error: { code: 'usage', message: 'unknown speech model "huge" (one of base, small, large-v3-turbo-q5_0)' },
+    });
+  });
+
+  it('says what transcribe needs (a mic, then a model), and suggest goes on without it', async () => {
+    const dir = temp();
+    takeFixture(dir);
+    const noMic = await cli('--json', '-C', dir, 'transcribe');
+    expect(noMic.code).toBe(1);
+    expect(noMic.json).toEqual({ error: { code: 'usage', message: 'the take has no mic track: record with --mic to transcribe what was said' } });
+    const result = spawnSync('ffmpeg', ['-hide_banner', '-v', 'error', '-f', 'lavfi', '-i', 'sine=duration=20', '-c:a', 'aac', '-y', join(dir, 'takes', '1', 'mic.m4a')]);
+    if (result.status !== 0) throw new Error(String(result.stderr));
+    const path = join(dir, 'cuttle.json');
+    const project = JSON.parse(readFileSync(path, 'utf8'));
+    writeFileSync(path, JSON.stringify({ ...project, sources: { ...project.sources, mic: 'takes/1/mic.m4a' } }));
+    const noModel = await cli('--json', '-C', dir, 'transcribe', '--language', 'de');
+    expect(noModel.code).toBe(1);
+    expect(noModel.json).toEqual({ error: { code: 'model-missing', message: 'no speech model is downloaded: run "cuttle models download small" (488 MB, once)' } });
+    expect((await cli('--json', '-C', dir, 'transcribe', '--language', 'Deutsch')).json).toEqual({
+      error: { code: 'usage', message: '--language takes "auto" or a language code such as "de" or "en", not "Deutsch"' },
+    });
+    const suggested = await cli('--json', '-C', dir, 'suggest');
+    expect(suggested.code).toBe(0);
+    const { notes, speech } = suggested.json as { notes: string[]; speech: unknown };
+    expect(notes[0]).toBe('the mic was not transcribed: no speech model is downloaded ("cuttle models download small"), so filler words and pauses stay');
+    // a steady tone is not speech
+    expect(speech).toEqual({ from: 'mic', fillers: 0, pauses: 0 });
+    // --no-speech leaves the mic out altogether
+    const without = await cli('--json', '-C', dir, 'suggest', '--dry-run', '--no-speech');
+    expect((without.json as { notes: string[]; speech: unknown }).speech).toEqual({ from: 'none', fillers: 0, pauses: 0 });
+  }, 30_000);
+});
+
 describe('cuttle suggest and recover', () => {
   let fixture: string;
   beforeAll(() => {
@@ -301,6 +349,11 @@ describe('cuttle suggest and recover', () => {
             "type": "clip",
           },
         ],
+        "speech": {
+          "fillers": 0,
+          "from": "none",
+          "pauses": 0,
+        },
         "written": true,
         "zooms": [
           {

@@ -29,7 +29,24 @@ export interface SuggestJob {
   output: string;
 }
 
-export type MediaJob = ProxyJob | ThumbnailsJob | PeaksJob | SuggestJob;
+/** Transcribes a project's mic (`input`: its folder) into its take's transcript.json, not linked yet. */
+export interface TranscribeJob {
+  job: 'transcribe';
+  input: string;
+  output: string;
+  model: string;
+  language: string;
+}
+
+/** Links `transcript` and cuts the filler words and pauses of a project (`input`: its folder), in one write. */
+export interface SpeechEditsJob {
+  job: 'speech-edits';
+  input: string;
+  output: string;
+  transcript: string;
+}
+
+export type MediaJob = ProxyJob | ThumbnailsJob | PeaksJob | SuggestJob | TranscribeJob | SpeechEditsJob;
 
 export interface ThumbnailsMeta {
   interval: number;

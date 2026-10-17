@@ -21,7 +21,7 @@ export interface RecoverResult {
   backup?: string;
 }
 
-const FILES = { screen: 'screen.mp4', webcam: 'webcam.mp4', mic: 'mic.m4a', events: 'events.jsonl', markers: 'markers.json', take: 'take.json', segments: 'segments.json' };
+const FILES = { screen: 'screen.mp4', webcam: 'webcam.mp4', mic: 'mic.m4a', events: 'events.jsonl', markers: 'markers.json', take: 'take.json', segments: 'segments.json', transcript: 'transcript.json' };
 
 /**
  * Recovers a take (a folder relative to the project, e.g. takes/3): makes it usable after
@@ -102,9 +102,9 @@ export async function recoverTake(projectDir: string, takeDir: string): Promise<
     );
   }
 
-  const { scenes, zooms, masks, texts } = file.project;
+  const { scenes, zooms, masks, texts, cuts } = file.project;
   const sameTake = samePath(resolve(file.dir, file.project.sources.screen), path(FILES.screen));
-  const keepEdit = sameTake && scenes.length + zooms.length + masks.length + texts.length > 0;
+  const keepEdit = sameTake && scenes.length + zooms.length + masks.length + texts.length + cuts.length > 0;
   const hadEdit = useTake(
     file,
     {
@@ -113,6 +113,7 @@ export async function recoverTake(projectDir: string, takeDir: string): Promise<
       ...(mic && { mic: source(FILES.mic) }),
       events: source(FILES.events),
       markers: source(FILES.markers),
+      ...(existsSync(path(FILES.transcript)) && { transcript: source(FILES.transcript) }),
       seconds,
     },
     sameTake,

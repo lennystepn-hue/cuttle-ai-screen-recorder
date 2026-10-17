@@ -5,7 +5,8 @@
 // removes it without saying so.
 import { parseProject, type CuttleProject } from '@cuttle/project';
 import { applyCommand, describeChange, DocumentError, ensureIds, firstChanged, pinIds, replayCommands, type Command, type EditLimits, type ListName, type Raw } from '../../shared/document';
-import type { ProjectFileEvent } from '../../shared/ipc';
+import type { ChangeOrigin, ProjectFileEvent } from '../../shared/ipc';
+import { takeKey } from '../../shared/take';
 import { bridge } from '../bridge';
 import { store } from './session';
 
@@ -180,7 +181,20 @@ function restore(raw: Raw): void {
   void save();
 }
 
-const sourcesOf = (raw: Raw) => JSON.stringify(raw.sources);
+const sourcesOf = (raw: Raw) => takeKey(raw.sources);
+
+/** The undo step of a change made outside the editor, by who made it. */
+const ORIGIN_LABELS: Record<ChangeOrigin, string> = { outside: 'the outside change', suggest: "Cuttle's cut", speech: "Cuttle's speech edits" };
+
+/** What the app's speech edits did, said once they arrive. */
+function speechToast(project: CuttleProject): string {
+  const count = (kind: 'filler' | 'pause') => project.cuts.filter((cut) => cut.auto === kind && cut.enabled).length;
+  const fillers = count('filler');
+  const pauses = count('pause');
+  if (fillers + pauses === 0) return 'Cuttle transcribed the take: no filler words or pauses to cut.';
+  const parts = [fillers > 0 && `${fillers} filler word${fillers === 1 ? '' : 's'}`, pauses > 0 && `${pauses} pause${pauses === 1 ? '' : 's'}`].filter(Boolean);
+  return `Cuttle cut ${parts.join(' and ')} where the picture rests.`;
+}
 
 /** The editor opens anew on another take (its media); the main process reloads it (a page cannot). */
 function reloadForTake(): void {
@@ -227,7 +241,7 @@ function save(): Promise<void> {
         setDoc({ problem: 'cuttle.json changed outside the app and has a mistake: your edit is saved once it is fixed' });
         return finish();
       }
-      const outside = conflict.origin === 'suggest' ? "Cuttle's cut" : 'the outside change';
+      const outside = ORIGIN_LABELS[conflict.origin];
       if (restoring) {
         // An undo or redo is a whole version: the newer one shows, as a step to undo (back to the
         // version the person had asked for).
@@ -352,9 +366,10 @@ export async function outsideChange(event: ProjectFileEvent): Promise<void> {
   } catch {
     return;
   }
-  undoStack.push({ raw: before.raw, label: event.origin === 'suggest' ? "Cuttle's cut" : 'the outside change' });
+  undoStack.push({ raw: before.raw, label: ORIGIN_LABELS[event.origin] });
   redoStack.length = 0;
   setDoc({ raw, project, hash: event.hash, preview: undefined });
   const show = firstChanged(before.project, project);
-  toast(event.origin === 'suggest' ? 'Cuttle cut the take.' : `Changed outside the app: ${describeChange(before.project, project)}`, { undo: true, ...(show && event.origin !== 'suggest' && { show }) });
+  const said = event.origin === 'suggest' ? 'Cuttle cut the take.' : event.origin === 'speech' ? speechToast(project) : `Changed outside the app: ${describeChange(before.project, project)}`;
+  toast(said, { undo: true, ...(show && event.origin === 'outside' && { show }) });
 }

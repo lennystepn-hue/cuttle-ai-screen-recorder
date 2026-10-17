@@ -17,6 +17,8 @@ export interface PlayerState {
   source?: number;
   /** Set when a frame could not be drawn, said for people. */
   error?: string;
+  /** The video's length in output seconds, as the timeline the player shows has it. */
+  duration?: number;
 }
 
 /** Frames the playback decoders open before a scene shows. */
@@ -143,6 +145,8 @@ export class Player {
     const renew = look(project) !== look(this.project) || background !== this.drawnBackground;
     this.project = project;
     this.timeline = this.makeTimeline();
+    // the title bar and the transport show the length: they learn it changed with the state
+    this.set({ duration: this.timeline.duration });
     if (renew) {
       this.renderer.dispose();
       this.renderer = this.makeRenderer();

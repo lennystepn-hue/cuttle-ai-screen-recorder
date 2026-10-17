@@ -9,6 +9,19 @@ const SettingsSchema = z.object({
   recent: z.array(z.object({ dir: z.string(), name: z.string(), opened: z.number() })).catch([]).default([]),
   /** Where the pill sits, per display (DIP), keyed by the display's id. */
   pill: z.record(z.string(), z.object({ x: z.number(), y: z.number() })).catch({}).default({}),
+  /** New recordings go into a new folder here. */
+  projectsFolder: z
+    .string()
+    .min(1)
+    .catch(() => join(app.getPath('home'), 'Cuttle'))
+    .default(() => join(app.getPath('home'), 'Cuttle')),
+  /** Seconds of countdown before a recording starts. */
+  countdown: z.union([z.literal(0), z.literal(3), z.literal(5)]).catch(3).default(3),
+  /** The picker bar's choices, kept between recordings. */
+  record: z
+    .object({ camera: z.string().optional(), mic: z.string().optional(), stop: z.enum(['none', 'claude', 'idle']).default('none'), claudeFolder: z.string().optional() })
+    .catch({ stop: 'none' as const })
+    .default({ stop: 'none' as const }),
 });
 
 export type Settings = z.output<typeof SettingsSchema>;

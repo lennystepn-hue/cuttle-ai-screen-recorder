@@ -10,7 +10,7 @@ import { PNG } from 'pngjs';
 import { whisperCliPath } from '@cuttle/core';
 import { _electron, type ElectronApplication, type Page } from 'playwright';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { FIXTURE_OUTPUT, makeFixture, makePrivateFixture, makeRestingFixture, makeSpokenFixture } from './fixture';
+import { FIXTURE_OUTPUT, makeFixture, makeMotionFixture, makePrivateFixture, makeRestingFixture, makeSpokenFixture } from './fixture';
 
 /**
  * The app end to end, its windows never shown: open a project, play, scrub, select, compare the
@@ -1645,6 +1645,30 @@ describe.runIf(enabled)('the Cuttle app', () => {
     expect(file().sources.screenText).toBeUndefined();
     await page.waitForSelector('[data-testid=privacy-note]');
     await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find((window) => window.getTitle() === 'private · Cuttle')?.close());
+  }, 180_000);
+
+  it('opens a project with motion: its scene on the timeline, and the export draws the scene and the overlay', async () => {
+    const dir = join(root, 'motion');
+    makeMotionFixture(dir);
+    const page = await openEditor(dir);
+    await page.waitForSelector('.scene.motion');
+    expect(await page.locator('.scene.motion').first().textContent()).toContain('intro');
+    await shotOf('37-motion', '/editor.html', 'motion · Cuttle');
+    await page.keyboard.press('Control+E');
+    await page.waitForSelector('[data-testid=export-sheet]');
+    await page.click('[data-testid=export-start]');
+    await page.waitForSelector('[data-testid=export-file]', { timeout: 120_000 });
+    // a pixel of the video (rgb24 from ffmpeg; a crop of 2×2, since 4:2:0 video crops in pairs)
+    const pixel = (seconds: number, x: number, y: number) => [
+      ...spawnSync('ffmpeg', ['-v', 'error', '-ss', String(seconds), '-i', join(dir, 'out', 'export.mp4'), '-frames:v', '1', '-vf', `crop=2:2:${x}:${y}`, '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-'], { windowsHide: true }).stdout.subarray(0, 3),
+    ];
+    // saturated colours move a little between the video's colour matrix and ffmpeg's
+    const near = (actual: number[], expected: number[]) => actual.length === 3 && actual.every((value, i) => Math.abs(value - expected[i]!) <= 40);
+    // the scene fills the frame; over the clip (output 2.5 s is source 1.5 s) the overlay's bar shows at the bottom only
+    expect(near(pixel(0.5, 320, 180), [255, 0, 255])).toBe(true);
+    expect(near(pixel(2.5, 320, 350), [0, 255, 0])).toBe(true);
+    expect(near(pixel(2.5, 320, 100), [0, 255, 0])).toBe(false);
+    await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find((window) => window.getTitle() === 'motion · Cuttle')?.close());
   }, 180_000);
 
   it('had no unhandled rejection in the main process, and no error in the editor', async () => {

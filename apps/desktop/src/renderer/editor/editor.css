@@ -736,6 +736,10 @@ button.chip-status:hover {
   background: linear-gradient(180deg, rgba(242, 179, 74, 0.26), rgba(242, 179, 74, 0.1));
   box-shadow: inset 0 0 0 1px rgba(242, 179, 74, 0.45);
 }
+.scene.motion {
+  background: linear-gradient(180deg, rgba(167, 139, 250, 0.28), rgba(167, 139, 250, 0.1));
+  box-shadow: inset 0 0 0 1px rgba(167, 139, 250, 0.5);
+}
 .item {
   position: absolute;
   height: 18px;

@@ -39,7 +39,7 @@ import {
   TEXT_STYLE_NAMES,
   WEBCAM_SHAPE_NAMES,
 } from '../../shared/names';
-import { outputTimesOf } from '../../shared/timeline-model';
+import { motionName, outputTimesOf } from '../../shared/timeline-model';
 import { BackgroundIcon, CameraIcon, CardIcon, CheckIcon, ChevronIcon, CopyIcon, CropIcon, FilmIcon, MaskIcon, PageIcon, SelectIcon, SoundIcon, SplitIcon, SubtitlesIcon, TextIcon, TrashIcon, WindowIcon, ZoomIcon } from '../icons';
 import { Select as StyledSelect } from '../Select';
 import { chooseImage, cutShownAt, deleteSelection, duplicateSelection, LIST_OF, playheadPlace, reveal, SPEEDS } from './actions';
@@ -716,6 +716,25 @@ function Details({ project, selection }: { project: CuttleProject; selection: Se
           </div>
           <Row label="Frame">
             <Select value={scene.frame} options={FRAME_STYLES} names={FRAME_NAMES} onChange={(frame) => set('scenes', id, { frame }, 'Change frame')} />
+          </Row>
+        </>
+      );
+    }
+    if (scene.type === 'motion') {
+      return (
+        <>
+          <Head icon={<CardIcon />} color="var(--motion)" name={scene.label ?? motionName(scene.src)} />
+          <Row label="Label">
+            <TextInput value={scene.label ?? ''} placeholder={motionName(scene.src)} onCommit={(value) => set('scenes', id, { label: value.trim() || undefined }, 'Rename motion scene')} />
+          </Row>
+          <Row label="Page" plain>
+            <span className="path" title={scene.src}>
+              {scene.src}
+            </span>
+          </Row>
+          {inVideo}
+          <Row label="Length (s)">
+            <NumberInput value={scene.duration} min={0.1} onCommit={(duration) => edit([{ type: 'trim', id, duration }], 'Change the length of the motion scene')} />
           </Row>
         </>
       );

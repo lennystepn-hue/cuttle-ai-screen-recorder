@@ -407,7 +407,14 @@ export function replayCommands(raw: Raw, commands: readonly Command[], limits: E
   return { raw: current, dropped };
 }
 
-const NOUNS: Record<ListName, [string, string]> = { scenes: ['scene', 'scenes'], zooms: ['zoom', 'zooms'], masks: ['mask', 'masks'], texts: ['caption', 'captions'], cuts: ['cut', 'cuts'] };
+const NOUNS: Record<ListName, [string, string]> = {
+  scenes: ['scene', 'scenes'],
+  zooms: ['zoom', 'zooms'],
+  masks: ['mask', 'masks'],
+  texts: ['caption', 'captions'],
+  overlays: ['motion overlay', 'motion overlays'],
+  cuts: ['cut', 'cuts'],
+};
 const noun = (list: ListName, count: number) => `${count} ${NOUNS[list][count === 1 ? 0 : 1]}`;
 
 /**

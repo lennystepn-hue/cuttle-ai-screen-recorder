@@ -10,7 +10,7 @@ export interface SceneBlock {
   index: number;
   /** The scene's id (`#<index>` for one without). */
   id: string;
-  kind: 'clip' | 'still' | 'card';
+  kind: 'clip' | 'still' | 'card' | 'motion';
   /** Output seconds. */
   start: number;
   end: number;
@@ -116,7 +116,15 @@ function sceneBlock(pieces: readonly SceneSpan[], project: CuttleProject): Scene
     const motion = scene.motion === 'none' ? '' : ` · ${scene.motion === 'kenburns' ? 'Ken Burns' : 'scroll'}`;
     return { index, id, kind: 'still', start, end, title: scene.label ?? baseName(scene.image), detail: `${formatDuration(scene.duration)}${motion}` };
   }
+  if (scene.type === 'motion') return { index, id, kind: 'motion', start, end, title: scene.label ?? motionName(scene.src), detail: `Motion · ${formatDuration(scene.duration)}` };
   return { index, id, kind: 'card', start, end, title: scene.label ?? scene.title, detail: formatDuration(scene.duration) };
+}
+
+/** A motion page's name: its folder (`motion/intro/index.html` is "intro"), or the file without its extension. */
+export function motionName(src: string): string {
+  const parts = src.split(/[\\/]/).filter(Boolean);
+  const file = parts.at(-1) ?? src;
+  return /^index\.html?$/i.test(file) && parts.length > 1 ? parts.at(-2)! : file.replace(/\.html?$/i, '');
 }
 
 function lane<T extends { enabled: boolean; label?: string; id?: string }>(

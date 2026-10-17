@@ -13,7 +13,9 @@ export const NEW_OVERLAY_SECONDS = 3;
 export const SPEEDS = [1, 2, 4, 8, 12, 20] as const;
 
 export const LIST_OF: Record<Selection['kind'], ListName> = { scene: 'scenes', zoom: 'zooms', mask: 'masks', caption: 'texts', cut: 'cuts', crop: 'scenes' };
-const NAMES: Record<ListName, string> = { scenes: 'scene', zooms: 'zoom', masks: 'mask', texts: 'caption', cuts: 'cut' };
+/** What people call a scene of each type. */
+const SCENE_NOUNS: Record<Scene['type'], string> = { clip: 'clip', still: 'page', card: 'card', motion: 'motion scene' };
+const NAMES: Record<ListName, string> = { scenes: 'scene', zooms: 'zoom', masks: 'mask', texts: 'caption', overlays: 'motion overlay', cuts: 'cut' };
 
 /** Where the playhead is: its scene and, in a clip, the source second it shows. */
 export interface PlayheadPlace {
@@ -48,7 +50,7 @@ export function playheadPlace(t = currentPlayer()?.current().t ?? 0): PlayheadPl
 export function overlayBlocked(t = currentPlayer()?.current().t ?? 0): string | undefined {
   const place = playheadPlace(t);
   if (!place) return 'There is nothing in the video yet';
-  if (!place.clip) return `Zooms, masks and captions go on clips, not on a ${place.span.scene.type === 'still' ? 'page' : 'card'}: move the playhead onto a clip`;
+  if (!place.clip) return `Zooms, masks and captions go on clips, not on a ${SCENE_NOUNS[place.span.scene.type]}: move the playhead onto a clip`;
   if ((currentPlayer()?.clipsAt(t) ?? 1) > 1) return 'Zooms, masks and captions do not go inside a crossfade: move the playhead a little';
   return undefined;
 }
@@ -245,14 +247,16 @@ export async function chooseImage(purpose: 'still' | 'background', id?: string):
   else edit([{ type: 'look', path: ['background'], value: { preset: 'image', image: chosen.path } }], 'Background image');
 }
 
-const KIND_OF: Record<ListName, Selection['kind']> = { scenes: 'scene', zooms: 'zoom', masks: 'mask', texts: 'caption', cuts: 'cut' };
+/** What selecting an item of each list selects (motion overlays get a lane in P5-M1c). */
+const KIND_OF: Record<ListName, Selection['kind'] | undefined> = { scenes: 'scene', zooms: 'zoom', masks: 'mask', texts: 'caption', overlays: undefined, cuts: 'cut' };
 
 /** Selects an item and moves the playhead to where the video first shows it (the toast's "Show"). */
 export function reveal(list: ListName, id: string): void {
   const project = documentProject();
   const item = project?.[list].find((candidate) => candidate.id === id);
   if (!project || !item) return;
-  select({ kind: KIND_OF[list], id });
+  const kind = KIND_OF[list];
+  if (kind) select({ kind, id });
   const spans = sceneSpans(project.scenes, project.cuts);
   const sceneIndex = list === 'scenes' ? project.scenes.indexOf(item as Scene) : -1;
   const at =

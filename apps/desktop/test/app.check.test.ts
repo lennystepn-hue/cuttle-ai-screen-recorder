@@ -28,8 +28,9 @@ const enabled = process.env.MODE === 'app';
 const MAIN = fileURLToPath(new URL('../dist/main/index.mjs', import.meta.url));
 const CLI = fileURLToPath(new URL('../../cli/dist/cuttle.mjs', import.meta.url));
 const SHOTS = process.env.CUTTLE_CHECK_SHOTS;
-/** The English text-to-speech take of the core tests. */
+/** The English text-to-speech take of the core tests, and the true start of each of its words. */
 const SPOKEN = fileURLToPath(new URL('../../../packages/core/test/fixtures/speech/en.m4a', import.meta.url));
+const SPOKEN_WORDS = fileURLToPath(new URL('../../../packages/core/test/fixtures/speech/en.words.json', import.meta.url));
 /**
  * The `base` speech model where one is downloaded (`CUTTLE_TEST_MODELS`, else the user's models
  * folder): the check downloads it from a server of its own, so the model can be checked end to end.
@@ -188,6 +189,21 @@ describe.runIf(enabled)('the Cuttle app', () => {
       { part, title },
     );
     writeFileSync(join(SHOTS, `${name}.png`), Buffer.from(png, 'base64'));
+  };
+  /** Opens a project folder as a second launch would, and finds its editor (others may be open: the takes recorded before). */
+  const openEditor = async (dir: string): Promise<Page> => {
+    const name = basename(dir);
+    await launchAgain(['--open', dir]);
+    await expect.poll(editorTitles, { timeout: 30_000 }).toContain(`${name} · Cuttle`);
+    const page = await waitForPage(
+      app,
+      async (candidate) =>
+        candidate.url().includes('/editor.html') &&
+        basename((await candidate.evaluate(() => (window as unknown as { cuttle: { invoke(channel: string): Promise<{ dir: string }> } }).cuttle.invoke('project:info'))).dir) === name,
+    );
+    await page.waitForSelector('.app[data-phase="ready"]', { timeout: 30_000 });
+    await page.setViewportSize({ width: 1440, height: 900 });
+    return page;
   };
   /** Asks the running app to open `argv` as a second launch would, `times` times at once. */
   const launchAgain = (argv: string[], times = 1) =>
@@ -1189,17 +1205,7 @@ describe.runIf(enabled)('the Cuttle app', () => {
     // a spoken take, opened: the Auto tab offers to transcribe it
     const spoken = join(root, 'spoken');
     makeSpokenFixture(spoken, SPOKEN);
-    await launchAgain(['--open', spoken]);
-    await expect.poll(editorTitles, { timeout: 30_000 }).toContain('spoken · Cuttle');
-    // other editors may be open (the takes recorded before): this one by its project
-    const page = await waitForPage(
-      app,
-      async (candidate) =>
-        candidate.url().includes('/editor.html') &&
-        /[\\/]spoken$/.test((await candidate.evaluate(() => (window as unknown as { cuttle: { invoke(channel: string): Promise<{ dir: string }> } }).cuttle.invoke('project:info'))).dir),
-    );
-    await page.waitForSelector('.app[data-phase="ready"]', { timeout: 30_000 });
-    await page.setViewportSize({ width: 1440, height: 900 });
+    const page = await openEditor(spoken);
     await click(page, '#tab-auto');
     await page.waitForSelector('[data-testid=speech-note]');
     await click(page, '[data-testid=transcribe]');
@@ -1230,6 +1236,87 @@ describe.runIf(enabled)('the Cuttle app', () => {
     await shotOf('27-speech-edits', '/editor.html', 'spoken · Cuttle');
     await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find((window) => window.getTitle() === 'spoken · Cuttle')?.close());
   }, 120_000);
+
+  it('shows the transcript (a click goes to a word, a fix reads in the subtitles, Delete cuts words and Restore brings them back), styles the subtitles, and exports them as .srt', async () => {
+    const dir = join(root, 'subtitled');
+    makeSpokenFixture(dir, SPOKEN);
+    // the transcript the spoken take gets, from its words' true starts: no speech model needed here
+    const truth = JSON.parse(readFileSync(SPOKEN_WORDS, 'utf8')) as { t: number; text: string }[];
+    const words = truth.map((word, i) => ({ t: word.t, end: Math.min(truth[i + 1]?.t ?? word.t + 0.5, word.t + 0.5), text: word.text }));
+    const take = join(dir, 'takes', '1');
+    writeFileSync(join(take, 'transcript.json'), JSON.stringify({ version: 1, language: 'en', model: 'small', words }));
+    cpSync(join(take, 'mic.m4a'), join(take, 'mic.clean.m4a'));
+    const path = join(dir, 'cuttle.json');
+    const raw = JSON.parse(readFileSync(path, 'utf8')) as { sources: Record<string, string> };
+    writeFileSync(path, JSON.stringify({ ...raw, sources: { ...raw.sources, transcript: 'takes/1/transcript.json', cleanMic: 'takes/1/mic.clean.m4a' } }, null, 2));
+    type Saved = { cuts?: { label?: string }[]; captions?: { style?: string; fixes?: { at: number; end: number; text: string }[] }; look?: { audio?: { cleanup?: boolean } } };
+    const saved = () => JSON.parse(readFileSync(path, 'utf8')) as Saved;
+    const page = await openEditor(dir);
+    const pageState = () => page.evaluate(() => (window as unknown as Hooked).__cuttleCheck.state());
+    const index = (text: string) => words.findIndex((word) => word.text === text);
+    const word = (text: string) => `[data-testid=transcript] .word[data-index="${index(text)}"]`;
+    // the subtitles over the mic's waveform
+    await page.waitForSelector('[data-testid=subtitle-cue]');
+    // the Transcript tab: every word; a click goes there
+    await click(page, '#tab-transcript');
+    await page.waitForSelector('[data-testid=transcript] .word');
+    expect(await page.locator('[data-testid=transcript] .word').count()).toBe(words.length);
+    await click(page, word('records'));
+    await expect.poll(async () => (await pageState()).t).toBeCloseTo(words[index('records')]!.t, 1);
+    // a double click fixes a word; the fix is one step in the file
+    await page.evaluate((selector) => document.querySelector(selector)!.dispatchEvent(new MouseEvent('dblclick', { bubbles: true })), word('Cuttle'));
+    await page.fill('[data-testid=word-field]', 'Cuttle!');
+    await page.press('[data-testid=word-field]', 'Enter');
+    const cuttle = words[index('Cuttle')]!;
+    await expect.poll(() => saved().captions?.fixes).toEqual([{ at: cuttle.t, end: cuttle.end, text: 'Cuttle!' }]);
+    // one word for one: it keeps its place in the list
+    await page.waitForSelector(`${word('Cuttle')}.fixed`);
+    // Delete cuts the selected word out of the video; Restore brings it back
+    await click(page, word('every'));
+    await page.keyboard.press('Delete');
+    await expect.poll(() => saved().cuts?.map((cut) => cut.label)).toEqual(['Words: “every”']);
+    await page.waitForSelector(`${word('every')}.cut`);
+    await click(page, '[data-testid=transcript-restore]');
+    await expect.poll(() => saved().cuts ?? []).toEqual([]);
+    // Ctrl+F finds words; Enter goes to the next one after the selected word ("every"), Shift+Enter back
+    await page.keyboard.press('Control+F');
+    await expect.poll(() => page.evaluate(() => (document.activeElement as HTMLElement | null)?.dataset.testid)).toBe('transcript-find');
+    await page.keyboard.type('click');
+    expect(await page.locator('.transcript-count').textContent()).toBe('2 found');
+    await page.keyboard.press('Enter');
+    await page.waitForSelector(`${word('click')}.selected`);
+    await page.keyboard.press('Shift+Enter');
+    await page.waitForSelector(`${word('clicks')}.selected`);
+    await shotOf('28-transcript', '/editor.html', 'subtitled · Cuttle');
+    // the Look tab: the subtitles' style, and the clean voice
+    await click(page, '#tab-look');
+    await page.waitForSelector('[data-testid=captions-enabled][aria-checked=true]');
+    await page.locator('[data-testid=captions-style]').evaluate((element) => (element as HTMLElement).click());
+    await page.waitForSelector('.select-list [role=option]');
+    await page.evaluate(() => {
+      const option = [...document.querySelectorAll('.select-list [role=option]')].find((item) => item.querySelector('.option-label')?.textContent === 'Karaoke');
+      (option as HTMLElement).click();
+    });
+    await expect.poll(() => saved().captions?.style).toBe('karaoke');
+    await click(page, '[data-testid=audio-cleanup]');
+    await expect.poll(() => saved().look?.audio?.cleanup).toBe(false);
+    await page.evaluate((t) => (window as unknown as Hooked).__cuttleCheck.seek(t), words[index('zooms')]!.t + 0.1);
+    await page.locator('[data-testid=captions-style]').evaluate((element) => element.scrollIntoView({ block: 'center' }));
+    await shotOf('29-subtitles-karaoke', '/editor.html', 'subtitled · Cuttle');
+    // the export writes the subtitles next to the video
+    await page.keyboard.press('Control+E');
+    await page.waitForSelector('[data-testid=export-subtitles]');
+    await click(page, '[data-testid=export-srt]');
+    await page.waitForSelector('[data-testid=export-srt][aria-pressed=true]');
+    await shotOf('30-export-subtitles', '/editor.html', 'subtitled · Cuttle');
+    await click(page, '[data-testid=export-start]');
+    await page.waitForSelector('[data-testid=export-file]', { timeout: 120_000 });
+    expect(await page.locator('[data-testid=export-file] small').textContent()).toContain('with .srt');
+    const srt = readFileSync(join(dir, 'out', 'export.srt'), 'utf8');
+    expect(srt.startsWith('1\n00:00:00,100 --> ')).toBe(true);
+    expect(srt).toContain('Cuttle!');
+    await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find((window) => window.getTitle() === 'subtitled · Cuttle')?.close());
+  }, 180_000);
 
   it('had no unhandled rejection in the main process, and no error in the editor', async () => {
     expect(await app.evaluate(() => (globalThis as unknown as { __rejections: string[] }).__rejections)).toEqual([]);

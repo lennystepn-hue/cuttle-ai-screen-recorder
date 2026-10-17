@@ -1065,6 +1065,35 @@ describe.runIf(enabled)('the Cuttle app', () => {
     await opened.waitForSelector('.app[data-phase="ready"]', { timeout: 30_000 });
   }, 120_000);
 
+  it('marks a slip from the HUD (the mistake key): it says what to do next, and the cut goes back from there', async () => {
+    const before = new Set(existsSync(join(root, 'projects')) ? readdirSync(join(root, 'projects')) : []);
+    await recordThroughPicker(pillRecord, { stop: 'none', camera: undefined }, false);
+    const hud = await runningHud();
+    await wait(2500);
+    await click(hud, '[data-testid=hud-retake]');
+    await expect.poll(() => hud.locator('[data-testid=hud-note]').textContent(), { timeout: 5_000 }).toBe('Slip marked: do it again');
+    // the hint fits the HUD whole
+    expect(await hud.evaluate(() => [...document.querySelectorAll('[data-testid=hud-note], [data-testid=hud-note] *')].every((element) => element.scrollWidth <= element.clientWidth + 1))).toBe(true);
+    await shotOf('31-hud-retake', '/hud.html');
+    await click(hud, '[data-testid=hud-stop]');
+    const dir = await newProject(before);
+    const written = (await projectWhen(dir, (file) => file.scenes[0]?.id !== undefined)) as unknown as { cuts?: { to: number; auto?: string; label?: string }[] };
+    const { markers } = JSON.parse(readFileSync(join(dir, 'takes', '1', 'markers.json'), 'utf8')) as { markers: { t: number; kind: string }[] };
+    const slip = markers.find((marker) => marker.kind === 'retake');
+    expect(slip?.t).toBeGreaterThan(2);
+    // no speech in this take: the cut goes back 5 s at most (not before the clip) to just past the key
+    expect((written.cuts ?? []).filter((cut) => cut.auto === 'retake')).toEqual([expect.objectContaining({ label: 'Retake', to: expect.closeTo(slip!.t + 0.15, 2) })]);
+    const opened = await waitForPage(app, async (page) => page.url().includes('/editor.html') && (await page.title()) === `${basename(dir)} · Cuttle`);
+    await opened.waitForSelector('.app[data-phase="ready"]', { timeout: 30_000 });
+    // once Cuttle's cut is in, the slip is a notch (its pin lies in the cut), and a row in the Auto tab
+    await expect.poll(() => opened.evaluate(() => (window as unknown as { __cuttleCheck: Check }).__cuttleCheck.doc().undo), { timeout: 15_000 }).toBe("Cuttle's cut");
+    await click(opened, '[data-testid=cut-notch]');
+    await opened.waitForSelector('[data-testid=auto-note]');
+    expect(await opened.locator('.inspector .kind-head .name').textContent()).toBe('Retake');
+    await click(opened, '#tab-auto');
+    expect(await opened.locator('[data-testid=auto-group-retakes] .auto-count').textContent()).toBe('1 on');
+  }, 120_000);
+
   it('restarts from the HUD on a held press only: the take is put aside, and Undo restart brings it back', async () => {
     const before = new Set(readdirSync(join(root, 'projects')));
     await recordThroughPicker(pillRecord, { stop: 'none' }, false);
@@ -1215,17 +1244,20 @@ describe.runIf(enabled)('the Cuttle app', () => {
     const cuts = file().cuts ?? [];
     const fillers = cuts.filter((cut) => cut.auto === 'filler').length;
     const pauses = cuts.filter((cut) => cut.auto === 'pause').length;
-    expect(fillers).toBeGreaterThanOrEqual(2);
+    expect(fillers).toBeGreaterThanOrEqual(1);
     expect(pauses).toBeGreaterThanOrEqual(1);
-    // "Uh" at 2.02 s and "Um" at 7.55 s are gone from the video
-    for (const at of [2.1, 7.7]) expect(cuts.some((cut) => cut.from <= at && at < cut.to), `a cut at ${at} s`).toBe(true);
+    // "Uh" at 2.02 s is gone from the video, and "Um, it zooms on clicks. Again." (7.55 to 10.8 s)
+    // with it: a slip said again
+    expect(cuts.filter((cut) => cut.auto === 'retake')).toEqual([expect.objectContaining({ label: 'Retake: “Again”' })]);
+    for (const at of [2.1, 7.7, 9, 10.5]) expect(cuts.some((cut) => cut.from <= at && at < cut.to), `a cut at ${at} s`).toBe(true);
     await page.waitForSelector('[data-testid=auto-group-fillers]');
     await page.waitForSelector('[data-testid=speech-note]', { state: 'detached' });
     expect(await page.locator('[data-testid=auto-group-fillers] .auto-count').textContent()).toBe(`${fillers} on`);
     expect(await page.locator('[data-testid=auto-group-pauses] .auto-count').textContent()).toBe(`${pauses} on`);
+    expect(await page.locator('[data-testid=auto-group-retakes] .auto-count').textContent()).toBe('1 on');
     const pageDoc = () => page.evaluate(() => (window as unknown as Hooked).__cuttleCheck.doc());
     expect((await pageDoc()).undo).toBe("Cuttle's speech edits");
-    expect((await pageDoc()).toast?.text).toBe(`Cuttle cut ${fillers} filler words and ${pauses} pause${pauses === 1 ? '' : 's'} where the picture rests.`);
+    expect((await pageDoc()).toast?.text).toBe(`Cuttle cut 1 retake, and ${fillers} filler word${fillers === 1 ? '' : 's'} and ${pauses} pause${pauses === 1 ? '' : 's'} where the picture rests.`);
     expect(await page.locator('[data-testid=project-status]').count()).toBe(0);
     // the video is shorter by the cuts, in the player and the title bar
     const removed = cuts.reduce((sum, cut) => sum + (cut.to - cut.from), 0);

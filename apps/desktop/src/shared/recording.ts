@@ -8,6 +8,7 @@ export type HostRequest =
   | { type: 'start'; options: Omit<RecordOptions, 'onEvent'> }
   | { type: 'stop' }
   | { type: 'marker'; label?: string }
+  | { type: 'retake' }
   | { type: 'pause' }
   | { type: 'resume' }
   | { type: 'dead-zones'; zones: Bounds[] };

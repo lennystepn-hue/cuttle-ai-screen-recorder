@@ -140,7 +140,7 @@ export async function runCli(argv: readonly string[], streams?: Streams): Promis
     .option('--claude [cwd]', "read Claude Code's transcript for a take without Claude markers (default: here)")
     .option('--no-zoom', 'no zooms (neither on the answer nor on clicks)')
     .option('--no-click-zooms', 'no zooms on clicks (the answer zoom stays)')
-    .option('--no-speech', 'leave the speech out: no filler or pause cuts, and speech does not keep a stretch')
+    .option('--no-speech', 'leave the speech out: no filler, pause or spoken retake cuts, and speech does not keep a stretch')
     .option('--no-transcribe', 'do not transcribe the mic first (when it has no transcript and a speech model is there)')
     .option('--dry-run', 'print the suggestion, leave cuttle.json as it is')
     .action(

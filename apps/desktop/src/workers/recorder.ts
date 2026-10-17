@@ -43,6 +43,9 @@ port.on('message', ({ data }) => {
     case 'marker':
       recording?.marker(data.label);
       return;
+    case 'retake':
+      recording?.retake();
+      return;
     case 'pause':
       recording?.pause();
       return;

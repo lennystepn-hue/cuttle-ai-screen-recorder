@@ -188,12 +188,15 @@ const ORIGIN_LABELS: Record<ChangeOrigin, string> = { outside: 'the outside chan
 
 /** What the app's speech edits did, said once they arrive. */
 function speechToast(project: CuttleProject): string {
-  const count = (kind: 'filler' | 'pause') => project.cuts.filter((cut) => cut.auto === kind && cut.enabled).length;
+  const count = (kind: 'retake' | 'filler' | 'pause') => project.cuts.filter((cut) => cut.auto === kind && cut.enabled).length;
+  const retakes = count('retake');
   const fillers = count('filler');
   const pauses = count('pause');
-  if (fillers + pauses === 0) return 'Cuttle transcribed the take: no filler words or pauses to cut.';
+  if (retakes + fillers + pauses === 0) return 'Cuttle transcribed the take: no filler words or pauses to cut.';
+  const slips = retakes > 0 ? `${retakes} retake${retakes === 1 ? '' : 's'}` : '';
+  if (fillers + pauses === 0) return `Cuttle cut ${slips}.`;
   const parts = [fillers > 0 && `${fillers} filler word${fillers === 1 ? '' : 's'}`, pauses > 0 && `${pauses} pause${pauses === 1 ? '' : 's'}`].filter(Boolean);
-  return `Cuttle cut ${parts.join(' and ')} where the picture rests.`;
+  return `Cuttle cut ${slips ? `${slips}, and ` : ''}${parts.join(' and ')} where the picture rests.`;
 }
 
 /** The editor opens anew on another take (its media); the main process reloads it (a page cannot). */

@@ -122,6 +122,11 @@ export class RecorderHost {
     if (this.running) this.send({ type: 'marker', ...(label !== undefined && { label }) });
   }
 
+  /** The mistake key: a `retake` marker. */
+  retake(): void {
+    if (this.running) this.send({ type: 'retake' });
+  }
+
   /** Pauses the take: every track stops until `resume()` (events `paused`, `resuming`, `resumed`). */
   pause(): void {
     if (this.running) this.send({ type: 'pause' });

@@ -39,7 +39,8 @@ permission, 3 render, 130 cancelled.
 - Webcam and mic only when asked (`--webcam`, `--mic`). A muted mic is reported as a warning.
   When the user will speak, Cuttle transcribes the mic on this computer and cuts filler words and
   pauses. That needs a speech model: `cuttle --json models` lists them. If none is downloaded, ask
-  the user before `cuttle models download small` (488 MB, once).
+  the user before `cuttle models download small` (488 MB, once). Tell them that a slip needs no
+  new take: press Ctrl+Shift+Alt+X (or say "nochmal", "again") and do the bit again.
 - Ask the user to make text large (terminal font 16 px or more, or zoom the browser), to close
   private windows and notifications, and to use a clean folder or browser profile.
 - The project folder: a new one per demo (`record` creates it).
@@ -119,6 +120,14 @@ words ("äh", "um") and pauses longer than a second down to 0.4 s, only where th
 (cuts tagged `filler` and `pause`). `--no-speech` leaves the speech out.
 `cuttle -C "<project>" --json transcribe --language de` transcribes again (`--model` picks one).
 Transcribing also writes a cleaned-up mic (less noise, even loudness) that the video plays.
+
+**Slips.** The mistake key (Ctrl+Shift+Alt+X, or the scissors in the recording bar) marks a slip
+in `markers.json` (kind `retake`). A spoken cue counts too when the bit is then said again ("…die
+Art. Nochmal. Die App erkennt die Art …"; also "noch mal", "again", "one more time"). `suggest`
+cuts each slip from the pause before it to where the bit starts again (cuts tagged `retake`,
+"Retake" or "Retake: “Nochmal”"); the key needs no speech model. Check each with `preview --at`
+just before and after the cut; if it took too much or too little, move its `from` or `to` and
+remove its `auto`.
 
 **Subtitles.** A transcribed take gets subtitles in the video (`captions`, project.md): as
 subtitles at the bottom, `karaoke` (the spoken word in colour) or `bold` (a few big words, for

@@ -34,7 +34,7 @@ export const WINDOW_CHANNELS = {
     events: ['picker:open', 'picker:active', 'picker:choices', 'picker:devices', 'app:motion'],
   },
   hud: {
-    requests: ['hud:stop', 'hud:marker', 'hud:pause', 'hud:resume', 'hud:restart'],
+    requests: ['hud:stop', 'hud:marker', 'hud:retake', 'hud:pause', 'hud:resume', 'hud:restart'],
     events: ['hud:state', 'app:motion'],
   },
   countdown: {

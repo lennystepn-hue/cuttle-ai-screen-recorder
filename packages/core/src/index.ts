@@ -20,5 +20,6 @@ export { LEVEL_SECONDS, SPEECH_RULES, micLevels, speechStretches } from './speec
 export { ALIGN_RULES, alignWords, guessLanguage, type Alignment } from './speech/align';
 export { SPEECH_EDIT_RULES, fillerCuts, fillerWords, inputSpans, mergeCuts, pauseCuts, restingAt, speechCuts, type RawCut, type SpeechCut, type SpeechEditInput } from './speech/edits';
 export { TRANSCRIPT_FILE, micOffset, readTranscript, transcribeTake, transcriptOfMic, type TranscribeOptions, type TranscribeResult } from './speech/transcribe';
-export { applySpeechEdits, speechActivity, withSpeechCuts, type SpeechCutsResult, type SpeechEditsResult } from './speech/apply';
+export { applySpeechEdits, speechActivity, withSpeechCuts, wordStretches, type SpeechCutsInput, type SpeechCutsResult, type SpeechEditsResult } from './speech/apply';
+export { RETAKE_RULES, retakeCuts, spokenCues, type RetakeCut, type RetakeInput, type SpokenCue } from './speech/retakes';
 export { CLEAN_MIC_FILE, cleanMic, cleanupFilter, denoiseLatency } from './speech/cleanup';

@@ -75,7 +75,7 @@ export function suggestClips(input: SuggestInput): Suggestion {
   );
   // Claude's turn, from its first prompt or tool call to the answer, is never cut: it only waits on a
   // spinner now and then (a still screen), and the speed-up shows it working.
-  const turnStart = answer === undefined ? undefined : input.markers.filter((marker) => marker.kind !== 'manual' && marker.t <= answer).at(0)?.t;
+  const turnStart = answer === undefined ? undefined : input.markers.filter((marker) => (marker.kind === 'prompt' || marker.kind === 'tool') && marker.t <= answer).at(0)?.t;
   const turn = turnStart !== undefined && answer !== undefined && answer > turnStart ? [{ from: turnStart, to: answer }] : [];
   const speechSpans = union(
     (input.speech ?? []).map((span) => ({ from: Math.max(0, span.from - RULES.inputPad), to: Math.min(duration, span.to + RULES.inputPad) })),

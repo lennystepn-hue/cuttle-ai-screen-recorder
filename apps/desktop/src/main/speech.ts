@@ -1,5 +1,6 @@
 // Speech in the app: the models (download with progress and cancel, remove), and transcribing a
-// take after its cut, in the media worker, then its filler words and pauses cut as one change.
+// take after its cut, in the media worker, then its retakes, filler words and pauses cut as one
+// change.
 import { dirname, join, relative, resolve, sep } from 'node:path';
 import { CLEAN_MIC_FILE, CoreError, SPEECH_MODELS, TRANSCRIPT_FILE, downloadModel, hasWhisper, installedModels, modelInstalled, modelsDir, readProjectFile, removeModel } from '@cuttle/core';
 import type { SpeechModelName, SpeechStatus } from '../shared/ipc';
@@ -89,9 +90,9 @@ export async function removeSpeechModel(name: SpeechModelName): Promise<SpeechSt
 const transcribing = new Set<string>();
 
 /**
- * Transcribes the project's mic after its cut and cuts its filler words and pauses, when speech is
- * on in the settings, the take has a mic and no transcript yet, the model is downloaded and ffmpeg
- * can transcribe. The editor's title bar shows the progress, and the speech edits arrive as one
+ * Transcribes the project's mic after its cut and cuts its retakes, filler words and pauses, when
+ * speech is on in the settings, the take has a mic and no transcript yet, the model is downloaded
+ * and ffmpeg can transcribe. The editor's title bar shows the progress, and the speech edits arrive as one
  * step to undo ("Cuttle's speech edits"). `asked`: the person asked for it (the Auto tab, Try again):
  * it runs again over a transcript there, and says why it cannot instead of staying quiet.
  */
@@ -115,7 +116,7 @@ export async function transcribeProject(dir: string, asked = false): Promise<{ s
       await mediaWorker.run({ job: 'transcribe', input: dir, output: '', model: model.name, language: speech.language }, (progress) => void status(progress)).promise;
       const take = (name: string) => relative(file.dir, join(dirname(resolve(file.dir, mic)), name)).split(sep).join('/');
       const transcript = take(TRANSCRIPT_FILE);
-      await setEditorStatus(dir, { text: 'Cutting filler words and pauses…', state: 'working' });
+      await setEditorStatus(dir, { text: 'Cutting retakes, filler words and pauses…', state: 'working' });
       await expectSpeech(dir, true);
       try {
         await mediaWorker.run({ job: 'speech-edits', input: dir, output: '', transcript, cleanMic: take(CLEAN_MIC_FILE) }, () => {}).promise;

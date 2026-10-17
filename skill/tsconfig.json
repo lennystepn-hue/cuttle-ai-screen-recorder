@@ -1,0 +1,8 @@
+{
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    "types": ["node"]
+  },
+  // The skill's tests (they read the skill's Markdown and run the CLI in-process).
+  "include": ["test"]
+}

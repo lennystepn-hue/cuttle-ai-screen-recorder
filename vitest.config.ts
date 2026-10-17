@@ -10,7 +10,7 @@ export default defineConfig({
         test: {
           name: 'node',
           environment: 'node',
-          include: ['packages/*/test/**/*.test.ts', 'apps/*/test/**/*.test.ts'],
+          include: ['packages/*/test/**/*.test.ts', 'apps/*/test/**/*.test.ts', 'skill/test/**/*.test.ts'],
           exclude: ['packages/*/test/**/*.browser.test.ts'],
         },
       },

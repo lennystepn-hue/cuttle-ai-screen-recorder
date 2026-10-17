@@ -81,7 +81,7 @@ async function withRendering<T>(job: PageJob, makePlan: (timeline: Timeline) => 
     const maxTextureSize = gl.getParameter(gl.MAX_TEXTURE_SIZE) as number;
     sources = new SceneSources(
       plan,
-      { screen, webcam: webcam && job.webcam ? { ...webcam, offset: job.webcam.offset } : undefined, stills: job.stills, maxTextureSize },
+      { screen, webcam: webcam && job.webcam ? { ...webcam, offset: job.webcam.offset } : undefined, stills: job.stills, scenes: project.scenes, maxTextureSize },
       lookahead,
     );
     return await body({ timeline, plan, renderer, canvas, gl, sources });

@@ -32,4 +32,11 @@ describe('useTake', () => {
     expect(file.raw.cuts).toEqual(first.cuts);
     expect((file.raw.sources as { transcript?: string }).transcript).toBe('takes/1/transcript.json');
   });
+
+  it('drops the motion overlays, which are timed on the previous take, and counts them as an edit', () => {
+    const raw = { version: 1, sources: first.sources, overlays: [{ id: 'o1', src: 'motion/callouts/index.html', at: 2, duration: 3 }] };
+    const file = fileWith(raw);
+    expect(useTake(file, { screen: 'takes/2/screen.mp4', seconds: 8 })).toBe(true);
+    expect(file.raw.overlays).toBeUndefined();
+  });
 });

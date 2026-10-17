@@ -398,3 +398,53 @@ describe('cuts and crops in the timeline', () => {
     expect(y).toBeGreaterThanOrEqual(141);
   });
 });
+
+describe('motion', () => {
+  const motion = (overrides: Record<string, unknown>) =>
+    createTimeline(
+      project(
+        { transition: { enabled: false } },
+        {
+          scenes: [
+            { type: 'motion', src: 'motion/intro/index.html', duration: 1 },
+            { type: 'clip', from: 10, to: 20 },
+            { type: 'clip', from: 20, to: 40, speed: 4 },
+          ],
+          zooms: [],
+          masks: [],
+          texts: [],
+          ...overrides,
+        },
+      ),
+      { screenSize },
+    );
+
+  it('shows a motion scene as a layer of its own, with its time and no overlays', () => {
+    const [layer] = motion({}).frameAt(0.5).layers;
+    expect(layer).toMatchObject({ index: 0, sceneIndex: 0, kind: 'motion', local: 0.5, progress: 0.5, overlays: [] });
+    expect(layer!.sourceTime).toBeUndefined();
+  });
+
+  it('gives an overlay a clock in output seconds that runs on across a continuous cut and a speed change', () => {
+    // source 18 to 24: 18–20 at 1× (output 9–11), then 20–24 at 4× (output 11–12)
+    const timeline = motion({ overlays: [{ src: 'motion/callouts/index.html', at: 18, duration: 6 }] });
+    expect(timeline.frameAt(8.5).layers[0]!.overlays).toEqual([]);
+    expect(timeline.frameAt(10).layers[0]!.overlays).toEqual([{ index: 0, key: '0@9', local: 1, duration: 3 }]);
+    expect(timeline.frameAt(11.5).layers[0]).toMatchObject({ sceneIndex: 2, overlays: [{ index: 0, key: '0@9', local: 2.5, duration: 3 }] });
+    expect(timeline.frameAt(12.25).layers[0]!.overlays).toEqual([]);
+  });
+
+  it('shows an overlay as often as its clips show its stretch, each showing with its own clock, and none when it is off', () => {
+    const twice = motion({
+      scenes: [
+        { type: 'clip', from: 10, to: 20 },
+        { type: 'clip', from: 15, to: 20 },
+      ],
+      overlays: [{ src: 'a.html', at: 16, duration: 2 }],
+    });
+    expect(twice.frameAt(7).layers[0]!.overlays).toEqual([{ index: 0, key: '0@6', local: 1, duration: 2 }]);
+    expect(twice.frameAt(12).layers[0]!.overlays).toEqual([{ index: 0, key: '0@11', local: 1, duration: 2 }]);
+    const off = motion({ overlays: [{ src: 'a.html', at: 12, duration: 2, enabled: false }] });
+    expect(off.frameAt(3).layers[0]!.overlays).toEqual([]);
+  });
+});

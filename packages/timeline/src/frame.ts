@@ -7,12 +7,23 @@ import { TEXT_FADE_SECONDS, activeMasks, activeTexts, badgeFor, type ActiveText 
 import { crossfadeHalf, isContinuousCut, sceneSpans, sourceTimeAt, spanAt, totalDuration, type SceneSpan } from './time';
 import { ZOOM_RAMP_SECONDS, zoomRectAt } from './zoom';
 
+/** A motion overlay on a clip's frame: which one, and where its own clock is. */
+export interface ActiveOverlay {
+  /** Its place in the project's `overlays`. */
+  index: number;
+  /** One showing of it (a clip shown twice shows it twice): the overlay and where its stretch starts. */
+  key: string;
+  /** Output seconds into this showing, and how long it lasts (its source stretch on the output timeline). */
+  local: number;
+  duration: number;
+}
+
 export interface SceneFrame {
   /** The span it comes from (`Timeline.spans`); a clip with cuts in it has several. */
   index: number;
   /** The scene it shows, in the project's `scenes`. */
   sceneIndex: number;
-  kind: 'clip' | 'still' | 'card';
+  kind: 'clip' | 'still' | 'card' | 'motion';
   local: number;
   progress: number;
   opacity: number;
@@ -24,6 +35,8 @@ export interface SceneFrame {
   aspect?: number;
   masks: Mask[];
   texts: ActiveText[];
+  /** Clip scenes: the motion overlays it shows, in the project's order (drawn over the whole frame). */
+  overlays: ActiveOverlay[];
   badge?: string;
   cursor?: CursorFrame;
 }
@@ -79,6 +92,8 @@ export function createTimeline(project: CuttleProject, opts: TimelineOptions): T
   // Where each zoom and text shows in output time, per span: their ramps run in output seconds.
   const zoomShown = new Map(project.zooms.map((zoom) => [zoom, occurrences(spans, zoom.at, zoom.at + zoom.duration)]));
   const textShown = new Map(project.texts.map((text) => [text, occurrences(spans, text.at, text.at + text.duration)]));
+  const overlayShown = project.overlays.map((overlay) => occurrences(spans, overlay.at, overlay.at + overlay.duration));
+  const round = (seconds: number) => Math.round(seconds * 1e6) / 1e6;
 
   const halfBetween = (a: SceneSpan, b: SceneSpan): number => crossfadeHalf(a, b, project.look.transition);
 
@@ -100,7 +115,7 @@ export function createTimeline(project: CuttleProject, opts: TimelineOptions): T
     const local = clamp(t - span.start, 0, length);
     const base = { index: span.index, sceneIndex: span.sceneIndex, local, progress: length === 0 ? 1 : local / length, opacity };
     const scene = span.scene;
-    if (scene.type !== 'clip') return { ...base, kind: scene.type, masks: [], texts: [] };
+    if (scene.type !== 'clip') return { ...base, kind: scene.type, masks: [], texts: [], overlays: [] };
     // Past the end (or on a frame whose source time would be `to`), hold the last frame shown:
     // its source time lies inside [from, to), so masks that end with the clip stay on, and a
     // clip's source time never goes back during a crossfade.
@@ -126,6 +141,12 @@ export function createTimeline(project: CuttleProject, opts: TimelineOptions): T
       aspect: screen[2] / screen[3],
       masks: activeMasks(project.masks, sourceTime),
       texts: activeTexts(project.texts, sourceTime, (text) => amount(textShown.get(text), TEXT_FADE_SECONDS, 'linear')),
+      // a motion overlay's clock runs in output seconds from where its stretch starts showing
+      overlays: project.overlays.flatMap((overlay, index) => {
+        const occurrence = overlay.enabled ? overlayShown[index]?.[span.index] : undefined;
+        if (!occurrence || shownAt < occurrence.start - 1e-9 || shownAt >= occurrence.end - 1e-9) return [];
+        return [{ index, key: `${index}@${round(occurrence.start)}`, local: round(shownAt - occurrence.start), duration: round(occurrence.end - occurrence.start) }];
+      }),
       badge: badgeFor(scene),
       cursor,
     };

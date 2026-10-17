@@ -3,6 +3,7 @@ import { realpath, stat } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { Readable } from 'node:stream';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { MOTION_SCHEME_PRIVILEGES } from '@cuttle/export';
 import { net, protocol, type Session } from 'electron';
 import { isInside, mediaCandidate, mediaFile, mediaType } from '../shared/media-path';
 import { parseRange } from '../shared/range';
@@ -34,6 +35,8 @@ export function registerSchemes(): void {
   protocol.registerSchemesAsPrivileged([
     { scheme: 'app', privileges: { standard: true, secure: true, supportFetchAPI: true } },
     { scheme: 'cuttle-media', privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true, corsEnabled: true } },
+    // the export's motion pages (their own sessions serve it)
+    MOTION_SCHEME_PRIVILEGES,
   ]);
 }
 

@@ -3,7 +3,7 @@ import type { ActiveCaption, ActiveText, RenderState, SceneFrame } from '@cuttle
 import type { EngineAssets } from './assets';
 import { CAPTION_LOOKS, drawCaption } from './captions';
 import { createRenderTarget, deleteRenderTarget, type RenderTarget } from './gl/target';
-import { createTexture, sourceSize, uploadTexture } from './gl/texture';
+import { createTexture, sourceSize, uploadPixels, uploadTexture } from './gl/texture';
 import { placeBadge, placeOverlay, stillCrop, unitFor, uvRect, webcamRect, windowLayout, type Size, type WindowLayout } from './layout';
 import { BackgroundPass } from './passes/background';
 import { ContentPass } from './passes/content';
@@ -15,6 +15,13 @@ import { WindowPass } from './passes/window';
 import { FRAME_CHROME, type FrameChrome } from './presets/frames';
 import { BADGE_STYLE, CARD_SUBTITLE_STYLE, CARD_TITLE_STYLE, TEXT_LABELS } from './presets/labels';
 import { SpriteCache } from './sprites';
+
+/** A motion page's frame: premultiplied RGBA, top row first (drawn over the whole output). */
+export interface MotionPixels {
+  width: number;
+  height: number;
+  data: Uint8Array;
+}
 
 /**
  * Per-frame images, keyed by `SceneFrame.index`: during a crossfade two clip layers with
@@ -30,6 +37,10 @@ export interface FrameSources {
    * and no larger than `MAX_TEXTURE_SIZE` on either side (render throws otherwise).
    */
   stills: Map<number, ImageBitmap>;
+  /** Scene index → the frame of a motion scene; a scene without one shows the background alone (its page is not drawn yet). */
+  motion: Map<number, MotionPixels>;
+  /** `ActiveOverlay.key` → the frame of a motion overlay; one without a frame is left out. */
+  overlays: Map<string, MotionPixels>;
 }
 
 export interface Renderer {
@@ -139,6 +150,8 @@ export function createRenderer(canvas: HTMLCanvasElement | OffscreenCanvas, proj
   const webcam = own(new WebcamPass(gl, output));
   const webcamTexture = texture(true);
   const stillTexture = texture(true);
+  const motionTexture = texture(false);
+  const fullFrame: Rect = [0, 0, output.width, output.height];
   let uploadedStill: ImageBitmap | undefined;
   let layerTarget: RenderTarget | undefined;
   let disposed = false;
@@ -186,6 +199,23 @@ export function createRenderer(canvas: HTMLCanvasElement | OffscreenCanvas, proj
     const badgeRect = badge ? placeBadge(layout.content, badge.box, unit, webcamArea) : undefined;
     drawTexts(layer.texts, [webcamArea, badgeRect].filter((rect): rect is Rect => rect !== undefined));
     if (badge && badgeRect) spritePass.drawSprite(badge, badgeRect[0], badgeRect[1], 1);
+    // motion overlays: over the finished clip, zooms, masks and the cursor (captions come last)
+    for (const overlay of layer.overlays) {
+      const pixels = sources.overlays.get(overlay.key);
+      if (pixels) drawMotion(pixels, `overlay ${overlay.index}`);
+    }
+  }
+
+  /** A motion page's frame over the whole output, with its transparency. */
+  function drawMotion(pixels: MotionPixels, what: string): void {
+    if (!(pixels.width > 0 && pixels.height > 0) || pixels.data.byteLength !== pixels.width * pixels.height * 4) {
+      throw new Error(`render: the frame of motion ${what} is ${pixels.width}×${pixels.height} px with ${pixels.data.byteLength} bytes`);
+    }
+    if (Math.max(pixels.width, pixels.height) > maxTextureSize) {
+      throw new Error(`render: the frame of motion ${what} is ${pixels.width}×${pixels.height} px, more than this GPU's limit of ${maxTextureSize} px`);
+    }
+    uploadPixels(gl, motionTexture, pixels);
+    spritePass.draw(motionTexture, fullFrame, 1);
   }
 
   function drawStill(layer: SceneFrame, scene: StillScene, sources: FrameSources): void {
@@ -239,7 +269,11 @@ export function createRenderer(canvas: HTMLCanvasElement | OffscreenCanvas, proj
     background.draw(t);
     if (scene.type === 'card') drawCard(scene);
     else if (scene.type === 'clip') drawClip(layer, sources);
-    else drawStill(layer, scene, sources);
+    else if (scene.type === 'still') drawStill(layer, scene, sources);
+    else {
+      const pixels = sources.motion.get(layer.index);
+      if (pixels) drawMotion(pixels, `scene ${layer.sceneIndex}`);
+    }
   }
 
   return {

@@ -332,7 +332,7 @@ export function Timeline() {
         setDrag({});
         if (!moved) return;
         if (edge) {
-          if (commands) edit(commands, scene.type === 'clip' ? 'Trim clip' : `Change the length of the ${scene.type === 'still' ? 'page' : 'card'}`);
+          if (commands) edit(commands, scene.type === 'clip' ? 'Trim clip' : `Change the length of the ${scene.type === 'still' ? 'page' : scene.type === 'motion' ? 'motion scene' : 'card'}`);
           else preview(undefined);
           return;
         }

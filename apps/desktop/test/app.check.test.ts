@@ -8,9 +8,11 @@ import { basename, delimiter, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { PNG } from 'pngjs';
 import { whisperCliPath } from '@cuttle/core';
+import { parseEventsJsonl, parseProjectJson } from '@cuttle/project';
+import { sceneSpans, typingClicks } from '@cuttle/timeline';
 import { _electron, type ElectronApplication, type Page } from 'playwright';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { FIXTURE_OUTPUT, makeFixture, makePrivateFixture, makeRestingFixture, makeSpokenFixture } from './fixture';
+import { FIXTURE_OUTPUT, makeFixture, makeMotionFixture, makePrivateFixture, makeRestingFixture, makeSpokenFixture } from './fixture';
 
 /**
  * The app end to end, its windows never shown: open a project, play, scrub, select, compare the
@@ -95,13 +97,28 @@ const click = (page: Page, selector: string) => page.evaluate((target) => (docum
 /**
  * Picks the option labelled `label` (`prefix`: starting with it) from a select (Select.tsx): a click
  * opens it, a click on the option picks it. A list closed again before the pick (a scroll still due
- * from a panel that changed just before, as in a small window) is opened again.
+ * from a panel that changed just before, as in a small window), or before it was seen at all, is
+ * opened again; one that never opens is reported with the select's state.
  */
 async function chooseIn(page: Page, trigger: string, label: string, prefix = false): Promise<void> {
   for (let attempt = 1; ; attempt++) {
     // a Playwright selector (it may use :has-text): the element's own click, as in a window never shown
     await page.locator(trigger).evaluate((element) => (element as HTMLElement).click());
-    await page.waitForSelector('.select-list [role=option]');
+    const shown = await page.waitForSelector('.select-list [role=option]', { timeout: 5000 }).then(
+      () => true,
+      () => false,
+    );
+    if (!shown) {
+      if (attempt < 5) continue;
+      const state = await page.locator(trigger).evaluate((element) => ({
+        disabled: (element as HTMLButtonElement).disabled,
+        expanded: element.getAttribute('aria-expanded'),
+        focused: document.hasFocus(),
+        lists: document.querySelectorAll('.select-list').length,
+        status: document.querySelector('[data-testid=project-status]')?.textContent ?? null,
+      }));
+      throw new Error(`the select ${trigger} did not open: ${JSON.stringify(state)}`);
+    }
     const result = await page.evaluate(
       ({ label, prefix }) => {
         const options = [...document.querySelectorAll('.select-list [role=option]')];
@@ -366,13 +383,19 @@ describe.runIf(enabled)('the Cuttle app', () => {
     expect(stats.clock - playing.t).toBeLessThan(0.7);
     // and plays as a movie, not a slideshow: at least half the frame rate per second of the clock
     expect(stats.drawn / stats.clock).toBeGreaterThan(FIXTURE_OUTPUT.fps / 2);
-    // the six keys typed at 2.4 s click a second before the clock gets there
-    expect(stats.clicks).toBeGreaterThanOrEqual(4);
+    // the six keys typed at 2.4 s click a second before the clock gets there: every click up to
+    // 0.9 s past the clock is set (the schedule looks every 0.1 s), whatever pace the machine kept
+    const parsed = parseProjectJson(readFileSync(join(project, 'cuttle.json'), 'utf8'));
+    if (!parsed.ok) throw new Error('the demo project does not parse');
+    const { events } = parseEventsJsonl(readFileSync(join(project, parsed.project.sources.events!), 'utf8'));
+    const clicks = typingClicks(sceneSpans(parsed.project.scenes, parsed.project.cuts), events, parsed.project.look.audio);
+    expect(clicks.length).toBe(6);
+    expect(stats.clicks).toBeGreaterThanOrEqual(clicks.filter((click) => click.at <= stats.clock + 0.9).length);
     const paused = await state();
     expect(paused.playing).toBe(false);
     await editor.waitForTimeout(300);
     expect((await state()).t).toBe(paused.t);
-  });
+  }, 30_000);
 
   it('scrubs with the playhead on the ruler and on the blocks; a click selects, Esc clears', async () => {
     const { duration } = await state();
@@ -1645,6 +1668,30 @@ describe.runIf(enabled)('the Cuttle app', () => {
     expect(file().sources.screenText).toBeUndefined();
     await page.waitForSelector('[data-testid=privacy-note]');
     await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find((window) => window.getTitle() === 'private · Cuttle')?.close());
+  }, 180_000);
+
+  it('opens a project with motion: its scene on the timeline, and the export draws the scene and the overlay', async () => {
+    const dir = join(root, 'motion');
+    makeMotionFixture(dir);
+    const page = await openEditor(dir);
+    await page.waitForSelector('.scene.motion');
+    expect(await page.locator('.scene.motion').first().textContent()).toContain('intro');
+    await shotOf('37-motion', '/editor.html', 'motion · Cuttle');
+    await page.keyboard.press('Control+E');
+    await page.waitForSelector('[data-testid=export-sheet]');
+    await page.click('[data-testid=export-start]');
+    await page.waitForSelector('[data-testid=export-file]', { timeout: 120_000 });
+    // a pixel of the video (rgb24 from ffmpeg; a crop of 2×2, since 4:2:0 video crops in pairs)
+    const pixel = (seconds: number, x: number, y: number) => [
+      ...spawnSync('ffmpeg', ['-v', 'error', '-ss', String(seconds), '-i', join(dir, 'out', 'export.mp4'), '-frames:v', '1', '-vf', `crop=2:2:${x}:${y}`, '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-'], { windowsHide: true }).stdout.subarray(0, 3),
+    ];
+    // saturated colours move a little between the video's colour matrix and ffmpeg's
+    const near = (actual: number[], expected: number[]) => actual.length === 3 && actual.every((value, i) => Math.abs(value - expected[i]!) <= 40);
+    // the scene fills the frame; over the clip (output 2.5 s is source 1.5 s) the overlay's bar shows at the bottom only
+    expect(near(pixel(0.5, 320, 180), [255, 0, 255])).toBe(true);
+    expect(near(pixel(2.5, 320, 350), [0, 255, 0])).toBe(true);
+    expect(near(pixel(2.5, 320, 100), [0, 255, 0])).toBe(false);
+    await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find((window) => window.getTitle() === 'motion · Cuttle')?.close());
   }, 180_000);
 
   it('had no unhandled rejection in the main process, and no error in the editor', async () => {

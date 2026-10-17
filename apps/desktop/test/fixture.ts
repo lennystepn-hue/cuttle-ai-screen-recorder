@@ -70,6 +70,36 @@ export function makeRestingFixture(dir: string): void {
   writeFileSync(join(dir, 'cuttle.json'), `${JSON.stringify(project, null, 2)}\n`);
 }
 
+/**
+ * A take with motion: a still screen (dark grey) for 5 s, a 1 s motion scene before it (a page that
+ * fills the frame with magenta) and a motion overlay over source 1 to 4 s (a green bar across the
+ * bottom fifth, clear above it).
+ */
+export function makeMotionFixture(dir: string): void {
+  const take = join(dir, 'takes', '1');
+  mkdirSync(take, { recursive: true });
+  ffmpeg(['-f', 'lavfi', '-i', 'color=c=0x202020:s=1280x720:r=30:d=5', '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', join(take, 'screen.mp4')]);
+  for (const [name, body] of [
+    ['intro', '<body style="margin:0;background:#ff00ff"></body>'],
+    ['bar', '<body style="margin:0"><div style="position:absolute;left:0;right:0;bottom:0;height:20%;background:#00ff00"></div></body>'],
+  ] as const) {
+    mkdirSync(join(dir, 'motion', name), { recursive: true });
+    writeFileSync(join(dir, 'motion', name, 'index.html'), `<!doctype html>${body}`);
+  }
+  const project = {
+    version: 1,
+    output: FIXTURE_OUTPUT,
+    sources: { screen: 'takes/1/screen.mp4' },
+    look: { transition: { enabled: false } },
+    scenes: [
+      { type: 'motion', id: 's1', src: 'motion/intro/index.html', duration: 1 },
+      { type: 'clip', id: 's2', from: 0, to: 5 },
+    ],
+    overlays: [{ id: 'o1', src: 'motion/bar/index.html', at: 1, duration: 3 }],
+  };
+  writeFileSync(join(dir, 'cuttle.json'), `${JSON.stringify(project, null, 2)}\n`);
+}
+
 export function makeFixture(dir: string): void {
   const take = join(dir, 'takes', '1');
   mkdirSync(take, { recursive: true });

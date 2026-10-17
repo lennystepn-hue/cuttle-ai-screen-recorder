@@ -1,8 +1,8 @@
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { PNG } from 'pngjs';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -12,6 +12,8 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
  * CLI. Runs only with `pnpm cli:check` (vitest --mode cli, after cli:build).
  */
 const CLI = fileURLToPath(new URL('../dist/cuttle.mjs', import.meta.url));
+/** The motion check's page: CSS, Web Animations, requestAnimationFrame, timers, transparency and a seeded random. */
+const MOTION_PAGE = fileURLToPath(new URL('./motion-page.html', import.meta.url));
 const enabled = process.env.MODE === 'cli';
 
 function cuttle(...argv: string[]): { code: number; json: Record<string, unknown> } {
@@ -118,6 +120,131 @@ describe.runIf(enabled)('cuttle in Electron', () => {
       writeFileSync(file, before);
     }
   }, 240_000);
+
+  it('checks a motion page: each way it moves lands on the frame, the same on every run, and it says nothing', () => {
+    mkdirSync(join(project, 'motion', 'check'), { recursive: true });
+    copyFileSync(MOTION_PAGE, join(project, 'motion', 'check', 'index.html'));
+    const first = cuttle('-C', project, 'motion', 'check', 'motion/check/index.html');
+    expect(first.code).toBe(0);
+    expect(first.json).toMatchObject({ src: 'motion/check/index.html', duration: 3, width: 1920, height: 1080, errors: [], console: [] });
+    const stills = first.json.stills as { t: number; file: string }[];
+    expect(stills.map((still) => still.t)).toEqual([0, 0.424, 0.848, 1.271, 1.695, 2.119, 2.543, 2.967]);
+    for (const still of stills) {
+      const png = PNG.sync.read(readFileSync(still.file));
+      // the first pixel of a row in a colour, and how many follow it
+      const run = (y: number, rgb: number[]): [number, number] => {
+        let start = -1;
+        let length = 0;
+        for (let x = 0; x < 1200; x++) {
+          const i = (y * png.width + x) * 4;
+          if (rgb.every((value, c) => Math.abs(png.data[i + c]! - value) <= 2)) {
+            if (start < 0) start = x;
+            length++;
+          }
+        }
+        return [start, length];
+      };
+      const t = Math.floor(still.t * 30 + 1e-6) / 30; // the frame the still shows
+      const slid = 40 + Math.min(t / 2, 1) * 400;
+      expect(Math.abs(run(90, [0xd9, 0x77, 0x57])[0] - slid), `CSS at ${t}`).toBeLessThanOrEqual(1);
+      expect(Math.abs(run(230, [0x3c, 0xc6, 0xc9])[0] - slid), `Web Animation at ${t}`).toBeLessThanOrEqual(1);
+      expect(Math.abs(run(370, [0xf2, 0xb3, 0x4a])[0] - (40 + t * 200)), `animation frame at ${t}`).toBeLessThanOrEqual(1);
+      expect(run(480, [255, 255, 255])[1], `timer at ${t}`).toBe(Math.floor(t / 0.25 + 1e-9) * 40);
+    }
+    const again = cuttle('-C', project, 'motion', 'check', 'motion/check/index.html', '-o', join(project, 'again'));
+    expect(again.code).toBe(0);
+    for (const still of stills) expect(readFileSync(join(project, 'again', basename(still.file))).equals(readFileSync(still.file))).toBe(true);
+    // 9:16 is taller than the screen: the page is the whole 1080×1920 still
+    const tall = cuttle('-C', project, 'motion', 'check', 'motion/check/index.html', '--format', '9:16', '--at', '2.5', '-o', join(project, 'tall'));
+    expect(tall.code).toBe(0);
+    expect(tall.json).toMatchObject({ width: 1080, height: 1920, errors: [] });
+    const portrait = PNG.sync.read(readFileSync((tall.json.stills as { file: string }[])[0]!.file));
+    const at = (x: number, y: number) => [...portrait.data.subarray((y * 1080 + x) * 4, (y * 1080 + x) * 4 + 3)];
+    // near the bottom right corner the panel is white at half opacity over the background beside it
+    const beside = at(1060, 1860);
+    at(1000, 1860).forEach((value, i) => expect(Math.abs(value - (255 + beside[i]!) / 2)).toBeLessThanOrEqual(6));
+    expect(at(490, 90)).toEqual([0xd9, 0x77, 0x57]);
+  }, 120_000);
+
+  it('tells what a motion page threw, and keeps it off the network and inside the project', () => {
+    mkdirSync(join(project, 'motion', 'bad'), { recursive: true });
+    const secret = join(dirname(project), `${basename(project)}-secret.txt`);
+    writeFileSync(secret, 'outside the project');
+    writeFileSync(
+      join(project, 'motion', 'bad', 'index.html'),
+      `<!doctype html><script>
+      document.addEventListener('securitypolicyviolation', (event) => console.log('refused ' + event.blockedURI));
+      cuttle.ready(Promise.allSettled([
+        fetch('https://127.0.0.1:9/').then(() => console.log('reached the network'), () => console.log('no network')),
+        fetch('../../cuttle.json').then((response) => console.log('own file ' + response.status)),
+        fetch('cuttle-motion://project/..%2F${basename(project)}-secret.txt').then((response) => console.log('outside ' + response.status)),
+      ]));
+      cuttle.onFrame((t) => { if (t > 0.5) throw new TypeError('late'); });
+      throw new Error('boom');
+      </script>`,
+    );
+    try {
+      const { code, json } = cuttle('-C', project, 'motion', 'check', 'motion/bad/index.html', '--duration', '1');
+      expect(code).toBe(0);
+      expect(json.errors).toEqual(['Error: boom', 'TypeError: late']);
+      const said = (json.console as string[]).join('\n');
+      for (const line of ['refused https://127.0.0.1:9/', 'no network', 'own file 200', 'outside 404']) expect(said).toContain(`info: ${line}`);
+      expect(said).not.toContain('reached the network');
+      expect(said).not.toContain('Electron Security Warning');
+      // a page outside the project is refused before anything renders
+      expect(cuttle('-C', project, 'motion', 'check', secret).code).toBe(1);
+    } finally {
+      rmSync(secret, { force: true });
+    }
+  }, 120_000);
+
+  it('renders a motion scene and a motion overlay into the video, as the preview shows them', () => {
+    const file = join(project, 'cuttle.json');
+    const before = readFileSync(file, 'utf8');
+    const raw = JSON.parse(before) as { scenes: unknown[] };
+    mkdirSync(join(project, 'motion', 'bar'), { recursive: true });
+    // a green bar across the bottom fifth, fading in over the overlay's first second
+    writeFileSync(
+      join(project, 'motion', 'bar', 'index.html'),
+      '<!doctype html><body style="margin:0"><div id="bar" style="position:absolute;left:0;right:0;bottom:0;height:20%;background:#00ff00"></div><script>cuttle.onFrame((t) => (bar.style.opacity = String(Math.min(1, t))))</script></body>',
+    );
+    writeFileSync(
+      file,
+      JSON.stringify({
+        ...raw,
+        scenes: [{ id: 's90', type: 'motion', src: 'motion/check/index.html', duration: 1.5 }, ...raw.scenes],
+        overlays: [{ id: 'o1', src: 'motion/bar/index.html', at: 0.5, duration: 2 }],
+      }),
+    );
+    try {
+      const out = join(project, 'out', 'motion.mp4');
+      const { code, json } = cuttle('-C', project, 'render', '-o', out);
+      expect(code).toBe(0);
+      expect(json.motion).toEqual([
+        { item: 'scenes[0]', src: 'motion/check/index.html', errors: [], console: [] },
+        { item: 'overlays[0]', src: 'motion/bar/index.html', errors: [], console: [] },
+      ]);
+      // the video's frames: 0.5 s into the motion scene (its CSS square at x 140), and the clip 1.5 s
+      // into the overlay (output 1.5 + 2 = 3.5 s), where its bar is fully in
+      const frame = (seconds: number) => {
+        const png = join(project, 'out', `frame-${seconds}.png`);
+        spawnSync('ffmpeg', ['-v', 'error', '-y', '-ss', String(seconds), '-i', out, '-frames:v', '1', png]);
+        return PNG.sync.read(readFileSync(png));
+      };
+      const rgb = (png: PNG, x: number, y: number) => [...png.data.subarray((y * png.width + x) * 4, (y * png.width + x) * 4 + 3)];
+      const close = (actual: number[], expected: number[]) => actual.every((value, i) => Math.abs(value - expected[i]!) <= 24);
+      expect(close(rgb(frame(0.5), 190, 90), [0xd9, 0x77, 0x57])).toBe(true);
+      const late = frame(3.5);
+      expect(close(rgb(late, 960, 1040), [0, 255, 0])).toBe(true);
+      expect(close(rgb(late, 960, 700), [0, 255, 0])).toBe(false);
+      // the preview shows the same
+      const still = cuttle('-C', project, 'preview', '--at', '3.5', '-o', join(project, 'motion-still'));
+      const shown = PNG.sync.read(readFileSync((still.json.stills as { file: string }[])[0]!.file));
+      expect(rgb(shown, 960, 1040)).toEqual([0, 255, 0]);
+    } finally {
+      writeFileSync(file, before);
+    }
+  }, 180_000);
 
   it('fails on an unknown format before rendering, and on a page that does not exist', () => {
     expect(cuttle('-C', project, 'render', '--format', '4:3').code).toBe(1);

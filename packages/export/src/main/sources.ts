@@ -1,7 +1,8 @@
 import { readFile, stat } from 'node:fs/promises';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { parseEventsJsonl, parseProjectJson, parseTakeJson, parseTranscriptJson, trackOffset, type CuttleProject, type InputEvent, type TakeFile, type TranscriptWord } from '@cuttle/project';
 import { ExportError } from '../errors';
+import type { MotionPages } from '../job';
 
 /** cuttle.json inside the project folder. */
 export const PROJECT_FILE = 'cuttle.json';
@@ -21,6 +22,8 @@ export interface ProjectSources {
   transcript?: TranscriptWord[];
   stills: Record<number, string>;
   backgroundImage?: string;
+  /** The motion items' pages, when the project has any. */
+  motion?: MotionPages;
   /** Every file the project names (cuttle.json and take.json included): the output must not replace one. */
   inputs: string[];
   /** Things the export goes on without, but the user should know (e.g. a take.json that does not apply). */
@@ -57,6 +60,27 @@ async function existing(projectDir: string, relative: string, what: string, medi
   if (!info.isFile()) throw new ExportError('missing-file', `${what} is a folder, not a file: ${path}`);
   if (media && info.size === 0) throw new ExportError('invalid-media', `${what} is empty (0 bytes): ${path}`);
   return path;
+}
+
+/**
+ * The pages of the project's motion scenes and overlays, checked: each a file inside the project
+ * folder (the only files a page may read). Undefined when the project has none.
+ */
+export async function motionPages(projectDir: string, project: CuttleProject): Promise<MotionPages | undefined> {
+  const root = resolve(projectDir);
+  const pages: MotionPages = { root, scenes: {}, overlays: {} };
+  const page = async (src: string, name: string): Promise<string> => {
+    const rel = relative(root, resolve(root, src));
+    if (rel === '' || rel === '..' || rel.startsWith(`..${sep}`) || isAbsolute(rel)) {
+      throw new ExportError('invalid-project', `${name}.src must be a file in the project folder, not ${src}`);
+    }
+    return existing(root, src, `page of ${name}`);
+  };
+  for (const [index, scene] of project.scenes.entries()) {
+    if (scene.type === 'motion') pages.scenes[index] = await page(scene.src, `scenes[${index}]`);
+  }
+  for (const [index, overlay] of project.overlays.entries()) pages.overlays[index] = await page(overlay.src, `overlays[${index}]`);
+  return Object.keys(pages.scenes).length + Object.keys(pages.overlays).length > 0 ? pages : undefined;
 }
 
 async function readTake(screen: string): Promise<{ path: string; take?: TakeFile; warning?: string } | undefined> {
@@ -148,6 +172,11 @@ export async function loadSources(projectDir: string): Promise<ProjectSources> {
   }
   if (look.background.preset === 'image' && look.background.image) {
     result.backgroundImage = await existing(projectDir, look.background.image, 'background image (look.background.image)');
+  }
+  const motion = await motionPages(projectDir, project);
+  if (motion) {
+    result.motion = motion;
+    result.inputs.push(...Object.values(motion.scenes), ...Object.values(motion.overlays));
   }
   return result;
 }

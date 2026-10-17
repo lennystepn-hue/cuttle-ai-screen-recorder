@@ -1,4 +1,5 @@
 import { join, resolve } from 'node:path';
+import type { MotionItemReport } from '@cuttle/export';
 import { sceneSpans, totalDuration } from '@cuttle/timeline';
 import { CliError } from '../errors';
 import { runInElectron } from '../electron-runner';
@@ -24,6 +25,8 @@ export interface PreviewResult {
   sheet?: string;
   width: number;
   height: number;
+  /** What the motion items' pages said (errors and console), when the project has any. */
+  motion?: MotionItemReport[];
   stats: { gpu: string; totalMs: number };
 }
 
@@ -49,6 +52,7 @@ export async function previewCommand(projectDir: string, args: PreviewArgs, outp
     [
       ...result.stills.map((still) => `${still.t.toFixed(2)} s${still.source !== undefined ? ` (source ${still.source.toFixed(2)} s)` : ''}  ${still.file}`),
       ...(result.sheet ? [`sheet  ${result.sheet}`] : []),
+      ...(result.motion ?? []).flatMap((report) => report.errors.map((error) => `error in ${report.item} (${report.src}): ${error}`)),
     ].join('\n'),
   );
   return result;

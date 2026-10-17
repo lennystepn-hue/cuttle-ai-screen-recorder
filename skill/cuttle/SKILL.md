@@ -188,7 +188,14 @@ Then refine `cuttle.json` ([project.md](project.md)) and preview again:
   scrolling still of a web page (the result the agent built); add `--wait 2500` for slow maps or
   fonts. It goes after every scene, so capture pages before you add the end card (or move the
   still in `scenes`).
-- **End card.** A `card` scene at the end with the product name and URL.
+- **Motion.** Anything a browser draws can be in the video: a kinetic intro, an end card with the
+  product's look, a chart that builds, a callout or a lower third over the clip. Write a page into
+  `motion/<name>/index.html` (project.md, "Motion pages"), add it as a `motion` scene or to
+  `overlays`, and check it before you preview the video:
+  `cuttle -C "<project>" --json motion check motion/<name>/index.html` renders it frame by frame
+  into `preview/motion-<name>/` (`--duration`, `--at`) and lists its `errors` and `console`.
+  Read the sheet, fix every error, then look at it in the video with `preview --at`.
+- **End card.** A `card` scene at the end with the product name and URL, or a `motion` scene.
 
 ## 4. Render
 

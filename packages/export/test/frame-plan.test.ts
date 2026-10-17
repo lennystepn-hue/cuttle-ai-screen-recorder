@@ -114,6 +114,31 @@ describe('stillFrames and shownSourceTime', () => {
   });
 });
 
+describe('planFrames with motion', () => {
+  it('plans a motion scene like a card, and each showing of an overlay with its frames and length', () => {
+    const result = plan(
+      {
+        look: { transition: { enabled: false } },
+        scenes: [
+          { type: 'motion', src: 'intro.html', duration: 1 },
+          { type: 'clip', from: 0, to: 4 },
+        ],
+        overlays: [
+          { src: 'callout.html', at: 1, duration: 2 },
+          { src: 'off.html', at: 0, duration: 4, enabled: false },
+        ],
+      },
+      10,
+    );
+    expect(result.scenes.map(({ index, kind, firstFrame, lastFrame, sourceTimes }) => ({ index, kind, firstFrame, lastFrame, times: sourceTimes.length }))).toEqual([
+      { index: 0, kind: 'motion', firstFrame: 0, lastFrame: 9, times: 0 },
+      { index: 1, kind: 'clip', firstFrame: 10, lastFrame: 49, times: 40 },
+    ]);
+    // source 1–3 shows at output 2–4: frames 20 to 39
+    expect(result.overlays).toEqual([{ key: '0@2', index: 0, duration: 2, firstFrame: 20, lastFrame: 39 }]);
+  });
+});
+
 describe('planFrames over cuts', () => {
   it('reads the pieces of a cut clip with one decoder: one plan, its source times jumping forward', () => {
     const result = plan({ scenes: [{ type: 'clip', from: 0, to: 2 }], cuts: [{ from: 0.5, to: 1.5 }] }, 10);

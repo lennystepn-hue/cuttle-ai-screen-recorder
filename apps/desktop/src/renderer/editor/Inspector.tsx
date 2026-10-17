@@ -1097,6 +1097,24 @@ function LookPanel() {
         </Row>
       )}
       {current.audio.enabled && (
+        <Row label="Typing sounds" inline note="a click per key">
+          <Toggle checked={current.audio.typing} label="Typing sounds" onChange={(on) => look(['audio', 'typing'], on, on ? 'Typing sounds on' : 'Typing sounds off')} testId="audio-typing" />
+        </Row>
+      )}
+      {current.audio.enabled && current.audio.typing && (
+        <Row label="Typing volume (%)">
+          <NumberInput
+            value={Math.round(current.audio.typingVolume * 100)}
+            min={0}
+            max={100}
+            step={10}
+            digits={0}
+            onCommit={(percent) => look(['audio', 'typingVolume'], percent / 100, 'Typing volume')}
+            testId="audio-typing-volume"
+          />
+        </Row>
+      )}
+      {current.audio.enabled && (
         <Row label="Sped-up clips" inline>
           <Toggle checked={current.audio.muteSpedUp} label="Silent when sped up" onChange={(on) => look(['audio', 'muteSpedUp'], on, on ? 'Sped-up clips silent' : 'Sped-up clips heard')} />
           <em>{current.audio.muteSpedUp ? 'Silent' : 'Heard'}</em>

@@ -6,6 +6,7 @@ import { planStills } from '@cuttle/export/frame-plan';
 import type { CuttleProject } from '@cuttle/project';
 import { createTimeline, type RenderState, type Timeline } from '@cuttle/timeline';
 import { AudioSchedule } from './audio';
+import { TypingSchedule } from './typing-audio';
 import { FrameGrabber, KeyFrames, PlaybackFrames, type HeldFrame, type PlaybackVideo } from './frames';
 import type { EditorMedia, VideoSource } from './media';
 
@@ -26,10 +27,11 @@ const LOOKAHEAD_FRAMES = 20;
 /** Playback this far behind the clock restarts its decoders at the clock (frames are dropped). */
 const BEHIND_SECONDS = 0.5;
 
-/** What playback did, for the check: frames drawn, decoder restarts at the clock (frames dropped), the clock. */
+/** What playback did, for the check: frames drawn, decoder restarts at the clock (frames dropped), typing clicks scheduled, the clock. */
 export interface PlaybackStats {
   drawn: number;
   restarts: number;
+  clicks: number;
   /** The clock's output time (where the sound is), while playing. */
   clock: number;
 }
@@ -60,8 +62,10 @@ export class Player {
   private playToken = 0;
   private context: AudioContext | undefined;
   private audio: AudioSchedule | undefined;
+  /** The typing sounds while playing (also without a mic). */
+  private typing: TypingSchedule | undefined;
   private disposed = false;
-  private readonly playback: PlaybackStats = { drawn: 0, restarts: 0, clock: 0 };
+  private readonly playback: PlaybackStats = { drawn: 0, restarts: 0, clicks: 0, clock: 0 };
   private clockNow: (() => number) | undefined;
 
   constructor(options: PlayerOptions) {
@@ -110,7 +114,7 @@ export class Player {
 
   /** Playback counters since the last play, and the clock's time while playing. */
   stats(): PlaybackStats {
-    return { ...this.playback, clock: this.clockNow?.() ?? this.state.t };
+    return { ...this.playback, clicks: this.typing?.scheduled ?? this.playback.clicks, clock: this.clockNow?.() ?? this.state.t };
   }
 
   private makeTimeline(): Timeline {
@@ -276,6 +280,8 @@ export class Player {
     this.playToken++;
     this.audio?.stop();
     this.audio = undefined;
+    this.typing?.stop();
+    this.typing = undefined;
     // A running context keeps the audio device busy (and the laptop awake) for nothing.
     void this.context?.suspend();
     this.set({ playing: false });
@@ -316,6 +322,7 @@ export class Player {
     let shown = startFrame - 1;
     try {
       if (this.media.mic) this.audio = new AudioSchedule(context, this.media.mic, this.project, this.timeline.spans, from, contextStart);
+      this.typing = new TypingSchedule(context, this.project, this.timeline.spans, this.media.events, from, contextStart);
       frames = open(startFrame);
       while (token === this.playToken && !this.disposed) {
         const now = clock();
@@ -351,6 +358,8 @@ export class Player {
         this.clockNow = undefined;
         this.audio?.stop();
         this.audio = undefined;
+        this.typing?.stop();
+        this.typing = undefined;
         void context.suspend();
         this.set({ playing: false, t: Math.min(this.state.t, this.duration) });
       }

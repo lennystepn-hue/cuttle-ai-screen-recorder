@@ -3,7 +3,7 @@
 // markers, a page still, and a cuttle.json with a continuous cut into an 8× clip (above 6×, playback
 // from the proxy shows key frames only), a jump cut, a card, a zoom, a mask and a caption.
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { copyFileSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 export const FIXTURE_OUTPUT = { width: 640, height: 360, fps: 30 } as const;
@@ -11,6 +11,27 @@ export const FIXTURE_OUTPUT = { width: 640, height: 360, fps: 30 } as const;
 function ffmpeg(args: string[]): void {
   const result = spawnSync('ffmpeg', ['-hide_banner', '-v', 'error', '-y', ...args], { encoding: 'utf8' });
   if (result.status !== 0) throw new Error(`ffmpeg failed: ${result.stderr}`);
+}
+
+/**
+ * A spoken take: a still screen (a dark grey frame) for 19.5 s, and `mic` (the core tests' English
+ * text-to-speech fixture, with "Uh" and "Um" and pauses) as its mic, started with the screen. One
+ * clip over the whole take, no input.
+ */
+export function makeSpokenFixture(dir: string, mic: string): void {
+  const take = join(dir, 'takes', '1');
+  mkdirSync(take, { recursive: true });
+  ffmpeg(['-f', 'lavfi', '-i', 'color=c=0x202020:s=1280x720:r=30:d=19.5', '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', join(take, 'screen.mp4')]);
+  copyFileSync(mic, join(take, 'mic.m4a'));
+  writeFileSync(join(take, 'events.jsonl'), '');
+  writeFileSync(join(take, 'take.json'), JSON.stringify({ version: 1, tracks: { screen: { file: 'screen.mp4', start: 100 }, mic: { file: 'mic.m4a', start: 100 } } }));
+  const project = {
+    version: 1,
+    output: FIXTURE_OUTPUT,
+    sources: { screen: 'takes/1/screen.mp4', mic: 'takes/1/mic.m4a', events: 'takes/1/events.jsonl' },
+    scenes: [{ type: 'clip', id: 's1', from: 0, to: 19.5 }],
+  };
+  writeFileSync(join(dir, 'cuttle.json'), `${JSON.stringify(project, null, 2)}\n`);
 }
 
 export function makeFixture(dir: string): void {

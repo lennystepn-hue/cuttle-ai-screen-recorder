@@ -1,6 +1,7 @@
 import { spawnSync } from 'node:child_process';
 import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
+import { createServer, type Server, type ServerResponse } from 'node:http';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
@@ -8,7 +9,7 @@ import { fileURLToPath } from 'node:url';
 import { PNG } from 'pngjs';
 import { _electron, type ElectronApplication, type Page } from 'playwright';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { FIXTURE_OUTPUT, makeFixture } from './fixture';
+import { FIXTURE_OUTPUT, makeFixture, makeSpokenFixture } from './fixture';
 
 /**
  * The app end to end, its windows never shown: open a project, play, scrub, select, compare the
@@ -27,6 +28,17 @@ const enabled = process.env.MODE === 'app';
 const MAIN = fileURLToPath(new URL('../dist/main/index.mjs', import.meta.url));
 const CLI = fileURLToPath(new URL('../../cli/dist/cuttle.mjs', import.meta.url));
 const SHOTS = process.env.CUTTLE_CHECK_SHOTS;
+/** The English text-to-speech take of the core tests. */
+const SPOKEN = fileURLToPath(new URL('../../../packages/core/test/fixtures/speech/en.m4a', import.meta.url));
+/**
+ * The `base` speech model where one is downloaded (`CUTTLE_TEST_MODELS`, else the user's models
+ * folder): the check downloads it from a server of its own, so the model can be checked end to end.
+ */
+const BASE_MODEL = [process.env.CUTTLE_TEST_MODELS, process.env.LOCALAPPDATA && join(process.env.LOCALAPPDATA, 'Cuttle', 'models')]
+  .filter((dir): dir is string => !!dir)
+  .map((dir) => join(dir, 'ggml-base.bin'))
+  .find((path) => existsSync(path));
+const hasWhisper = /\swhisper\s/.test(spawnSync('ffmpeg', ['-hide_banner', '-filters'], { encoding: 'utf8', windowsHide: true }).stdout ?? '');
 
 interface CheckState {
   t: number;
@@ -112,6 +124,9 @@ describe.runIf(enabled)('the Cuttle app', () => {
   let root: string;
   let project: string;
   let app: ElectronApplication;
+  /** Serves the speech models: `base` from BASE_MODEL, `small` broken, `large-v3-turbo-q5_0` never ending. */
+  let models: Server;
+  const hanging: ServerResponse[] = [];
   let editor: Page;
   const pageErrors: string[] = [];
   // The page's hook (`__cuttleCheck`); each call is its own function, as the page's CSP allows no eval.
@@ -156,6 +171,24 @@ describe.runIf(enabled)('the Cuttle app', () => {
     });
     writeFileSync(join(SHOTS, `${name}.png`), Buffer.from(png, 'base64'));
   };
+  /** A screenshot of the window whose URL has `part` and whose title is `title` (when given). */
+  const shotOf = async (name: string, part: string, title?: string) => {
+    if (!SHOTS) return;
+    const png = await app.evaluate(
+      async ({ BrowserWindow }, { part, title }) => {
+        const window = BrowserWindow.getAllWindows().find((candidate) => candidate.webContents.getURL().includes(part) && (title === undefined || candidate.getTitle() === title))!;
+        // the first capture of a window never shown can be its first paint: the second is now
+        for (let round = 0; round < 2; round++) {
+          window.webContents.invalidate();
+          await new Promise((resolve) => setTimeout(resolve, 1600));
+          await window.webContents.capturePage();
+        }
+        return (await window.webContents.capturePage()).toPNG().toString('base64');
+      },
+      { part, title },
+    );
+    writeFileSync(join(SHOTS, `${name}.png`), Buffer.from(png, 'base64'));
+  };
   /** Asks the running app to open `argv` as a second launch would, `times` times at once. */
   const launchAgain = (argv: string[], times = 1) =>
     app.evaluate(
@@ -175,6 +208,17 @@ describe.runIf(enabled)('the Cuttle app', () => {
     // New recordings go into a folder of the check's own.
     mkdirSync(join(root, 'user-data'));
     writeFileSync(join(root, 'user-data', 'settings.json'), JSON.stringify({ projectsFolder: join(root, 'projects') }));
+    models = createServer((request, response) => {
+      if (request.url === '/ggml-base.bin' && BASE_MODEL) return void response.end(readFileSync(BASE_MODEL));
+      if (request.url === '/ggml-small.bin') return void response.end('not a model');
+      if (request.url === '/ggml-large-v3-turbo-q5_0.bin') {
+        response.write(Buffer.alloc(1_000_000));
+        return void hanging.push(response);
+      }
+      response.statusCode = 404;
+      response.end();
+    });
+    await new Promise<void>((resolve) => models.listen(0, '127.0.0.1', () => resolve()));
     app = await _electron.launch({
       executablePath: electronPath(),
       args: [MAIN, '--cuttle-check', '--open', project],
@@ -186,6 +230,9 @@ describe.runIf(enabled)('the Cuttle app', () => {
         CUTTLE_USER_DATA: join(root, 'user-data'),
         CUTTLE_RECORDER_BACKEND: 'test',
         CUTTLE_COUNTDOWN: '0',
+        // the check's own models folder (empty at first), and the models from the check's server
+        CUTTLE_MODELS_DIR: join(root, 'models'),
+        CUTTLE_MODELS_URL: `http://127.0.0.1:${(models.address() as { port: number }).port}/`,
       },
     });
     // Unhandled rejections in the main process are bugs: collect them for the last test.
@@ -213,6 +260,9 @@ describe.runIf(enabled)('the Cuttle app', () => {
 
   afterAll(async () => {
     await app?.close().catch(() => {});
+    for (const response of hanging) response.destroy();
+    models?.closeAllConnections();
+    models?.close();
     await rm(root, { recursive: true, force: true });
   });
 
@@ -1078,6 +1128,108 @@ describe.runIf(enabled)('the Cuttle app', () => {
     expect(existsSync(project)).toBe(true);
     await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find((window) => window.webContents.getURL().includes('/settings.html'))?.close());
   }, 60_000);
+
+  it('downloads a speech model in the settings (checked, cancelled, failed), and transcribes a spoken take from the Auto tab: its filler words and pauses cut as one step', async () => {
+    await launchAgain(['--settings']);
+    const settings = await waitForPage(app, async (page) => page.url().includes('/settings.html') && (await page.locator('[data-testid=speech-line]').count()) === 1);
+    const saved = () => JSON.parse(readFileSync(join(root, 'user-data', 'settings.json'), 'utf8')) as { speech?: { model: string; language: string } };
+    const line = () => settings.locator('[data-testid=speech-line] .row-hint').textContent();
+    const choose = async (label: string) => {
+      await settings.locator('[data-testid=speech-model]').evaluate((element) => (element as HTMLElement).click());
+      await settings.waitForSelector('.select-list [role=option]');
+      await settings.evaluate((label) => {
+        const option = [...document.querySelectorAll('.select-list [role=option]')].find((item) => item.querySelector('.option-label')?.textContent?.startsWith(label));
+        if (!option) throw new Error(`no option "${label}"`);
+        (option as HTMLElement).click();
+      }, label);
+    };
+    // Good (small), the default: not downloaded here; its download breaks off, and says so
+    expect(await line()).toBe('German and English, about 5× real time. 488 MB to download, once.');
+    await click(settings, '[data-testid=speech-download]');
+    await expect.poll(line).toMatch(/^The download failed: the download from .* ended at 11 of 487601967 bytes$/);
+    expect(await settings.locator('[data-testid=speech-download]').textContent()).toBe('Try again');
+    expect(existsSync(join(root, 'models'))).toBe(true);
+    expect(readdirSync(join(root, 'models'))).toEqual([]);
+    // Best: its download runs on (progress) until it is cancelled
+    await choose('Best');
+    await expect.poll(() => saved().speech?.model).toBe('large-v3-turbo-q5_0');
+    await expect.poll(line).toBe('The most accurate, about 2.6× real time. 574 MB to download, once.');
+    await click(settings, '[data-testid=speech-download]');
+    await settings.waitForSelector('[data-testid=speech-line] progress.download');
+    expect(await line()).toBe('Downloading… 0 % of 574 MB');
+    // another model chosen meanwhile: the line still shows the download, to cancel it
+    await choose('Good');
+    await expect.poll(line).toBe('The Best model is downloading (0 % of 574 MB): one download at a time.');
+    await choose('Best');
+    await expect.poll(line).toBe('Downloading… 0 % of 574 MB');
+    await settings.locator('[data-testid=speech-line]').evaluate((element) => element.scrollIntoView({ block: 'center' }));
+    await shotOf('25-speech-download', '/settings.html');
+    await click(settings, '[data-testid=speech-cancel]');
+    await settings.waitForSelector('[data-testid=speech-download]');
+    expect(await line()).toBe('The most accurate, about 2.6× real time. 574 MB to download, once.');
+    expect(readdirSync(join(root, 'models'))).toEqual([]);
+    // the language spoken
+    await click(settings, '[data-testid=speech-language] button:nth-child(3)');
+    await expect.poll(() => saved().speech?.language).toBe('en');
+    if (!BASE_MODEL || !hasWhisper) {
+      await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find((window) => window.webContents.getURL().includes('/settings.html'))?.close());
+      return;
+    }
+    // Fast (base): downloaded from the check's server, its checksum right
+    await choose('Fast');
+    await expect.poll(line).toBe('Good for English, weak for German. 148 MB to download, once.');
+    await click(settings, '[data-testid=speech-download]');
+    await settings.waitForSelector('[data-testid=speech-remove]', { timeout: 60_000 });
+    expect(await line()).toBe('Downloaded: good for English, weak for German.');
+    expect(readdirSync(join(root, 'models'))).toEqual(['ggml-base.bin']);
+    await settings.locator('[data-testid=speech-line]').evaluate((element) => element.scrollIntoView({ block: 'center' }));
+    await shotOf('26-speech-ready', '/settings.html');
+    await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find((window) => window.webContents.getURL().includes('/settings.html'))?.close());
+
+    // a spoken take, opened: the Auto tab offers to transcribe it
+    const spoken = join(root, 'spoken');
+    makeSpokenFixture(spoken, SPOKEN);
+    await launchAgain(['--open', spoken]);
+    await expect.poll(editorTitles, { timeout: 30_000 }).toContain('spoken · Cuttle');
+    // other editors may be open (the takes recorded before): this one by its project
+    const page = await waitForPage(
+      app,
+      async (candidate) =>
+        candidate.url().includes('/editor.html') &&
+        /[\\/]spoken$/.test((await candidate.evaluate(() => (window as unknown as { cuttle: { invoke(channel: string): Promise<{ dir: string }> } }).cuttle.invoke('project:info'))).dir),
+    );
+    await page.waitForSelector('.app[data-phase="ready"]', { timeout: 30_000 });
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await click(page, '#tab-auto');
+    await page.waitForSelector('[data-testid=speech-note]');
+    await click(page, '[data-testid=transcribe]');
+    // the title bar says how far it is; the cuts arrive as one step, "Cuttle's speech edits"
+    const file = () => JSON.parse(readFileSync(join(spoken, 'cuttle.json'), 'utf8')) as { sources: { transcript?: string }; cuts?: { auto?: string; from: number; to: number }[] };
+    await expect.poll(() => file().sources.transcript, { timeout: 60_000 }).toBe('takes/1/transcript.json');
+    const cuts = file().cuts ?? [];
+    const fillers = cuts.filter((cut) => cut.auto === 'filler').length;
+    const pauses = cuts.filter((cut) => cut.auto === 'pause').length;
+    expect(fillers).toBeGreaterThanOrEqual(2);
+    expect(pauses).toBeGreaterThanOrEqual(1);
+    // "Uh" at 2.02 s and "Um" at 7.55 s are gone from the video
+    for (const at of [2.1, 7.7]) expect(cuts.some((cut) => cut.from <= at && at < cut.to), `a cut at ${at} s`).toBe(true);
+    await page.waitForSelector('[data-testid=auto-group-fillers]');
+    await page.waitForSelector('[data-testid=speech-note]', { state: 'detached' });
+    expect(await page.locator('[data-testid=auto-group-fillers] .auto-count').textContent()).toBe(`${fillers} on`);
+    expect(await page.locator('[data-testid=auto-group-pauses] .auto-count').textContent()).toBe(`${pauses} on`);
+    const pageDoc = () => page.evaluate(() => (window as unknown as Hooked).__cuttleCheck.doc());
+    expect((await pageDoc()).undo).toBe("Cuttle's speech edits");
+    expect((await pageDoc()).toast?.text).toBe(`Cuttle cut ${fillers} filler words and ${pauses} pause${pauses === 1 ? '' : 's'} where the picture rests.`);
+    expect(await page.locator('[data-testid=project-status]').count()).toBe(0);
+    // the video is shorter by the cuts, in the player and the title bar
+    const removed = cuts.reduce((sum, cut) => sum + (cut.to - cut.from), 0);
+    await expect.poll(async () => (await page.evaluate(() => (window as unknown as Hooked).__cuttleCheck.state())).duration).toBeCloseTo(19.5 - removed, 1);
+    const duration = (await page.evaluate(() => (window as unknown as Hooked).__cuttleCheck.state())).duration;
+    expect(await page.locator('.titlebar .project-name span').textContent()).toBe(`19.5 s recorded · ${Math.floor(duration * 10 + 1e-6) / 10} s video`);
+    await click(page, '[data-testid=auto-group-fillers] .auto-toggle');
+    await shotOf('27-speech-edits', '/editor.html', 'spoken · Cuttle');
+    await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find((window) => window.getTitle() === 'spoken · Cuttle')?.close());
+  }, 120_000);
 
   it('had no unhandled rejection in the main process, and no error in the editor', async () => {
     expect(await app.evaluate(() => (globalThis as unknown as { __rejections: string[] }).__rejections)).toEqual([]);

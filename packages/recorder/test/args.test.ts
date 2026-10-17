@@ -34,6 +34,12 @@ describe('ffmpeg arguments', () => {
     );
   });
 
+  it("keeps the device's own timestamps when asked (macOS's capture times)", () => {
+    expect(micArgs(input, 'mic.m4a', false)).not.toContain('-use_wallclock_as_timestamps');
+    expect(webcamArgs(input, 'webcam.mp4', false)).not.toContain('-use_wallclock_as_timestamps');
+    expect(micArgs(input, 'mic.m4a').slice(0, 2)).toEqual(['-use_wallclock_as_timestamps', '1']);
+  });
+
   it('cuts the mic into 1 s fragments and watches it for digital silence', () => {
     const args = micArgs(input, 'mic.m4a').join(' ');
     expect(args).toContain('silencedetect=n=-80dB:d=1');

@@ -10,7 +10,7 @@ import { spawnCapture, type CaptureProcess } from './ffmpeg';
 import { captureHelper, helperArgs, helperInput } from './mac-capture';
 import { startInput, type InputSource } from './input';
 import { joinSegments, mediaInfo, renameWhenFree } from './join';
-import { areaGeometry, checkDevice, micInput, micLatency, platformFor, resolveArea, screenFilter, screenInput, screenLatency, webcamInput, type CameraMode, type Platform, type ScreenArea } from './sources';
+import { areaGeometry, checkDevice, deviceClock, micInput, micLatency, platformFor, resolveArea, screenFilter, screenInput, screenLatency, webcamInput, type CameraMode, type Platform, type ScreenArea } from './sources';
 import type { Bounds, RawInput, RecordOptions, Recording, RecorderEvent, StopOptions, StopReason, Take } from './types';
 
 const DEFAULT_COUNTDOWN_SECONDS = 3;
@@ -317,6 +317,9 @@ async function recordTake({ options, control, platform, area, cameraMode, projec
   let micWarned = false;
   // macOS: ScreenCaptureKit through the helper, which leaves out the app's own windows; avfoundation without it
   const helper = platform === 'macos' ? captureHelper() : undefined;
+  // macOS: the camera's and the mic's starts are their capture times on the host clock, mapped to the wall clock
+  const ownStamps = deviceClock(platform);
+  const toWall = ownStamps ? (await import('./darwin').then(({ loadDarwin }) => loadDarwin())).hostToWall : (seconds: number) => seconds;
   if (platform === 'macos' && !helper && (options.hideWindowsOf?.length ?? 0) > 0) {
     reporter.warn("Cuttle's own windows show in this take: the capture helper is missing (it is built by pnpm install with Xcode's command line tools)");
   }
@@ -327,8 +330,8 @@ async function recordTake({ options, control, platform, area, cameraMode, projec
     const screen = helper
       ? spawnCapture('screen', screenArgs(helperInput(area), file(FILES.screen), options.stop.untilIdleSeconds), { command: helper, args: helperArgs(area, drawMouse, options.hideWindowsOf ?? []) })
       : spawnCapture('screen', screenArgs(screenInput(platform, area, drawMouse), file(FILES.screen), options.stop.untilIdleSeconds, screenFilter(platform, area)));
-    const webcam = options.webcam === undefined ? undefined : spawnCapture('webcam', webcamArgs(webcamInput(platform, options.webcam, cameraMode), file(FILES.webcam)));
-    const mic = options.mic === undefined ? undefined : spawnCapture('mic', micArgs(micInput(platform, options.mic), file(FILES.mic)));
+    const webcam = options.webcam === undefined ? undefined : spawnCapture('webcam', webcamArgs(webcamInput(platform, options.webcam, cameraMode), file(FILES.webcam), !ownStamps));
+    const mic = options.mic === undefined ? undefined : spawnCapture('mic', micArgs(micInput(platform, options.mic), file(FILES.mic), !ownStamps));
     // Rejects with the first capture that fails; `exited` only resolves after stop() was called.
     const failed: Promise<never> = Promise.race([screen, webcam, mic].filter((capture) => capture !== undefined).map((capture) => capture.exited)).then(() => new Promise<never>(() => {}));
     failed.catch(() => {});
@@ -364,8 +367,8 @@ async function recordTake({ options, control, platform, area, cameraMode, projec
     // the first frame shows the screen as it was a moment before ffmpeg stamped it
     const screenAt = stamped - screenLatency(platform, helper !== undefined);
     const starts: { webcam?: number; mic?: number } = {};
-    void tracks.webcam?.started.then((at) => (starts.webcam = at), () => {});
-    void tracks.mic?.started.then((at) => (starts.mic = at), () => {});
+    void tracks.webcam?.started.then((at) => (starts.webcam = toWall(at)), () => {});
+    void tracks.mic?.started.then((at) => (starts.mic = toWall(at)), () => {});
     const others = [tracks.webcam && 'webcam', tracks.mic && 'mic'].filter(Boolean).join(' and ');
     if (others !== '') await startedWithin(Promise.race([Promise.all([tracks.webcam?.started, tracks.mic?.started]), tracks.failed, control.stopped()]), others);
     const begun = { ...starts };

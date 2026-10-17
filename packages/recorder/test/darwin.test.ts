@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { displayOf, eventWallTime, pixelMapper } from '../src/darwin';
+import { CURSOR_SIGNATURES, cursorSignature, displayOf, eventWallTime, pixelMapper } from '../src/darwin';
 
 // A 1440×900 point Retina display (2880×1800 pixels) with a 1920×1080 display at 1× to its right,
 // and one at 2× above it.
@@ -54,5 +54,15 @@ describe('eventWallTime', () => {
   it('takes the wall clock for an event without a timestamp or one that fits neither clock', () => {
     expect(eventWallTime(0n, now, ticks)).toBe(now.wall);
     expect(eventWallTime(now.uptimeNs + 1_000_000_000n, now, ticks)).toBe(now.wall);
+  });
+});
+
+describe('cursor signatures', () => {
+  it('names a cursor by its hotspot and size, rounded', () => {
+    expect(cursorSignature({ x: 12.2, y: 10.6 }, { width: 23, height: 22.4 })).toBe('12,11,23,22');
+    const shapes = new Map(CURSOR_SIGNATURES);
+    expect(shapes.get(cursorSignature({ x: 5, y: 5 }, { width: 28, height: 40 }))).toBe('arrow');
+    expect(shapes.get(cursorSignature({ x: 12, y: 11 }, { width: 23, height: 22 }))).toBe('text');
+    expect(new Set(CURSOR_SIGNATURES.map(([signature]) => signature)).size).toBe(CURSOR_SIGNATURES.length);
   });
 });

@@ -194,12 +194,16 @@ export function screenLatency(platform: Platform, helper: boolean): number {
 }
 
 /**
- * Seconds to subtract from the mic's stamped start to get the time of its first sample (avfoundation
- * hands audio over in buffers of about 20 ms).
+ * Seconds to subtract from the mic's stamped start to get the time of its first sample. macOS needs
+ * none: its mic and camera keep avfoundation's own stamps, the time each buffer was captured
+ * (`deviceClock`).
  */
 export function micLatency(platform: Platform): number {
-  return platform === 'windows' ? MIC_BUFFER_MS / 1000 : platform === 'macos' ? 0.02 : 0;
+  return platform === 'windows' ? MIC_BUFFER_MS / 1000 : 0;
 }
+
+/** Whether the camera and the mic keep the device's own timestamps (macOS) instead of the wall clock's at arrival. */
+export const deviceClock = (platform: Platform) => platform === 'macos';
 
 export function micInput(platform: Platform, name: string): string[] {
   if (platform === 'test') {

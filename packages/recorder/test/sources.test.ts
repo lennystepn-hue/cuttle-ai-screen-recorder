@@ -146,7 +146,8 @@ describe('ffmpeg inputs', () => {
     expect(webcamInput('macos', 'FaceTime HD Camera')).toEqual(['-f', 'avfoundation', '-framerate', '30', '-i', 'FaceTime HD Camera:none']);
     expect(webcamInput('macos', 'FaceTime HD Camera', { width: 1280, height: 720 })).toEqual(['-f', 'avfoundation', '-framerate', '30', '-video_size', '1280x720', '-i', 'FaceTime HD Camera:none']);
     expect(micInput('macos', 'MacBook Air Microphone')).toEqual(['-f', 'avfoundation', '-i', 'none:MacBook Air Microphone']);
-    expect(micLatency('macos')).toBe(0.02);
+    // macOS keeps avfoundation's capture stamps: nothing to subtract
+    expect(micLatency('macos')).toBe(0);
   });
 });
 

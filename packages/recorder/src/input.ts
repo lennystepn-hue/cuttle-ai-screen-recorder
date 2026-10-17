@@ -175,7 +175,7 @@ const WHERE_INPUT_MONITORING = 'allow the app that runs Cuttle (your terminal, o
 /**
  * macOS: an event tap of darwin.ts (see there why not uiohook) in desktop pixels, each event at its
  * own timestamp (a caret read or a busy moment of this thread does not shift it); the pointer's
- * shape stays the arrow. Without Input Monitoring only the mouse is logged (no key counts, no
+ * shape read as on Windows. Without Input Monitoring only the mouse is logged (no key counts, no
  * hotkeys, no caret); the caret also needs the Accessibility permission (without it, zooms on
  * typing follow what the screen changes).
  */
@@ -202,11 +202,21 @@ async function startMacInput(onInput: InputSink, onHotkey: HotkeySink): Promise<
     : !keyboard
       ? `the keyboard is not logged (no typing activity, no hotkeys): ${WHERE_INPUT_MONITORING}`
       : undefined;
-  // the caret, read as on Windows: a few times a second while keys come
+  // the pointer's shape and the caret, read as on Windows (the caret a few times a second while keys come)
   const caret = caretWatch(() => mac.caret(), onInput);
-  const poll = tap && keyboard ? setInterval(() => caret(now(), typedAt), SHAPE_POLL_MS) : undefined;
+  let shape = mac.cursorShape();
+  const poll = tap
+    ? setInterval(() => {
+        const current = mac.cursorShape();
+        if (current !== shape) {
+          shape = current;
+          onInput({ type: 'shape', time: now(), shape });
+        }
+        if (keyboard) caret(now(), typedAt);
+      }, SHAPE_POLL_MS)
+    : undefined;
   return {
-    initial: (time) => [{ type: 'move', time, ...mac.cursorPosition() }, { type: 'shape', time, shape: 'arrow' }],
+    initial: (time) => [{ type: 'move', time, ...mac.cursorPosition() }, { type: 'shape', time, shape }],
     stop: () => {
       clearInterval(poll);
       tap?.stop();

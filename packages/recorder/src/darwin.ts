@@ -7,6 +7,7 @@
 // origin times the largest backing scale of all displays (so no two displays overlap however their
 // scales differ), and a point on it lies `scale` pixels apart from the next. `toPixels` maps a point,
 // as the input hook and CoreGraphics report it, onto the display that holds it.
+import type { CursorShape } from '@cuttle/project';
 import type { Monitor, WindowInfo } from './types';
 
 export interface Darwin {
@@ -26,6 +27,10 @@ export interface Darwin {
   requestScreenAccess(): void;
   /** Whether this process may watch the keyboard (Input Monitoring); the first call asks macOS for it. */
   keyboardAccess(): boolean;
+  /** Seconds on the host clock (mach time since startup, as avfoundation stamps captures) as wall-clock seconds. */
+  hostToWall(seconds: number): number;
+  /** The pointer's shape now, from the system cursor's hotspot and size (anything unknown is the arrow). */
+  cursorShape(): CursorShape;
   /**
    * Where text is typed in the front app, in desktop pixels, through the Accessibility API: the
    * selection's bounds, or the right edge of the character before the insertion point (macOS gives
@@ -109,6 +114,23 @@ const FIELD = { buttonNumber: 3, keyAutorepeat: 8, keycode: 9, scrollY: 11, scro
 const FLAG = { shift: 0x20000n, control: 0x40000n, alternate: 0x80000n };
 /** How often the tap's run loop source is serviced. */
 const TAP_POLL_MS = 8;
+
+/**
+ * System cursors by hotspot and image size (points), as macOS 26 and 27 draw them: NSCursor's own
+ * arrow and I-beam are not given to a process without an app, so they are measured; the others are
+ * read from NSCursor at load as well. Not-allowed shares the arrow's and stays the arrow.
+ */
+export const CURSOR_SIGNATURES: [string, CursorShape][] = [
+  ['5,5,28,40', 'arrow'],
+  ['12,11,23,22', 'text'],
+  ['12,8,32,32', 'pointer'],
+  ['11,11,24,24', 'crosshair'],
+  ['15,16,32,32', 'move'],
+];
+
+/** A cursor's signature: its hotspot and size, rounded. */
+export const cursorSignature = (hot: { x: number; y: number }, size: { width: number; height: number }) =>
+  [hot.x, hot.y, size.width, size.height].map(Math.round).join(',');
 
 /** Maps points to desktop pixels on the displays (see the file's comment); pure, for the tests. */
 export function pixelMapper(displays: readonly Display[]) {
@@ -241,6 +263,11 @@ async function create(): Promise<Darwin> {
   // objc_msgSend takes the method's own signature: one declaration per signature used.
   const sendWithPid = objc.func('objc_msgSend', 'void *', ['void *', 'void *', 'int32']);
   const sendActivate = objc.func('objc_msgSend', 'bool', ['void *', 'void *', 'uint64']);
+  const sendObject = objc.func('objc_msgSend', 'void *', ['void *', 'void *']);
+  const sendPoint = objc.func('objc_msgSend', CGPoint, ['void *', 'void *']);
+  const sendSize = objc.func('objc_msgSend', CGSize, ['void *', 'void *']);
+  const objc_autoreleasePoolPush = objc.func('objc_autoreleasePoolPush', 'void *', []);
+  const objc_autoreleasePoolPop = objc.func('objc_autoreleasePoolPop', 'void', ['void *']);
   const sendWithObject = objc.func('objc_msgSend', 'long', ['void *', 'void *', 'void *']);
 
   /** A CFString that lives as long as the process (keys and constants). */
@@ -369,6 +396,37 @@ async function create(): Promise<Darwin> {
   };
 
   const mediaTypes = { camera: cfString(MEDIA_TYPES.camera), mic: cfString(MEDIA_TYPES.mic) };
+
+  // The pointer's shape: the system cursor's signature looked up among the known ones. Each read runs
+  // in an autorelease pool of its own: the cursor and its image would otherwise pile up in a process
+  // without a run loop to drain them.
+  const NSCursor = objc_getClass('NSCursor');
+  const signatureOf = (cursor: unknown) =>
+    cursorSignature(sendPoint(cursor, sel_registerName('hotSpot')) as { x: number; y: number }, sendSize(sendObject(cursor, sel_registerName('image')), sel_registerName('size')) as { width: number; height: number });
+  const shapes = new Map<string, CursorShape>();
+  {
+    const pool = objc_autoreleasePoolPush();
+    try {
+      for (const [name, shape] of [['crosshairCursor', 'crosshair'], ['openHandCursor', 'move'], ['closedHandCursor', 'move'], ['pointingHandCursor', 'pointer'], ['IBeamCursor', 'text']] as const) {
+        const cursor = sendObject(NSCursor, sel_registerName(name));
+        if (cursor) shapes.set(signatureOf(cursor), shape);
+      }
+    } finally {
+      objc_autoreleasePoolPop(pool);
+    }
+    for (const [signature, shape] of CURSOR_SIGNATURES) shapes.set(signature, shape);
+  }
+  const cursorShape = (): CursorShape => {
+    const pool = objc_autoreleasePoolPush();
+    try {
+      const cursor = sendObject(NSCursor, sel_registerName('currentSystemCursor'));
+      return cursor ? (shapes.get(signatureOf(cursor)) ?? 'arrow') : 'arrow';
+    } catch {
+      return 'arrow';
+    } finally {
+      objc_autoreleasePoolPop(pool);
+    }
+  };
   const AX = { focused: cfString('AXFocusedUIElement'), range: cfString('AXSelectedTextRange'), bounds: cfString('AXBoundsForRange') };
 
   /** The app in front: the owner of the frontmost ordinary window (the system-wide element's focus often cannot be read). */
@@ -512,6 +570,11 @@ async function create(): Promise<Darwin> {
     screenAccess: () => CGPreflightScreenCaptureAccess(),
     requestScreenAccess: () => void CGRequestScreenCaptureAccess(),
     keyboardAccess: () => CGPreflightListenEventAccess() || (CGRequestListenEventAccess(), false),
+    cursorShape,
+    hostToWall(seconds) {
+      const hostNow = Number((BigInt(mach_absolute_time() as number | bigint) * ticks.numer) / ticks.denom) / 1e9;
+      return Date.now() / 1000 - (hostNow - seconds);
+    },
     caret() {
       const rect = caretPoints();
       if (!rect) return undefined;

@@ -51,14 +51,18 @@ export function screenArgs(input: readonly string[], file: string, idleSeconds?:
   return [...WALLCLOCK, ...input, '-filter_complex', graph, '-map', '[out]', ...VIDEO_CODEC, ...FRAGMENTED_MP4, '-y', file];
 }
 
-export function webcamArgs(input: readonly string[], file: string): string[] {
-  return [...WALLCLOCK, ...input, '-filter_complex', `[0:v]${VIDEO_CHAIN}[out]`, '-map', '[out]', ...VIDEO_CODEC, ...FRAGMENTED_MP4, '-y', file];
+/**
+ * `wallclock` false keeps the device's own timestamps (macOS: avfoundation stamps each buffer with
+ * the time it was captured, on the host clock), which the recorder maps to the wall clock itself.
+ */
+export function webcamArgs(input: readonly string[], file: string, wallclock = true): string[] {
+  return [...(wallclock ? WALLCLOCK : []), ...input, '-filter_complex', `[0:v]${VIDEO_CHAIN}[out]`, '-map', '[out]', ...VIDEO_CODEC, ...FRAGMENTED_MP4, '-y', file];
 }
 
 /** The mic track, with `silencedetect` on a copy so a muted microphone can be reported. */
-export function micArgs(input: readonly string[], file: string): string[] {
+export function micArgs(input: readonly string[], file: string, wallclock = true): string[] {
   const graph = `[0:a]asplit[rec][chk];[chk]silencedetect=n=${SILENCE_NOISE}:d=${SILENCE_SECONDS},anullsink;[rec]anull[out]`;
-  return [...WALLCLOCK, ...input, '-filter_complex', graph, '-map', '[out]', ...AUDIO_CODEC, ...AUDIO_FRAGMENTS, ...FRAGMENTED_MP4, '-y', file];
+  return [...(wallclock ? WALLCLOCK : []), ...input, '-filter_complex', graph, '-map', '[out]', ...AUDIO_CODEC, ...AUDIO_FRAGMENTS, ...FRAGMENTED_MP4, '-y', file];
 }
 
 /** `[Parsed_freezedetect_3 @ …] lavfi.freezedetect.freeze_start: 0.973633` → 0.973633 */

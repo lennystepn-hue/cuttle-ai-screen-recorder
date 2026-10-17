@@ -1606,4 +1606,67 @@ Expected: `git status` prints nothing, then `no temp folders left`.
 
 ## Changes during execution
 
-(Filled in after the plan has been executed.)
+The code blocks above are the original plan. Its tasks were executed by replaying the plan
+mechanically (twice, on fresh clones; byte-identical to the prototype) and bringing those commits
+in. Two reviews followed: one of the code, and one that read the skill as a fresh session would
+and followed it with the `test` backend (devices, a background `record`, `suggest`, `preview`,
+`frame --grid`, masks, cards, renders in 16:9 and 9:16, `capture-page`, `recover`). They found the
+problems below. The repo is the source of truth.
+
+- **The source second of a still (Task 2, code review).** `preview` computed it from the raw
+  output second, but the page renders the frame that time falls in and holds a clip's last frame
+  at its end. In a sped-up clip that is up to `speed / fps` source seconds off: 13.0 s instead of
+  12.8 s at 12×, and 2.1 s off at 64×. A mask placed by it would sit on the wrong frame. The page
+  now returns, for each still, the source second of the frame it rendered. Two new pure helpers in
+  `@cuttle/export` do the work:
+  - `stillFrames` snaps a time to its frame.
+  - `shownSourceTime` takes the most visible layer, the front one in a crossfade's middle, with a
+    tolerance for `0.15 / 0.3` being 0.4999….
+
+  The CLI's own `sourceSecond` is gone. `frame-plan.test.ts` covers 12×, the crossfade and a card.
+  The Electron check also checks a still on the page scene, which has no source second.
+- **`frame` (Task 2, code review):**
+  - A time inside the last frame (19.99 s of a 20 s take) made ffmpeg write nothing. The command
+    reported success, and an older file at the same path passed for the new frame. Now the target
+    is removed first, and a missing result is an error: `no frame starts at or after …`.
+  - It writes with `-update 1`, so a `%d` in the path is not read as a frame-number pattern.
+  - The font is looked up under `WINDIR`.
+  - An ffmpeg without `drawtext` falls back to a grid with lines only.
+  - A missing screen track is `missing-file`.
+- **`record` (skill review):** after a stop by `--until-file`, the stop file is removed. Left in
+  place, it made the next `record` fail, because the file must not exist at the start.
+- **The installer (code review):**
+  - It writes its marker before the files, so an install cut short can still be reinstalled or
+    removed.
+  - `{{REPO}}` is replaced through a function, so a `$&` in the path stays as it is.
+  - Uninstall removes only plain `*.md` names from its own folder, whatever the marker lists.
+- **The skill's tests (code review):**
+  - Options standing alone in inline code (`` `--until-file …` ``) are checked against the help of
+    every command.
+  - A flag must match a whole option (`--until` no longer passes for `--until-file`).
+  - A command's options end at `&&`, `;`, `|` or the next `cuttle`.
+  - Each field's values are checked where that field is described, not anywhere in the file.
+- **The idle test (code review):** besides the 1.95–5 s bounds, it checks the input's rest in
+  screen seconds from events.jsonl: the take ends at least a second after the last input.
+- **SKILL.md (skill review):**
+  - Every recording has a stop file, and stopping means creating it, never killing the task. A
+    killed take is cut off, and `cuttle.json` still points at the previous one; `recover` comes
+    first then.
+  - It gives a recipe for waiting until `recording takes/<n>` appears (`until grep …`, about 40 s).
+  - It warns that `--until-claude` on one's own folder ends at one's own next turn.
+  - The privacy pass is thorough: step through sped-up stretches, find a secret's first and last
+    second with `frame` and pad 0.5 s, mask each position of scrolling text, check each mask at
+    its start, middle and end, and look at captured pages yourself (masks cover clips only).
+  - Durations over sped-up clips are in source seconds.
+  - `suggest` replaces clips and zooms, so run it before hand edits.
+  - The project path is absolute (`"$HOME/…"`; a quoted `~` stays literal).
+  - 9:16 needs a narrow source or tight zooms; preview it first.
+  - Capture pages before adding the end card.
+  - Each `preview` run replaces `preview/` (use `-o` to keep a set).
+  - Errors name fields from 0 (`scenes[1].to`).
+- **project.md (skill review):**
+  - Durations over sped-up clips: a 3 s caption over 12× needs `"duration": 36`.
+  - The zoom's ramp is in output seconds.
+  - Masks cover clips only.
+  - The example's caption moved to the bottom, because a `top` pill covered the frame title.
+  - It notes that a clip must end inside the take.

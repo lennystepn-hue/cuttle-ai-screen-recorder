@@ -282,6 +282,8 @@ export const ProjectSchema = z
 // where the system reports points instead of pixels, applies the display scale); positions outside
 // [0, width) x [0, height) mean the pointer is off the captured area.
 const point = { t: seconds, x: z.number(), y: z.number() };
+/** What a window over the screen is, by its class (see the recorder). */
+export const WINDOW_KINDS = ['dialog', 'menu', 'notification'] as const;
 export const InputEventSchema = z.discriminatedUnion('type', [
   z.strictObject({ type: z.literal('move'), ...point }),
   z.strictObject({ type: z.literal('click'), ...point, button: z.enum(MOUSE_BUTTONS) }),
@@ -290,7 +292,15 @@ export const InputEventSchema = z.discriminatedUnion('type', [
   z.strictObject({ type: z.literal('keys'), t: seconds, count: z.number().int().positive() }),
   // where text is typed: the system caret, where the app keeps one (a fact, not input)
   z.strictObject({ type: z.literal('caret'), t: seconds, rect: RectSchema }),
+  // the content area of the window shown (a browser's page, an Electron app's view); null: none
+  z.strictObject({ type: z.literal('area'), t: seconds, rect: RectSchema.nullable() }),
+  // a dialog, menu or notification opens (`open`) or closes over the screen; `id` pairs the two
+  z.strictObject({ type: z.literal('window'), t: seconds, id: z.number().int().nonnegative(), kind: z.enum(WINDOW_KINDS), rect: RectSchema, open: z.boolean() }),
 ]);
+
+/** Events that are facts about the screen, not input: the pointer's shape, the caret, the content area, windows. */
+const FACTS: ReadonlySet<string> = new Set(['shape', 'caret', 'area', 'window']);
+export const isFact = (event: InputEvent): boolean => FACTS.has(event.type);
 
 export type InputEvent = z.output<typeof InputEventSchema>;
 export type CursorShape = (typeof CURSOR_SHAPES)[number];
@@ -314,6 +324,7 @@ export type StillScene = Extract<Scene, { type: 'still' }>;
 export type CardScene = Extract<Scene, { type: 'card' }>;
 export type Zoom = CuttleProject['zooms'][number];
 export type ZoomMove = NonNullable<Zoom['moves']>[number];
+export type WindowKind = (typeof WINDOW_KINDS)[number];
 export type Mask = CuttleProject['masks'][number];
 export type TextOverlay = CuttleProject['texts'][number];
 export type Cut = CuttleProject['cuts'][number];

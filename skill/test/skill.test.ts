@@ -62,13 +62,15 @@ const GLOBAL = ['--json', '--project', '--help', '--version'];
 /** The help text of a command, from the CLI itself. */
 async function help(command: string): Promise<string> {
   let out = '';
-  await runCli([command, '--help'], { stdout: (text) => void (out += text), stderr: () => {} });
+  await runCli([...command.split(' '), '--help'], { stdout: (text) => void (out += text), stderr: () => {} });
   return out;
 }
 
 /** `--flag` as a whole option in a help text (not `--until` inside `--until-file`). */
 const hasFlag = (text: string, flag: string) => new RegExp(`${flag}(?![\\w-])`).test(text);
-const COMMANDS = ['devices', 'record', 'suggest', 'transcribe', 'models', 'transcript', 'preview', 'fit', 'frame', 'capture-page', 'render', 'recover'];
+const COMMANDS = ['devices', 'record', 'suggest', 'transcribe', 'models', 'transcript', 'preview', 'fit', 'frame', 'capture-page', 'motion check', 'render', 'recover'];
+/** Commands with subcommands: the subcommand is part of the command (`motion check`). */
+const GROUPS = ['motion'];
 
 describe('the cuttle commands in the skill', () => {
   // Code blocks and inline code: what Claude runs.
@@ -76,14 +78,18 @@ describe('the cuttle commands in the skill', () => {
   // `cuttle [-C dir] [--json] <command> … --flags`, up to the end of the line, a `&&`, `;`, `|` or the next cuttle.
   const uses = code.flatMap((snippet) =>
     [...snippet.matchAll(/(?:^|\s)cuttle((?: (?:-C "[^"]*"|-C \S+|--json))*) ([a-z][a-z-]*)((?:(?!&&|;|\||\bcuttle )[^\n])*)/g)].map(
-      ([, , command, rest]) => ({
-        command: command!,
-        flags: [...rest!.matchAll(/(?:^|\s)(--[a-z-]+)/g)].map((flag) => flag[1]!).filter((flag) => !GLOBAL.includes(flag)),
-      }),
+      ([, , group, rest]) => {
+        const sub = GROUPS.includes(group!) ? / ([a-z][a-z-]*)/.exec(rest!)?.[1] : undefined;
+        return {
+          command: sub ? `${group} ${sub}` : group!,
+          flags: [...rest!.matchAll(/(?:^|\s)(--[a-z-]+)/g)].map((flag) => flag[1]!).filter((flag) => !GLOBAL.includes(flag)),
+        };
+      },
     ),
   );
-  // An option on its own (`--until-file "<project>/stop"`): it must belong to some command.
-  const loose = code.flatMap((snippet) => (/^--[a-z-]+/.exec(snippet)?.[0] ?? []) as string[]);
+  // An option on its own (`--until-file "<project>/stop"`): it must belong to some command. The
+  // motion pages' CSS variables (`--cuttle-accent`) are not options.
+  const loose = code.flatMap((snippet) => (/^--(?!cuttle-)[a-z-]+/.exec(snippet)?.[0] ?? []) as string[]);
 
   it('covers the workflow', () => {
     expect(new Set(uses.map((use) => use.command))).toEqual(new Set(COMMANDS));

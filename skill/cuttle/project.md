@@ -8,8 +8,8 @@ errors, and every command names the path of a problem, counting from 0
 ## Times and pixels
 
 - **Source seconds** are seconds of the take's screen track (`takes/<n>/screen.mp4`). Scenes cut
-  and speed them up. `zooms`, `masks` and `texts` use source seconds too, so they stay on their
-  content; they show only while a clip scene covers that source time. In a clip at speed `s`, `d`
+  and speed them up. `zooms`, `masks`, `texts` and motion `overlays` use source seconds too, so
+  they stay on their content; they show only while a clip scene covers that source time. In a clip at speed `s`, `d`
   source seconds last `d / s` output seconds: a 3 s caption over a 12× clip is on screen for a
   quarter second, so give it `"duration": 36` there.
 - **Output seconds** are seconds of the rendered video. `cuttle preview --at` and the times on the
@@ -38,6 +38,7 @@ errors, and every command names the path of a problem, counting from 0
     "cursor": { "style": "system" }
   },
   "scenes": [
+    { "type": "motion", "id": "s0", "label": "Intro", "src": "motion/intro/index.html", "duration": 2.5, "params": { "title": "One prompt" } },
     { "type": "clip", "id": "s1", "label": "Prompt", "from": 1.2, "to": 7.5 },
     { "type": "clip", "id": "s2", "label": "Claude at work", "from": 7.5, "to": 120.4, "speed": 12 },
     { "type": "clip", "id": "s3", "label": "Answer", "from": 120.4, "to": 128 },
@@ -46,7 +47,8 @@ errors, and every command names the path of a problem, counting from 0
   ],
   "zooms": [{ "id": "z1", "label": "Answer", "at": 121, "duration": 4, "rect": [0, 600, 1400, 788] }],
   "masks": [{ "from": 0, "to": 128, "rect": [2200, 0, 360, 40], "style": "fill" }],
-  "texts": [{ "at": 2, "duration": 3, "text": "One prompt", "style": "pill", "position": "bottom" }]
+  "texts": [{ "at": 2, "duration": 3, "text": "One prompt", "style": "pill", "position": "bottom" }],
+  "overlays": [{ "id": "o1", "label": "Callout", "src": "motion/callout/index.html", "at": 121, "duration": 4 }]
 }
 ```
 
@@ -92,6 +94,7 @@ there are not two cursors.
 | `clip` | `from`, `to` (source seconds, `to` > `from`), `speed` (`1`, up to 64; above 1 a badge like "12× speed" shows), `badge` (custom badge text, `""` for none), `crop` (`{ "rect": [x, y, w, h], "enabled": true }`: the part of the screen the clip shows, e.g. a browser's page without its tabs; the window takes its shape and zooms stay inside it; `suggest` makes it, tagged `auto: "crop"`, and cuts a clip where the content area changes for good) |
 | `still` | `image` (a path, e.g. from `cuttle capture-page`), `duration` (output seconds), `motion` (`none`, `kenburns`, `scroll`: top to bottom of a tall image), `frame` (`none`, `mac-dark`, `mac-light`, `browser-light`) |
 | `card` | `title`, `subtitle` (optional), `duration` (output seconds): a title or end card on the background |
+| `motion` | `src` (an HTML page in the project, e.g. `motion/intro/index.html`), `duration` (output seconds), `params` (`{ "name": value }`: text, numbers, `true`/`false` or `null`, for the page), `network` (`false`; `true` lets the page load from https): a page drawn frame by frame over the whole output, over the background where it is clear (see "Motion pages") |
 
 `zooms`: `at` and `duration` (source seconds), `rect`, `ease` (`smooth`, `linear`) and `enabled`
 (`true`). The rect is widened to the screen's aspect and kept inside the screen. The zoom eases in
@@ -113,6 +116,12 @@ words masked wherever the screen shows them (`suggest --mask` adds to them).
 `position` (`top`, `center`, `bottom`) and `enabled` (`true`). A `top` text sits over the window's
 title bar; `bottom` keeps the title visible. Texts fade in and out over 0.25 output seconds.
 
+`overlays` are motion pages over the video: `src`, `at` and `duration` (source seconds, as a
+text's), `params`, `network` and `enabled` (`true`). A page covers the whole output with its
+transparency (a lower third, a callout, a logo), over the clip, its zooms, masks, cursor and texts,
+and under the captions. Its clock runs in output seconds from where the video first shows its
+stretch, across cuts and speed-ups; a clip shown twice shows it twice.
+
 `captions`: the subtitles from the transcript (none without one). `enabled` (`true`), `style`
 (`subtitle`: two lines on a dark box; `karaoke`: the spoken word in `color`; `bold`: a few big words),
 `position` (`bottom`, `top`, `center`), `size` (`1`, 0.5 to 2), `color` (`#D97757`), and `fixes`:
@@ -126,7 +135,7 @@ texts run on across it. Use them for a slip, a filler or a pause inside a clip; 
 them for slips ("Retake": the mistake key, or a spoken "nochmal" with the bit said again), filler
 words ("Filler: äh") and pauses ("Pause: 2.4 s") from the transcript.
 
-Every scene, zoom, mask, text and cut may have an `id` (1 to 64 letters, digits, `-` or `_`,
+Every scene, zoom, mask, text, overlay and cut may have an `id` (1 to 64 letters, digits, `-` or `_`,
 unique in the whole project) and a `label` (a name for people, shown in the Cuttle app). `suggest`
 sets both on what it makes (`s1`, `z1`; "Prompt", "Claude at work", "Waiting", "Answer"). Keep
 them when you edit an item; give a new item an id no other item uses (`s7`, `m2`, `c3`) and a
@@ -139,6 +148,45 @@ only tagged items. **When you change a tagged item's time, place or size, remove
 it is yours and the next `suggest` keeps it (switching it on or off keeps the tag). `autoEdits`
 (`clickZooms`, `answerZoom`, `crop`, `privacy`, `retakes`, `fillers`, `pauses`, `typingZooms`,
 `dialogZooms`: all `true`) holds which kinds are made at all; one set to `false` is not made again.
+
+## Motion pages
+
+A motion scene or overlay is a web page in the project folder, usually `motion/<name>/index.html`
+with its own CSS, scripts, images and fonts next to it. Anything a browser draws works: HTML and
+CSS, SVG, a canvas, WebGL. Cuttle renders it frame by frame, the same in every render.
+
+- **Its clock is the video's.** `performance.now`, `Date`, `setTimeout`, `setInterval`,
+  `requestAnimationFrame`, CSS animations and transitions and Web Animations all follow the frame
+  being drawn, from 0 at the item's start. `Math.random` is seeded per item. Ordinary animation
+  code works as it is.
+- **`window.cuttle`** (there before the page's scripts run): `time` (seconds into the item),
+  `duration`, `fps`, `size` (`{ width, height }`: the output), `format` (`16:9`, `9:16`, `1:1`),
+  `params` (the item's), `theme`, `onFrame((t) => …)` (called before each frame is drawn, also
+  after a jump: draw everything from `t` there and the frame is always right), and
+  `ready(promise)` (the first frame waits for it: data, a model, images it loads late; fonts and
+  `<img>`s are waited for anyway).
+- **The look** as CSS variables: `--cuttle-accent` (the cursor colour), `--cuttle-bg`,
+  `--cuttle-fg`, `--cuttle-font`, `--cuttle-mono`.
+- **Transparent by default.** Where the page draws nothing, a scene shows the look's background and
+  an overlay the video. A scene that wants its own background sets one on `body`.
+- **The size is the output's**: 1920×1080 for 16:9, 1080×1920 for 9:16. Lay out in `%`, `vw` and
+  `vh`, or from `cuttle.size`, so one page works in every format.
+- **Only the project's files.** Load them by relative paths. Nothing else is reachable (no
+  network, no other files) unless the item has `"network": true`.
+
+```html
+<!doctype html>
+<style>
+  body { margin: 0; display: grid; place-items: center; height: 100vh; font: 700 8vh var(--cuttle-font); color: var(--cuttle-fg); }
+  h1 { animation: rise 0.8s cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+  @keyframes rise { from { opacity: 0; transform: translateY(6vh); } }
+</style>
+<h1 id="title"></h1>
+<script>
+  title.textContent = cuttle.params.title ?? 'Hello';
+  cuttle.onFrame((t) => (title.style.opacity = String(Math.min(1, (cuttle.duration - t) / 0.4))));
+</script>
+```
 
 ## Finding source seconds and rects
 

@@ -59,6 +59,39 @@ describe('ProjectSchema', () => {
     });
   });
 
+  it('keeps the optional id and label of scenes and overlays', () => {
+    const p = ProjectSchema.parse({
+      ...minimal,
+      scenes: [
+        { type: 'clip', id: 's1', label: 'Claude at work', from: 0, to: 9, speed: 12 },
+        { type: 'card', id: 'end-card', label: 'End', title: 'Done', duration: 2 },
+      ],
+      zooms: [{ id: 'z1', label: 'Answer', at: 1, duration: 2, rect: [0, 0, 10, 10] }],
+      masks: [{ id: 'm_1', from: 0, to: 1, rect: [0, 0, 1, 1] }],
+      texts: [{ label: '', at: 0, duration: 1, text: 'Hi' }],
+    });
+    expect(p.scenes.map((scene) => [scene.id, scene.label])).toEqual([['s1', 'Claude at work'], ['end-card', 'End']]);
+    expect(p.zooms[0]).toMatchObject({ id: 'z1', label: 'Answer' });
+    expect(p.masks[0]?.id).toBe('m_1');
+    expect(p.texts[0]).toMatchObject({ label: '' });
+    expect(ProjectSchema.parse({ ...minimal, zooms: [{ at: 1, duration: 2, rect: [0, 0, 10, 10] }] }).zooms[0]).not.toHaveProperty('id');
+  });
+
+  it('rejects an id with other characters, and one used twice anywhere in the project', () => {
+    expect(pathsOf({ ...minimal, zooms: [{ id: 'zoom 1', at: 1, duration: 2, rect: [0, 0, 10, 10] }] })).toEqual(['zooms.0.id']);
+    expect(pathsOf({ ...minimal, zooms: [{ id: '', at: 1, duration: 2, rect: [0, 0, 10, 10] }] })).toEqual(['zooms.0.id']);
+    const twice = ProjectSchema.safeParse({
+      ...minimal,
+      scenes: [{ type: 'clip', id: 'a', from: 0, to: 1 }],
+      masks: [{ id: 'b', from: 0, to: 1, rect: [0, 0, 1, 1] }],
+      texts: [{ id: 'a', at: 0, duration: 1, text: 'Hi' }, { id: 'b', at: 0, duration: 1, text: 'Ho' }],
+    });
+    expect(twice.error?.issues.map((issue) => [issue.path.join('.'), issue.message])).toEqual([
+      ['texts.0.id', 'the id "a" is already used by scenes[0]'],
+      ['texts.1.id', 'the id "b" is already used by masks[0]'],
+    ]);
+  });
+
   it('rejects unknown keys and names them', () => {
     const r = ProjectSchema.safeParse({ ...minimal, look: { frame: { foo: 1 } } });
     expect(r.success).toBe(false);

@@ -1,7 +1,7 @@
 // Recording from the app: the pickers (one per display), the countdown over the target, the HUD,
 // the recorder host, and what happens after the stop: the take becomes the project's, the editor
 // opens on it, and `suggest` cuts it in the background.
-import { existsSync } from 'node:fs';
+import { existsSync, realpathSync } from 'node:fs';
 import { copyFile, mkdir, readdir, rmdir, statfs } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { BrowserWindow, dialog, globalShortcut, screen, session, type Rectangle } from 'electron';
@@ -15,7 +15,7 @@ import { cutTake } from './media-service';
 import { APP_ORIGIN, serveApp, bundlePath } from './protocols';
 import { recorderHost, RecordingError } from './recorder-host';
 import { loadSettings, updateSettings } from './settings';
-import { editorWindowOf, guard, reopenEditor, setEditorStatus, showPill, webPreferences } from './windows';
+import { editorWindowOf, guard, hidePill, reopenEditor, setEditorStatus, showPill, webPreferences } from './windows';
 
 /** The HUD's window (the HUD and a margin for its shadow): never in the video, and a dead zone for the input log. */
 const HUD_SIZE = { width: 380, height: 64 };
@@ -40,8 +40,19 @@ let pillHidden = false;
 const finishing = new Set<string>();
 /** The running recording until its take is written into the project, for a quit to wait on. */
 let writing: Promise<void> | undefined;
+/** The app quits: no recording starts any more, and a take written now is cut at its next open. */
+let quitting = false;
 
-const keyOf = (dir: string) => (process.platform === 'win32' ? resolve(dir).toLowerCase() : resolve(dir));
+/** A project's key, as the editors key it: the real path (a junction or a short name is the same folder). */
+function keyOf(dir: string): string {
+  let path = resolve(dir);
+  try {
+    path = realpathSync.native(path);
+  } catch {
+    // not there (yet): its resolved path
+  }
+  return process.platform === 'win32' ? path.toLowerCase() : path;
+}
 
 function pickerSessionOnce(): Electron.Session {
   if (pickerSession) return pickerSession;
@@ -159,11 +170,13 @@ function withTimeout<T>(promise: Promise<T>, ms: number, what: string): Promise<
   return Promise.race([promise, new Promise<T>((_, reject) => setTimeout(() => reject(new Error(`${what} did not answer in ${ms / 1000} s`)), ms))]);
 }
 
+const messageOf = (error: unknown) => (error instanceof Error ? error.message : String(error));
+const ffmpegMissing = (error: unknown) => /ffmpeg/i.test(messageOf(error)) && /ENOENT|not found|cannot find/i.test(messageOf(error));
+
 /** Why the recorder cannot list the devices, said for people. */
 function listingProblem(error: unknown): string {
-  const message = error instanceof Error ? error.message : String(error);
-  if (/ffmpeg/i.test(message) && /ENOENT|not found|cannot find/i.test(message)) return 'Cuttle needs ffmpeg to record. Install it (winget install Gyan.FFmpeg), then press Try again.';
-  return `Cuttle cannot record: ${message.split('\n')[0]}`;
+  if (ffmpegMissing(error)) return 'Cuttle needs ffmpeg to record. Install it (winget install Gyan.FFmpeg), then press Try again.';
+  return `Cuttle cannot record: ${messageOf(error).split('\n')[0]}`;
 }
 
 /**
@@ -173,12 +186,14 @@ function listingProblem(error: unknown): string {
  * or picks.
  */
 export async function startPicking(projectDir?: string, options: { fromPill?: boolean } = {}): Promise<void> {
-  if (busy || recorderHost.recording) return;
+  if (busy || recorderHost.recording || quitting) return;
   if (projectDir && finishing.has(keyOf(projectDir))) {
     return say('Cuttle is still cutting the last take of this project. Record again once the cut is in the editor.');
   }
   busy = true;
+  // "New recording" on the pill: the pill is not in the video; it comes back when no editor opens.
   pillHidden = options.fromPill ?? false;
+  if (pillHidden) hidePill();
   pickingFor = projectDir;
   try {
     let devices: Devices;
@@ -267,19 +282,30 @@ function openPicker(display: PickerDisplay, displays: PickerDisplay[], devices: 
 /** The cameras and mics for every picker, once DirectShow has listed them. */
 async function listMedia(): Promise<void> {
   const listed = pickers;
-  let update: Pick<PickerSetup, 'cameras' | 'mics' | 'choices'> & { problem?: string };
+  let update: Pick<PickerSetup, 'cameras' | 'mics' | 'choices'>;
+  let problem: string | undefined;
+  let warning: string | undefined;
   try {
     const devices = await withTimeout(recorderHost.devices(true), LISTING_TIMEOUT_MS, 'The device listing');
     update = { cameras: devices.cameras, mics: devices.mics, choices: await choicesNow(devices) };
   } catch (error) {
-    update = { cameras: [], mics: [], choices: await choicesNow({ cameras: [], mics: [] }), problem: listingProblem(error) };
+    update = { cameras: [], mics: [], choices: await choicesNow({ cameras: [], mics: [] }) };
+    // Without ffmpeg nothing records; a listing that fails otherwise leaves the screen to record alone.
+    if (ffmpegMissing(error)) problem = listingProblem(error);
+    else warning = `The cameras and mics could not be listed (${messageOf(error).split('\n')[0]}): the screen records without them.`;
   }
   if (pickers !== listed) return;
   for (const picker of pickers) {
     if (!picker.setup) continue;
-    picker.setup = { ...picker.setup, ...update, listingDevices: false, ...(update.problem && { problem: update.problem }) };
+    picker.setup = {
+      ...picker.setup,
+      ...update,
+      listingDevices: false,
+      ...(problem && { problem }),
+      ...(warning && { warning: picker.setup.warning ? `${warning} ${picker.setup.warning}` : warning }),
+    };
     send(picker.window.webContents, 'picker:devices', { cameras: update.cameras, mics: update.mics, choices: update.choices });
-    if (update.problem) send(picker.window.webContents, 'picker:open', picker.setup);
+    if (problem || warning) send(picker.window.webContents, 'picker:open', picker.setup);
   }
 }
 
@@ -344,9 +370,22 @@ async function newProjectDir(): Promise<string> {
   }
 }
 
-/** Removes a new project's folder that a cancelled or failed start left empty. */
-async function removeIfEmpty(dir: string): Promise<void> {
-  if ((await readdir(dir).catch(() => ['?'])).length === 0) await rmdir(dir).catch(() => {});
+/**
+ * Removes a new project's folder that a cancelled or failed start left without a file (an empty
+ * `takes/1` included); a folder with any file in it, or a link, stays. Returns whether it is gone.
+ */
+async function removeIfEmpty(dir: string): Promise<boolean> {
+  const entries = await readdir(dir, { withFileTypes: true }).catch(() => undefined);
+  if (!entries) return false;
+  let empty = true;
+  for (const entry of entries) if (!entry.isDirectory() || !(await removeIfEmpty(join(dir, entry.name)))) empty = false;
+  return (
+    empty &&
+    rmdir(dir).then(
+      () => true,
+      () => false,
+    )
+  );
 }
 
 /** The take folder number a project uses now (`takes/<n>/screen.mp4`), if any. */
@@ -361,6 +400,7 @@ function currentTake(raw: Record<string, unknown>): string | undefined {
  * (the cut is left for the next open). Resolves at once when nothing records.
  */
 export function stopForQuit(): Promise<void> {
+  quitting = true;
   if (!writing) return Promise.resolve();
   recorderHost.stop();
   return writing;
@@ -370,32 +410,38 @@ export function stopForQuit(): Promise<void> {
 export const recordingRuns = () => writing !== undefined;
 
 async function beginRecording(target: PickedTarget, displays: PickerDisplay[]): Promise<void> {
+  // One recording per pick: a second request (Enter held, or one sent as the picker closed) is late.
+  if (writing || !pickers.some((picker) => picker.display === target.display)) return;
   const display = displays.find((candidate) => candidate.id === target.display);
   const picked = pickers.find((picker) => picker.display === target.display)?.setup;
   const choices = picked?.choices ?? { stop: 'none' as const };
   const blocked = picked?.problem;
-  endPicking(false);
-  // The picked window gets the focus back now, while Cuttle still has it to hand on.
-  if (target.kind === 'window' && !TEST_BACKEND) void focusWindow(target.window).catch(() => false);
   let finished: () => void = () => {};
   writing = new Promise<void>((done) => (finished = done));
+  let opened = false;
   try {
+    // The picked window gets the focus back while a picker (Cuttle) still has it to hand on.
+    if (target.kind === 'window' && !TEST_BACKEND) await focusWindow(target.window).catch(() => false);
+    endPicking(false);
     if (!display || blocked) {
       if (blocked) say(blocked);
       return;
     }
-    await record(target, display, displays, picked, choices);
+    opened = await record(target, display, displays, picked, choices);
   } catch (error) {
     say(`Cuttle cannot record: ${(error as Error).message}`);
   } finally {
     writing = undefined;
     finished();
     busy = false;
+    // The pill "New recording" hid comes back when no editor opened (cancelled, failed).
+    if (pillHidden && !opened && !quitting) void showPill();
     pillHidden = false;
   }
 }
 
-async function record(target: PickedTarget, display: PickerDisplay, displays: PickerDisplay[], picked: PickerSetup | undefined, choices: RecordChoices): Promise<void> {
+/** Records a pick into its project; returns whether the editor opens on the take. */
+async function record(target: PickedTarget, display: PickerDisplay, displays: PickerDisplay[], picked: PickerSetup | undefined, choices: RecordChoices): Promise<boolean> {
   const source = captureSourceFor(target, display);
   const created = !pickingFor;
   const projectDir = pickingFor ?? (await newProjectDir());
@@ -435,7 +481,8 @@ async function record(target: PickedTarget, display: PickerDisplay, displays: Pi
     );
     const hud = overlay({ ...hudPosition(displays, display.id, area, HUD_SIZE), ...HUD_SIZE }, 'hud.cjs', { focusable: false, movable: true });
     const hudState: HudState = { phase: 'countdown', markers: 0 };
-    const showHud = () => send(hud.webContents, 'hud:state', { ...hudState });
+    // a check of the drive or the window still under way may note something after the HUD closed
+    const showHud = () => !hud.isDestroyed() && send(hud.webContents, 'hud:state', { ...hudState });
     const note = (message: string, detail: string, tone: HudState['tone']) => {
       hudState.message = message;
       hudState.detail = detail;
@@ -453,7 +500,11 @@ async function record(target: PickedTarget, display: PickerDisplay, displays: Pi
     bindRequests(countdown.webContents, 'countdown', {});
     const deadZone = () => screen.dipToScreenRect(null, hud.getBounds());
     hud.on('moved', () => recorderHost.setDeadZones([deadZone()]));
-    // Windows ends the session (sign out, shut down): the take is stopped and kept.
+    // Windows ends the session (sign out, shut down): the end waits while the take is stopped and written.
+    hud.on('query-session-end', (event) => {
+      event.preventDefault();
+      recorderHost.stop();
+    });
     hud.on('session-end', () => recorderHost.stop());
     void hud.loadURL(`${APP_ORIGIN}/hud.html`).catch(() => {});
     const cancelKey = 'Escape';
@@ -526,6 +577,7 @@ async function record(target: PickedTarget, display: PickerDisplay, displays: Pi
     if (choices.camera && countdownFor < 1) await new Promise((resolve) => setTimeout(resolve, 600));
     let take: Take;
     try {
+      if (quitting) throw new RecordingError('cancelled', 'The app quits');
       take = await recorderHost.record(
         {
           projectDir,
@@ -542,20 +594,25 @@ async function record(target: PickedTarget, display: PickerDisplay, displays: Pi
       clearInterval(watch);
       closeOverlays();
       if (!hud.isDestroyed()) hud.destroy();
-      if (error instanceof RecordingError && error.code === 'cancelled') return await giveUp();
+      if (error instanceof RecordingError && error.code === 'cancelled') {
+        await giveUp();
+        return false;
+      }
       // A take that had started is kept: repaired with recover, then opened like any other.
       if (takeDir) {
         cutting = await recoverAndOpen(projectDir, takeDir, (error as Error).message, showEditor);
-        return;
+        return cutting;
       }
       await giveUp();
       const failure = recordingFailure((error as Error).message);
-      return say(`The recording could not start. ${failure.text}`, failure.detail);
+      say(`The recording could not start. ${failure.text}`, failure.detail);
+      return false;
     }
     clearInterval(watch);
     closeOverlays();
     if (!hud.isDestroyed()) hud.destroy();
     cutting = await finishTake(projectDir, take, showEditor);
+    return cutting;
   } finally {
     if (!cutting) finishing.delete(project);
   }
@@ -580,7 +637,11 @@ async function recoverAndOpen(projectDir: string, takeDir: string, why: string, 
   return true;
 }
 
-/** The take becomes the project's (its previous version kept as a backup), the editor opens on it, and `suggest` cuts it. Returns whether the cut started. */
+/**
+ * The take becomes the project's (its previous version kept as a backup), the editor opens on it, and
+ * `suggest` cuts it; while the app quits, it is cut at the project's next open instead. Returns
+ * whether the cut started.
+ */
 async function finishTake(projectDir: string, take: Take, showEditor: () => Promise<void>): Promise<boolean> {
   try {
     const file = projectExists(projectDir) ? await readProjectFile(projectDir) : newProjectFile(projectDir);
@@ -591,8 +652,25 @@ async function finishTake(projectDir: string, take: Take, showEditor: () => Prom
     say(`The take is saved in ${take.dir}, but cuttle.json could not be pointed at it: ${(error as Error).message.split('\n')[0]}. Run "cuttle recover ${take.dir}".`);
     return false;
   }
+  if (quitting) {
+    const key = keyOf(projectDir);
+    await updateSettings((settings) => {
+      settings.uncut = [...settings.uncut.filter((entry) => entry !== key), key];
+    });
+    return false;
+  }
   void cutAndShow(resolve(projectDir));
   return true;
+}
+
+/** A take written while the app quit is cut when its project opens next (once its editor shows it). */
+export async function cutIfPending(dir: string): Promise<void> {
+  const key = keyOf(dir);
+  if (!(await loadSettings()).uncut.includes(key)) return;
+  await updateSettings((settings) => {
+    settings.uncut = settings.uncut.filter((entry) => entry !== key);
+  });
+  await recut(dir);
 }
 
 /** Opens the editor on the take at once, and reloads it once `suggest` has cut it in the background. */

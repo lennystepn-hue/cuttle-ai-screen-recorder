@@ -15,6 +15,9 @@ import { chooseAndOpen, createPill, lockDown, openEditorOrSay, showPill } from '
 app.setName('Cuttle');
 if (process.env.CUTTLE_USER_DATA) app.setPath('userData', resolve(process.env.CUTTLE_USER_DATA));
 
+/** A quit waits this long for a recording to be written into its project, then quits anyway. */
+const QUIT_WAIT_MS = 60_000;
+
 /** The folder after `--open` in `argv`, if any, resolved against the folder that launch ran in. */
 function openArgument(argv: readonly string[], cwd: string): string | undefined {
   const at = argv.indexOf('--open');
@@ -43,13 +46,17 @@ if (!app.requestSingleInstanceLock()) {
 
   // The app lives in the tray: closing the last editor does not quit it.
   app.on('window-all-closed', () => {});
-  // Quitting while a take records stops it and writes it into its project first.
-  let quitAfterTake = false;
+  // Quitting while a take records stops it and writes it into its project first: every quit until
+  // then waits (a second Quit from the tray too), unless the recorder does not answer for a minute.
+  let stopping: Promise<void> | undefined;
+  let quitNow = false;
   app.on('before-quit', (event) => {
-    if (quitAfterTake || !recordingRuns()) return;
+    if (quitNow || !recordingRuns()) return;
     event.preventDefault();
-    quitAfterTake = true;
-    void stopForQuit().finally(() => app.quit());
+    stopping ??= Promise.race([stopForQuit(), new Promise<void>((resolve) => setTimeout(resolve, QUIT_WAIT_MS))]).finally(() => {
+      quitNow = true;
+      app.quit();
+    });
   });
   app.on('will-quit', () => {
     globalShortcut.unregisterAll();

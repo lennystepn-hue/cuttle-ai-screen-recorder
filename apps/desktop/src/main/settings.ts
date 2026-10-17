@@ -17,6 +17,8 @@ const SettingsSchema = z.object({
     .default(() => join(app.getPath('home'), 'Cuttle')),
   /** Seconds of countdown before a recording starts. */
   countdown: z.union([z.literal(0), z.literal(3), z.literal(5)]).catch(3).default(3),
+  /** Projects whose take was written while the app quit: cut by suggest when they open next. */
+  uncut: z.array(z.string()).catch([]).default([]),
   /** The picker bar's choices, kept between recordings. */
   record: z
     .object({ camera: z.string().optional(), mic: z.string().optional(), stop: z.enum(['none', 'claude', 'idle']).default('none'), claudeFolder: z.string().optional() })

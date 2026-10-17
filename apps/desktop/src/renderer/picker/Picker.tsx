@@ -4,7 +4,7 @@
 // the label and the camera bubble keep clear of what is about to be recorded where there is room.
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import type { PickedTarget, PickerSetup, Rect, RecordChoices } from '../../shared/ipc';
-import { barPlacement, bubbleSize, dragRect, labelPlacement, matchMediaDevice, windowsAt } from '../../shared/recording';
+import { barPlacement, bubblePlacement, bubbleSize, dragRect, labelPlacement, matchMediaDevice, windowsAt } from '../../shared/recording';
 import { bridge } from '../bridge';
 import { FolderIcon, MicIcon, WarningIcon } from '../icons';
 
@@ -134,8 +134,11 @@ export function Picker() {
   const needsFolder = choices.stop === 'claude' && !choices.claudeFolder;
   const recordReason = blocked ?? (!shown ? 'Pick a window, a display or a region first' : needsFolder ? 'Choose the folder Claude Code runs in first' : undefined);
 
+  // One pick records once (Enter held, or a click and then Enter, would ask again).
+  const sent = useRef(false);
   const record = useCallback(() => {
-    if (!display || !shown || recordReason) return;
+    if (!display || !shown || recordReason || sent.current) return;
+    sent.current = true;
     const target: PickedTarget =
       shown.kind === 'screen'
         ? { kind: 'screen', display: display.id }
@@ -260,9 +263,7 @@ export function Picker() {
   const wholeDisplay = rect !== undefined && rect.width >= full.width - 1 && rect.height >= full.height - 1;
   const hintLeft = (rect !== undefined && !wholeDisplay && covers(hintRight, rect)) || (labelBox !== undefined && covers(hintRight, labelBox));
   const bubble = rect && choices.camera ? bubbleSize(rect) : 0;
-  // bottom left inside the target, above the bar when the bar had to go inside it
-  const bubbleBottom = rect ? Math.min(rect.y + rect.height, barAt.where === 'inside' ? barAt.y : Infinity) - 16 : 0;
-  const bubbleTop = rect ? Math.max(rect.y + 8 + (label && !label.above ? labelSize.height + 8 : 0), bubbleBottom - bubble) : 0;
+  const bubbleAt = rect ? bubblePlacement(rect, bubble, barAt, rect.y + 8 + (label && !label.above ? labelSize.height + 8 : 0)) : undefined;
   const atEdge = rect !== undefined && (rect.x <= 0 || rect.y <= 0 || rect.x + rect.width >= full.width || rect.y + rect.height >= full.height);
   const kindName = shown?.kind === 'screen' ? 'Screen' : shown?.kind === 'window' ? 'Window' : 'Region';
   const effective = shown?.kind ?? (mode === 'auto' ? 'screen' : mode);
@@ -311,7 +312,7 @@ export function Picker() {
               <kbd>Ctrl+Shift+Alt+S</kbd> stops
             </span>
           </div>
-          {choices.camera && rect && <CameraBubble name={choices.camera} size={bubble} left={rect.x + 16} top={bubbleTop} />}
+          {choices.camera && bubbleAt && <CameraBubble name={choices.camera} size={bubble} left={bubbleAt.left} top={bubbleAt.top} />}
           {notice && (
             <div
               className={`problem${blocked ? ' blocking' : ''}`}

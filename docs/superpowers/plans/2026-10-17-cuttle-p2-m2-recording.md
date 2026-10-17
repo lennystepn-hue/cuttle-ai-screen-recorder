@@ -4805,3 +4805,27 @@ in plain words, and the picker's layout.
 
 After the fixes: `pnpm typecheck`; the node tests (374 passed, 23 skipped outside their modes);
 `pnpm app:check` (15 passed); `pnpm app:build` (3 passed).
+
+**A second review, of the fixes.** It found these, now fixed too:
+
+- **A second Quit while the take was written lost it.** Every quit waits now until the take is in its
+  project (a minute at most, should the recorder not answer); a quit before the recorder started
+  (the folder being made, the camera's 0.6 s) starts nothing. A take written while the app quits is
+  cut by `suggest` when its project opens next (`settings.uncut`), instead of an editor flashing up
+  as the app goes; Windows ending the session waits (`query-session-end`) while the take is written.
+- **The camera bubble sat at the top left for a whole display or a maximised window** (the bar inside
+  the target's top capped it). Only a bar inside the target's lower half lifts it now
+  (`bubblePlacement`, with a unit test).
+- **The pill stayed hidden** after a pick from it was cancelled in the countdown or failed to start,
+  and when "New recording" was pressed while a pick or take was under way. The pill hides once the
+  pick really starts and comes back whenever no editor opens.
+- **A second record request for one pick** (Enter held, a click then Enter) started a second
+  recording over the first one's state. The main process takes the first only, and the picker sends
+  one.
+- Smaller: a camera and mic listing that fails for another reason than a missing ffmpeg warns and
+  leaves the screen to record; the HUD is not sent to after it closed; projects are kept apart by
+  their real path (a junction is the same project); the picked window gets the focus while a picker
+  still has it; a cancelled start leaves no empty `takes/1` folder behind.
+
+`app:check` records by clicking the picker's Record button again (not through the bridge), and quits
+twice while the take is written.

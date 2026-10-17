@@ -379,19 +379,21 @@ describe.runIf(enabled)('the Cuttle app', () => {
     return found!;
   }
 
-  /** Records the first monitor's display from the picker (with `choices`), stopping from the HUD after about 1.5 s. */
+  /**
+   * Records the first monitor's display with its picker's Record button (with `choices`), stopping
+   * from the HUD after about 1.5 s. The pointer is on that display, over nothing: Record takes it whole.
+   */
   async function recordThroughPicker(start: () => Promise<unknown>, choices?: Record<string, unknown>, stop = true): Promise<void> {
     await start();
-    const { page, display } = await firstMonitorPicker();
-    await page.evaluate(
-      async ({ display, choices }) => {
-        const bridge = (window as unknown as { cuttle: { invoke(channel: string, argument?: unknown): Promise<unknown> } }).cuttle;
-        if (choices) await bridge.invoke('picker:choices', choices);
-        // the pickers close as the recording begins: the answer never comes back to this page
-        void bridge.invoke('picker:record', { kind: 'screen', display }).catch(() => {});
-      },
-      { display, choices },
-    ).catch(() => {});
+    const { page } = await firstMonitorPicker();
+    await page.evaluate(async (choices) => {
+      const bridge = (window as unknown as { cuttle: { invoke(channel: string, argument?: unknown): Promise<unknown> } }).cuttle;
+      if (choices) await bridge.invoke('picker:choices', choices);
+      await bridge.invoke('picker:hover');
+    }, choices);
+    await page.waitForSelector('[data-testid=picker-record]:not([disabled])', { state: 'attached' });
+    // the pickers close as the recording begins
+    await click(page, '[data-testid=picker-record]').catch(() => {});
     if (!stop) return;
     const hud = await waitForPage(app, async (page) => page.url().includes('/hud.html') && (await page.locator('[data-testid=hud-time]').textContent()) !== '0:00');
     await new Promise((resolve) => setTimeout(resolve, 1500));
@@ -465,7 +467,7 @@ describe.runIf(enabled)('the Cuttle app', () => {
   });
 
   // Last: the app quits here.
-  it('stops a recording when the app quits, and writes the take into its project first', async () => {
+  it('stops a recording when the app quits, and writes the take into its project first (a second quit waits too)', async () => {
     const projects = join(root, 'projects');
     const before = new Set(readdirSync(projects));
     const pill = app.windows().find((page) => page.url().includes('/pill.html'))!;
@@ -474,7 +476,13 @@ describe.runIf(enabled)('the Cuttle app', () => {
     await waitForPage(app, async (page) => page.url().includes('/hud.html') && (await page.locator('[data-testid=hud-time]').textContent()) !== '0:00');
     await new Promise((resolve) => setTimeout(resolve, 1000));
     const exited = new Promise((resolve) => app.process().once('exit', resolve));
-    await app.evaluate(({ app: electronApp }) => electronApp.quit()).catch(() => {});
+    await app
+      .evaluate(({ app: electronApp }) => {
+        electronApp.quit();
+        // Quit again while the take is written (from the tray, say): it waits as well.
+        setTimeout(() => electronApp.quit(), 200);
+      })
+      .catch(() => {});
     await exited;
     const made = readdirSync(projects).find((name) => !before.has(name))!;
     expect(JSON.parse(readFileSync(join(projects, made, 'cuttle.json'), 'utf8')).sources.screen).toBe('takes/1/screen.mp4');

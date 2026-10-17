@@ -13,7 +13,7 @@ import { bindRequests, send } from './ipc';
 import { ProjectMedia } from './media-service';
 import { LockedError, lockProject, openProjectFile, projectInfo } from './project';
 import { APP_ORIGIN, assetPath, bundlePath, serveApp, serveMedia } from './protocols';
-import { recut, startPicking } from './recording';
+import { cutIfPending, recut, startPicking } from './recording';
 import { addRecent, loadSettings, updateSettings } from './settings';
 
 
@@ -91,7 +91,9 @@ async function createEditor(dir: string, key: string, force: boolean): Promise<B
   const file = await openProjectFile(dir);
   const release = await lockProject(dir, { force });
   try {
-    return await editorWindow(dir, key, file, release);
+    const window = await editorWindow(dir, key, file, release);
+    void cutIfPending(dir);
+    return window;
   } catch (error) {
     // A window that failed to load is not left open (and invisible), nor the project locked.
     const editor = editors.get(key);
@@ -373,10 +375,7 @@ export async function createPill(): Promise<BrowserWindow> {
       else await chooseAndOpen();
     },
     'pill:hide': () => window.hide(),
-    'pill:record': () => {
-      window.hide();
-      void startPicking(undefined, { fromPill: true });
-    },
+    'pill:record': () => void startPicking(undefined, { fromPill: true }),
     'pill:menu': async () => {
       const recent = (await loadSettings()).recent;
       Menu.buildFromTemplate([
@@ -406,6 +405,11 @@ export async function createPill(): Promise<BrowserWindow> {
   await window.loadURL(`${APP_ORIGIN}/pill.html`);
   pill = window;
   return window;
+}
+
+/** Hides the pill: a recording is picked from it (it is not to be in the video). */
+export function hidePill(): void {
+  if (pill && !pill.isDestroyed()) pill.hide();
 }
 
 export async function showPill(): Promise<void> {

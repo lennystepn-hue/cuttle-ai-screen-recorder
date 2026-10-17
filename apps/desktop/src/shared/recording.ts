@@ -223,3 +223,14 @@ export function labelPlacement(target: Rect, area: Rect, label: { width: number 
 
 /** The camera bubble's size for a target: 18 % of its shorter side, 48 to 120 DIP. */
 export const bubbleSize = (target: Rect) => Math.round(Math.min(120, Math.max(48, Math.min(target.width, target.height) * 0.18)));
+
+/**
+ * Where the camera's preview goes: inside the target's bottom left, where the look puts the camera
+ * in the video; above the bar when the bar had to go inside the target's lower half; never above
+ * `top` (below a label inside the target).
+ */
+export function bubblePlacement(target: Rect, size: number, bar: { y: number; where: 'below' | 'above' | 'inside' }, top: number): { left: number; top: number } {
+  const barInLowerHalf = bar.where === 'inside' && bar.y > target.y + target.height / 2;
+  const bottom = Math.min(target.y + target.height, barInLowerHalf ? bar.y : Infinity) - 16;
+  return { left: target.x + 16, top: Math.max(top, bottom - size) };
+}

@@ -3,6 +3,7 @@ import {
   captureSourceFor,
   dragRect,
   barPlacement,
+  bubblePlacement,
   bubbleSize,
   hudPosition,
   hudWarning,
@@ -155,5 +156,15 @@ describe('the picker’s layout', () => {
 
   it('sizes the camera bubble to the target', () => {
     expect([bubbleSize({ x: 0, y: 0, width: 200, height: 90 }), bubbleSize({ x: 0, y: 0, width: 640, height: 360 }), bubbleSize({ x: 0, y: 0, width: 2048, height: 1104 })]).toEqual([48, 65, 120]);
+  });
+
+  it('puts the camera bubble in the bottom left of the target, above the bar only when the bar is inside its lower half', () => {
+    const display = { x: 0, y: 0, width: 2048, height: 1104 };
+    // a whole display: the bar is inside near the top, the bubble stays at the bottom
+    expect(bubblePlacement(display, 120, { y: 52, where: 'inside' }, 8)).toEqual({ left: 16, top: 968 });
+    // the bar inside the lower half (a label above): the bubble sits above it
+    expect(bubblePlacement({ x: 100, y: 500, width: 800, height: 604 }, 108, { y: 900, where: 'inside' }, 508)).toEqual({ left: 116, top: 776 });
+    // a bar below or above leaves the bubble alone; a short target keeps it under the label inside
+    expect(bubblePlacement({ x: 0, y: 0, width: 300, height: 90 }, 48, { y: 106, where: 'below' }, 44)).toEqual({ left: 16, top: 44 });
   });
 });

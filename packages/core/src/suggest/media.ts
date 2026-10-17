@@ -1,6 +1,7 @@
 // What suggest needs from the screen track, read with ffmpeg.
 import { CoreError } from '../errors';
 import { runFfmpeg } from '../ffmpeg';
+import type { ScreenBands } from './crop';
 import type { Span } from './spans';
 
 export interface ScreenAnalysis {
@@ -43,6 +44,46 @@ export function parseAnalysis(log: string): ScreenAnalysis {
   }
   if (open !== undefined) still.push({ from: open, to: duration });
   return { duration, width: Number(size?.[1] ?? 0), height: Number(size?.[2] ?? 0), still };
+}
+
+/** A pixel whose grey value moved more than this between frames changed (video noise does not). */
+const BAND_THRESHOLD = 6;
+
+/**
+ * How much each row and column of the screen track changed from keyframe to keyframe (a keyframe
+ * every 2 s in Cuttle's takes: only those are decoded, so a long take is read quickly), 640 px wide.
+ */
+export async function screenBands(path: string, size: { width: number; height: number }): Promise<ScreenBands> {
+  const width = 640;
+  const height = 2 * Math.round((width * size.height) / size.width / 2);
+  const area = width * height;
+  const rows = new Float64Array(height);
+  const cols = new Float64Array(width);
+  let previous: Buffer | undefined;
+  let pending: Buffer = Buffer.alloc(0);
+  let frames = 0;
+  await runFfmpeg(['-skip_frame', 'nokey', '-i', path, '-map', '0:v:0', '-vf', `scale=${width}:${height}:flags=area,format=gray`, '-fps_mode', 'passthrough', '-f', 'rawvideo', '-'], (chunk) => {
+    pending = pending.length === 0 ? chunk : Buffer.concat([pending, chunk]);
+    while (pending.length >= area) {
+      const frame = pending.subarray(0, area);
+      pending = pending.subarray(area);
+      if (previous) {
+        for (let y = 0; y < height; y++) {
+          for (let x = 0; x < width; x++) {
+            const i = y * width + x;
+            if (Math.abs(frame[i]! - previous[i]!) > BAND_THRESHOLD) {
+              rows[y]!++;
+              cols[x]!++;
+            }
+          }
+        }
+      }
+      previous = frame;
+      frames++;
+    }
+  });
+  const pairs = Math.max(1, frames - 1);
+  return { rows: Array.from(rows, (count) => count / (pairs * width)), cols: Array.from(cols, (count) => count / (pairs * height)), frames };
 }
 
 /** Size and length of the screen track from a pass that copies its packets (fast: nothing is decoded). */

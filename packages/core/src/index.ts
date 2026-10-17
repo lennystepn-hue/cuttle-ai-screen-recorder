@@ -23,4 +23,6 @@ export { TRANSCRIPT_FILE, micOffset, readTranscript, transcribeTake, transcriptO
 export { applySpeechEdits, speechActivity, withSpeechCuts, wordStretches, type SpeechCutsInput, type SpeechCutsResult, type SpeechEditsResult } from './speech/apply';
 export { RETAKE_RULES, retakeCuts, spokenCues, type RetakeCut, type RetakeInput, type SpokenCue } from './speech/retakes';
 export { TYPING_RULES, keyBursts, screenStretches, typingZooms, type Burst, type ScreenChange, type TypingInput, type TypingZoom } from './suggest/typing';
+export { CROP_RULES, areaStretches, bandCrop, cropOf, cropPieces, type CropStretch, type ScreenBands } from './suggest/crop';
+export { DIALOG_RULES, dialogZooms, type DialogZoom } from './suggest/dialogs';
 export { CLEAN_MIC_FILE, cleanMic, cleanupFilter, denoiseLatency } from './speech/cleanup';

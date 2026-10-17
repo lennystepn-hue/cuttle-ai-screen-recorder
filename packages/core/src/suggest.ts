@@ -4,7 +4,9 @@ import { newId, parseEventsJsonl, parseProject, parseTakeJson, usedIds, type Inp
 import { clickZooms, sceneSpans, shownClicks } from '@cuttle/timeline';
 import { CoreError } from './errors';
 import { readProjectFile, writeProjectFile } from './project-file';
-import { analyseScreen, grabGray, grayFrames } from './suggest/media';
+import { areaStretches, bandCrop, cropPieces, type CropStretch } from './suggest/crop';
+import { dialogZooms } from './suggest/dialogs';
+import { analyseScreen, grabGray, grayFrames, screenBands } from './suggest/media';
 import { suggestClips } from './suggest/plan';
 import { changedRegion, zoomRect } from './suggest/region';
 import { screenStretches, typingZooms, type ScreenChange } from './suggest/typing';
@@ -26,6 +28,10 @@ export interface SuggestOptions {
   clickZooms?: boolean;
   /** Zooms that follow typing (default true; `zoom: false` turns them off too). */
   typingZooms?: boolean;
+  /** Zooms on dialogs (default true; `zoom: false` turns them off too). */
+  dialogZooms?: boolean;
+  /** Crops each clip to the content (default true): the window's content area, else the picture's still edges. */
+  crop?: boolean;
   /**
    * The mic's speech (default true): it is kept and never sped up, and the transcript's filler words
    * and pauses are cut where the picture rests.
@@ -39,7 +45,9 @@ export interface SuggestOptions {
   onProgress?: (fraction: number) => void;
 }
 
-type ClipScene = { type: 'clip'; id: string; label?: string; from: number; to: number; speed?: number };
+/** A clip's crop as written to cuttle.json. */
+type ClipCrop = { rect: Rect; enabled?: boolean; auto?: 'crop' };
+type ClipScene = { type: 'clip'; id: string; label?: string; from: number; to: number; speed?: number; crop?: ClipCrop };
 
 export interface SuggestResult {
   project: string;
@@ -133,14 +141,22 @@ export async function suggestProject(projectDir: string, args: SuggestOptions = 
   // Every id of the file as read, also those of the clips and zoom being replaced: an id that an
   // editor or an undo step still holds must never name a different item.
   const taken = usedIds(file.raw);
-  const clips: ClipScene[] = suggestion.clips.map(({ from: start, to, speed, label }) => ({
-    type: 'clip',
-    id: newId('scenes', taken),
-    ...(label !== undefined && { label }),
-    from: start,
-    to,
-    ...(speed !== 1 && { speed }),
-  }));
+  // The crop: what each clip shows of the screen; a clip is cut where the content area changes for good.
+  const crops = args.crop !== false && file.project.autoEdits.crop ? await cropsFor(screen, events, screenInfo, previous, notes) : undefined;
+  const pieces = crops ? cropPieces(suggestion.clips, crops.stretches) : suggestion.clips.map((clip) => ({ clip, from: clip.from, to: clip.to }));
+  const clips: ClipScene[] = pieces.map(({ clip: { speed, label }, from: start, to, ...piece }) => {
+    const rect = (piece as { rect?: Rect }).rect;
+    const crop = rect ? crops?.crop(rect, start, to) : crops?.kept(start, to);
+    return {
+      type: 'clip',
+      id: newId('scenes', taken),
+      ...(label !== undefined && { label }),
+      from: start,
+      to,
+      ...(speed !== 1 && { speed }),
+      ...(crop && { crop }),
+    };
+  });
   if (before.length + after.length > 0) {
     notes.push(`kept ${before.length + after.length} still or card scene(s)${before.length > 0 ? `, ${before.length} before the clips` : ''}`);
   }
@@ -161,12 +177,12 @@ export async function suggestProject(projectDir: string, args: SuggestOptions = 
   }
   // The zooms suggest made before are replaced; the others stay, and the new ones avoid them.
   const rawZooms = (file.raw.zooms as SuggestedZoom[] | undefined) ?? [];
-  const isOurs = (zoom: { auto?: string }) => zoom.auto === 'answer' || zoom.auto === 'typing' || zoom.auto === 'click';
+  const isOurs = (zoom: { auto?: string }) => zoom.auto === 'answer' || zoom.auto === 'dialog' || zoom.auto === 'typing' || zoom.auto === 'click';
   const kept = rawZooms.filter((zoom) => !isOurs(zoom));
   const switchedOff = file.project.zooms.filter((zoom) => isOurs(zoom) && !zoom.enabled);
   if (kept.length > 0) notes.push(`kept ${kept.length} zoom${kept.length === 1 ? '' : 's'} made or changed by hand`);
   const zooms: SuggestedZoom[] = [];
-  const add = (zoom: SuggestedZoom & { auto: 'answer' | 'typing' | 'click' }) => zooms.push(staysOff(zoom, switchedOff) ? { ...zoom, enabled: false } : zoom);
+  const add = (zoom: SuggestedZoom & { auto: 'answer' | 'dialog' | 'typing' | 'click' }) => zooms.push(staysOff(zoom, switchedOff) ? { ...zoom, enabled: false } : zoom);
   const first = suggestion.clips[0];
   const last = suggestion.clips.at(-1);
   const keptOverlaps = (at: number, end: number) => kept.some((zoom) => at < zoom.at + zoom.duration && zoom.at < end);
@@ -192,6 +208,11 @@ export async function suggestProject(projectDir: string, args: SuggestOptions = 
   const parsed = parseProject({ ...file.raw, scenes, ...(cuts && { cuts }), zooms: [] });
   const spans = parsed.ok ? sceneSpans(parsed.project.scenes, parsed.project.cuts) : [];
   const shown = spans.flatMap((span) => (span.scene.type === 'clip' ? [{ from: span.scene.from, to: span.scene.to, speed: span.scene.speed, start: span.start }] : []));
+  if (args.zoom !== false && args.dialogZooms !== false && file.project.autoEdits.dialogZooms && events.some((event) => event.type === 'window')) {
+    const opened = dialogZooms(events, shown, screenInfo, [...kept, ...zooms]);
+    for (const zoom of opened) add({ id: newId('zooms', taken), label: 'Dialog', at: zoom.at, duration: zoom.duration, rect: zoom.rect, auto: 'dialog' });
+    if (opened.length > 0) notes.push(`${opened.length} zoom${opened.length === 1 ? '' : 's'} on a dialog`);
+  }
   if (args.zoom !== false && args.typingZooms !== false && file.project.autoEdits.typingZooms && events.some((event) => event.type === 'keys')) {
     // where the text goes: the caret, else what the screen changes while keys are typed
     const changes = await typingChanges(screen, screenStretches(events, shown, screenInfo), screenInfo);
@@ -295,6 +316,49 @@ function staysOff(zoom: SuggestedZoom, off: readonly { at: number; duration: num
     const inter = w > 0 && h > 0 ? w * h : 0;
     return inter / (aw * ah + bw * bh - inter) >= 0.5;
   });
+}
+
+/**
+ * The crops of the new clips. From the recorder's content areas where the take has them, else one
+ * from the picture's still edges for all clips. A crop the person made on an old clip stays on the
+ * new ones it overlaps (and none is made there); one of Cuttle's they switched off stays off.
+ */
+async function cropsFor(
+  screen: string,
+  events: readonly InputEvent[],
+  screenInfo: { width: number; height: number; duration: number },
+  previous: readonly Record<string, unknown>[],
+  notes: string[],
+): Promise<{ stretches: CropStretch[]; crop: (rect: Rect, from: number, to: number) => ClipCrop | undefined; kept: (from: number, to: number) => ClipCrop | undefined }> {
+  type Old = { from: number; to: number; crop: ClipCrop };
+  const old = previous.filter((scene): scene is Record<string, unknown> & Old => scene.type === 'clip' && typeof scene.crop === 'object' && scene.crop !== null);
+  const over = (from: number, to: number) => old.filter((scene) => scene.from < to && from < scene.to);
+  /** A crop made by hand on a clip that showed this stretch. */
+  const kept = (from: number, to: number) => over(from, to).find((scene) => scene.crop.auto === undefined)?.crop;
+  const crop = (rect: Rect, from: number, to: number): ClipCrop | undefined => {
+    const mine = kept(from, to);
+    if (mine) return mine;
+    const off = over(from, to).some((scene) => scene.crop.auto === 'crop' && scene.crop.enabled === false && alike(scene.crop.rect, rect));
+    return { rect, auto: 'crop', ...(off && { enabled: false }) };
+  };
+  let stretches = areaStretches(events, screenInfo.duration, screenInfo);
+  if (stretches.length > 0) {
+    const cropped = stretches.filter((stretch) => stretch.rect).length;
+    notes.push(cropped > 0 ? `cropped to the window's content area (${cropped} stretch${cropped === 1 ? '' : 'es'}, from the recorder)` : 'no crop: the windows shown had no content area to crop to');
+  } else {
+    const rect = bandCrop(await screenBands(screen, screenInfo), screenInfo);
+    stretches = [{ from: 0, to: screenInfo.duration, ...(rect && { rect }) }];
+    notes.push(rect ? `cropped to ${rect.join(', ')}: the screen's edges that hardly change (tabs, bars, a taskbar) are left out` : 'no crop: no still edges around what changes');
+  }
+  return { stretches, crop, kept };
+}
+
+/** Two rects at least half alike (intersection over union). */
+function alike(a: Rect, b: Rect): boolean {
+  const w = Math.min(a[0] + a[2], b[0] + b[2]) - Math.max(a[0], b[0]);
+  const h = Math.min(a[1] + a[3], b[1] + b[3]) - Math.max(a[1], b[1]);
+  const inter = w > 0 && h > 0 ? w * h : 0;
+  return inter / (a[2] * a[3] + b[2] * b[3] - inter) >= 0.5;
 }
 
 /** What the screen changed in each stretch, frame by frame (`TYPING_RATE` a second), in screen pixels. */

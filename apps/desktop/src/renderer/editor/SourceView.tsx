@@ -7,7 +7,7 @@ import { useEffect, useLayoutEffect, useRef, useState, type PointerEvent as Reac
 import type { Rect } from '@cuttle/project';
 import type { Command } from '../../shared/document';
 import { formatSource } from '../../shared/format';
-import { zoomTargetAt } from '@cuttle/timeline';
+import { maskRectAt, zoomTargetAt } from '@cuttle/timeline';
 import { adjustRect, drawnRect, fitInside, movePath, toSource, toStage, type Fit, type Handle } from '../../shared/edit';
 import { addMask, addZoom, cropClip, overlayBlocked, playheadPlace } from './actions';
 import { edit, preview } from './doc';
@@ -116,7 +116,8 @@ export function SourceView() {
   const zoomAt = (zoom: (typeof project.zooms)[number]): Rect => (frameAt === undefined ? zoom.rect : (zoomTargetAt(zoom, frameAt, speed).map((value) => Math.round(value)) as Rect));
   const boxes: Box[] = [
     ...project.zooms.map((zoom) => ({ kind: 'zoom' as const, id: zoom.id!, rect: zoomAt(zoom), here: frameAt !== undefined && frameAt >= zoom.at && frameAt < zoom.at + zoom.duration })),
-    ...project.masks.map((mask) => ({ kind: 'mask' as const, id: mask.id!, rect: mask.rect, here: frameAt !== undefined && frameAt >= mask.from && frameAt < mask.to })),
+    // a mask that follows covers, at that second, where it is (between two places both)
+    ...project.masks.map((mask) => ({ kind: 'mask' as const, id: mask.id!, rect: frameAt === undefined ? mask.rect : maskRectAt(mask, frameAt), here: frameAt !== undefined && frameAt >= mask.from && frameAt < mask.to })),
   ].filter((box) => box.here || (selection?.kind === box.kind && selection.id === box.id));
   // that clip's crop, while cropping or selected
   if (croppedClip?.crop && croppedClip.id) boxes.push({ kind: 'crop', id: croppedClip.id, rect: croppedClip.crop.rect, here: true });
@@ -173,14 +174,14 @@ export function SourceView() {
     select({ kind: box.kind, id: box.id });
     const list = box.kind === 'zoom' ? 'zooms' : box.kind === 'mask' ? 'masks' : 'scenes';
     const clip = box.kind === 'crop' ? project.scenes.find((scene) => scene.id === box.id) : undefined;
-    const path = box.kind === 'zoom' ? project.zooms.find((zoom) => zoom.id === box.id) : undefined;
+    const path = box.kind === 'zoom' ? project.zooms.find((zoom) => zoom.id === box.id) : box.kind === 'mask' ? project.masks.find((mask) => mask.id === box.id) : undefined;
     let commands: Command[] | undefined;
     follow(
       event,
       (dx, dy) => {
         const rect = adjustRect(box.rect, handle, dx, dy, screen, box.kind === 'zoom' ? aspect : undefined).map((value) => Math.round(value));
         // a crop moved by hand is the person's: a new crop object, without the automatic tag; a zoom
-        // that follows takes its whole path along
+        // or mask that follows takes its whole path along
         const fields =
           box.kind === 'crop' && clip?.type === 'clip'
             ? { crop: { rect, ...(clip.crop?.enabled === false && { enabled: false }) } }
@@ -229,6 +230,7 @@ export function SourceView() {
       <canvas ref={canvas} style={{ width: size.width, height: size.height }} />
       {(selected?.kind === 'zoom' || selected?.kind === 'crop') && <ZoomDim fit={fit} rect={selected.rect} size={size} />}
       {selected?.kind === 'zoom' && <ZoomPath fit={fit} zoom={project.zooms.find((zoom) => zoom.id === selected.id)} />}
+      {selected?.kind === 'mask' && <ZoomPath fit={fit} zoom={project.masks.find((mask) => mask.id === selected.id)} kind="mask" />}
       {!selected && tool === 'crop' && boxes.some((box) => box.kind === 'crop') && <ZoomDim fit={fit} rect={boxes.find((box) => box.kind === 'crop')!.rect} size={size} />}
       {boxes.map((box) => {
         const at = toStage(box.rect, fit);
@@ -277,7 +279,7 @@ export function SourceView() {
                   : selected
                     ? ` · drag the box to place it, elsewhere for a new ${tool}`
                     : ` · drag to draw a ${tool}`
-                : selected?.kind === 'zoom' && project.zooms.find((zoom) => zoom.id === selected.id)?.moves?.length
+                : (selected?.kind === 'zoom' ? project.zooms : selected?.kind === 'mask' ? project.masks : []).find((item) => item.id === selected?.id)?.moves?.length
                   ? ' · it follows the dashed path: drag the box to move all of it, its handles to resize it'
                   : ' · drag the box to move it, its handles to resize it'}
         <span className="sep" />
@@ -298,13 +300,13 @@ export function SourceView() {
   );
 }
 
-/** A selected zoom that follows: the rects it moves through, dashed, and the way from one to the next. */
-function ZoomPath({ fit, zoom }: { fit: Fit; zoom?: { rect: Rect; moves?: { rect: Rect }[] } }) {
+/** A selected zoom or mask that follows: the rects it moves through, dashed, and the way from one to the next. */
+function ZoomPath({ fit, zoom, kind = 'zoom' }: { fit: Fit; zoom?: { rect: Rect; moves?: { rect: Rect }[] }; kind?: 'zoom' | 'mask' }) {
   if (!zoom?.moves?.length) return null;
   const rects = [zoom.rect, ...zoom.moves.map((move) => move.rect)].map((rect) => toStage(rect, fit));
   const middles = rects.map((rect) => `${rect.x + rect.width / 2},${rect.y + rect.height / 2}`);
   return (
-    <svg className="zoom-path" data-testid="zoom-path">
+    <svg className={`zoom-path${kind === 'mask' ? ' mask' : ''}`} data-testid={`${kind}-path`}>
       {rects.map((rect, i) => (
         <rect key={i} x={rect.x} y={rect.y} width={rect.width} height={rect.height} />
       ))}

@@ -103,8 +103,9 @@ async function run(id: number, job: MediaJob): Promise<ThumbnailsMeta | undefine
       return meta;
     }
     case 'suggest': {
-      // the app transcribes after the cut, as a step of its own (`transcribe`, `speech-edits`)
-      await suggestProject(job.input, { transcribe: false, onStatus: () => reply({ id, progress: 0 }) });
+      // the app transcribes after the cut, as a step of its own (`transcribe`, `speech-edits`); the
+      // screen's text is read in a step of its own too (P4-M5b): the cut leaves the privacy masks be
+      await suggestProject(job.input, { transcribe: false, privacy: false, onStatus: () => reply({ id, progress: 0 }) });
       return undefined;
     }
     case 'transcribe': {

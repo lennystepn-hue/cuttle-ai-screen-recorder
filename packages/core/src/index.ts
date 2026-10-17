@@ -25,4 +25,9 @@ export { RETAKE_RULES, retakeCuts, spokenCues, type RetakeCut, type RetakeInput,
 export { TYPING_RULES, keyBursts, screenStretches, typingZooms, type Burst, type ScreenChange, type TypingInput, type TypingZoom } from './suggest/typing';
 export { CROP_RULES, areaStretches, bandCrop, cropOf, cropPieces, type CropStretch, type ScreenBands } from './suggest/crop';
 export { DIALOG_RULES, dialogZooms, type DialogZoom } from './suggest/dialogs';
+export { SECRET_KINDS, SECRET_LABELS, findSecrets, lineSecrets, type Secret, type SecretKind } from './privacy/patterns';
+export { MASK_RULES, privacyMasks, type PrivacyMask } from './privacy/masks';
+export { ScreenReader } from './privacy/ocr';
+export { READ_RULES, SCREEN_TEXT_FILE, framesToRead, readFrames, writeScreenText } from './privacy/read';
+export { readScreenText, withPrivacyMasks, type PrivacyMasksResult, type RawMask } from './privacy/apply';
 export { CLEAN_MIC_FILE, cleanMic, cleanupFilter, denoiseLatency } from './speech/cleanup';

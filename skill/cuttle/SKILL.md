@@ -149,8 +149,13 @@ stills in `preview/`; add `-o "<folder>"` to keep a set.
 
 Then refine `cuttle.json` ([project.md](project.md)) and preview again:
 
-- **Privacy first.** Look for names, email addresses, tokens and API keys, file paths with user
-  names, hook or plugin errors, and notifications.
+- **Privacy first.** On Windows `suggest` reads the screen's text (Windows' own OCR, on this
+  computer) and masks what it finds: email addresses, keys and tokens, the value of a `…KEY=`,
+  `…TOKEN=` or `password:` line, IBANs, card and phone numbers (masks tagged `auto: "privacy"`,
+  following text that scrolls). Pass the user's name and address once with
+  `--mask "<word>"` (kept in cuttle.json). This is a help, not a guarantee: the OCR misses small
+  grey text and some lines, so **still look** yourself. Look for names, email addresses, tokens and
+  API keys, file paths with user names, hook or plugin errors, and notifications.
   - Twelve stills miss things: step through sped-up stretches with `preview --at` about every
     output second.
   - For each find, take the still's `source` second and run

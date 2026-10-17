@@ -140,6 +140,8 @@ export async function runCli(argv: readonly string[], streams?: Streams): Promis
     .option('--claude [cwd]', "read Claude Code's transcript for a take without Claude markers (default: here)")
     .option('--no-zoom', 'no zooms (neither on the answer, nor on dialogs, nor on typing, nor on clicks)')
     .option('--no-crop', 'no crop to the content (a browser\'s page without its tabs and bars)')
+    .option('--no-privacy', "no privacy masks (and the screen's text is not read)")
+    .option('--mask <word>', 'mask this word wherever the screen shows it (a name, an address); kept in cuttle.json', (word: string, words: string[]) => [...words, word], [] as string[])
     .option('--no-dialog-zooms', 'no zooms on dialogs')
     .option('--no-typing-zooms', 'no zooms that follow typing')
     .option('--no-click-zooms', 'no zooms on clicks (the answer zoom stays)')
@@ -147,8 +149,8 @@ export async function runCli(argv: readonly string[], streams?: Streams): Promis
     .option('--no-transcribe', 'do not transcribe the mic first (when it has no transcript and a speech model is there)')
     .option('--dry-run', 'print the suggestion, leave cuttle.json as it is')
     .action(
-      action((output, project, options: { claude?: string | true; zoom: boolean; crop: boolean; dialogZooms: boolean; typingZooms: boolean; clickZooms: boolean; speech: boolean; transcribe: boolean; dryRun?: boolean }) =>
-        suggestCommand(project, options, output),
+      action((output, project, { mask, ...options }: { claude?: string | true; zoom: boolean; crop: boolean; privacy: boolean; mask: string[]; dialogZooms: boolean; typingZooms: boolean; clickZooms: boolean; speech: boolean; transcribe: boolean; dryRun?: boolean }) =>
+        suggestCommand(project, { ...options, ...(mask.length > 0 && { maskWords: mask }) }, output),
       ),
     );
 

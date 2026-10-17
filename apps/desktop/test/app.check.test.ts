@@ -739,6 +739,36 @@ describe.runIf(enabled)('the Cuttle app', () => {
     await editor.waitForFunction(() => document.querySelectorAll('.item.zoom[data-id=z8]').length === 0);
   }, 45_000);
 
+  it('shows a privacy mask that follows text up the screen: its path in the source view, the Auto tab row, Hold still', async () => {
+    const original = readFileSync(projectFile(), 'utf8');
+    // suggest's mask over a token that scrolled up between 0.5 and 2.5 s
+    const outside = onDisk() as unknown as { masks: unknown[] };
+    outside.masks.push({ id: 'm8', label: 'Key', from: 0.2, to: 2.8, rect: [300, 500, 500, 40], moves: [{ at: 1, rect: [300, 500, 500, 40] }, { at: 1.5, rect: [300, 400, 500, 40] }, { at: 2, rect: [300, 300, 500, 40] }], style: 'fill', auto: 'privacy' });
+    writeFileSync(projectFile(), `${JSON.stringify(outside, null, 2)}\n`);
+    await editor.waitForSelector('.item.mask[data-id=m8] .move-mark');
+    await click(editor, '#tab-auto');
+    await click(editor, '[data-testid=auto-group-privacy] .auto-toggle');
+    await click(editor, '[data-testid=auto-group-privacy] .auto-item');
+    await editor.waitForSelector('[data-testid=mask-path]');
+    // between two places it covers both: one place is 500 × 40, at 1.25 s it is 500 × 140
+    const shape = async () => {
+      const box = (await editor.locator('.source-box.mask.selected').boundingBox())!;
+      return box.width / box.height;
+    };
+    await seek(1.25);
+    await expect.poll(shape).toBeLessThan(5);
+    await click(editor, '#tab-selection');
+    await editor.waitForSelector('[data-testid=mask-hold]');
+    await shot('33-privacy-mask');
+    await click(editor, '[data-testid=mask-hold]');
+    await savedWhen((file) => (file.masks.find((mask) => mask.id === 'm8') as unknown as { moves?: unknown }).moves === undefined);
+    expect((await doc()).undo).toBe('Hold the mask still');
+    await editor.keyboard.press('Escape');
+    await undoAll();
+    writeFileSync(projectFile(), original);
+    await editor.waitForFunction(() => document.querySelectorAll('.item.mask[data-id=m8]').length === 0);
+  }, 45_000);
+
   it('crops a clip in the source view: the window takes the crop’s shape; the crop is switched off in the inspector', async () => {
     const original = readFileSync(projectFile(), 'utf8');
     await press('.scene[data-id=s1]');

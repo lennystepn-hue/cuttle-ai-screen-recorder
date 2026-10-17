@@ -1,0 +1,15 @@
+{
+  "name": "@cuttle/cli",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@cuttle/export": "workspace:*",
+    "@cuttle/project": "workspace:*",
+    "@cuttle/recorder": "workspace:*",
+    "@cuttle/timeline": "workspace:*",
+    "commander": "15.0.0",
+    "koffi": "3.3.2",
+    "uiohook-napi": "1.5.5"
+  }
+}

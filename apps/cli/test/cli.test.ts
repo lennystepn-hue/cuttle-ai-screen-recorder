@@ -781,6 +781,50 @@ describe.runIf(process.platform === 'win32' || process.platform === 'darwin')('c
   }, 120_000);
 });
 
+describe('cuttle suggest --length', () => {
+  it('cuts where the video rests to fit, keeps the answer, says how short it can get, and keeps the analysis for the app', async () => {
+    const dir = temp();
+    takeFixture(dir);
+    const fit = (await cli('--json', '-C', dir, 'suggest', '--no-crop', '--no-privacy', '--length', '6')).json as { length: { target: number; before: number; length: number; reached: boolean }; notes: string[] };
+    // about 10.4 s of video; the waiting (sped up 3×) changes on screen and goes first; the
+    // typing, the answer and each scene's first second stay, so 6 s is out of reach
+    expect(fit.length).toMatchObject({ target: 6, reached: false });
+    expect(fit.length.length).toBeLessThan(fit.length.before - 1);
+    expect(fit.notes.at(-1)).toMatch(/^shortest without cutting speech, clicks, typing, a zoom or a text: [\d.]+ s \(6 s asked\)$/);
+    const file = JSON.parse(readFileSync(join(dir, 'cuttle.json'), 'utf8')) as { cuts: { from: number; to: number; auto?: string; label?: string }[]; zooms: { at: number; duration: number; auto?: string }[] };
+    const cuts = file.cuts.filter((cut) => cut.auto === 'length');
+    expect(cuts.length).toBeGreaterThan(0);
+    expect(cuts.every((cut) => cut.label === 'Fit to 6 s')).toBe(true);
+    const answer = file.zooms.find((zoom) => zoom.auto === 'answer')!;
+    for (const cut of cuts) expect(cut.to <= answer.at || cut.from >= answer.at + answer.duration).toBe(true);
+    // the screen's analysis, kept in the project for the app's Length control
+    expect(existsSync(join(dir, '.cuttle', 'analysis', 'takes_1_screen.mp4.json'))).toBe(true);
+    expect((await cli('--json', '-C', dir, 'suggest', '--length', '0')).json).toMatchObject({ error: { code: 'usage' } });
+  });
+
+  it('fits after the edits with cuttle fit, takes the fit out with --off, and asks for a length', async () => {
+    const dir = temp();
+    takeFixture(dir);
+    await cli('--json', '-C', dir, 'suggest', '--no-crop', '--no-privacy');
+    type Fit = { written: boolean; target: number; before: number; length: number; reached: boolean; notes: string[] };
+    const fit = (await cli('--json', '-C', dir, 'fit', '9')).json as Fit;
+    expect(fit).toMatchObject({ written: true, target: 9, reached: true });
+    expect(fit.length).toBeLessThanOrEqual(9.125);
+    expect(fit.notes[0]).toMatch(/^cut [\d.]+ s where the video rests \(\d+ cuts?\) to fit 9 s: [\d.]+ s now$/);
+    const lengthCuts = () => (JSON.parse(readFileSync(join(dir, 'cuttle.json'), 'utf8')) as { cuts?: { auto?: string }[] }).cuts?.filter((cut) => cut.auto === 'length') ?? [];
+    expect(lengthCuts().length).toBeGreaterThan(0);
+    // the same again: nothing to write
+    expect(((await cli('--json', '-C', dir, 'fit', '9')).json as Fit).written).toBe(false);
+    const off = (await cli('--json', '-C', dir, 'fit', '--off')).json as Fit;
+    expect(off).toMatchObject({ written: true, notes: ['the length fit is taken out'] });
+    expect(off.length).toBeCloseTo(fit.before, 3);
+    expect(lengthCuts()).toEqual([]);
+    const none = await cli('--json', '-C', dir, 'fit');
+    expect(none.code).toBe(1);
+    expect(none.json).toMatchObject({ error: { code: 'usage' } });
+  });
+});
+
 describe('cuttle suggest masks notifications', () => {
   it('masks a notification while it was open, and a rerun leaves the mask as it is', async () => {
     const dir = temp();

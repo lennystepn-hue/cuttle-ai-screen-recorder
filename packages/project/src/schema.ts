@@ -178,7 +178,28 @@ const CardSceneSchema = z.strictObject({
   duration: positiveSeconds,
 });
 
-const SceneSchema = z.discriminatedUnion('type', [ClipSceneSchema, StillSceneSchema, CardSceneSchema]);
+/** A page (HTML, in the project) as a value its params may hold: text, a number, a switch, a colour, a path. */
+const ParamValue = z.union([z.string(), z.number(), z.boolean(), z.null()]);
+
+/** What a motion page gets: the page (a path in the project), its params, and whether it may reach the network. */
+const motionPage = {
+  /** The page: an HTML file in the project (`motion/intro/index.html`). */
+  src: z.string().min(1),
+  /** The values of the params the page declares. */
+  params: z.record(z.string(), ParamValue).default({}),
+  /** Let the page reach https: (off: only the project's files). */
+  network: z.boolean().default(false),
+};
+
+/** A page Claude or the person wrote, rendered frame by frame as a scene (an intro, an end card, a 3D shot). */
+const MotionSceneSchema = z.strictObject({
+  type: z.literal('motion'),
+  ...named,
+  ...motionPage,
+  duration: positiveSeconds,
+});
+
+const SceneSchema = z.discriminatedUnion('type', [ClipSceneSchema, StillSceneSchema, CardSceneSchema, MotionSceneSchema]);
 
 /** A point on a zoom's path: from `at` (source seconds) the zoom shows `rect`. */
 const ZoomMoveSchema = z.strictObject({ at: seconds, rect: RectSchema });
@@ -282,6 +303,18 @@ const TextSchema = z.strictObject({
   enabled: z.boolean().default(true),
 });
 
+/**
+ * A page drawn over the video where its clips show source seconds `at` to `at + duration`, with
+ * its transparency (a lower third, callouts, a logo); its own clock runs in output seconds.
+ */
+const MotionOverlaySchema = z.strictObject({
+  ...named,
+  ...motionPage,
+  at: seconds,
+  duration: positiveSeconds,
+  enabled: z.boolean().default(true),
+});
+
 export const ProjectSchema = z
   .strictObject({
     version: z.literal(CURRENT_VERSION),
@@ -292,6 +325,7 @@ export const ProjectSchema = z
     zooms: z.array(ZoomSchema).default([]),
     masks: z.array(MaskSchema).default([]),
     texts: z.array(TextSchema).default([]),
+    overlays: z.array(MotionOverlaySchema).default([]),
     cuts: z.array(CutSchema).default([]),
     autoEdits: AutoEditsSchema.prefault({}),
     captions: CaptionsSchema.prefault({}),
@@ -300,7 +334,7 @@ export const ProjectSchema = z
   // Runs once everything else is valid (see the note above BackgroundSchema).
   .superRefine((project, ctx) => {
     const seen = new Map<string, string>();
-    for (const list of ['scenes', 'zooms', 'masks', 'texts', 'cuts'] as const) {
+    for (const list of ['scenes', 'zooms', 'masks', 'texts', 'overlays', 'cuts'] as const) {
       project[list].forEach((item: { id?: string }, index) => {
         if (item.id === undefined) return;
         const first = seen.get(item.id);
@@ -355,6 +389,8 @@ export type Scene = CuttleProject['scenes'][number];
 export type ClipScene = Extract<Scene, { type: 'clip' }>;
 export type StillScene = Extract<Scene, { type: 'still' }>;
 export type CardScene = Extract<Scene, { type: 'card' }>;
+export type MotionScene = Extract<Scene, { type: 'motion' }>;
+export type MotionOverlay = CuttleProject['overlays'][number];
 export type Zoom = CuttleProject['zooms'][number];
 export type ZoomMove = NonNullable<Zoom['moves']>[number];
 export type WindowKind = (typeof WINDOW_KINDS)[number];

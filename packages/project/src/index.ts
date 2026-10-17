@@ -28,6 +28,8 @@ export {
   type Captions,
   type CaptionStyle,
   type CardScene,
+  type MotionOverlay,
+  type MotionScene,
   type ClipScene,
   type CursorShape,
   type CursorStyle,

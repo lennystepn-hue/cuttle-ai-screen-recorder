@@ -35,6 +35,7 @@ describe('ProjectSchema', () => {
     expect(p.zooms).toEqual([]);
     expect(p.masks).toEqual([]);
     expect(p.texts).toEqual([]);
+    expect(p.overlays).toEqual([]);
   });
 
   it('parses the spec example and applies item defaults', () => {
@@ -279,5 +280,32 @@ describe('captions', () => {
     expect(pathsOf({ ...minimal, captions: { style: 'marquee' } })).toEqual(['captions.style']);
     expect(pathsOf({ ...minimal, captions: { size: 3 } })).toEqual(['captions.size']);
     expect(pathsOf({ ...minimal, captions: { fixes: [{ at: 2, end: 1, text: 'x' }] } })).toEqual(['captions.fixes.0.end']);
+  });
+});
+
+describe('motion', () => {
+  it('reads a motion scene and a motion overlay, with their defaults', () => {
+    const p = ProjectSchema.parse({
+      ...minimal,
+      scenes: [{ type: 'motion', id: 's1', label: 'Intro', src: 'motion/intro/index.html', duration: 3, params: { title: 'Cuttle', size: 2, dark: true, logo: null } }],
+      overlays: [{ id: 'o1', src: 'motion/callouts/index.html', at: 4.2, duration: 6 }],
+    });
+    expect(p.scenes[0]).toEqual({
+      type: 'motion',
+      id: 's1',
+      label: 'Intro',
+      src: 'motion/intro/index.html',
+      duration: 3,
+      params: { title: 'Cuttle', size: 2, dark: true, logo: null },
+      network: false,
+    });
+    expect(p.overlays[0]).toEqual({ id: 'o1', src: 'motion/callouts/index.html', at: 4.2, duration: 6, params: {}, network: false, enabled: true });
+  });
+
+  it('refuses a page without a path, a length of zero, a param that is a list and an id used elsewhere', () => {
+    expect(pathsOf({ ...minimal, scenes: [{ type: 'motion', src: '', duration: 2 }] })).toEqual(['scenes.0.src']);
+    expect(pathsOf({ ...minimal, scenes: [{ type: 'motion', src: 'a.html', duration: 0 }] })).toEqual(['scenes.0.duration']);
+    expect(pathsOf({ ...minimal, overlays: [{ src: 'a.html', at: 1, duration: 2, params: { list: [1, 2] } }] })).toEqual(['overlays.0.params.list']);
+    expect(pathsOf({ ...minimal, texts: [{ id: 'o1', at: 1, duration: 2, text: 'Hi' }], overlays: [{ id: 'o1', src: 'a.html', at: 1, duration: 2 }] })).toEqual(['overlays.0.id']);
   });
 });

@@ -4,6 +4,7 @@
 // undoable. A change from outside is always a step of its own in the history, so no undo ever
 // removes it without saying so.
 import { parseProject, type CuttleProject } from '@cuttle/project';
+import { LENGTH_RULES, sceneSpans, totalDuration } from '@cuttle/timeline';
 import { applyCommand, describeChange, DocumentError, ensureIds, firstChanged, pinIds, replayCommands, type Command, type EditLimits, type ListName, type Raw } from '../../shared/document';
 import type { ChangeOrigin, ProjectFileEvent } from '../../shared/ipc';
 import { takeKey } from '../../shared/take';
@@ -184,7 +185,7 @@ function restore(raw: Raw): void {
 const sourcesOf = (raw: Raw) => takeKey(raw.sources);
 
 /** The undo step of a change made outside the editor, by who made it. */
-const ORIGIN_LABELS: Record<ChangeOrigin, string> = { outside: 'the outside change', suggest: "Cuttle's cut", speech: "Cuttle's speech edits", privacy: "Cuttle's privacy masks" };
+const ORIGIN_LABELS: Record<ChangeOrigin, string> = { outside: 'the outside change', suggest: "Cuttle's cut", speech: "Cuttle's speech edits", privacy: "Cuttle's privacy masks", length: "Cuttle's length fit" };
 
 /** What the app's speech edits did, said once they arrive. */
 function speechToast(project: CuttleProject): string {
@@ -197,6 +198,35 @@ function speechToast(project: CuttleProject): string {
   if (fillers + pauses === 0) return `Cuttle cut ${slips}.`;
   const parts = [fillers > 0 && `${fillers} filler word${fillers === 1 ? '' : 's'}`, pauses > 0 && `${pauses} pause${pauses === 1 ? '' : 's'}`].filter(Boolean);
   return `Cuttle cut ${slips ? `${slips}, and ` : ''}${parts.join(' and ')} where the picture rests.`;
+}
+
+/** The length the Length control asked for last (null: the fit taken out), for what the fit's change says. */
+let lengthAsked: number | null = null;
+/** Seconds as the title bar and the timeline show them: to the tenth below. */
+const secondsText = (seconds: number) => `${Math.floor(seconds * 10 + 1e-6) / 10} s`;
+const SHORTEST = 'Shortest without cutting speech, clicks, typing, a zoom or a text';
+
+/** What the app's length fit did, said once it arrives. */
+function lengthToast(project: CuttleProject): string {
+  const length = totalDuration(sceneSpans(project.scenes, project.cuts));
+  if (lengthAsked === null) return `Cuttle took the length fit out: the video is ${secondsText(length)} again.`;
+  if (length <= lengthAsked + LENGTH_RULES.close + 1e-6) return `Cuttle cut where the video rests to fit ${secondsText(lengthAsked)}: ${secondsText(length)} now.`;
+  return `${SHORTEST}: ${secondsText(length)} (${secondsText(lengthAsked)} asked).`;
+}
+
+/**
+ * Fits the video to `seconds` where it rests (the Length control), or takes the fit out (`null`).
+ * A fit that changes the video arrives as a change of its own, one step to undo, and says what it
+ * did; one that changes nothing says so here.
+ */
+export async function fitLength(seconds: number | null): Promise<void> {
+  lengthAsked = seconds;
+  const answer = await bridge.invoke('project:fit-length', { seconds });
+  if ('problem' in answer) return toast(answer.problem, { tone: 'warning' });
+  const { report } = answer;
+  if (report.written) return;
+  if (seconds === null) return toast('There is no length fit to take out.');
+  toast(report.reached ? `The video is ${secondsText(report.length)}: it fits ${secondsText(seconds)}.` : `${SHORTEST}: ${secondsText(report.length)} (${secondsText(seconds)} asked).`);
 }
 
 /** What the app's privacy masks did, said once they arrive. */
@@ -390,6 +420,8 @@ export async function outsideChange(event: ProjectFileEvent): Promise<void> {
         ? speechToast(project)
         : event.origin === 'privacy'
           ? privacyToast(project)
-          : `Changed outside the app: ${describeChange(before.project, project)}`;
+          : event.origin === 'length'
+            ? lengthToast(project)
+            : `Changed outside the app: ${describeChange(before.project, project)}`;
   toast(said, { undo: true, ...(show && event.origin === 'outside' && { show }) });
 }

@@ -1,6 +1,7 @@
 import { Command, CommanderError, InvalidArgumentError, Option } from 'commander';
 import { capturePageCommand } from './commands/capture-page';
 import { devices } from './commands/devices';
+import { fitCommand } from './commands/fit';
 import { frameCommand } from './commands/frame';
 import { init } from './commands/init';
 import { previewCommand } from './commands/preview';
@@ -147,9 +148,10 @@ export async function runCli(argv: readonly string[], streams?: Streams): Promis
     .option('--no-click-zooms', 'no zooms on clicks (the answer zoom stays)')
     .option('--no-speech', 'leave the speech out: no filler, pause or spoken retake cuts, and speech does not keep a stretch')
     .option('--no-transcribe', 'do not transcribe the mic first (when it has no transcript and a speech model is there)')
+    .option('--length <seconds>', 'fit the video to this length: what rests is cut, never speech, clicks or typing', positive)
     .option('--dry-run', 'print the suggestion, leave cuttle.json as it is')
     .action(
-      action((output, project, { mask, ...options }: { claude?: string | true; zoom: boolean; crop: boolean; privacy: boolean; mask: string[]; dialogZooms: boolean; typingZooms: boolean; clickZooms: boolean; speech: boolean; transcribe: boolean; dryRun?: boolean }) =>
+      action((output, project, { mask, ...options }: { claude?: string | true; zoom: boolean; crop: boolean; privacy: boolean; mask: string[]; dialogZooms: boolean; typingZooms: boolean; clickZooms: boolean; speech: boolean; transcribe: boolean; length?: number; dryRun?: boolean }) =>
         suggestCommand(project, { ...options, ...(mask.length > 0 && { maskWords: mask }) }, output),
       ),
     );
@@ -205,6 +207,13 @@ export async function runCli(argv: readonly string[], streams?: Streams): Promis
         withSignal(output, (signal) => capturePageCommand(project, target, options, output, signal)),
       ),
     );
+
+  program
+    .command('fit')
+    .description('fit the video to a length after your edits: cut where it rests, never speech, clicks, typing, a zoom or a text (cuts tagged "length"; a new fit replaces them)')
+    .argument('[seconds]', 'the length in seconds', positive)
+    .option('--off', 'take the fit out: the full length again')
+    .action(action((output, project, length: number | undefined, options: { off?: boolean }) => fitCommand(project, length, options.off === true, output)));
 
   program
     .command('frame')

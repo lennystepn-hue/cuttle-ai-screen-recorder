@@ -64,7 +64,28 @@ export interface PrivacyEditsJob {
   words: string[];
 }
 
-export type MediaJob = ProxyJob | ThumbnailsJob | PeaksJob | SuggestJob | TranscribeJob | SpeechEditsJob | ReadScreenJob | PrivacyEditsJob;
+/** Fits a project (`input`: its folder) to `seconds` of video where it rests, or takes the fit out (none). */
+export interface FitLengthJob {
+  job: 'fit-length';
+  input: string;
+  output: string;
+  seconds?: number;
+}
+
+/** What a length fit did, in output seconds: the length asked for, the video's length before and after, whether it fits. */
+export interface LengthReport {
+  target: number;
+  before: number;
+  length: number;
+  reached: boolean;
+  /** Whether cuttle.json changed (it already fitted, or the fit was the same: not). */
+  written: boolean;
+}
+
+export type MediaJob = ProxyJob | ThumbnailsJob | PeaksJob | SuggestJob | TranscribeJob | SpeechEditsJob | ReadScreenJob | PrivacyEditsJob | FitLengthJob;
+
+/** What a job answers besides being done: the thumbnails' layout, or a length fit's report. */
+export type JobResult = ThumbnailsMeta | LengthReport;
 
 export interface ThumbnailsMeta {
   interval: number;
@@ -78,7 +99,7 @@ export type WorkerRequest = { id: number; cancel?: false } & MediaJob;
 export type WorkerCancel = { id: number; cancel: true };
 export type WorkerReply =
   | { id: number; progress: number }
-  | { id: number; done: true; meta?: ThumbnailsMeta }
+  | { id: number; done: true; meta?: JobResult }
   | { id: number; error: string; cancelled?: boolean; code?: string };
 
 /** Height of the proxy (the screen track is scaled down to it, never up). */

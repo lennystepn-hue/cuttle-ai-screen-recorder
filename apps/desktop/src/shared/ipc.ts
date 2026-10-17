@@ -2,6 +2,7 @@
 // what a window may send. The main process checks each request against it; the preloads expose only
 // their window's channels.
 import { z } from 'zod';
+import type { LengthReport } from './media-jobs';
 import type { PickedTarget, PickerDisplay, PickerWindow, RecordChoices } from './recording';
 
 export type { PickedTarget, PickerDisplay, PickerWindow, Rect, RecordChoices } from './recording';
@@ -297,6 +298,8 @@ export const REQUESTS = {
   'speech:remove': z.enum(SPEECH_MODEL_NAMES),
   /** Reads the screen's text of the project's take again and masks what it showed (the Auto tab, Try again). */
   'project:read-screen': z.undefined(),
+  /** Fits the video to this many seconds where it rests, or takes the fit out (null). */
+  'project:fit-length': z.strictObject({ seconds: z.number().positive().max(36_000).nullable() }),
 } as const;
 
 export type Request = keyof typeof REQUESTS;
@@ -370,6 +373,8 @@ export interface Responses {
   'speech:remove': SpeechStatus;
   /** Started (the title bar shows it), or why not. */
   'project:read-screen': { started: true } | { problem: string };
+  /** What the fit did, once it is done, or why it could not. */
+  'project:fit-length': { report: LengthReport } | { problem: string };
 }
 
 /** A version of cuttle.json: as written, and the SHA-256 of its bytes. */
@@ -386,8 +391,8 @@ export interface ProjectVersion {
  */
 export type ProjectFileEvent = (ProjectVersion & { origin: ChangeOrigin }) | { issues: string[] };
 
-/** Who changed cuttle.json outside the editor: another program, or the app's own cut, speech edits or privacy masks. */
-export type ChangeOrigin = 'outside' | 'suggest' | 'speech' | 'privacy';
+/** Who changed cuttle.json outside the editor: another program, or the app's own cut, speech edits, privacy masks or length fit. */
+export type ChangeOrigin = 'outside' | 'suggest' | 'speech' | 'privacy' | 'length';
 
 /** Events (main → window). */
 export interface Events {

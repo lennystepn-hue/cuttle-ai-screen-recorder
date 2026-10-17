@@ -33,3 +33,4 @@ export {
 } from './captions';
 export { clickZooms, shownClicks, zoomRectFor, type ClickZoom, type ClipSpan } from './click-zooms';
 export { TYPING_RULES, clickSamples, keyPresses, mixTyping, typingClicks, type KeyPress, type TypingClick } from './typing';
+export { HIGH, LENGTH_RULES, LOW, MIDDLE, fitLength, importance, type ImportanceInput, type LengthFit, type Level, type SourceSpan } from './importance';

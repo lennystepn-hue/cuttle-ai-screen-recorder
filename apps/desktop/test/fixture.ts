@@ -55,6 +55,21 @@ export function makePrivateFixture(dir: string): void {
   writeFileSync(join(dir, 'cuttle.json'), `${JSON.stringify(project, null, 2)}\n`);
 }
 
+/**
+ * A take that mostly rests: 20 s of a still screen, clicks at 3 and 15 s, no mic. One clip over
+ * the whole take; the length fit has plenty to cut.
+ */
+export function makeRestingFixture(dir: string): void {
+  const take = join(dir, 'takes', '1');
+  mkdirSync(take, { recursive: true });
+  ffmpeg(['-f', 'lavfi', '-i', 'color=c=0x202020:s=1280x720:r=30:d=20', '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', join(take, 'screen.mp4')]);
+  const click = (t: number) => ({ t, type: 'click', x: 640, y: 360, button: 'left' });
+  writeFileSync(join(take, 'events.jsonl'), [click(3), click(15)].map((event) => `${JSON.stringify(event)}\n`).join(''));
+  writeFileSync(join(take, 'take.json'), JSON.stringify({ version: 1, tracks: { screen: { file: 'screen.mp4', start: 100 } } }));
+  const project = { version: 1, output: FIXTURE_OUTPUT, sources: { screen: 'takes/1/screen.mp4', events: 'takes/1/events.jsonl' }, scenes: [{ type: 'clip', id: 's1', from: 0, to: 20 }] };
+  writeFileSync(join(dir, 'cuttle.json'), `${JSON.stringify(project, null, 2)}\n`);
+}
+
 export function makeFixture(dir: string): void {
   const take = join(dir, 'takes', '1');
   mkdirSync(take, { recursive: true });

@@ -8,7 +8,8 @@ import { areaStretches, bandCrop, cropPieces, type CropStretch } from './suggest
 import { dialogZooms } from './suggest/dialogs';
 import { readScreenText, withPrivacyMasks, type RawMask } from './privacy/apply';
 import { SCREEN_TEXT_FILE, framesToRead, readFrames, writeScreenText } from './privacy/read';
-import { analyseScreen, grabGray, grayFrames, screenBands } from './suggest/media';
+import { cachedAnalysis, grabGray, grayFrames, screenBands } from './suggest/media';
+import { withLengthFit } from './suggest/length';
 import { suggestClips } from './suggest/plan';
 import { changedRegion, zoomRect } from './suggest/region';
 import { union } from './suggest/spans';
@@ -46,6 +47,8 @@ export interface SuggestOptions {
   speech?: boolean;
   /** Transcribe the mic first when it has no transcript and a speech model is downloaded (default true). */
   transcribe?: boolean;
+  /** Fit the video to this many seconds: what rests is cut, never speech, clicks or typing. */
+  length?: number;
   /** Status for people while it runs. */
   onStatus?: (text: string) => void;
   /** The transcription's progress, 0 to 1. */
@@ -68,6 +71,8 @@ export interface SuggestResult {
   speech: { from: 'transcript' | 'mic' | 'none'; fillers: number; pauses: number; retakes: number };
   /** Whether the screen's text was there to mask from, and how many privacy and notification masks were made. */
   privacy: { read: boolean; masks: number; notifications: number };
+  /** With `length`: the asked length, the video's length before and after the fit, and whether it fits. */
+  length?: { target: number; before: number; length: number; reached: boolean };
   notes: string[];
   /** Where the markers came from. */
   markers: { from: 'take' | 'transcript' | 'none'; count: number };
@@ -104,7 +109,8 @@ export async function suggestProject(projectDir: string, args: SuggestOptions = 
   const { sources } = file.project;
   const screen = resolve(file.dir, sources.screen);
   args.onStatus?.('reading the screen recording …');
-  const screenInfo = await analyseScreen(screen);
+  // kept in the project, for the steps after suggest (the app's length fit)
+  const screenInfo = await cachedAnalysis(screen, file.dir);
   if (screenInfo.duration <= 0) throw new CoreError('invalid-media', `${screen} has no video frames`);
   let transcript: TranscriptFile | undefined;
   let speech: { spans: { from: number; to: number }[]; from: SuggestResult['speech']['from'] } = { spans: [], from: 'none' };
@@ -264,6 +270,17 @@ export async function suggestProject(projectDir: string, args: SuggestOptions = 
   }
 
   const allZooms = [...kept, ...zooms].sort((a, b) => a.at - b.at);
+  // The length fit, last: what rests goes until the video fits, around the cuts and zooms made above.
+  let length: SuggestResult['length'];
+  if (args.length !== undefined) {
+    const shaped = parseProject({ ...file.raw, scenes, ...(cuts && { cuts }), zooms: allZooms });
+    if (shaped.ok) {
+      const fit = withLengthFit({ ...file.raw, ...(cuts && { cuts }) }, shaped.project, { speech: speech.spans, events, still: screenInfo.still, duration: screenInfo.duration }, args.length, taken);
+      notes.push(...fit.notes);
+      cuts = fit.cuts;
+      length = { target: fit.target, before: fit.before, length: fit.length, reached: fit.reached };
+    }
+  }
   let backup: string | undefined;
   if (!args.dryRun) {
     file.raw.scenes = scenes;
@@ -280,6 +297,7 @@ export async function suggestProject(projectDir: string, args: SuggestOptions = 
     ...(cuts && { cuts }),
     speech: { from: speech.from, ...made },
     privacy,
+    ...(length && { length }),
     notes,
     markers: { from, count: markers.length },
     written: !args.dryRun,

@@ -548,6 +548,28 @@ button.chip-status:hover {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+/* the video's length and its fit (Timeline.tsx's LengthControl) */
+.length-select {
+  color: var(--muted);
+}
+.length-fitted {
+  color: var(--accent);
+}
+.length-input {
+  width: 72px;
+  height: 22px;
+  padding: 0 6px;
+  border: 0;
+  border-radius: 6px;
+  background: var(--stage);
+  box-shadow: inset 0 0 0 1px var(--accent);
+  color: var(--text);
+  font: inherit;
+  user-select: text;
+}
+.length-input:focus-visible {
+  outline: none;
+}
 /* the lanes scroll up and down together with their names when they are taller than the panel */
 .tl-body {
   flex: 1;

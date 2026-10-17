@@ -30,7 +30,7 @@ import { FitIcon } from '../icons';
 import { Select } from '../Select';
 import { addCard, addMask, addPage, addZoom, overlayBlocked, selectedOrCurrentClip, setSpeed, split, SPEEDS } from './actions';
 import { audible } from './audio';
-import { edit, preview } from './doc';
+import { edit, fitLength, preview } from './doc';
 import { beginGesture } from './gesture';
 import { mediaUrl } from './media';
 import { currentPlayer, select, setTool, shownProject, store, type Selection } from './session';
@@ -390,7 +390,7 @@ export function Timeline() {
 
   return (
     <section className="timeline" aria-label="Timeline">
-      <TimelineBar status={model ? `${model.scenes.length} scene${model.scenes.length === 1 ? '' : 's'} · ${formatTime(duration)}` : ''} fit={fit} zoomValue={zoomValue} onScale={(value) => {
+      <TimelineBar status={model ? `${model.scenes.length} scene${model.scenes.length === 1 ? '' : 's'}` : ''} duration={model ? duration : undefined} fit={fit} zoomValue={zoomValue} onScale={(value) => {
         const element = scroller.current;
         if (!element || !(fitPps > 0)) return;
         const next = fitPps * Math.pow(MAX_PPS / fitPps, value);
@@ -579,7 +579,7 @@ export function Timeline() {
 const isSelected = (selection: Selection | undefined, kind: Selection['kind'], id: string) => selection?.kind === kind && selection.id === id;
 
 /** The timeline's bar: split, speed, new items, snapping, fit and scale. */
-function TimelineBar({ status, fit, zoomValue, onScale }: { status: string; fit: () => void; zoomValue: number; onScale: (value: number) => void }) {
+function TimelineBar({ status, duration, fit, zoomValue, onScale }: { status: string; duration?: number; fit: () => void; zoomValue: number; onScale: (value: number) => void }) {
   useStore(store, (state) => state.doc?.project);
   useStore(store, (state) => state.selection);
   const t = useStore(store, (state) => Math.round(state.player.t * 10));
@@ -626,6 +626,7 @@ function TimelineBar({ status, fit, zoomValue, onScale }: { status: string; fit:
         + Page
       </button>
       <span className="tl-status">{status}</span>
+      {duration !== undefined && <LengthControl duration={duration} />}
       <div className="grow" />
       <button className="act" aria-pressed={snap} onClick={() => store.set({ snap: !snap })} title="Snap to the playhead, scene edges, markers and other overlays (Ctrl while dragging: frames only)">
         Snap
@@ -636,6 +637,64 @@ function TimelineBar({ status, fit, zoomValue, onScale }: { status: string; fit:
       </button>
       <input type="range" min={0} max={1} step={0.001} value={Math.max(0, Math.min(1, zoomValue))} aria-label="Timeline scale" title="Timeline scale (Ctrl + wheel)" onChange={(event) => onScale(Number(event.target.value))} />
     </div>
+  );
+}
+
+/** The lengths the Length menu offers (output seconds). */
+const LENGTHS = [15, 30, 45, 60, 90];
+
+/**
+ * The video's length; its menu fits the video to another length (Cuttle cuts where it rests, never
+ * speech, clicks or typing: the Auto tab lists the cuts), to one typed in, or takes the fit out.
+ */
+function LengthControl({ duration }: { duration: number }) {
+  const fitted = useStore(store, (state) => state.doc?.project.cuts.some((cut) => cut.auto === 'length') ?? false);
+  const busy = useStore(store, (state) => state.status?.state === 'working' || state.doc?.issues !== undefined);
+  const [typing, setTyping] = useState(false);
+  if (typing) {
+    return (
+      <input
+        className="length-input"
+        autoFocus
+        inputMode="decimal"
+        placeholder="seconds"
+        aria-label="Fit the video to this many seconds"
+        onKeyDown={(event) => {
+          event.stopPropagation();
+          if (event.key === 'Enter') {
+            const seconds = Number(event.currentTarget.value.trim().replace(',', '.'));
+            setTyping(false);
+            if (seconds > 0) void fitLength(seconds);
+          }
+          if (event.key === 'Escape') setTyping(false);
+        }}
+        onBlur={() => setTyping(false)}
+        data-testid="length-input"
+      />
+    );
+  }
+  return (
+    <Select
+      value={undefined}
+      options={[
+        ...LENGTHS.map((seconds) => ({ value: String(seconds), label: `${seconds} s`, ...(duration <= seconds + 0.05 && { note: 'fits' }) })),
+        { value: 'other', label: 'Other length…' },
+        ...(fitted ? [{ value: 'none', label: 'Full length', note: 'no fit' }] : []),
+      ]}
+      onChange={(choice) => {
+        if (choice === 'other') setTyping(true);
+        else void fitLength(choice === 'none' ? null : Number(choice));
+      }}
+      label="Fit the video to a length"
+      variant="bare"
+      disabled={busy}
+      className="length-select"
+      testId="length"
+      title="The video's length: fit it to another, and Cuttle cuts where it rests (never speech, clicks or typing)"
+    >
+      {formatTime(duration)}
+      {fitted && <span className="length-fitted"> · fitted</span>}
+    </Select>
   );
 }
 

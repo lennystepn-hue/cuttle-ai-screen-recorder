@@ -10,7 +10,7 @@ import { PNG } from 'pngjs';
 import { whisperCliPath } from '@cuttle/core';
 import { _electron, type ElectronApplication, type Page } from 'playwright';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { FIXTURE_OUTPUT, makeFixture, makePrivateFixture, makeSpokenFixture } from './fixture';
+import { FIXTURE_OUTPUT, makeFixture, makePrivateFixture, makeRestingFixture, makeSpokenFixture } from './fixture';
 
 /**
  * The app end to end, its windows never shown: open a project, play, scrub, select, compare the
@@ -1532,6 +1532,48 @@ describe.runIf(enabled)('the Cuttle app', () => {
   }, 180_000);
 
   // the system's own OCR: Windows', macOS's Vision
+  it('fits a video to a length from the timeline bar: cut where it rests, never near a click, one step, listed in the Auto tab, and back to the full length', async () => {
+    // the demo (10.1 s) fits 15 s as it is: nothing changes, and the bar says so
+    await chooseIn(editor, '[data-testid=length]', '15 s');
+    // (the first fit reads the take's screen: its analysis is kept for the next)
+    await expect.poll(async () => (await doc()).toast?.text, { timeout: 30_000 }).toBe('The video is 10.1 s: it fits 15 s.');
+    expect(((JSON.parse(readFileSync(projectFile(), 'utf8')) as { cuts?: { auto?: string }[] }).cuts ?? []).some((cut) => cut.auto === 'length')).toBe(false);
+
+    // a take that mostly rests: 20 s of a still screen, clicks at 3 and 15 s
+    const dir = join(root, 'resting');
+    makeRestingFixture(dir);
+    const page = await openEditor(dir);
+    const pageDoc = () => page.evaluate(() => (window as unknown as Hooked).__cuttleCheck.doc());
+    const pageState = () => page.evaluate(() => (window as unknown as Hooked).__cuttleCheck.state());
+    const lengthCuts = () => ((JSON.parse(readFileSync(join(dir, 'cuttle.json'), 'utf8')) as { cuts?: { from: number; to: number; auto?: string; label?: string }[] }).cuts ?? []).filter((cut) => cut.auto === 'length');
+    // an other length, typed
+    await chooseIn(page, '[data-testid=length]', 'Other length…');
+    await page.fill('[data-testid=length-input]', '5');
+    await page.press('[data-testid=length-input]', 'Enter');
+    await expect.poll(() => lengthCuts().length, { timeout: 30_000 }).toBeGreaterThan(0);
+    for (const cut of lengthCuts()) {
+      expect(cut.label).toBe('Fit to 5 s');
+      for (const t of [3, 15]) expect(cut.to <= t - 0.3 || cut.from >= t + 0.3).toBe(true);
+    }
+    await expect.poll(async () => (await pageDoc()).undo).toBe("Cuttle's length fit");
+    await expect.poll(async () => (await pageState()).duration).toBeLessThan(5.2);
+    expect((await pageState()).duration).toBeGreaterThan(4.3);
+    expect((await pageDoc()).toast?.text).toMatch(/^Cuttle cut where the video rests to fit 5 s: [\d.]+ s now\.$/);
+    await page.waitForSelector('[data-testid=length] .length-fitted');
+    // the Auto tab lists the fit's cuts
+    await click(page, '#tab-auto');
+    await page.waitForSelector('[data-testid=auto-group-length]');
+    await click(page, '[data-testid=auto-group-length] .auto-toggle');
+    await shotOf('36-length-fit', '/editor.html', 'resting · Cuttle');
+    // the full length again, also one step
+    await chooseIn(page, '[data-testid=length]', 'Full length');
+    await expect.poll(() => lengthCuts().length, { timeout: 30_000 }).toBe(0);
+    await expect.poll(async () => (await pageState()).duration).toBeCloseTo(20, 1);
+    await expect.poll(async () => (await pageDoc()).toast?.text).toBe('Cuttle took the length fit out: the video is 20 s again.');
+    await page.waitForSelector('[data-testid=length] .length-fitted', { state: 'detached' });
+    await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find((window) => window.getTitle() === 'resting · Cuttle')?.close());
+  }, 120_000);
+
   it.runIf(process.platform === 'win32' || process.platform === 'darwin')('reads the screen after a take when the settings say so, and from the Auto tab: what it shows that is private and the notifications masked as one step', async () => {
     // the settings: reading is off in this check; switched on, each new take is read after its cut
     await launchAgain(['--settings']);

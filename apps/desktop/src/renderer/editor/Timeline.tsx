@@ -1,33 +1,56 @@
-// The timeline (view only in this version): markers, ruler, scenes with thumbnails, the overlay lanes
-// (one block per stretch of output that shows an overlay, overlapping ones on separate rows), the
-// mic's waveform and input activity. The playhead is dragged anywhere on the ruler and the lanes; a
-// click without a drag selects a block. The wheel scrolls along the timeline, Shift+wheel up and
-// down when the lanes are taller than the panel, Ctrl+wheel zooms around the pointer.
+// The timeline: markers, ruler, scenes with thumbnails, the overlay lanes (one block per stretch of
+// output that shows an overlay, overlapping ones on separate rows), the mic's waveform and input
+// activity. The ruler, the markers and empty lanes scrub; a click on a block selects it (and moves
+// the playhead there); a drag edits: a scene's edges trim it and its body moves it among the
+// scenes; an overlay's body moves it and its edges change its length (Alt: a copy). Drags snap to
+// the playhead, scene edges, markers and other overlays (Ctrl: only to frames). Edits ripple: the
+// scenes after move. The wheel scrolls along, Shift+wheel up and down, Ctrl+wheel zooms.
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
-import type { MarkerKind } from '@cuttle/project';
+import { createPortal } from 'react-dom';
+import type { CuttleProject, MarkerKind } from '@cuttle/project';
+import { sceneSpans } from '@cuttle/timeline';
+import type { Command, OverlayList } from '../../shared/document';
+import { dragRange, overlayRange, rangeFields, snapTime } from '../../shared/edit';
 import { formatTime } from '../../shared/format';
-import { activityColumns, groupPins, pinGroupDetail, pinGroupName, timelineModel, waveformColumns, type OverlayKind, type Peaks, type SceneBlock, type TimelineModel } from '../../shared/timeline-model';
+import {
+  activityColumns,
+  groupPins,
+  pinGroupDetail,
+  pinGroupName,
+  timelineModel,
+  waveformColumns,
+  type OverlayBlock,
+  type OverlayKind,
+  type Peaks,
+  type SceneBlock,
+  type TimelineModel,
+} from '../../shared/timeline-model';
 import { FitIcon } from '../icons';
+import { addCard, addMask, addPage, addZoom, overlayBlocked, selectedOrCurrentClip, setSpeed, split, SPEEDS } from './actions';
 import { audible } from './audio';
+import { edit, preview } from './doc';
 import { mediaUrl } from './media';
-import { currentPlayer, select, shownProject, store, type Selection } from './session';
+import { currentPlayer, select, setTool, shownProject, store, type Selection } from './session';
 import { useStore } from './store';
 
 const END_SPACE = 40;
 /** A row of an overlay lane (lanes grow a row for overlays that overlap in time). */
 const ROW = 22;
 const BASE_ROWS = { markers: 26, ruler: 20, video: 52, mic: 30, input: 26 } as const;
-const LANES: { kind: OverlayKind; name: string }[] = [
-  { kind: 'zoom', name: 'Zoom' },
-  { kind: 'mask', name: 'Mask' },
-  { kind: 'caption', name: 'Caption' },
+const LANES: { kind: OverlayKind; name: string; list: OverlayList }[] = [
+  { kind: 'zoom', name: 'Zoom', list: 'zooms' },
+  { kind: 'mask', name: 'Mask', list: 'masks' },
+  { kind: 'caption', name: 'Caption', list: 'texts' },
 ];
+const NOUN: Record<OverlayKind, string> = { zoom: 'zoom', mask: 'mask', caption: 'caption' };
 const TICKS = [0.1, 0.2, 0.5, 1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 1800];
 const MAX_PPS = 400;
-/** A pointer that moves less than this between down and up clicked (selects); more scrubs. */
+/** A pointer that moves less than this between down and up clicked (selects); more drags. */
 const DRAG_PX = 3;
 /** Labels hide on blocks narrower than this. */
 const LABEL_MIN_PX = 48;
+/** How near (px) a dragged edge comes to a target before it snaps. */
+const SNAP_PX = 6;
 
 /**
  * Until when the playhead was last moved with the pointer (performance.now()): the view does not
@@ -63,24 +86,36 @@ function layoutOf(model: TimelineModel | undefined): Layout {
 /** The colour of the waveform and activity bars (the `--bars` token). */
 const BARS = '#5c5c68';
 
+/** A drag under way: where a snapped edge lines up (a guide), where a moved scene would go. */
+interface DragView {
+  guide?: number;
+  insertAt?: number;
+}
+
 export function Timeline() {
   const scroller = useRef<HTMLDivElement>(null);
   const body = useRef<HTMLDivElement>(null);
   const media = useStore(store, (state) => state.media);
-  const format = useStore(store, (state) => state.format);
+  useStore(store, (state) => state.doc?.preview ?? state.doc?.project);
+  useStore(store, (state) => state.format);
   const pps = useStore(store, (state) => state.pxPerSecond);
   const selection = useStore(store, (state) => state.selection);
+  const snapOn = useStore(store, (state) => state.snap);
   const peaksState = useStore(store, (state) => state.mediaState.peaks.state);
   const peaksPath = useStore(store, (state) => state.mediaState.peaks.path);
   const peaksRate = useStore(store, (state) => state.mediaState.peaks.rate);
   const [view, setView] = useState({ left: 0, width: 800 });
   const [peaks, setPeaks] = useState<Peaks>();
+  const [drag, setDrag] = useState<DragView>({});
+  // The overlay under the pointer: its other blocks (other clips that show it) light up with it.
+  const [hovered, setHovered] = useState<string>();
+  // The lane whose cut-out overlays are listed, and where its label is on screen.
+  const [cutOutList, setCutOutList] = useState<{ kind: OverlayKind; left: number; top: number }>();
 
-  const player = currentPlayer();
   const project = shownProject();
-  const spans = player?.spans ?? [];
-  const duration = player?.duration ?? 0;
-  const model = useMemo(() => (project ? timelineModel(project, spans, media?.markers) : undefined), [project, spans, media, format]);
+  const spans = useMemo(() => (project ? sceneSpans(project.scenes) : []), [project]);
+  const duration = spans.at(-1)?.end ?? 0;
+  const model = useMemo(() => (project ? timelineModel(project, spans, media?.markers) : undefined), [project, spans, media]);
   const layout = useMemo(() => layoutOf(model), [model]);
 
   const fit = useCallback(() => {
@@ -111,7 +146,8 @@ export function Timeline() {
       const current = store.get().pxPerSecond;
       if (event.ctrlKey || event.altKey) {
         event.preventDefault();
-        const length = currentPlayer()?.duration ?? 0;
+        const project = shownProject();
+        const length = project ? (sceneSpans(project.scenes).at(-1)?.end ?? 0) : 0;
         const fitPps = length > 0 ? (element.clientWidth - END_SPACE - 8) / length : current;
         const box = element.getBoundingClientRect();
         const anchorX = event.clientX - box.left;
@@ -154,14 +190,17 @@ export function Timeline() {
     return Math.max(0, Math.min(duration, (clientX - box.left + element.scrollLeft) / pps));
   };
 
+  const seekTo = (t: number) => {
+    pointerSeekUntil = performance.now() + 1000;
+    void currentPlayer()?.seek(t);
+  };
+
   /**
-   * Scrubs from a pointerdown: the playhead follows the pointer (from the press when `seekAtDown`, else
-   * from the first move). A press that does not move calls `onClick`: a block selects itself, the
-   * empty timeline clears the selection.
+   * Follows a pointer from a press on `event`'s element: `onMove` with the horizontal distance
+   * (px) once it moved more than a click would, `onEnd` with whether it moved. It listens on the
+   * window: the pressed element may be drawn anew while it is dragged.
    */
-  const scrub = (event: ReactPointerEvent<HTMLElement>, onClick?: () => void, seekAtDown = !onClick) => {
-    if (event.button !== 0 || !player) return;
-    event.stopPropagation();
+  const follow = (event: ReactPointerEvent<HTMLElement>, onMove: (dx: number, moved: PointerEvent) => void, onEnd: (moved: boolean, last: PointerEvent | undefined) => void) => {
     const target = event.currentTarget;
     try {
       target.setPointerCapture(event.pointerId);
@@ -170,25 +209,138 @@ export function Timeline() {
     }
     const startX = event.clientX;
     let dragging = false;
-    const seekTo = (clientX: number) => {
-      pointerSeekUntil = performance.now() + 1000;
-      void player.seek(timeAt(clientX));
-    };
-    if (seekAtDown) seekTo(startX);
+    let last: PointerEvent | undefined;
     const move = (moved: PointerEvent) => {
       if (!dragging && Math.abs(moved.clientX - startX) < DRAG_PX) return;
       dragging = true;
-      seekTo(moved.clientX);
+      last = moved;
+      onMove(moved.clientX - startX, moved);
     };
     const up = () => {
-      target.removeEventListener('pointermove', move);
-      target.removeEventListener('pointerup', up);
-      target.removeEventListener('pointercancel', up);
-      if (!dragging) onClick?.();
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+      window.removeEventListener('pointercancel', up);
+      onEnd(dragging, last);
     };
-    target.addEventListener('pointermove', move);
-    target.addEventListener('pointerup', up);
-    target.addEventListener('pointercancel', up);
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+    window.addEventListener('pointercancel', up);
+  };
+
+  /** Scrubs from a press on the ruler, the markers or an empty lane (a click on an empty lane clears the selection). */
+  const scrub = (event: ReactPointerEvent<HTMLElement>) => {
+    if (event.button !== 0) return;
+    const onLane = !(event.target as HTMLElement).closest('.ruler, .markers');
+    seekTo(timeAt(event.clientX));
+    follow(
+      event,
+      (_dx, moved) => seekTo(timeAt(moved.clientX)),
+      (moved) => !moved && onLane && select(undefined),
+    );
+  };
+
+  /** Output times a dragged edge snaps to, without those of the item being dragged. */
+  const targets = (except: { scene?: string; overlay?: string }): number[] => {
+    if (!model) return [];
+    const list = [currentPlayer()?.current().t ?? 0, ...model.markers.map((pin) => pin.t)];
+    for (const scene of model.scenes) if (scene.id !== except.scene) list.push(scene.start, scene.end);
+    for (const lane of LANES) for (const block of model.lanes[lane.kind].blocks) if (block.id !== except.overlay) list.push(block.start, block.end);
+    return list;
+  };
+  const fps = project?.output.fps ?? 30;
+  const snapped = (t: number, list: number[], event: { ctrlKey: boolean }) => (snapOn && !event.ctrlKey ? snapTime(t, list, SNAP_PX / pps, fps) : { t: Math.round(t * fps) / fps });
+
+  /** A press on a scene: select it (the playhead goes there); its edges trim, its body moves it. */
+  const pressScene = (event: ReactPointerEvent<HTMLElement>, block: SceneBlock) => {
+    if (event.button !== 0 || !model || !project) return;
+    event.stopPropagation();
+    const edge = (event.target as HTMLElement).dataset.edge as 'start' | 'end' | undefined;
+    select({ kind: 'scene', id: block.id });
+    if (!edge) seekTo(timeAt(event.clientX));
+    const scene = project.scenes[block.index]!;
+    const others = targets({ scene: block.id });
+    let commands: Command[] | undefined;
+    let insertAt: number | undefined;
+    follow(
+      event,
+      (dx, moved) => {
+        const deltaOut = dx / pps;
+        if (edge) {
+          // The end edge snaps; the start edge of a clip moves its source start (where it starts in
+          // the video stays, and it gets shorter or longer at its end, as every edit ripples).
+          if (scene.type === 'clip') {
+            if (edge === 'end') {
+              const end = snapped(block.end + deltaOut, others, moved);
+              setDrag({ guide: end.target });
+              commands = [{ type: 'trim', id: block.id, to: scene.from + (end.t - block.start) * scene.speed }];
+            } else commands = [{ type: 'trim', id: block.id, from: scene.from + deltaOut * scene.speed }];
+          } else {
+            const end = edge === 'end' ? snapped(block.end + deltaOut, others, moved) : { t: block.end - deltaOut, target: undefined };
+            setDrag({ guide: end.target });
+            commands = [{ type: 'trim', id: block.id, duration: Math.max(1 / fps, end.t - block.start) }];
+          }
+          preview(commands);
+          return;
+        }
+        // moving: the scene goes where the pointer is among the others' middles
+        const t = timeAt(moved.clientX);
+        const rest = model.scenes.filter((other) => other.id !== block.id);
+        insertAt = rest.filter((other) => (other.start + other.end) / 2 < t).length;
+        setDrag({ insertAt: insertAt === 0 ? (rest[0]?.start ?? 0) : rest[insertAt - 1]!.end });
+      },
+      (moved) => {
+        setDrag({});
+        if (!moved) return;
+        if (edge) {
+          if (commands) edit(commands, scene.type === 'clip' ? 'Trim clip' : `Change the length of the ${scene.type === 'still' ? 'page' : 'card'}`);
+          else preview(undefined);
+          return;
+        }
+        if (insertAt !== undefined && insertAt !== block.index) edit([{ type: 'move-scene', id: block.id, index: insertAt }], 'Move scene');
+      },
+    );
+  };
+
+  /** A press on an overlay block: select it; its edges change its length, its body moves it (Alt: a copy). */
+  const pressOverlay = (event: ReactPointerEvent<HTMLElement>, block: OverlayBlock, list: OverlayList) => {
+    if (event.button !== 0 || !project) return;
+    event.stopPropagation();
+    const edge = ((event.target as HTMLElement).dataset.edge as 'start' | 'end' | undefined) ?? 'move';
+    const copy = event.altKey && edge === 'move';
+    select({ kind: block.kind, id: block.id, start: block.start, end: block.end });
+    if (edge === 'move') seekTo(timeAt(event.clientX));
+    const item = project[list].find((candidate) => candidate.id === block.id);
+    const scene = spans[block.span]?.scene;
+    if (!item || scene?.type !== 'clip') return;
+    const range = overlayRange(item as { from?: number; to?: number; at?: number; duration?: number });
+    const others = targets({ overlay: block.id });
+    let commands: Command[] | undefined;
+    follow(
+      event,
+      (dx, moved) => {
+        let deltaOut = dx / pps;
+        // the edge that leads snaps (both ends of a moved block: the nearer target wins)
+        const candidates = edge === 'move' ? [block.start, block.end] : [edge === 'start' ? block.start : block.end];
+        let best: { delta: number; target: number } | undefined;
+        for (const at of candidates) {
+          const hit = snapped(at + deltaOut, others, moved);
+          if (hit.target !== undefined && (!best || Math.abs(hit.t - at - deltaOut) < Math.abs(best.delta - deltaOut))) best = { delta: hit.t - at, target: hit.target };
+        }
+        if (best) deltaOut = best.delta;
+        setDrag({ guide: best?.target });
+        const [from, to] = dragRange(range, edge, deltaOut, scene.speed, scene.speed / fps);
+        commands = copy
+          ? [{ type: 'duplicate', list, id: block.id, shift: from - range[0] }]
+          : [{ type: 'set', list, id: block.id, fields: rangeFields(list, from, to) }];
+        preview(commands);
+      },
+      (moved) => {
+        setDrag({});
+        if (!moved || !commands) return preview(undefined);
+        const noun = NOUN[block.kind];
+        edit(commands, copy ? `Duplicate ${noun}` : edge === 'move' ? `Move ${noun}` : `Change the length of the ${noun}`);
+      },
+    );
   };
 
   const width = duration * pps;
@@ -198,101 +350,101 @@ export function Timeline() {
 
   return (
     <section className="timeline" aria-label="Timeline">
-      <div className="tl-bar">
-        <span className="tl-status">{model ? `${model.scenes.length} scene${model.scenes.length === 1 ? '' : 's'} · ${formatTime(duration)}` : ''}</span>
-        <div className="grow" />
-        <button className="act" onClick={fit} title="Fit the whole video (Shift+Z)">
-          <FitIcon size={14} />
-          Fit
-        </button>
-        <input
-          type="range"
-          min={0}
-          max={1}
-          step={0.001}
-          value={Math.max(0, Math.min(1, zoomValue))}
-          aria-label="Timeline scale"
-          title="Timeline scale (Ctrl + wheel)"
-          onChange={(event) => {
-            const element = scroller.current;
-            if (!element || !(fitPps > 0)) return;
-            const next = fitPps * Math.pow(MAX_PPS / fitPps, Number(event.target.value));
-            const anchor = currentPlayer()?.current().t ?? 0;
-            store.set({ pxPerSecond: next });
-            requestAnimationFrame(() => (element.scrollLeft = Math.max(0, anchor * next - element.clientWidth / 2)));
-          }}
-        />
-      </div>
+      <TimelineBar status={model ? `${model.scenes.length} scene${model.scenes.length === 1 ? '' : 's'} · ${formatTime(duration)}` : ''} fit={fit} zoomValue={zoomValue} onScale={(value) => {
+        const element = scroller.current;
+        if (!element || !(fitPps > 0)) return;
+        const next = fitPps * Math.pow(MAX_PPS / fitPps, value);
+        const anchor = currentPlayer()?.current().t ?? 0;
+        store.set({ pxPerSecond: next });
+        requestAnimationFrame(() => (element.scrollLeft = Math.max(0, anchor * next - element.clientWidth / 2)));
+      }} />
       <div className="tl-body" ref={body}>
-        <div className="tl-names" aria-hidden="true" style={{ height: layout.total }}>
+        <div className="tl-names" style={{ height: layout.total }}>
           <div style={{ height: heights.markers }} />
           <div style={{ height: heights.ruler }} />
           <div style={{ height: heights.video }}>Video</div>
           {LANES.map((lane) => (
             <div key={lane.kind} style={{ height: heights[lane.kind] }} className="lane-name">
               {lane.name}
-              {(model?.lanes[lane.kind].cutOut ?? 0) > 0 && <small title="No clip shows these; they are not in the video">{model!.lanes[lane.kind].cutOut} cut out</small>}
+              {(model?.lanes[lane.kind].cutOut ?? 0) > 0 && (
+                <button
+                  type="button"
+                  className="cut-out"
+                  title="No clip shows these; they are not in the video. Click to list them."
+                  aria-expanded={cutOutList?.kind === lane.kind}
+                  onClick={(event) => {
+                    const at = event.currentTarget.getBoundingClientRect();
+                    setCutOutList(cutOutList?.kind === lane.kind ? undefined : { kind: lane.kind, left: at.right + 6, top: at.top });
+                  }}
+                  data-testid={`cut-out-${lane.kind}`}
+                >
+                  {model!.lanes[lane.kind].cutOut} cut out
+                </button>
+              )}
+              {cutOutList?.kind === lane.kind && model && (
+                <CutOutList
+                  at={cutOutList}
+                  items={model.lanes[lane.kind].cutOutItems}
+                  onPick={(id) => {
+                    setCutOutList(undefined);
+                    select({ kind: lane.kind, id });
+                  }}
+                  onClose={() => setCutOutList(undefined)}
+                />
+              )}
             </div>
           ))}
           <div style={{ height: heights.mic }}>Mic</div>
           <div style={{ height: heights.input }}>Input</div>
         </div>
         <div className="tl-scroll" ref={scroller} data-testid="timeline">
-          <div
-            className="tl-content"
-            style={{ width: width + END_SPACE, height: layout.total }}
-            // a press on the ruler or the markers seeks; a click on an empty lane also clears the selection
-            onPointerDown={(event) => scrub(event, (event.target as HTMLElement).closest('.ruler, .markers') ? undefined : () => select(undefined), true)}
-          >
-            {model && pps > 0 && (
+          <div className="tl-content" style={{ width: width + END_SPACE, height: layout.total }} onPointerDown={scrub}>
+            {model && project && pps > 0 && (
               <>
                 <Markers model={model} pps={pps} />
                 <Ruler duration={duration} pps={pps} view={view} top={tops.ruler} />
                 <div className="tl-row" style={{ position: 'absolute', top: tops.video, height: heights.video, left: 0, right: 0 }}>
                   {model.scenes.map((scene) => (
-                    <Scene
-                      key={scene.index}
-                      scene={scene}
-                      pps={pps}
-                      view={view}
-                      selected={selection?.kind === 'scene' && selection.index === scene.index}
-                      onPointerDown={(event) => scrub(event, () => select({ kind: 'scene', index: scene.index }))}
-                    />
+                    <Scene key={scene.id} scene={scene} project={project} pps={pps} view={view} selected={isSelected(selection, 'scene', scene.id)} onPointerDown={(event) => pressScene(event, scene)} />
                   ))}
                 </div>
                 {LANES.map((lane) => (
                   <div key={lane.kind} className="tl-row" style={{ position: 'absolute', top: tops[lane.kind], height: heights[lane.kind], left: 0, right: 0 }}>
-                    {model.lanes[lane.kind].blocks.map((block, i) => {
+                    {model.lanes[lane.kind].blocks.map((block, index, blocks) => {
                       const blockLeft = block.start * pps;
                       const blockWidth = Math.max(6, (block.end - block.start) * pps);
                       const inset = Math.max(0, Math.min(view.left - blockLeft, blockWidth - LABEL_MIN_PX));
                       return (
                         <button
-                          key={`${block.item}-${i}`}
-                          className={`item ${lane.kind}${block.enabled ? '' : ' off'}${isSelected(selection, lane.kind, block.item) ? ' selected' : ''}`}
+                          // by the overlay and which of its blocks: a block keeps its element while it is dragged
+                          key={`${block.id}#${blocks.slice(0, index).filter((other) => other.id === block.id).length}`}
+                          className={`item ${lane.kind}${block.enabled ? '' : ' off'}${isSelected(selection, lane.kind, block.id) ? ' selected' : ''}${hovered === block.id ? ' linked' : ''}`}
+                          onPointerEnter={() => setHovered(block.id)}
+                          onPointerLeave={() => setHovered((id) => (id === block.id ? undefined : id))}
                           style={{ left: blockLeft, width: blockWidth, top: 4 + block.row * ROW }}
-                          title={`${block.title}${block.enabled ? '' : ' (off: not in the video)'}`}
-                          onPointerDown={(event) => scrub(event, () => select({ kind: lane.kind, index: block.item, start: block.start, end: block.end }))}
-                          onKeyDown={(event) => event.key === 'Enter' && select({ kind: lane.kind, index: block.item, start: block.start, end: block.end })}
+                          title={`${block.title}${block.enabled ? '' : ' (off: not in the video)'} · drag to move, edges to change the length, Alt to copy`}
+                          data-id={block.id}
+                          onPointerDown={(event) => pressOverlay(event, block, lane.list)}
+                          onKeyDown={(event) => event.key === 'Enter' && select({ kind: lane.kind, id: block.id, start: block.start, end: block.end })}
                         >
+                          {blockWidth >= 14 && <i className="edge start" data-edge="start" />}
                           {blockWidth >= LABEL_MIN_PX && <span style={{ marginLeft: inset }}>{block.title}</span>}
+                          {blockWidth >= 14 && <i className="edge end" data-edge="end" />}
                         </button>
                       );
                     })}
                   </div>
                 ))}
-                {project && (
-                  <ColumnsCanvas
-                    top={tops.mic}
-                    height={heights.mic}
-                    view={view}
-                    color={BARS}
-                    columns={(from, to, count) => (peaks ? waveformColumns(peaks, spans, from, to, count, (speed) => !audible(project, speed)) : new Array<number>(count).fill(0))}
-                    pps={pps}
-                    mirrored
-                    deps={[peaks, spans, project]}
-                  />
-                )}
+                <ColumnsCanvas
+                  top={tops.mic}
+                  height={heights.mic}
+                  view={view}
+                  color={BARS}
+                  columns={(from, to, count) => (peaks ? waveformColumns(peaks, spans, from, to, count, (speed) => !audible(project, speed)) : new Array<number>(count).fill(0))}
+                  pps={pps}
+                  mirrored
+                  deps={[peaks, spans, project]}
+                />
                 <ColumnsCanvas
                   top={tops.input}
                   height={heights.input}
@@ -302,6 +454,8 @@ export function Timeline() {
                   pps={pps}
                   deps={[media, spans]}
                 />
+                {drag.guide !== undefined && <div className="snap-guide" style={{ left: drag.guide * pps }} />}
+                {drag.insertAt !== undefined && <div className="insert-mark" style={{ left: drag.insertAt * pps, top: tops.video, height: heights.video }} />}
                 <Playhead pps={pps} top={heights.markers - 8} scroller={scroller} />
               </>
             )}
@@ -312,7 +466,112 @@ export function Timeline() {
   );
 }
 
-const isSelected = (selection: Selection | undefined, kind: Selection['kind'], index: number) => selection?.kind === kind && selection.index === index;
+const isSelected = (selection: Selection | undefined, kind: Selection['kind'], id: string) => selection?.kind === kind && selection.id === id;
+
+/** The timeline's bar: split, speed, new items, snapping, fit and scale. */
+function TimelineBar({ status, fit, zoomValue, onScale }: { status: string; fit: () => void; zoomValue: number; onScale: (value: number) => void }) {
+  useStore(store, (state) => state.doc?.project);
+  useStore(store, (state) => state.selection);
+  const t = useStore(store, (state) => Math.round(state.player.t * 10));
+  const snap = useStore(store, (state) => state.snap);
+  const clip = selectedOrCurrentClip();
+  const blocked = overlayBlocked();
+  void t;
+  return (
+    <div className="tl-bar" role="toolbar" aria-label="Edit">
+      <button className="act" onClick={split} disabled={!clip} title="Split the clip at the playhead (S)" data-testid="split">
+        <SplitGlyph />
+        Split
+      </button>
+      <label className="act speed" title="The clip's speed (R)">
+        <span>Speed</span>
+        <select
+          value={clip ? String(clip.speed) : ''}
+          disabled={!clip}
+          onChange={(event) => setSpeed(Number(event.target.value), clip?.id)}
+          aria-label="Speed"
+          data-testid="speed"
+          id="speed-select"
+        >
+          {!clip && <option value="">–</option>}
+          {clip && !SPEEDS.includes(clip.speed as (typeof SPEEDS)[number]) && <option value={String(clip.speed)}>{clip.speed}×</option>}
+          {SPEEDS.map((speed) => (
+            <option key={speed} value={String(speed)}>
+              {speed}×
+            </option>
+          ))}
+        </select>
+      </label>
+      <span className="tl-sep" />
+      <button className="act" onClick={() => addZoom()} disabled={!!blocked} title={blocked ?? 'A zoom at the playhead (Z draws one)'}>
+        + Zoom
+      </button>
+      <button className="act" onClick={() => addMask()} disabled={!!blocked} title={blocked ?? 'A mask at the playhead (M draws one)'}>
+        + Mask
+      </button>
+      <button className="act" onClick={() => setTool('caption')} disabled={!!blocked} title={blocked ?? 'A caption at the playhead: type it on the video (T)'}>
+        + Caption
+      </button>
+      <button className="act" onClick={addCard} title="A title card after the scene under the playhead">
+        + Card
+      </button>
+      <button className="act" onClick={() => void addPage()} title="A page (an image, scrolled through) after the scene under the playhead">
+        + Page
+      </button>
+      <span className="tl-status">{status}</span>
+      <div className="grow" />
+      <button className="act" aria-pressed={snap} onClick={() => store.set({ snap: !snap })} title="Snap to the playhead, scene edges, markers and other overlays (Ctrl while dragging: frames only)">
+        Snap
+      </button>
+      <button className="act" onClick={fit} title="Fit the whole video (Shift+Z)">
+        <FitIcon size={14} />
+        Fit
+      </button>
+      <input type="range" min={0} max={1} step={0.001} value={Math.max(0, Math.min(1, zoomValue))} aria-label="Timeline scale" title="Timeline scale (Ctrl + wheel)" onChange={(event) => onScale(Number(event.target.value))} />
+    </div>
+  );
+}
+
+/** The overlays of a lane that no clip shows: a click selects one (the inspector can move or delete it). */
+function CutOutList({ at, items, onPick, onClose }: { at: { left: number; top: number }; items: { id: string; title: string }[]; onPick: (id: string) => void; onClose: () => void }) {
+  const list = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    list.current?.querySelector('button')?.focus();
+    const away = (event: PointerEvent) => !list.current?.contains(event.target as Node) && onClose();
+    window.addEventListener('pointerdown', away, true);
+    return () => window.removeEventListener('pointerdown', away, true);
+  }, [onClose]);
+  // on the body: the lane names clip what overflows them
+  return createPortal(
+    <div
+      className="cut-out-list"
+      ref={list}
+      role="menu"
+      style={{ left: at.left, top: Math.min(at.top, window.innerHeight - 40 - items.length * 30) }}
+      onKeyDown={(event) => {
+        if (event.key !== 'Escape') return;
+        event.stopPropagation();
+        onClose();
+      }}
+    >
+      <div className="cut-out-head">Not in the video: no clip shows these</div>
+      {items.map((item) => (
+        <button key={item.id} type="button" role="menuitem" onClick={() => onPick(item.id)}>
+          {item.title}
+        </button>
+      ))}
+    </div>,
+    document.body,
+  );
+}
+
+function SplitGlyph() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true">
+      <path d="M8 1.5v13M3 5l-1.5 3L3 11M13 5l1.5 3L13 11" />
+    </svg>
+  );
+}
 
 /** The playhead: the only part that changes on every frame. Keeps itself in view while playing and after a seek by key. */
 function Playhead({ pps, top, scroller }: { pps: number; top: number; scroller: React.RefObject<HTMLDivElement | null> }) {
@@ -363,8 +622,8 @@ const Ruler = memo(function Ruler({ duration, pps, view, top }: { duration: numb
   );
 });
 
-function Scene(props: { scene: SceneBlock; pps: number; view: { left: number; width: number }; selected: boolean; onPointerDown: (event: ReactPointerEvent<HTMLElement>) => void }) {
-  const { scene, pps, view, selected, onPointerDown } = props;
+function Scene(props: { scene: SceneBlock; project: CuttleProject; pps: number; view: { left: number; width: number }; selected: boolean; onPointerDown: (event: ReactPointerEvent<HTMLElement>) => void }) {
+  const { scene, project, pps, view, selected, onPointerDown } = props;
   const thumbState = useStore(store, (state) => state.mediaState.thumbnails.state);
   const thumbPath = useStore(store, (state) => state.mediaState.thumbnails.path);
   const interval = useStore(store, (state) => state.mediaState.thumbnails.interval);
@@ -373,10 +632,9 @@ function Scene(props: { scene: SceneBlock; pps: number; view: { left: number; wi
   const count = useStore(store, (state) => state.mediaState.thumbnails.count ?? 1);
   const columns = useStore(store, (state) => state.mediaState.thumbnails.columns ?? 1);
   const screenStart = useStore(store, (state) => state.media?.screen.start ?? 0);
-  const project = shownProject();
   const left = scene.start * pps;
   const width = (scene.end - scene.start) * pps;
-  const clip = project?.scenes[scene.index];
+  const clip = project.scenes[scene.index];
   const tileHeight = BASE_ROWS.video - 10;
   const tiles: { x: number; index: number }[] = [];
   const ready = thumbState === 'ready' && thumbPath !== undefined && interval !== undefined;
@@ -400,9 +658,10 @@ function Scene(props: { scene: SceneBlock; pps: number; view: { left: number; wi
     <button
       className={`scene${kindClass}${selected ? ' selected' : ''}`}
       style={{ left, width: Math.max(4, width - 2) }}
-      title={`${name} · ${scene.detail}`}
+      title={`${name} · ${scene.detail} · drag to move, edges to trim`}
+      data-id={scene.id}
       onPointerDown={onPointerDown}
-      onKeyDown={(event) => event.key === 'Enter' && select({ kind: 'scene', index: scene.index })}
+      onKeyDown={(event) => event.key === 'Enter' && select({ kind: 'scene', id: scene.id })}
     >
       {ready && tiles.length > 0 && (
         <span className="thumbs">
@@ -435,6 +694,8 @@ function Scene(props: { scene: SceneBlock; pps: number; view: { left: number; wi
           </span>
         )
       )}
+      {width >= 14 && <i className="edge start" data-edge="start" />}
+      {width >= 14 && <i className="edge end" data-edge="end" />}
     </button>
   );
 }

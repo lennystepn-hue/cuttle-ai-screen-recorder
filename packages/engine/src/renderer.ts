@@ -1,4 +1,4 @@
-import type { CardScene, CuttleProject, FrameStyle, Rect, StillScene } from '@cuttle/project';
+import type { CardScene, CuttleProject, FrameStyle, Rect, Scene, StillScene, TextOverlay } from '@cuttle/project';
 import type { ActiveText, RenderState, SceneFrame } from '@cuttle/timeline';
 import type { EngineAssets } from './assets';
 import { createRenderTarget, deleteRenderTarget, type RenderTarget } from './gl/target';
@@ -37,8 +37,21 @@ export interface Renderer {
    * when the WebGL context was lost (create a new renderer after `webglcontextrestored`).
    */
   render(state: RenderState, sources: FrameSources): void;
+  /** The text overlays the last `render` drew, where they are in the output (for picking one with the pointer). */
+  drawnTexts(): readonly DrawnText[];
+  /**
+   * The scenes of a newer version of the project whose look and output are the same (an edit): the
+   * layers' indices point into these from now on. Another look or output needs a new renderer.
+   */
+  setScenes(scenes: readonly Scene[]): void;
   /** Frees every GL object; `render` throws afterwards. Leaves the canvas and its context alone. */
   dispose(): void;
+}
+
+/** A text overlay as drawn: the overlay, and its box in output pixels. */
+export interface DrawnText {
+  overlay: TextOverlay;
+  rect: Rect;
 }
 
 export interface RendererOptions {
@@ -128,6 +141,8 @@ export function createRenderer(canvas: HTMLCanvasElement | OffscreenCanvas, proj
   let uploadedStill: ImageBitmap | undefined;
   let layerTarget: RenderTarget | undefined;
   let disposed = false;
+  let drawn: DrawnText[] = [];
+  let scenes: readonly Scene[] = project.scenes;
 
   function frame(style: FrameStyle | null): { chrome: FrameChrome | null; layout: WindowLayout } {
     const chrome = style ? FRAME_CHROME[style] : null;
@@ -142,6 +157,7 @@ export function createRenderer(canvas: HTMLCanvasElement | OffscreenCanvas, proj
       const sprite = sprites.label(overlay.text, style, unit, output.width * TEXT_MAX_WIDTH);
       const [x, y] = placeOverlay(output, sprite.box, overlay.position, style.align, avoid);
       spritePass.drawSprite(sprite, x, y, opacity);
+      drawn.push({ overlay, rect: [x, y, sprite.box.width, sprite.box.height] });
     }
   }
 
@@ -205,7 +221,7 @@ export function createRenderer(canvas: HTMLCanvasElement | OffscreenCanvas, proj
   }
 
   function drawLayer(layer: SceneFrame, sources: FrameSources, t: number): void {
-    const scene = project.scenes[layer.index];
+    const scene = scenes[layer.index];
     if (!scene) throw new Error(`render: the project has no scene ${layer.index}`);
     background.draw(t);
     if (scene.type === 'card') drawCard(scene);
@@ -218,6 +234,7 @@ export function createRenderer(canvas: HTMLCanvasElement | OffscreenCanvas, proj
       if (disposed) throw new Error('render: the renderer was disposed');
       // A lost context draws nothing and reports no error: fail loudly instead of exporting black frames.
       if (gl.isContextLost()) throw new Error('render: the WebGL context was lost');
+      drawn = [];
       gl.bindVertexArray(vao);
       gl.viewport(0, 0, output.width, output.height);
       gl.enable(gl.BLEND);
@@ -237,6 +254,10 @@ export function createRenderer(canvas: HTMLCanvasElement | OffscreenCanvas, proj
         spritePass.draw(layerTarget.texture, [0, 0, output.width, output.height], layer.opacity, true);
       }
       sprites.endFrame();
+    },
+    drawnTexts: () => drawn,
+    setScenes(next) {
+      scenes = next;
     },
     dispose() {
       if (disposed) return;

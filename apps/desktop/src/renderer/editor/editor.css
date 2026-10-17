@@ -2,13 +2,14 @@
   display: grid;
   /* the video stays the largest part: the timeline takes a third of a small window */
   grid-template-rows: 44px minmax(0, 1fr) var(--timeline-height, clamp(220px, 34vh, 320px));
-  grid-template-columns: minmax(0, 1fr) 300px;
+  /* the tools beside the video, the inspector on the right */
+  grid-template-columns: 48px minmax(0, 1fr) 300px;
   height: 100%;
 }
 
 /* title bar: the window's caption buttons sit over its right end (titleBarOverlay) */
 .titlebar {
-  grid-column: 1 / 3;
+  grid-column: 1 / 4;
   display: flex;
   align-items: center;
   gap: 12px;
@@ -148,7 +149,7 @@ button.chip-status:hover {
 /* stage: the output view, as large as it fits, with the transport under it */
 .stage {
   grid-row: 2;
-  grid-column: 1;
+  grid-column: 2;
   background: var(--stage);
   position: relative;
   display: flex;
@@ -251,7 +252,7 @@ button.chip-status:hover {
 /* inspector */
 .inspector {
   grid-row: 2 / 4;
-  grid-column: 2;
+  grid-column: 3;
   background: var(--panel);
   border-left: 1px solid var(--line);
   display: flex;
@@ -296,15 +297,6 @@ button.chip-status:hover {
   place-items: center;
   flex: none;
 }
-/* view only in this version: values read as text, not as fields to type in */
-.view-only {
-  margin: 0;
-  padding: 8px 16px;
-  border-bottom: 1px solid var(--line);
-  color: var(--muted);
-  font-size: var(--size-xs);
-  line-height: 1.45;
-}
 .kind-head .name {
   display: block;
   flex: 1;
@@ -320,27 +312,6 @@ button.chip-status:hover {
   color: var(--muted);
   font-size: var(--size-s);
   margin-bottom: 2px;
-}
-.value {
-  min-height: 20px;
-  display: flex;
-  align-items: baseline;
-  justify-content: flex-start;
-  gap: 8px;
-  overflow-wrap: anywhere;
-}
-.value em {
-  color: var(--muted);
-  font-style: normal;
-  font-size: var(--size-s);
-  white-space: nowrap;
-}
-.value.area {
-  justify-content: flex-start;
-  gap: 14px;
-}
-.value.area em {
-  font-size: var(--size-xs);
 }
 .grid2 {
   display: grid;
@@ -360,35 +331,11 @@ button.chip-status:hover {
   font-weight: 600;
   margin-top: 4px;
 }
-.look-row {
-  display: flex;
-  justify-content: space-between;
-  gap: 12px;
-  font-size: var(--size-s);
-  color: var(--muted);
-  min-height: 22px;
-  align-items: center;
-}
-.look-row b {
-  color: var(--text);
-  font-weight: 500;
-  text-align: right;
-  overflow-wrap: anywhere;
-}
-.swatch {
-  width: 12px;
-  height: 12px;
-  border-radius: 3px;
-  display: inline-block;
-  vertical-align: -1px;
-  margin-right: 6px;
-  box-shadow: 0 0 0 1px var(--line-strong);
-}
 
 /* timeline */
 .timeline {
   grid-row: 3;
-  grid-column: 1;
+  grid-column: 1 / 3;
   background: var(--panel);
   border-top: 1px solid var(--line);
   display: flex;
@@ -905,4 +852,881 @@ button.chip-status:hover {
     opacity: 0;
     transform: translateY(8px) scale(0.98);
   }
+}
+
+/* ---- editing ---------------------------------------------------------------------------------- */
+
+/* title bar: whether every edit is on disk; Undo and Redo */
+.seg.icons button {
+  width: 28px;
+  height: 24px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+}
+.seg.icons button:disabled {
+  opacity: 0.35;
+}
+.save-state {
+  color: var(--faint);
+  font-size: var(--size-s);
+  white-space: nowrap;
+}
+.save-state.warn {
+  color: var(--card);
+}
+
+/* the tools, beside the video */
+.tools {
+  grid-row: 2;
+  grid-column: 1;
+  background: var(--panel);
+  border-right: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 10px 0;
+  min-height: 0;
+}
+.tools button {
+  position: relative;
+  width: 36px;
+  height: 36px;
+  border-radius: 9px;
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+  transition:
+    background var(--fast),
+    color var(--fast);
+}
+.tools button:hover:not(:disabled) {
+  background: var(--raised);
+  color: var(--text);
+}
+.tools button[aria-pressed='true'] {
+  background: var(--raised-active);
+  color: var(--text);
+}
+.tools [data-testid='tool-zoom'][aria-pressed='true'] {
+  background: rgba(90, 162, 255, 0.16);
+  color: var(--zoom);
+}
+.tools [data-testid='tool-mask'][aria-pressed='true'] {
+  background: rgba(167, 123, 255, 0.16);
+  color: var(--mask);
+}
+.tools [data-testid='tool-caption'][aria-pressed='true'] {
+  background: rgba(79, 209, 161, 0.14);
+  color: var(--caption);
+}
+.tools kbd {
+  position: absolute;
+  right: 2px;
+  bottom: 1px;
+  padding: 0 2px;
+  background: none;
+  font-size: 8.5px;
+  line-height: 1.2;
+  color: var(--faint);
+}
+.tools button[aria-pressed='true'] kbd {
+  color: inherit;
+  opacity: 0.8;
+}
+
+/* the video and what the tools draw on it */
+.frame {
+  position: relative;
+}
+.frame canvas {
+  display: block;
+}
+.app[data-tool='caption'] .frame canvas {
+  cursor: text;
+}
+.frame canvas.over-caption {
+  cursor: pointer;
+}
+.caption-box {
+  position: absolute;
+  border-radius: 6px;
+  box-shadow: 0 0 0 1px rgba(79, 209, 161, 0.7);
+  pointer-events: none;
+}
+.caption-box.selected {
+  box-shadow:
+    0 0 0 2px var(--caption),
+    0 0 0 5px rgba(79, 209, 161, 0.18);
+}
+
+/* the caption tool: typed on the video, away from where the caption goes */
+.caption-bar {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(580px, calc(100% - 24px));
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
+  border-radius: 12px;
+  background: var(--overlay);
+  box-shadow: var(--shadow-float);
+  backdrop-filter: blur(10px);
+  z-index: 2;
+  animation: fade var(--normal) var(--ease-out);
+}
+.caption-bar.near-top {
+  top: 12px;
+}
+.caption-bar.near-bottom {
+  bottom: 12px;
+}
+.caption-bar input {
+  flex: 1;
+  min-width: 0;
+  height: 30px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--raised);
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+  user-select: text;
+}
+.caption-bar input:focus {
+  box-shadow: inset 0 0 0 1px var(--caption);
+}
+.caption-bar input::placeholder {
+  color: var(--faint);
+}
+.caption-bar .seg {
+  flex: none;
+}
+.primary.small {
+  height: 30px;
+  padding: 0 12px;
+}
+
+/* the source view: the screen at the playhead, with the zooms and masks on it */
+.source-view {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  background: var(--stage);
+  overflow: hidden;
+  cursor: crosshair;
+}
+.app[data-tool='select'] .source-view,
+.app[data-tool='caption'] .source-view {
+  cursor: default;
+}
+.source-view canvas {
+  position: absolute;
+  left: 0;
+  top: 0;
+  box-shadow: none;
+  border-radius: 0;
+  background: none;
+}
+.zoom-dim {
+  position: absolute;
+  inset: 0;
+  background: rgba(6, 6, 9, 0.6);
+  pointer-events: none;
+}
+.source-box {
+  position: absolute;
+  border-radius: 2px;
+  cursor: move;
+}
+.source-box.zoom {
+  box-shadow:
+    0 0 0 1.5px var(--zoom),
+    0 0 0 4px rgba(90, 162, 255, 0.16);
+}
+.source-box.mask {
+  box-shadow: 0 0 0 1.5px var(--mask);
+  background: repeating-linear-gradient(135deg, rgba(167, 123, 255, 0.26) 0 6px, rgba(167, 123, 255, 0.1) 6px 12px);
+}
+.source-box.selected.zoom {
+  box-shadow:
+    0 0 0 2px var(--zoom),
+    0 0 0 6px rgba(90, 162, 255, 0.2);
+}
+.source-box.selected.mask {
+  box-shadow:
+    0 0 0 2px var(--mask),
+    0 0 0 6px rgba(167, 123, 255, 0.2);
+}
+/* a selected item the playhead is not on: drawn faint */
+.source-box.elsewhere {
+  opacity: 0.55;
+}
+.source-box.drawing {
+  pointer-events: none;
+}
+.box-handle {
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  margin: -5px 0 0 -5px;
+  border-radius: 2px;
+  background: #fff;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.55);
+}
+/* a larger target than it looks */
+.box-handle::before {
+  content: '';
+  position: absolute;
+  inset: -6px;
+}
+.box-handle.nw {
+  left: 0;
+  top: 0;
+  cursor: nwse-resize;
+}
+.box-handle.n {
+  left: 50%;
+  top: 0;
+  cursor: ns-resize;
+}
+.box-handle.ne {
+  left: 100%;
+  top: 0;
+  cursor: nesw-resize;
+}
+.box-handle.e {
+  left: 100%;
+  top: 50%;
+  cursor: ew-resize;
+}
+.box-handle.se {
+  left: 100%;
+  top: 100%;
+  cursor: nwse-resize;
+}
+.box-handle.s {
+  left: 50%;
+  top: 100%;
+  cursor: ns-resize;
+}
+.box-handle.sw {
+  left: 0;
+  top: 100%;
+  cursor: nesw-resize;
+}
+.box-handle.w {
+  left: 0;
+  top: 50%;
+  cursor: ew-resize;
+}
+.source-chip {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  max-width: calc(100% - 190px);
+  height: 28px;
+  padding: 0 12px;
+  border-radius: 999px;
+  background: var(--overlay);
+  box-shadow: var(--shadow-float);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--muted);
+  font-size: var(--size-s);
+  white-space: nowrap;
+  overflow: hidden;
+  pointer-events: none;
+  z-index: 2;
+}
+.source-chip b {
+  color: var(--text);
+  font-weight: 600;
+}
+.source-chip .sep {
+  width: 1px;
+  height: 12px;
+  margin: 0 6px;
+  background: var(--line-strong);
+  flex: none;
+}
+.source-close {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  height: 28px;
+  padding: 0 12px;
+  border-radius: 8px;
+  background: var(--overlay);
+  box-shadow: var(--shadow-float);
+  font-size: var(--size-s);
+  z-index: 2;
+  cursor: default;
+}
+.source-close:hover {
+  background: var(--raised-hover);
+}
+
+/* cuttle.json does not parse: editing waits */
+.banner {
+  position: absolute;
+  top: 12px;
+  left: 24px;
+  right: 24px;
+  z-index: 3;
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: #261f14;
+  box-shadow:
+    var(--shadow-float),
+    inset 0 0 0 1px rgba(242, 179, 74, 0.35);
+}
+.banner > svg {
+  color: var(--card);
+  margin-top: 1px;
+}
+.banner > div {
+  flex: 1;
+  min-width: 0;
+}
+.banner b {
+  font-weight: 600;
+}
+.banner p {
+  margin: 3px 0 6px;
+  color: var(--muted);
+  font-size: var(--size-s);
+  line-height: 1.45;
+}
+.banner ul {
+  margin: 0;
+  padding-left: 16px;
+  font: var(--size-xs) / 1.5 var(--mono);
+  color: #ead6ad;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+
+/* what just happened, with Undo */
+.toast {
+  position: absolute;
+  left: 50%;
+  bottom: 62px;
+  transform: translateX(-50%);
+  max-width: min(640px, calc(100% - 48px));
+  min-height: 36px;
+  padding: 4px 6px 4px 14px;
+  border-radius: 10px;
+  background: var(--overlay);
+  box-shadow: var(--shadow-float);
+  backdrop-filter: blur(10px);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: var(--size-s);
+  z-index: 4;
+  animation: toast-in var(--normal) var(--ease-out);
+}
+/* two lines at most: a draft note says what happened and where your version is */
+.toast span {
+  min-width: 0;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-height: 1.4;
+}
+.toast.warn > svg {
+  color: var(--card);
+}
+.toast-undo {
+  height: 26px;
+  padding: 0 10px;
+  border-radius: 7px;
+  color: var(--accent);
+  font-weight: 600;
+  flex: none;
+}
+.toast-undo:hover {
+  background: var(--raised);
+}
+.toast-close {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+  flex: none;
+}
+.toast-close:hover {
+  background: var(--raised);
+  color: var(--text);
+}
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 8px);
+  }
+}
+
+/* the command menu (Ctrl+K) */
+.menu-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: grid;
+  place-items: start center;
+  padding-top: 12vh;
+  background: rgba(6, 6, 9, 0.4);
+  animation: fade var(--fast) var(--ease-out);
+}
+.command-menu {
+  width: min(560px, calc(100vw - 48px));
+  max-height: 64vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--panel);
+  border-radius: var(--radius-l);
+  box-shadow: var(--shadow-float);
+  overflow: hidden;
+  animation: rise var(--normal) var(--ease-out);
+}
+.command-menu input {
+  flex: none;
+  height: 48px;
+  padding: 0 16px;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  background: none;
+  font-size: var(--size-l);
+  user-select: text;
+}
+.command-menu input::placeholder {
+  color: var(--faint);
+}
+.command-list {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 6px;
+}
+.command-list .hint {
+  margin: 0;
+  padding: 12px 10px;
+}
+.command-group {
+  padding: 10px 10px 4px;
+  color: var(--faint);
+  font-size: var(--size-xs);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.command {
+  height: 32px;
+  padding: 0 10px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.command[data-active='true'] {
+  background: var(--raised-active);
+}
+.command[aria-disabled='true'] {
+  color: var(--faint);
+}
+.command-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.command em {
+  flex: none;
+  color: var(--faint);
+  font-size: var(--size-xs);
+  font-style: normal;
+}
+.command-foot {
+  flex: none;
+  display: flex;
+  gap: 16px;
+  padding: 8px 14px;
+  border-top: 1px solid var(--line);
+  color: var(--faint);
+  font-size: var(--size-xs);
+}
+.command-foot kbd {
+  margin-right: 3px;
+}
+
+/* inspector fields */
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+}
+.field .field-label {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 0;
+}
+.field-input {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  min-height: 28px;
+}
+.field-input em {
+  color: var(--muted);
+  font-size: var(--size-s);
+  font-style: normal;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.field input[type='text'],
+.field input[type='number'],
+.field textarea,
+.field select {
+  flex: 1;
+  min-width: 0;
+  width: 100%;
+  height: 28px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 7px;
+  background: var(--raised);
+  box-shadow: inset 0 0 0 1px var(--line);
+  color: var(--text);
+  font: inherit;
+  user-select: text;
+  transition: box-shadow var(--fast);
+}
+.field textarea {
+  height: auto;
+  min-height: 52px;
+  padding: 6px 8px;
+  resize: vertical;
+  line-height: 1.4;
+}
+.field input:hover,
+.field textarea:hover,
+.field select:hover {
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+}
+.field input:focus,
+.field textarea:focus,
+.field select:focus {
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+.field input[type='number']::-webkit-inner-spin-button {
+  opacity: 0.3;
+}
+.field-input.narrow input {
+  flex: 0 0 76px;
+}
+.field input[type='color'] {
+  width: 40px;
+  height: 26px;
+  padding: 0;
+  border: 0;
+  background: none;
+  flex: none;
+}
+.field input[type='color']::-webkit-color-swatch-wrapper {
+  padding: 0;
+}
+.field input[type='color']::-webkit-color-swatch {
+  border: 0;
+  border-radius: 6px;
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+}
+.grid4 {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+}
+.grid4 .field-input {
+  position: relative;
+}
+.grid4 .field-input em {
+  position: absolute;
+  left: 7px;
+  font-size: var(--size-xs);
+  color: var(--faint);
+  pointer-events: none;
+}
+.grid4 input[type='number'] {
+  padding: 0 4px 0 17px;
+}
+/* four numbers in a row: room for 4 digits, the arrow keys step them */
+.grid4 input[type='number']::-webkit-inner-spin-button {
+  display: none;
+}
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.chips button {
+  height: 24px;
+  padding: 0 8px;
+  border-radius: 6px;
+  background: var(--raised);
+  color: var(--muted);
+  font-size: var(--size-s);
+  font-weight: 500;
+  transition:
+    background var(--fast),
+    color var(--fast);
+}
+.chips button:hover {
+  color: var(--text);
+}
+.chips button[aria-pressed='true'] {
+  background: var(--raised-active);
+  color: var(--text);
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+}
+.toggle {
+  position: relative;
+  width: 32px;
+  height: 18px;
+  border-radius: 9px;
+  background: var(--raised-active);
+  flex: none;
+  transition: background var(--fast);
+}
+.toggle i {
+  position: absolute;
+  left: 2px;
+  top: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--muted);
+  transition:
+    transform var(--fast) var(--ease-out),
+    background var(--fast);
+}
+.toggle[aria-checked='true'] {
+  background: var(--accent);
+}
+.toggle[aria-checked='true'] i {
+  transform: translateX(14px);
+  background: #fff;
+}
+.swatches {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+.swatch-button {
+  height: 46px;
+  border-radius: 8px;
+  display: flex;
+  align-items: flex-end;
+  padding: 4px 6px;
+  overflow: hidden;
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+  transition: box-shadow var(--fast);
+}
+.swatch-button span {
+  font-size: 10px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.92);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.7);
+}
+.swatch-button[aria-pressed='true'] {
+  box-shadow:
+    0 0 0 2px var(--accent),
+    inset 0 0 0 1px rgba(0, 0, 0, 0.3);
+}
+/* the swatches look like the engine's presets (packages/engine/src/presets/backgrounds.ts) */
+.bg-sunset-sky {
+  background: linear-gradient(180deg, #1b1c4a, #b85679 62%, #f9a866);
+}
+.bg-aurora {
+  background:
+    linear-gradient(180deg, transparent 28%, rgba(51, 242, 166, 0.45) 36%, transparent 44%),
+    linear-gradient(180deg, transparent 42%, rgba(64, 153, 255, 0.4) 50%, transparent 58%),
+    linear-gradient(180deg, transparent 54%, rgba(184, 92, 242, 0.4) 62%, transparent 72%),
+    linear-gradient(180deg, #050816, #0a1126);
+}
+.bg-mesh {
+  background:
+    radial-gradient(circle at 15% 20%, #7c5cff 0, transparent 60%),
+    radial-gradient(circle at 85% 18%, #ff7ab6 0, transparent 60%),
+    radial-gradient(circle at 20% 88%, #4cc9f0 0, transparent 60%),
+    radial-gradient(circle at 80% 82%, #ffb86b 0, transparent 60%),
+    #a07ad0;
+}
+.bg-solid {
+  background: #1c1c22;
+}
+.bg-image {
+  background: repeating-linear-gradient(45deg, var(--raised) 0 6px, var(--raised-hover) 6px 12px);
+}
+.path {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted);
+  font: var(--size-xs) var(--mono);
+}
+.ghost.small {
+  height: 26px;
+  padding: 0 10px;
+  flex: none;
+}
+.link {
+  color: var(--accent);
+  font-size: var(--size-xs);
+  font-weight: 500;
+}
+.link:hover {
+  text-decoration: underline;
+}
+
+/* timeline: dragging */
+.edge {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 8px;
+  z-index: 3;
+  cursor: ew-resize;
+}
+.edge.start {
+  left: 0;
+}
+.edge.end {
+  right: 0;
+}
+.item .edge {
+  width: 6px;
+}
+.scene:hover .edge::after,
+.item:hover .edge::after,
+.selected .edge::after {
+  content: '';
+  position: absolute;
+  top: 28%;
+  bottom: 28%;
+  left: 3px;
+  width: 2px;
+  border-radius: 1px;
+  background: rgba(255, 255, 255, 0.6);
+}
+.item .edge::after {
+  left: 2px;
+}
+.snap-guide {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  margin-left: -0.5px;
+  background: rgba(255, 255, 255, 0.75);
+  z-index: 4;
+  pointer-events: none;
+}
+.insert-mark {
+  position: absolute;
+  width: 3px;
+  margin-left: -1.5px;
+  border-radius: 2px;
+  background: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+  z-index: 4;
+  pointer-events: none;
+}
+.tl-sep {
+  width: 1px;
+  height: 16px;
+  margin: 0 4px;
+  background: var(--line-strong);
+  flex: none;
+}
+.tl-bar .act:disabled:hover {
+  background: none;
+  color: var(--muted);
+}
+.tl-bar .act[aria-pressed='true'] {
+  background: var(--raised-active);
+  color: var(--text);
+}
+.tl-bar .act.speed select {
+  height: 22px;
+  padding: 0 4px;
+  border: 0;
+  border-radius: 6px;
+  background: var(--raised);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+.scene .lbl .detail {
+  color: #a9a9b2;
+  font-weight: 400;
+}
+/* one overlay shown by several clips: its blocks light up together */
+.item.linked:not(.selected)::after {
+  box-shadow: inset 0 0 0 1.5px currentColor;
+}
+/* the lane label's count of overlays no clip shows, and their list */
+.tl-names .cut-out {
+  color: var(--card);
+  font-size: 10px;
+  line-height: 1.2;
+  text-decoration: underline dotted;
+  text-underline-offset: 2px;
+}
+.tl-names .cut-out:hover {
+  color: var(--text);
+}
+.cut-out-list {
+  position: fixed;
+  z-index: 15;
+  min-width: 200px;
+  max-width: 320px;
+  padding: 6px;
+  border-radius: 10px;
+  background: var(--panel);
+  box-shadow: var(--shadow-float);
+  display: flex;
+  flex-direction: column;
+  animation: fade var(--fast) var(--ease-out);
+}
+.cut-out-head {
+  padding: 4px 8px 6px;
+  color: var(--faint);
+  font-size: var(--size-xs);
+}
+.cut-out-list button {
+  height: 28px;
+  padding: 0 8px;
+  border-radius: 7px;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cut-out-list button:hover,
+.cut-out-list button:focus-visible {
+  background: var(--raised-active);
 }

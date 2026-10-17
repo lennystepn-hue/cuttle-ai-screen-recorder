@@ -123,24 +123,6 @@ export async function loadImage(path: string, maxSize: number, what: string): Pr
   return createImageBitmap(blob, { ...options, resizeWidth, resizeHeight, resizeQuality: 'high' });
 }
 
-/** Everything the editor shows of a project, opened once. */
-export interface EditorMedia {
-  project: CuttleProject;
-  screen: VideoSource;
-  webcam?: VideoSource & { offset: number };
-  mic?: AudioSource;
-  events: InputEvent[];
-  cursor?: CursorTrack;
-  markers: Marker[];
-  stills: Map<number, ImageBitmap>;
-  backgroundImage?: ImageBitmap;
-  /** Things that work without, said for people (a missing webcam file, unreadable events). */
-  warnings: string[];
-}
-
-/** Larger images are scaled down: textures of 8192 px work on every GPU Cuttle runs on. */
-const MAX_IMAGE = 8192;
-
 /** The issues of a cuttle.json that does not parse, one plain line each. */
 export function projectIssues(issues: readonly { path: string; message: string }[]): string {
   return issues.map((issue) => plainIssue(`${issue.path}: ${issue.message}`)).join('\n');
@@ -159,62 +141,104 @@ async function placeholder(path?: string): Promise<ImageBitmap> {
   return createImageBitmap(canvas, { premultiplyAlpha: 'premultiply' });
 }
 
-export async function openProjectMedia(info: ProjectInfo): Promise<EditorMedia> {
-  const parsed = parseProject(info.raw);
-  if (!parsed.ok) throw new MediaError(`cuttle.json has a mistake:\n${projectIssues(parsed.issues)}`);
-  const project = parsed.project;
-  const { sources, look } = project;
-  const warnings: string[] = [];
-  /** An optional file's problem is a warning: the editor works without it. */
-  const optional = async <T>(work: () => Promise<T>): Promise<T | undefined> => {
-    try {
-      return await work();
-    } catch (error) {
-      warnings.push(error instanceof Error ? error.message : String(error));
-      return undefined;
-    }
-  };
+/**
+ * Everything the editor shows of a project. The take's tracks are opened once; images, the webcam
+ * and the mic are opened when the project first needs them (an edit can add a page or turn the
+ * webcam on), see `ensureMedia`.
+ */
+export interface EditorMedia {
+  screen: VideoSource;
+  webcam?: VideoSource & { offset: number };
+  mic?: AudioSource;
+  events: InputEvent[];
+  /** The pointer's track from the input events (drawn when the look's cursor is on). */
+  cursor?: CursorTrack;
+  markers: Marker[];
+  /** Still images by their project path. */
+  stills: Map<string, ImageBitmap>;
+  backgroundImage?: ImageBitmap;
+  /** The path `backgroundImage` was read from. */
+  backgroundPath?: string;
+  /** Seconds after the screen track that the webcam and the mic started. */
+  offsets: ProjectInfo['offsets'];
+  /** Sources tried and failed (not tried again), and warnings for people (a missing webcam file …). */
+  failed: Set<string>;
+  warnings: string[];
+}
+
+/** Larger images are scaled down: textures of 8192 px work on every GPU Cuttle runs on. */
+const MAX_IMAGE = 8192;
+
+/** A file the editor works without: its problem becomes a warning (once). */
+async function optional<T>(media: Pick<EditorMedia, 'warnings' | 'failed'>, key: string, work: () => Promise<T>): Promise<T | undefined> {
+  if (media.failed.has(key)) return undefined;
+  try {
+    return await work();
+  } catch (error) {
+    media.failed.add(key);
+    media.warnings.push(error instanceof Error ? error.message : String(error));
+    return undefined;
+  }
+}
+
+export async function openProjectMedia(info: ProjectInfo, project: CuttleProject): Promise<EditorMedia> {
+  const { sources } = project;
   const screen = await openVideo(sources.screen, 'The screen recording');
-
-  let webcam: EditorMedia['webcam'];
-  if (sources.webcam && look.webcam.enabled) {
-    const video = await optional(() => openVideo(sources.webcam!, 'The webcam recording'));
-    if (video) webcam = { ...video, offset: info.offsets.webcam };
-  }
-  let mic: AudioSource | undefined;
-  if (sources.mic && look.audio.enabled) {
-    mic = await optional(async () => {
-      const audio = await openAudio(sources.mic!, info.offsets.mic);
-      if (audio) return audio;
-      throw (await present(sources.mic!)) ? new MediaError(`The mic recording (${sources.mic}) cannot be played.`) : missing(sources.mic!);
-    });
-  }
-
-  let events: InputEvent[] = [];
+  const media: EditorMedia = { screen, events: [], markers: [], stills: new Map(), offsets: info.offsets, failed: new Set(), warnings: [] };
   if (sources.events) {
-    const text = await optional(async () => {
+    const text = await optional(media, sources.events, async () => {
       const found = await fetchText(sources.events!);
       if (found === undefined) throw new MediaError(`${sources.events} cannot be read: no cursor or input activity.`);
       return found;
     });
-    if (text !== undefined) events = parseEventsJsonl(text).events;
+    if (text !== undefined) media.events = parseEventsJsonl(text).events;
   }
-  const cursor = look.cursor.enabled && events.length > 0 ? createCursorTrack(events) : undefined;
-  let markers: Marker[] = [];
+  if (media.events.length > 0) media.cursor = createCursorTrack(media.events);
   if (sources.markers) {
-    const text = await optional(async () => (await fetchText(sources.markers!)) ?? '');
+    const text = await optional(media, sources.markers, async () => (await fetchText(sources.markers!)) ?? '');
     const parsedMarkers = parseMarkersJson(text ?? '');
-    if (parsedMarkers.ok) markers = parsedMarkers.markers;
+    if (parsedMarkers.ok) media.markers = parsedMarkers.markers;
   }
+  await ensureMedia(media, project);
+  return media;
+}
 
-  const stills = new Map<number, ImageBitmap>();
-  for (const [index, scene] of project.scenes.entries()) {
-    if (scene.type !== 'still') continue;
-    stills.set(index, (await optional(() => loadImage(scene.image, MAX_IMAGE, `The image of scene ${index + 1}`))) ?? (await placeholder(scene.image)));
+/**
+ * Opens what `project` needs and `media` lacks: the images of its stills (a placeholder for one
+ * that cannot be read), the background image, the webcam when the look shows it, the mic when the
+ * look plays it. Returns whether anything was added.
+ */
+export async function ensureMedia(media: EditorMedia, project: CuttleProject): Promise<boolean> {
+  const { sources, look } = project;
+  let added = false;
+  for (const scene of project.scenes) {
+    if (scene.type !== 'still' || media.stills.has(scene.image)) continue;
+    media.stills.set(scene.image, (await optional(media, scene.image, () => loadImage(scene.image, MAX_IMAGE, 'The image of a page'))) ?? (await placeholder(scene.image)));
+    added = true;
   }
-  const backgroundImage =
-    look.background.preset === 'image' && look.background.image
-      ? ((await optional(() => loadImage(look.background.image!, MAX_IMAGE, 'The background image'))) ?? (await placeholder()))
-      : undefined;
-  return { project, screen, ...(webcam && { webcam }), ...(mic && { mic }), events, ...(cursor && { cursor }), markers, stills, ...(backgroundImage && { backgroundImage }), warnings };
+  const background = look.background.preset === 'image' ? look.background.image : undefined;
+  if (background && media.backgroundPath !== background) {
+    media.backgroundImage = (await optional(media, background, () => loadImage(background, MAX_IMAGE, 'The background image'))) ?? (await placeholder());
+    media.backgroundPath = background;
+    added = true;
+  }
+  if (sources.webcam && look.webcam.enabled && !media.webcam) {
+    const video = await optional(media, sources.webcam, () => openVideo(sources.webcam!, 'The webcam recording'));
+    if (video) {
+      media.webcam = { ...video, offset: media.offsets.webcam };
+      added = true;
+    }
+  }
+  if (sources.mic && look.audio.enabled && !media.mic) {
+    const mic = await optional(media, sources.mic, async () => {
+      const audio = await openAudio(sources.mic!, media.offsets.mic);
+      if (audio) return audio;
+      throw (await present(sources.mic!)) ? new MediaError(`The mic recording (${sources.mic}) cannot be played.`) : missing(sources.mic!);
+    });
+    if (mic) {
+      media.mic = mic;
+      added = true;
+    }
+  }
+  return added;
 }

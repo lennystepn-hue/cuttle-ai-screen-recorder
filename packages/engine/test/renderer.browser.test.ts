@@ -149,6 +149,34 @@ describe('render', () => {
     expect(render(CARDS, { t: 0, layers: [layer(0, 0), layer(1, 1)] }).pixels.data).toEqual(b);
   });
 
+  it('draws the scenes it was given last: a card where the project it was made with had a clip', () => {
+    const clipFirst = parse({ look: { background: { preset: 'solid', color: '#204060' } }, scenes: [{ type: 'clip', from: 0, to: 1 }, ...CARDS.scenes] });
+    const renderer = createRenderer(new OffscreenCanvas(1, 1), clipFirst, { assets, screenSize: SCREEN });
+    const state: RenderState = { t: 0, layers: [layer(0, 1)] };
+    expect(() => renderer.render(state, NO_SOURCES)).toThrow('render: no screen frame for scene 0');
+    renderer.setScenes(CARDS.scenes);
+    expect(() => renderer.render(state, NO_SOURCES)).not.toThrow();
+    renderer.dispose();
+  });
+
+  it('reports where it drew each text, for picking one with the pointer', () => {
+    const project = parse({ scenes: [{ type: 'clip', from: 0, to: 1 }], texts: [{ id: 't1', at: 0, duration: 1, text: 'Hello', position: 'bottom' }] });
+    const renderer = createRenderer(new OffscreenCanvas(1, 1), project, { assets, screenSize: SCREEN });
+    renderer.render({ t: 0, layers: [{ ...layer(0, 1, 'clip'), texts: [{ overlay: project.texts[0]!, opacity: 1 }] }] }, { ...NO_SOURCES, screens: new Map([[0, fakeScreen()]]) });
+    const [drawn] = renderer.drawnTexts();
+    expect(drawn?.overlay.id).toBe('t1');
+    // inside the output, in its lower half (a bottom caption)
+    const [x, y, width, height] = drawn!.rect;
+    expect(x).toBeGreaterThanOrEqual(0);
+    expect(x + width).toBeLessThanOrEqual(64);
+    expect(y).toBeGreaterThan(18);
+    expect(y + height).toBeLessThanOrEqual(36);
+    // a frame without texts reports none
+    renderer.render({ t: 0, layers: [layer(0, 1, 'clip')] }, { ...NO_SOURCES, screens: new Map([[0, fakeScreen()]]) });
+    expect(renderer.drawnTexts()).toEqual([]);
+    renderer.dispose();
+  });
+
   it('throws after dispose', () => {
     const renderer = createRenderer(new OffscreenCanvas(1, 1), CARDS, { assets, screenSize: SCREEN });
     renderer.dispose();

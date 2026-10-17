@@ -58,6 +58,8 @@ export const SplitIcon = icon(
 );
 export const FitIcon = icon(<path d="M2.5 6V3.5a1 1 0 0 1 1-1H6M10 2.5h2.5a1 1 0 0 1 1 1V6M13.5 10v2.5a1 1 0 0 1-1 1H10M6 13.5H3.5a1 1 0 0 1-1-1V10" />);
 export const FolderIcon = icon(<path d="M2 4.5h4l1.5 1.5H14v6.5a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1z" />);
+/** The command menu: a keyboard. */
+export const KeysIcon = icon(<path d="M2 4.5h12v7H2zM4.5 7h.1M7 7h.1M9.5 7h.1M12 7h.1M5 9.5h6" />);
 export const CloseIcon = icon(<path d="m4 4 8 8M12 4l-8 8" />);
 export const CheckIcon = icon(<path d="m3 8.5 3 3 7-7" />);
 export const FilmIcon = icon(

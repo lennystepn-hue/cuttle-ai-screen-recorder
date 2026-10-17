@@ -33,6 +33,8 @@ export interface EditorState {
   exportUnseen: boolean;
   /** Timeline scale; 0 until the timeline fits itself. */
   pxPerSecond: number;
+  /** What the main process is doing to the project ("Cutting the take…"). */
+  status?: string;
 }
 
 export const store = createStore<EditorState>({
@@ -65,6 +67,8 @@ const query = new URLSearchParams(location.search);
 
 /** Opens the window's project: its media through the protocol, the engine's assets, the player. */
 export async function openSession(canvas: HTMLCanvasElement): Promise<void> {
+  // The status comes before the project is open (the window opens while the take is cut).
+  bridge.on('project:status', ({ text }) => store.set({ status: text }));
   try {
     const info = await bridge.invoke('project:info');
     document.title = `${info.name} · Cuttle`;

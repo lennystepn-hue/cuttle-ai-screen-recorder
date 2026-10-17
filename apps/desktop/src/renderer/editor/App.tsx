@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { formatDuration, formatSource, formatTime, plainIssue } from '../../shared/format';
 import type { MediaState } from '../../shared/ipc';
 import { bridge } from '../bridge';
-import { CloseIcon, ExportIcon, FolderIcon, Mark, PauseIcon, PlayIcon, WarningIcon } from '../icons';
+import { ChevronIcon, CloseIcon, ExportIcon, FolderIcon, Mark, PauseIcon, PlayIcon, RecordIcon, WarningIcon } from '../icons';
 import { ExportSheet } from './ExportSheet';
 import { Inspector } from './Inspector';
 import { currentPlayer, openExport, openSession, retryMedia, select, setFormat, shownProject, store } from './session';
@@ -66,6 +66,7 @@ function TitleBar() {
   const phase = useStore(store, (state) => state.phase);
   const info = useStore(store, (state) => state.info);
   const media = useStore(store, (state) => state.media);
+  const status = useStore(store, (state) => state.status);
   const duration = currentPlayer()?.duration ?? 0;
   const recorded = media ? media.screen.end - media.screen.start : 0;
   return (
@@ -80,11 +81,26 @@ function TitleBar() {
         )}
       </div>
       <div className="grow" />
+      {status && (
+        <div className="chip-status" role="status" data-testid="project-status">
+          <span className="spinner small" aria-hidden="true" />
+          {status}
+        </div>
+      )}
       {phase === 'ready' && (
         <>
           <MediaChip />
           <ExportChip />
           <FormatSwitch />
+          <div className="seg" role="group" aria-label="Takes">
+            <button onClick={() => void bridge.invoke('project:record')} title="Record a new take for this project; this one stays restorable" data-testid="record-again">
+              <RecordIcon size={10} style={{ color: 'var(--recording)', display: 'inline-block', marginRight: 6, verticalAlign: -1 }} />
+              Record again
+            </button>
+            <button onClick={() => void bridge.invoke('project:takes')} title="Earlier takes of this project" aria-label="Takes">
+              <ChevronIcon size={13} />
+            </button>
+          </div>
           <button className="primary" onClick={openExport} title="Export (Ctrl+E)">
             <ExportIcon size={14} />
             Export

@@ -870,6 +870,13 @@ button.chip-status:hover {
   margin: 0 auto;
 }
 
+.spinner.small {
+  width: 12px;
+  height: 12px;
+  border-width: 2px;
+  margin: 0;
+}
+
 @keyframes spin {
   to {
     transform: rotate(360deg);

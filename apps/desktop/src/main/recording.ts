@@ -21,7 +21,7 @@ import { transcribeProject } from './speech';
 import { editorWindowOf, expectSuggest, guard, hidePill, reopenEditor, sendToEditor, setEditorStatus, showPill, webPreferences } from './windows';
 
 /** The HUD's window (the HUD and a margin for its shadow): never in the video, and a dead zone for the input log. */
-const HUD_SIZE = { width: 480, height: 64 };
+const HUD_SIZE = { width: 512, height: 64 };
 /** The recorder host answers a listing in this time, or the picker says it cannot record. */
 const LISTING_TIMEOUT_MS = 10_000;
 

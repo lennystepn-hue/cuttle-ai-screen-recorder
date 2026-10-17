@@ -6,7 +6,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { HudState } from '../../shared/ipc';
 import { bridge } from '../bridge';
-import { WarningIcon } from '../icons';
+import { Mark, WarningIcon } from '../icons';
 
 const clock = (seconds: number) => `${Math.floor(seconds / 60)}:${String(Math.floor(seconds % 60)).padStart(2, '0')}`;
 /** How long Restart must be held. */
@@ -49,6 +49,7 @@ export function Hud() {
   return (
     <div className="hud-wrap">
       <div className={`hud ${state.phase}`} role="toolbar" aria-label="Recording">
+        <Mark size={26} />
         <span className="dot" />
         <span className="time" data-testid="hud-time">
           {clock(seconds)}

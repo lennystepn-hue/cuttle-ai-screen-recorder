@@ -1,6 +1,7 @@
-# Typecheck and unit tests on Windows and macOS, so a change made on one platform cannot quietly
-# break the other. The recorder's tests use its test backend (ffmpeg test sources), which runs on
-# both; the platform tests (DXGI and Win32 on Windows, CoreGraphics on macOS) run on their own runner.
+# Typecheck, unit tests and the app end to end on Windows and macOS, so a change made on one
+# platform cannot quietly break the other. The recorder's tests use its test backend (ffmpeg test
+# sources), which runs on both; the platform tests (DXGI and Win32 on Windows, CoreGraphics on
+# macOS) run on their own runner.
 name: CI
 
 on:
@@ -50,3 +51,36 @@ jobs:
 
       # one retry: a few recorder tests time real captures, which a busy runner can stretch
       - run: pnpm exec vitest run --project node --retry 1
+
+  # The app end to end, its windows hidden (pnpm app:check): the editor, the pickers, the HUD, the
+  # settings and the exports, with the recorder's test backend. A change to the UI made on one
+  # platform shows here when it breaks the other.
+  app:
+    name: app ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: ffmpeg (Windows)
+        if: runner.os == 'Windows'
+        run: choco install ffmpeg -y --no-progress
+
+      - name: ffmpeg (macOS)
+        if: runner.os == 'macOS'
+        run: brew install ffmpeg
+
+      - run: pnpm install --frozen-lockfile
+
+      - run: pnpm app:check

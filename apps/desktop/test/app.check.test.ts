@@ -3,10 +3,11 @@ import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rea
 import { rm } from 'node:fs/promises';
 import { createServer, type Server, type ServerResponse } from 'node:http';
 import { createRequire } from 'node:module';
-import { tmpdir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { basename, delimiter, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { PNG } from 'pngjs';
+import { whisperCliPath } from '@cuttle/core';
 import { _electron, type ElectronApplication, type Page } from 'playwright';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { FIXTURE_OUTPUT, makeFixture, makeSpokenFixture } from './fixture';
@@ -35,11 +36,16 @@ const SPOKEN_WORDS = fileURLToPath(new URL('../../../packages/core/test/fixtures
  * The `base` speech model where one is downloaded (`CUTTLE_TEST_MODELS`, else the user's models
  * folder): the check downloads it from a server of its own, so the model can be checked end to end.
  */
-const BASE_MODEL = [process.env.CUTTLE_TEST_MODELS, process.env.LOCALAPPDATA && join(process.env.LOCALAPPDATA, 'Cuttle', 'models')]
+const BASE_MODEL = [
+  process.env.CUTTLE_TEST_MODELS,
+  process.env.LOCALAPPDATA && join(process.env.LOCALAPPDATA, 'Cuttle', 'models'),
+  process.platform === 'darwin' && join(homedir(), 'Library', 'Application Support', 'Cuttle', 'models'),
+]
   .filter((dir): dir is string => !!dir)
   .map((dir) => join(dir, 'ggml-base.bin'))
   .find((path) => existsSync(path));
-const hasWhisper = /\swhisper\s/.test(spawnSync('ffmpeg', ['-hide_banner', '-filters'], { encoding: 'utf8', windowsHide: true }).stdout ?? '');
+/** Whisper as the app finds it: ffmpeg's filter, else whisper.cpp's whisper-cli (macOS). */
+const hasWhisper = /\swhisper\s/.test(spawnSync('ffmpeg', ['-hide_banner', '-filters'], { encoding: 'utf8', windowsHide: true }).stdout ?? '') || whisperCliPath() !== undefined;
 
 interface CheckState {
   t: number;

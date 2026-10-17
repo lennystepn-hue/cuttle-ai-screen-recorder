@@ -51,7 +51,8 @@ export function inputSpans(events: readonly InputEvent[], rules = SPEECH_EDIT_RU
   const spans: Span[] = [];
   let anchor: { x: number; y: number } | undefined;
   for (const event of events) {
-    if (event.type === 'shape') continue;
+    // the pointer's shape and the caret are facts about the screen, not input
+    if (event.type === 'shape' || event.type === 'caret') continue;
     if (event.type === 'move') {
       if (anchor && Math.hypot(event.x - anchor.x, event.y - anchor.y) <= rules.pointerSlack) continue;
       const first = anchor === undefined;

@@ -4,9 +4,10 @@ import { newId, parseEventsJsonl, parseProject, parseTakeJson, usedIds, type Inp
 import { clickZooms, sceneSpans, shownClicks } from '@cuttle/timeline';
 import { CoreError } from './errors';
 import { readProjectFile, writeProjectFile } from './project-file';
-import { analyseScreen, grabGray } from './suggest/media';
+import { analyseScreen, grabGray, grayFrames } from './suggest/media';
 import { suggestClips } from './suggest/plan';
 import { changedRegion, zoomRect } from './suggest/region';
+import { screenStretches, typingZooms, type ScreenChange } from './suggest/typing';
 import { takeClock, transcriptMarkers } from './suggest/transcript';
 import { readMarkers, speechActivity, withSpeechCuts, wordStretches } from './speech/apply';
 import type { RawCut } from './speech/edits';
@@ -23,6 +24,8 @@ export interface SuggestOptions {
   zoom?: boolean;
   /** Zooms that follow the clicks (default true; `zoom: false` turns them off too). */
   clickZooms?: boolean;
+  /** Zooms that follow typing (default true; `zoom: false` turns them off too). */
+  typingZooms?: boolean;
   /**
    * The mic's speech (default true): it is kept and never sped up, and the transcript's filler words
    * and pauses are cut where the picture rests.
@@ -61,6 +64,11 @@ const COMPARE_WIDTH = 480;
 /** The answer is compared with the screen this long before it. */
 const ANSWER_LOOKBACK = 6;
 const ZOOM_SECONDS = 4;
+/** Typing is read at this rate and width: typed letters are a few pixels at this size. */
+const TYPING_RATE = 2;
+const TYPING_WIDTH = 640;
+/** A change of fewer pixels is noise. */
+const TYPING_MIN_PIXELS = 8;
 
 /**
  * Suggests scenes from the take (quiet start and end trimmed, idle stretches cut, waiting
@@ -153,12 +161,12 @@ export async function suggestProject(projectDir: string, args: SuggestOptions = 
   }
   // The zooms suggest made before are replaced; the others stay, and the new ones avoid them.
   const rawZooms = (file.raw.zooms as SuggestedZoom[] | undefined) ?? [];
-  const isOurs = (zoom: { auto?: string }) => zoom.auto === 'answer' || zoom.auto === 'click';
+  const isOurs = (zoom: { auto?: string }) => zoom.auto === 'answer' || zoom.auto === 'typing' || zoom.auto === 'click';
   const kept = rawZooms.filter((zoom) => !isOurs(zoom));
   const switchedOff = file.project.zooms.filter((zoom) => isOurs(zoom) && !zoom.enabled);
   if (kept.length > 0) notes.push(`kept ${kept.length} zoom${kept.length === 1 ? '' : 's'} made or changed by hand`);
   const zooms: SuggestedZoom[] = [];
-  const add = (zoom: SuggestedZoom & { auto: 'answer' | 'click' }) => zooms.push(staysOff(zoom, switchedOff) ? { ...zoom, enabled: false } : zoom);
+  const add = (zoom: SuggestedZoom & { auto: 'answer' | 'typing' | 'click' }) => zooms.push(staysOff(zoom, switchedOff) ? { ...zoom, enabled: false } : zoom);
   const first = suggestion.clips[0];
   const last = suggestion.clips.at(-1);
   const keptOverlaps = (at: number, end: number) => kept.some((zoom) => at < zoom.at + zoom.duration && zoom.at < end);
@@ -180,11 +188,26 @@ export async function suggestProject(projectDir: string, args: SuggestOptions = 
       notes.push(region ? 'no zoom: most of the screen changed with the answer (add one by hand)' : 'no zoom: nothing changed around the answer');
     }
   }
+  // where each clip piece starts in the output, with the cards and pages around the clips and the cuts counted
+  const parsed = parseProject({ ...file.raw, scenes, ...(cuts && { cuts }), zooms: [] });
+  const spans = parsed.ok ? sceneSpans(parsed.project.scenes, parsed.project.cuts) : [];
+  const shown = spans.flatMap((span) => (span.scene.type === 'clip' ? [{ from: span.scene.from, to: span.scene.to, speed: span.scene.speed, start: span.start }] : []));
+  if (args.zoom !== false && args.typingZooms !== false && file.project.autoEdits.typingZooms && events.some((event) => event.type === 'keys')) {
+    // where the text goes: the caret, else what the screen changes while keys are typed
+    const changes = await typingChanges(screen, screenStretches(events, shown, screenInfo), screenInfo);
+    const typed = typingZooms({ events, clips: shown, screen: screenInfo, avoid: [...kept, ...zooms], changes });
+    for (const zoom of typed) {
+      add({ id: newId('zooms', taken), label: 'Typing', at: zoom.at, duration: zoom.duration, rect: zoom.rect, ...(zoom.moves.length > 0 && { moves: zoom.moves }), auto: 'typing' });
+    }
+    if (typed.length > 0) {
+      const moves = typed.reduce((sum, zoom) => sum + zoom.moves.length, 0);
+      const caret = typed.filter((zoom) => zoom.follows === 'caret').length;
+      notes.push(
+        `${typed.length} zoom${typed.length === 1 ? '' : 's'} while typing, ${moves} move${moves === 1 ? '' : 's'} following the text (${caret === typed.length ? 'the caret' : caret === 0 ? 'what the screen changed' : `the caret in ${caret}, the screen in the others`})`,
+      );
+    }
+  }
   if (args.zoom !== false && args.clickZooms !== false && file.project.autoEdits.clickZooms && events.length > 0) {
-    // where each clip piece starts in the output, with the cards and pages around the clips and the cuts counted
-    const parsed = parseProject({ ...file.raw, scenes, ...(cuts && { cuts }), zooms: [] });
-    const spans = parsed.ok ? sceneSpans(parsed.project.scenes, parsed.project.cuts) : [];
-    const shown = spans.flatMap((span) => (span.scene.type === 'clip' ? [{ from: span.scene.from, to: span.scene.to, speed: span.scene.speed, start: span.start }] : []));
     const there = [...kept, ...zooms];
     const followed = clickZooms(events, shown, screenInfo, there);
     // the clicks the zooms there do not show, less those the click zooms follow
@@ -272,6 +295,24 @@ function staysOff(zoom: SuggestedZoom, off: readonly { at: number; duration: num
     const inter = w > 0 && h > 0 ? w * h : 0;
     return inter / (aw * ah + bw * bh - inter) >= 0.5;
   });
+}
+
+/** What the screen changed in each stretch, frame by frame (`TYPING_RATE` a second), in screen pixels. */
+async function typingChanges(screen: string, stretches: readonly { from: number; to: number }[], size: { width: number; height: number; duration: number }): Promise<ScreenChange[]> {
+  const height = 2 * Math.round((TYPING_WIDTH * size.height) / size.width / 2);
+  const scale = size.width / TYPING_WIDTH;
+  const changes: ScreenChange[] = [];
+  for (const stretch of stretches) {
+    const from = Math.max(0, stretch.from);
+    const to = Math.min(size.duration, stretch.to);
+    if (!(to > from)) continue;
+    const frames = await grayFrames(screen, from, to, TYPING_RATE, TYPING_WIDTH, height);
+    for (let k = 1; k < frames.length; k++) {
+      const box = changedRegion(frames[k - 1]!, frames[k]!, TYPING_MIN_PIXELS);
+      if (box) changes.push({ t: frames[k]!.t, box: { x: box.x * scale, y: box.y * scale, width: box.width * scale, height: box.height * scale } });
+    }
+  }
+  return changes;
 }
 
 /** A marker Claude Code's session made (not the person's own, nor the mistake key's). */

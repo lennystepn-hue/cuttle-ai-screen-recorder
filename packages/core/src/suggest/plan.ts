@@ -70,7 +70,7 @@ export function suggestClips(input: SuggestInput): Suggestion {
   const prompt = input.markers.find((marker) => marker.kind === 'prompt')?.t;
   const inputSpans = union(
     input.events
-      .filter((event) => event.type !== 'shape')
+      .filter((event) => event.type !== 'shape' && event.type !== 'caret')
       .map((event) => ({ from: Math.max(0, event.t - RULES.inputPad), to: Math.min(duration, event.t + RULES.inputPad) })),
   );
   // Claude's turn, from its first prompt or tool call to the answer, is never cut: it only waits on a

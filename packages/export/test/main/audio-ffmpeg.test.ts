@@ -65,12 +65,16 @@ describe.runIf(hasFfmpeg)('export audio through ffmpeg', () => {
     }
   });
 
-  it('plays a split clip exactly like the whole clip: no dip at a continuous cut', () => {
-    const whole = render([{ type: 'clip', from: 1, to: 5 }], 4);
-    const split = render([{ type: 'clip', from: 1, to: 2.5 }, { type: 'clip', from: 2.5, to: 5 }], 4);
-    expect(split.length).toBe(whole.length);
-    let worst = 0;
-    for (let i = 0; i < whole.length; i++) worst = Math.max(worst, Math.abs(split[i]! - whole[i]!));
-    expect(worst).toBeLessThan(1e-4);
+  it('plays a split clip exactly like the whole clip, at any speed: no dip or click at a continuous cut', () => {
+    const loud = { audio: { muteSpedUp: false } };
+    for (const [speed, split] of [[1, 2.5], [0.5, 1.5], [2, 3.7], [3, 4.4]] as const) {
+      const seconds = Math.round((8 / speed) * 30) / 30;
+      const whole = render([{ type: 'clip', from: 1, to: 9, speed }], seconds, loud);
+      const cut = render([{ type: 'clip', from: 1, to: split, speed }, { type: 'clip', from: split, to: 9, speed }], seconds, loud);
+      expect(cut.length, `speed ${speed}`).toBe(whole.length);
+      let worst = 0;
+      for (let i = 0; i < whole.length; i++) worst = Math.max(worst, Math.abs(cut[i]! - whole[i]!));
+      expect(worst, `speed ${speed}`).toBeLessThan(1e-4);
+    }
   });
 });

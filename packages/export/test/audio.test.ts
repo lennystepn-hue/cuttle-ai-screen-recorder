@@ -59,7 +59,7 @@ describe('planAudio', () => {
     expect(hard.every((s) => s.fadeIn === 480 && s.fadeOut === 480)).toBe(true);
   });
 
-  it('does not fade at a continuous cut where the sound runs on at the same speed', () => {
+  it('plays clips joined by continuous cuts at one speed as one segment, without a fade between them', () => {
     // one piece of footage: 1–3, 3–5, then 5–13 at 4×
     const continuous = [
       { type: 'clip', from: 1, to: 3 },
@@ -67,10 +67,13 @@ describe('planAudio', () => {
       { type: 'clip', from: 5, to: 13, speed: 4 },
     ] as const;
     const segments = plan({ scenes: [...continuous] });
-    expect(segments.map((s) => [s.fadeIn, s.fadeOut])).toEqual([[480, 0], [0, 480], [480, 480]]);
+    expect(segments).toEqual([
+      { samples: 192_000, mic: { from: 48_000, to: 240_000, speed: 1, content: 192_000 }, fadeIn: 480, fadeOut: 480 },
+      { samples: 96_000, fadeIn: 480, fadeOut: 480 },
+    ]);
     // where the sped-up clip is heard too, its speed changes there: 10 ms against a click
     const loud = plan({ scenes: [...continuous], look: { audio: { muteSpedUp: false } } });
-    expect(loud.map((s) => [s.fadeIn, s.fadeOut])).toEqual([[480, 0], [0, 480], [480, 480]]);
+    expect(loud.map((s) => [s.mic?.speed, s.fadeIn, s.fadeOut])).toEqual([[1, 480, 480], [4, 480, 480]]);
   });
 });
 

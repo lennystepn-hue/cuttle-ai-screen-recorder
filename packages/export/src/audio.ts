@@ -1,5 +1,5 @@
 import type { Look } from '@cuttle/project';
-import { isContinuousCut, type SceneSpan } from '@cuttle/timeline';
+import { crossfadeHalf, isContinuousCut, type SceneSpan } from '@cuttle/timeline';
 
 /** Sample rate of the exported audio (AAC). */
 export const AUDIO_SAMPLE_RATE = 48_000;
@@ -14,7 +14,10 @@ const MIN_FADE_SECONDS = 0.01;
  */
 const ATEMPO_FLUSH = 200_000;
 
-/** One scene's stretch of the exported audio, in samples at `AUDIO_SAMPLE_RATE`. */
+/**
+ * A stretch of the exported audio, in samples at `AUDIO_SAMPLE_RATE`: one scene, or a run of clips
+ * joined by continuous cuts that the sound plays straight through (heard at one speed).
+ */
 export interface AudioSegment {
   /** Length in output samples; segments are laid end to end. */
   samples: number;
@@ -41,13 +44,14 @@ export interface AudioPlanOptions {
 const toSamples = (seconds: number): number => Math.round(seconds * AUDIO_SAMPLE_RATE);
 
 /**
- * Cuts the audio into one segment per scene, on the same boundaries as the video. Clip scenes play
- * their stretch of the mic (sped up with the clip), unless the clip is sped up and
- * `look.audio.muteSpedUp` is set; still and card scenes are silent. The last segment runs to
- * `seconds`, which can be up to one frame past the timeline. Cuts fade out and in over half the
- * crossfade on each side (at least 10 ms), so the sound dips where the picture crossfades. A
- * continuous cut has no crossfade: where the sound runs on at the same speed it has no fade at all,
- * where it changes speed or stops only the 10 ms that keep it from clicking.
+ * Cuts the audio into segments on the same boundaries as the video. Clip scenes play their stretch
+ * of the mic (sped up with the clip), unless the clip is sped up and `look.audio.muteSpedUp` is
+ * set; still and card scenes are silent. Clips joined by continuous cuts and heard at one speed
+ * are one segment, so their sound runs on exactly as in one clip (one trim, one atempo). The last
+ * segment runs to `seconds`, which can be up to one frame past the timeline. Cuts fade out and in
+ * over half the crossfade on each side (at least 10 ms), so the sound dips where the picture
+ * crossfades; at a continuous cut where the sound changes speed or stops, only the 10 ms that keep
+ * it from clicking.
  */
 export function planAudio({ spans, look, mic, seconds }: AudioPlanOptions): AudioSegment[] {
   /** The speed a span plays the mic at; undefined when it is silent. */
@@ -56,30 +60,36 @@ export function planAudio({ spans, look, mic, seconds }: AudioPlanOptions): Audi
     const audible = mic && look.audio.enabled && scene.type === 'clip' && !(look.audio.muteSpedUp && scene.speed > 1);
     return audible && scene.type === 'clip' ? scene.speed : undefined;
   };
-  const half = (a: SceneSpan, b: SceneSpan): number => {
-    if (isContinuousCut(a.scene, b.scene)) return 0;
-    return look.transition.enabled ? Math.min(look.transition.duration / 2, (a.end - a.start) / 2, (b.end - b.start) / 2) : 0;
-  };
+  const half = (a: SceneSpan, b: SceneSpan): number => crossfadeHalf(a, b, look.transition);
+  // Runs of spans the sound plays straight through.
+  const runs: SceneSpan[][] = [];
+  for (const span of spans) {
+    const run = runs.at(-1);
+    const last = run?.at(-1);
+    const speed = soundOf(span);
+    if (run && last && speed !== undefined && soundOf(last) === speed && isContinuousCut(last.scene, span.scene)) run.push(span);
+    else runs.push([span]);
+  }
   const total = toSamples(seconds);
-  return spans.map((span, i) => {
-    const start = i === 0 ? 0 : toSamples(span.start);
-    const end = i === spans.length - 1 ? total : toSamples(span.end);
+  return runs.map((run, i) => {
+    const first = run[0]!;
+    const last = run.at(-1)!;
+    const start = i === 0 ? 0 : toSamples(first.start);
+    const end = i === runs.length - 1 ? total : toSamples(last.end);
     const samples = Math.max(0, end - start);
     /** Fade at the cut between `a` and `b`; at the start and end of the video only the minimum. */
-    const fadeAt = (a: SceneSpan | undefined, b: SceneSpan | undefined): number => {
-      if (a && b && isContinuousCut(a.scene, b.scene) && soundOf(a) !== undefined && soundOf(a) === soundOf(b)) return 0;
-      return Math.min(Math.floor(samples / 2), toSamples(Math.max(MIN_FADE_SECONDS, a && b ? half(a, b) : 0)));
-    };
+    const fadeAt = (a: SceneSpan | undefined, b: SceneSpan | undefined): number =>
+      Math.min(Math.floor(samples / 2), toSamples(Math.max(MIN_FADE_SECONDS, a && b ? half(a, b) : 0)));
     const segment: AudioSegment = {
       samples,
-      fadeIn: fadeAt(spans[i - 1], span),
-      fadeOut: fadeAt(span, spans[i + 1]),
+      fadeIn: fadeAt(runs[i - 1]?.at(-1), first),
+      fadeOut: fadeAt(last, runs[i + 1]?.[0]),
     };
-    const scene = span.scene;
-    if (soundOf(span) !== undefined && scene.type === 'clip') {
-      const from = toSamples(scene.from);
-      const to = toSamples(scene.to);
-      segment.mic = { from, to, speed: scene.speed, content: Math.min(samples, Math.round((to - from) / scene.speed)) };
+    const speed = soundOf(first);
+    if (speed !== undefined && first.scene.type === 'clip' && last.scene.type === 'clip') {
+      const from = toSamples(first.scene.from);
+      const to = toSamples(last.scene.to);
+      segment.mic = { from, to, speed, content: Math.min(samples, Math.round((to - from) / speed)) };
     }
     return segment;
   });

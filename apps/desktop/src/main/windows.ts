@@ -176,9 +176,10 @@ async function editorWindow(dir: string, key: string, file: ProjectFile, release
           return { format, out, ...(info?.isFile() && { modified: info.mtimeMs }) };
         }),
       ),
-    'export:start': ({ formats, encoder }) => {
+    'export:start': ({ formats, encoder, captions, subtitles }) => {
       if (editor.run) throw new Error('an export is already running');
-      const run = new ExportRun(dir, formats, encoder, (progress) => send(contents, 'export:progress', progress));
+      const settings = { encoder, ...(captions !== undefined && { captions }), ...(subtitles && { subtitles }) };
+      const run = new ExportRun(dir, formats, settings, (progress) => send(contents, 'export:progress', progress));
       editor.run = run;
       void run.done.then((end: ExportEnd) => {
         editor.run = undefined;

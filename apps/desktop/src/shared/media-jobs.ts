@@ -38,12 +38,13 @@ export interface TranscribeJob {
   language: string;
 }
 
-/** Links `transcript` and cuts the filler words and pauses of a project (`input`: its folder), in one write. */
+/** Links `transcript` (and `cleanMic`) and cuts the filler words and pauses of a project (`input`: its folder), in one write. */
 export interface SpeechEditsJob {
   job: 'speech-edits';
   input: string;
   output: string;
   transcript: string;
+  cleanMic?: string;
 }
 
 export type MediaJob = ProxyJob | ThumbnailsJob | PeaksJob | SuggestJob | TranscribeJob | SpeechEditsJob;

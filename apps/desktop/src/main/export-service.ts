@@ -1,10 +1,17 @@
 import { stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { exportProject, ExportError, type EncoderPreference } from '@cuttle/export';
-import type { ExportEnd, ExportFile, ExportProgress, ExportTarget } from '../shared/ipc';
+import type { ExportEnd, ExportFile, ExportProgress, ExportTarget, SUBTITLE_FILES } from '../shared/ipc';
 import { bundlePath } from './protocols';
 
 type Format = ExportTarget;
+
+/** How a run exports: the encoder, whether the subtitles are burned in, and the subtitle files beside each video. */
+export interface ExportSettings {
+  encoder: EncoderPreference;
+  captions?: boolean;
+  subtitles?: readonly (typeof SUBTITLE_FILES)[number][];
+}
 
 /** The file a format is exported to, inside the project's `out/`, named as the CLI names it (`export.mp4` for the project's own size). */
 export function exportPath(projectDir: string, format: Format): string {
@@ -23,11 +30,11 @@ export class ExportRun {
   private readonly controller = new AbortController();
   readonly done: Promise<ExportEnd>;
 
-  constructor(projectDir: string, formats: readonly Format[], encoder: EncoderPreference, onProgress: (progress: ExportProgress) => void) {
-    this.done = this.run(projectDir, formats, encoder, onProgress);
+  constructor(projectDir: string, formats: readonly Format[], settings: ExportSettings, onProgress: (progress: ExportProgress) => void) {
+    this.done = this.run(projectDir, formats, settings, onProgress);
   }
 
-  private async run(projectDir: string, formats: readonly Format[], encoder: EncoderPreference, onProgress: (progress: ExportProgress) => void): Promise<ExportEnd> {
+  private async run(projectDir: string, formats: readonly Format[], settings: ExportSettings, onProgress: (progress: ExportProgress) => void): Promise<ExportEnd> {
     const files: ExportFile[] = [];
     const started = Date.now();
     for (const [position, format] of formats.entries()) {
@@ -38,7 +45,9 @@ export class ExportRun {
           projectDir,
           ...(format !== 'project' && { format }),
           out,
-          encoder,
+          encoder: settings.encoder,
+          ...(settings.captions !== undefined && { captions: settings.captions }),
+          ...(settings.subtitles && settings.subtitles.length > 0 && { subtitles: settings.subtitles }),
           pageDir: bundlePath('main', 'export-page'),
           signal: this.controller.signal,
           onProgress: (done, total) => {
@@ -48,7 +57,7 @@ export class ExportRun {
             onProgress({ format, position, formats: formats.length, done, total, elapsed: (now - started) / 1000 });
           },
         });
-        files.push({ format, out: result.out, seconds: result.seconds, bytes: (await stat(result.out)).size });
+        files.push({ format, out: result.out, seconds: result.seconds, bytes: (await stat(result.out)).size, ...(result.subtitles && { subtitles: result.subtitles }) });
       } catch (error) {
         if (error instanceof ExportError && error.code === 'cancelled') return { state: 'cancelled', files };
         const code = error instanceof ExportError ? error.code : 'internal';

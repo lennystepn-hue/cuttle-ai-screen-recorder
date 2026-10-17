@@ -2,13 +2,13 @@
 // stretches, written as takes/<n>/transcript.json and linked from cuttle.json.
 import { readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname, join, relative, resolve, sep } from 'node:path';
-import { parseTakeJson, parseTranscriptJson, trackOffset, TRANSCRIPT_VERSION, type TranscriptFile } from '@cuttle/project';
+import { likelyFiller, parseTakeJson, parseTranscriptJson, trackOffset, TRANSCRIPT_VERSION, type TranscriptFile } from '@cuttle/project';
 import { CoreError } from '../errors';
 import { readProjectFile, writeProjectFile } from '../project-file';
 import { streamSeconds } from '../suggest/media';
 import { samePath } from '../use-take';
 import { alignWords, guessLanguage } from './align';
-import { likelyFiller } from './edits';
+import { CLEAN_MIC_FILE, cleanMic } from './cleanup';
 import { micLevels, speechStretches } from './levels';
 import { chooseModel, modelPath, SPEECH_MODELS } from './models';
 import { runWhisper } from './whisper';
@@ -25,16 +25,20 @@ export interface TranscribeOptions {
   onStatus?: (text: string) => void;
   signal?: AbortSignal;
   /**
-   * Link the transcript from cuttle.json (default true). The app links it together with the speech
-   * edits instead (`applySpeechEdits`'s `link`), so the editor gets one change.
+   * Link the transcript (and the cleaned-up mic) from cuttle.json (default true). The app links them
+   * together with the speech edits instead (`applySpeechEdits`'s `link`), so the editor gets one change.
    */
   link?: boolean;
+  /** Also write the cleaned-up mic, `mic.clean.m4a` (default true). */
+  cleanup?: boolean;
 }
 
 export interface TranscribeResult {
   project: string;
   /** transcript.json, relative to the project folder. */
   transcript: string;
+  /** The cleaned-up mic, relative to the project folder (unless `cleanup` was false). */
+  cleanMic?: string;
   model: string;
   language: string;
   words: number;
@@ -84,10 +88,12 @@ export async function transcribeTake(projectDir: string, options: TranscribeOpti
   if (seconds <= 0) throw new CoreError('invalid-media', `${mic} has no audio`);
   options.onStatus?.(`transcribing ${seconds.toFixed(1)} s of the mic with the ${model} model …`);
   options.onProgress?.(0);
+  const cleaned = join(dirname(mic), CLEAN_MIC_FILE);
   const [levels, heard, offset] = await Promise.all([
     micLevels(mic, options.signal),
     runWhisper(mic, { model: modelPath(model), language, seconds, ...(options.onProgress && { onProgress: options.onProgress }), ...(options.signal && { signal: options.signal }) }),
     micOffset(screen, mic),
+    ...(options.cleanup !== false ? [cleanMic(mic, cleaned, options.signal)] : []),
   ]);
   const spoken = language === 'auto' ? guessLanguage(heard) : language;
   const alignment = alignWords(heard, speechStretches(levels), { filler: (word) => likelyFiller(word.text, spoken) });
@@ -111,11 +117,13 @@ export async function transcribeTake(projectDir: string, options: TranscribeOpti
   await writeFile(part, `${JSON.stringify(transcript, null, 1)}\n`);
   await rename(part, path);
   const link = projectPath(file.dir, path);
-  if (options.link !== false) await linkTranscript(projectDir, link);
+  const cleanLink = options.cleanup !== false ? projectPath(file.dir, cleaned) : undefined;
+  if (options.link !== false) await linkTranscript(projectDir, link, cleanLink);
   options.onProgress?.(1);
   return {
     project: file.path,
     transcript: link,
+    ...(cleanLink && { cleanMic: cleanLink }),
     model,
     language: transcript.language,
     words: words.length,
@@ -134,14 +142,18 @@ export function transcriptOfMic(dir: string, sources: { mic?: string | undefined
   return sources.mic !== undefined && samePath(dirname(resolve(dir, sources.mic)), dirname(resolve(dir, link)));
 }
 
-/** Links a transcript from cuttle.json (`sources.transcript`), refusing when the project moved to another take. */
-async function linkTranscript(projectDir: string, link: string): Promise<void> {
+/**
+ * Links a transcript (`sources.transcript`) and the cleaned-up mic (`sources.cleanMic`) from
+ * cuttle.json, refusing when the project moved to another take.
+ */
+async function linkTranscript(projectDir: string, link: string, cleanLink?: string): Promise<void> {
   const file = await readProjectFile(projectDir);
   if (!transcriptOfMic(file.dir, file.project.sources, link)) {
     throw new CoreError('conflict', `the project moved to another take while it was transcribed: ${link} is not linked`);
   }
-  if ((file.raw.sources as Record<string, unknown>).transcript === link) return;
-  file.raw.sources = { ...(file.raw.sources as Record<string, unknown>), transcript: link };
+  const sources = file.raw.sources as Record<string, unknown>;
+  if (sources.transcript === link && sources.cleanMic === (cleanLink ?? sources.cleanMic)) return;
+  file.raw.sources = { ...sources, transcript: link, ...(cleanLink && { cleanMic: cleanLink }) };
   await writeProjectFile(file, 'transcribe');
 }
 

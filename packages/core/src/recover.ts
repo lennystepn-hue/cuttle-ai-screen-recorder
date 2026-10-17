@@ -21,7 +21,7 @@ export interface RecoverResult {
   backup?: string;
 }
 
-const FILES = { screen: 'screen.mp4', webcam: 'webcam.mp4', mic: 'mic.m4a', events: 'events.jsonl', markers: 'markers.json', take: 'take.json', segments: 'segments.json', transcript: 'transcript.json' };
+const FILES = { screen: 'screen.mp4', webcam: 'webcam.mp4', mic: 'mic.m4a', events: 'events.jsonl', markers: 'markers.json', take: 'take.json', segments: 'segments.json', transcript: 'transcript.json', cleanMic: 'mic.clean.m4a' };
 
 /**
  * Recovers a take (a folder relative to the project, e.g. takes/3): makes it usable after
@@ -114,6 +114,7 @@ export async function recoverTake(projectDir: string, takeDir: string): Promise<
       events: source(FILES.events),
       markers: source(FILES.markers),
       ...(existsSync(path(FILES.transcript)) && { transcript: source(FILES.transcript) }),
+      ...(mic && existsSync(path(FILES.cleanMic)) && { cleanMic: source(FILES.cleanMic) }),
       seconds,
     },
     sameTake,

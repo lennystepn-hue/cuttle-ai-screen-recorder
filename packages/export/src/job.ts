@@ -1,4 +1,4 @@
-import type { CuttleProject, InputEvent } from '@cuttle/project';
+import type { CuttleProject, InputEvent, TranscriptWord } from '@cuttle/project';
 
 /**
  * Contract between the main process and the export page. Pure types and constants: both sides
@@ -20,6 +20,10 @@ export interface ExportJob {
   webcam?: { path: string; offset: number };
   /** Present when the cursor is on and the project has events. */
   events?: InputEvent[];
+  /** The take's transcript (source seconds), for the captions; present when the project has one. */
+  transcript?: TranscriptWord[];
+  /** Burn the captions in (default: the project's `captions.enabled`). */
+  captions?: boolean;
   /** Scene index → image of a still scene. */
   stills: Record<number, string>;
   /** Image for `look.background.preset: 'image'`. */

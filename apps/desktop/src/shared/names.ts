@@ -1,6 +1,7 @@
 // The project's enum values as people read them in the editor ("mac-dark" is "Mac, dark").
 import type {
   BACKGROUND_PRESETS,
+  CAPTION_STYLES,
   CLICK_EFFECTS,
   CURSOR_STYLES,
   EASES,
@@ -27,6 +28,7 @@ export const CURSOR_NAMES: Names<typeof CURSOR_STYLES> = {
 };
 export const TEXT_STYLE_NAMES: Names<typeof TEXT_STYLES> = { pill: 'Pill', 'lower-third': 'Lower third', caption: 'Caption' };
 export const POSITION_NAMES: Names<typeof TEXT_POSITIONS> = { top: 'Top', center: 'Centre', bottom: 'Bottom' };
+export const CAPTION_STYLE_NAMES: Names<typeof CAPTION_STYLES> = { subtitle: 'Subtitle', karaoke: 'Karaoke', bold: 'Bold' };
 export const MOTION_NAMES: Names<typeof STILL_MOTIONS> = { none: 'None', kenburns: 'Ken Burns', scroll: 'Scroll' };
 export const EASE_NAMES: Names<typeof EASES> = { smooth: 'Smooth', linear: 'Linear' };
 export const MASK_STYLE_NAMES: Names<typeof MASK_STYLES> = { fill: 'Fill', blur: 'Blur' };

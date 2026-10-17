@@ -29,7 +29,8 @@ errors, and every command names the path of a problem, counting from 0
     "mic": "takes/1/mic.m4a",
     "events": "takes/1/events.jsonl",
     "markers": "takes/1/markers.json",
-    "transcript": "takes/1/transcript.json"
+    "transcript": "takes/1/transcript.json",
+    "cleanMic": "takes/1/mic.clean.m4a"
   },
   "look": {
     "background": { "preset": "sunset-sky" },
@@ -59,6 +60,8 @@ errors, and every command names the path of a problem, counting from 0
 once the mic was transcribed (`cuttle transcribe`, or `suggest` with a speech model). Never edit
 transcript.json: `{ "language", "model", "words": [{ "t", "end", "text" }], "sounds": [{ "t", "end" }] }`,
 in source seconds; `sounds` are stretches the mic heard without a word (a cough, a dropped filler).
+`cleanMic` is the mic cleaned up with it (less noise, even loudness), played instead of the mic
+while `look.audio.cleanup` is on.
 
 `look` (every field is optional):
 
@@ -68,7 +71,7 @@ in source seconds; `sounds` are stretches the mic heard without a word (a cough,
 | `frame` | `enabled` (`true`), `style` (`mac-dark`, `mac-light`, `browser-light`, `none`), `title` (`""`), `radius` (`14`), `shadow` (`true`) |
 | `cursor` | `enabled` (`true`), `style` (`system`, `arrow-white`, `arrow-black`, `dot`, `ring`, `spotlight`), `size` (`1`, up to 4), `color` (`"#D97757"`: tints dot, ring, spotlight and the click ripple), `clickEffect` (`ripple`, `none`), `smoothing` (`0.5`: 0 draws the path as recorded, up to 1 very smooth; clicks stay exact) |
 | `webcam` | `enabled` (`false`), `shape` (`circle`, `rounded`), `corner` (`bottom-left`, `bottom-right`, `top-left`, `top-right`), `size` (`0.18` of the output's short side, up to 0.5) |
-| `audio` | `enabled` (`true`), `muteSpedUp` (`true`: sped-up clips are silent) |
+| `audio` | `enabled` (`true`), `muteSpedUp` (`true`: sped-up clips are silent), `cleanup` (`true`: the cleaned-up mic plays, where there is one) |
 | `transition` | `enabled` (`true`: a crossfade between scenes), `duration` (`0.3` s, up to 2) |
 
 Two clips where the second starts where the first ends (within 1 ms), as `suggest`'s speed-ups and
@@ -101,6 +104,13 @@ page).
 `texts`: `at` and `duration` (source seconds), `text`, `style` (`pill`, `lower-third`, `caption`),
 `position` (`top`, `center`, `bottom`) and `enabled` (`true`). A `top` text sits over the window's
 title bar; `bottom` keeps the title visible. Texts fade in and out over 0.25 output seconds.
+
+`captions`: the subtitles from the transcript (none without one). `enabled` (`true`), `style`
+(`subtitle`: two lines on a dark box; `karaoke`: the spoken word in `color`; `bold`: a few big words),
+`position` (`bottom`, `top`, `center`), `size` (`1`, 0.5 to 2), `color` (`#D97757`), and `fixes`:
+`[{ "at", "end", "text" }]`, the words spoken in `[at, end)` (source seconds) read as `text`, `""`
+for none. Take `at` and `end` from the words in transcript.json. Words in sped-up clips and in
+cuts have no subtitle.
 
 `cuts` take a stretch out of whatever clip covers it, without splitting the clip: `from` and `to`
 (source seconds) and `enabled` (`true`). The video jumps there (no crossfade); zooms, masks and

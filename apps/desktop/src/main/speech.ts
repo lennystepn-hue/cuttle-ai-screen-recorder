@@ -1,7 +1,7 @@
 // Speech in the app: the models (download with progress and cancel, remove), and transcribing a
 // take after its cut, in the media worker, then its filler words and pauses cut as one change.
 import { dirname, join, relative, resolve, sep } from 'node:path';
-import { CoreError, SPEECH_MODELS, TRANSCRIPT_FILE, downloadModel, hasWhisper, installedModels, modelInstalled, modelsDir, readProjectFile, removeModel } from '@cuttle/core';
+import { CLEAN_MIC_FILE, CoreError, SPEECH_MODELS, TRANSCRIPT_FILE, downloadModel, hasWhisper, installedModels, modelInstalled, modelsDir, readProjectFile, removeModel } from '@cuttle/core';
 import type { SpeechModelName, SpeechStatus } from '../shared/ipc';
 import { mediaWorker } from './media-service';
 import { loadSettings } from './settings';
@@ -113,11 +113,12 @@ export async function transcribeProject(dir: string, asked = false): Promise<{ s
     try {
       await status(0);
       await mediaWorker.run({ job: 'transcribe', input: dir, output: '', model: model.name, language: speech.language }, (progress) => void status(progress)).promise;
-      const transcript = relative(file.dir, join(dirname(resolve(file.dir, mic)), TRANSCRIPT_FILE)).split(sep).join('/');
+      const take = (name: string) => relative(file.dir, join(dirname(resolve(file.dir, mic)), name)).split(sep).join('/');
+      const transcript = take(TRANSCRIPT_FILE);
       await setEditorStatus(dir, { text: 'Cutting filler words and pauses…', state: 'working' });
       await expectSpeech(dir, true);
       try {
-        await mediaWorker.run({ job: 'speech-edits', input: dir, output: '', transcript }, () => {}).promise;
+        await mediaWorker.run({ job: 'speech-edits', input: dir, output: '', transcript, cleanMic: take(CLEAN_MIC_FILE) }, () => {}).promise;
       } catch (error) {
         // nothing was written: the next outside change is someone else's
         await expectSpeech(dir, false);

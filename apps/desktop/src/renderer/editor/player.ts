@@ -114,7 +114,11 @@ export class Player {
   }
 
   private makeTimeline(): Timeline {
-    return createTimeline(this.project, { screenSize: this.media.screen.size, ...(this.media.cursor && { cursor: this.media.cursor }) });
+    return createTimeline(this.project, {
+      screenSize: this.media.screen.size,
+      ...(this.media.cursor && { cursor: this.media.cursor }),
+      ...(this.media.transcript && { transcript: this.media.transcript.words }),
+    });
   }
 
   private makeRenderer(): Renderer {

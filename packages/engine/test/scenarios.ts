@@ -1,4 +1,4 @@
-import type { CuttleProjectInput, InputEvent } from '@cuttle/project';
+import type { CuttleProjectInput, InputEvent, TranscriptWord } from '@cuttle/project';
 
 /** One golden image: a project, the output time to render and the fake inputs to feed it. */
 export interface Scenario {
@@ -10,6 +10,8 @@ export interface Scenario {
   events?: InputEvent[];
   /** Feed the fake webcam frame to clip layers (the project must enable `look.webcam`). */
   webcam?: boolean;
+  /** The take's transcript, for captions. */
+  transcript?: TranscriptWord[];
 }
 
 type Look = NonNullable<CuttleProjectInput['look']>;
@@ -71,7 +73,27 @@ function textScenario(style: 'pill' | 'lower-third' | 'caption', position: 'top'
   };
 }
 
+/** Two sentences spoken over the clip; at t = 5 the word "Bildschirm" is being said. */
+const SPOKEN: TranscriptWord[] = 'Cuttle nimmt deinen Bildschirm auf und schneidet das Video für dich'
+  .split(' ')
+  .map((text, i) => ({ t: 3.2 + i * 0.45, end: 3.2 + i * 0.45 + 0.4, text }));
+
+function captionScenario(style: 'subtitle' | 'karaoke' | 'bold', format: 'wide' | 'vertical' = 'wide'): Scenario {
+  const output = format === 'wide' ? { width: 640, height: 360, fps: 30 } : { width: 360, height: 640, fps: 30 };
+  return {
+    name: `caption-${style}${format === 'vertical' ? '-vertical' : ''}`,
+    project: project({ frame: { title: TITLE } }, { output, captions: { style, ...(style === 'bold' && { position: 'center' }) } }),
+    t: 4.6,
+    transcript: SPOKEN,
+  };
+}
+
 export const SCENARIOS: Scenario[] = [
+  // Captions in their three styles; bold in a 9:16 video too
+  captionScenario('subtitle'),
+  captionScenario('karaoke'),
+  captionScenario('bold'),
+  captionScenario('bold', 'vertical'),
   // Backgrounds, behind an end card
   ...(['sunset-sky', 'aurora', 'mesh'] as const).map((preset) => ({
     name: `background-${preset}`,

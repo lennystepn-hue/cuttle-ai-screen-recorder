@@ -118,6 +118,13 @@ and when a speech model is downloaded it first transcribes the mic into `takes/<
 words ("äh", "um") and pauses longer than a second down to 0.4 s, only where the picture rests
 (cuts tagged `filler` and `pause`). `--no-speech` leaves the speech out.
 `cuttle -C "<project>" --json transcribe --language de` transcribes again (`--model` picks one).
+Transcribing also writes a cleaned-up mic (less noise, even loudness) that the video plays.
+
+**Subtitles.** A transcribed take gets subtitles in the video (`captions`, project.md): as
+subtitles at the bottom, `karaoke` (the spoken word in colour) or `bold` (a few big words, for
+9:16). `cuttle -C "<project>" transcript --text` prints what was said; `--srt` the subtitles on
+the video's time. Read them for misheard names and fix them in `captions.fixes`. Check a still
+with a subtitle on it before you render.
 
 `preview` writes 12 stills and `preview/sheet.png`. **Look at the sheet** (Read the PNG). Each
 still in the JSON has its output second `t` and the `source` second it shows. For details, run
@@ -160,7 +167,8 @@ Then refine `cuttle.json` ([project.md](project.md)) and preview again:
 cuttle -C "<project>" --json render --format 16:9
 ```
 
-Run it in the background when the video is longer than about a minute; the Bash tool stops long
+With a transcript, `--srt` and `--vtt` also write the subtitles next to the video, and
+`--no-captions` leaves them out of the picture. Run it in the background when the video is longer than about a minute; the Bash tool stops long
 commands. It writes `out/16x9.mp4` (or `-o <file>`); the JSON has the frames, the seconds and the
 encoder (`stats`). For 9:16, check `preview --format 9:16` first. Render each format the user
 wants. Tell the user the file's path and length. Do not upload it anywhere.

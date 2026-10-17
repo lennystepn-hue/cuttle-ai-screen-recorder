@@ -707,6 +707,27 @@ button.chip-status:hover {
   color: var(--muted);
   font-size: var(--size-s);
 }
+/* the subtitle files beside the video: .srt and .vtt */
+.subtitle-files {
+  display: inline-flex;
+  gap: 4px;
+}
+.sheet .chip {
+  height: 26px;
+  padding: 0 10px;
+  border-radius: 13px;
+  background: var(--raised);
+  color: var(--muted);
+  font-size: var(--size-s);
+  font-family: var(--mono);
+}
+.sheet .chip:hover {
+  color: var(--text);
+}
+.sheet .chip[aria-pressed='true'] {
+  color: var(--text);
+  box-shadow: inset 0 0 0 1.5px var(--text);
+}
 .sheet .select-trigger {
   height: 28px;
   border-radius: 8px;
@@ -1618,6 +1639,10 @@ button.chip-status:hover {
   min-width: 0;
   min-height: 28px;
 }
+/* a menu next to a note keeps room for its value */
+.field-input > .select-trigger {
+  min-width: 112px;
+}
 .field-input em {
   color: var(--muted);
   font-size: var(--size-s);
@@ -1625,6 +1650,8 @@ button.chip-status:hover {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  /* a long note gives way (with an ellipsis) before the field it explains */
+  min-width: 0;
 }
 .field input[type='text'],
 .field textarea {
@@ -2267,7 +2294,156 @@ button.chip-status:hover {
 .auto-empty p {
   margin: 0;
 }
-/* the mic not transcribed yet, at the top of the Auto tab */
+/* the subtitles over the mic's waveform on the timeline */
+.subtitle-cue {
+  position: absolute;
+  height: 13px;
+  padding: 0 4px;
+  border-radius: 3px;
+  background: rgba(236, 236, 241, 0.16);
+  color: var(--text);
+  font-size: 9.5px;
+  line-height: 13px;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.subtitle-cue:hover {
+  background: rgba(236, 236, 241, 0.28);
+}
+.subtitle-cue.off {
+  background: rgba(236, 236, 241, 0.06);
+  color: var(--faint);
+}
+
+/* the Transcript tab: the words in paragraphs */
+.transcript {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+}
+.transcript-find {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.transcript-find input {
+  flex: 1;
+  min-width: 0;
+  height: 30px;
+  padding: 0 10px;
+  border-radius: 8px;
+  border: none;
+  background: var(--raised);
+  color: var(--text);
+  font: inherit;
+}
+.transcript-find input:focus-visible {
+  outline: none;
+  box-shadow: var(--focus);
+}
+.transcript-count {
+  color: var(--muted);
+  font-size: var(--size-s);
+  white-space: nowrap;
+}
+.transcript-meta {
+  margin: 0;
+}
+.transcript-words {
+  border-radius: 10px;
+  padding: 4px 2px;
+  line-height: 1.75;
+  user-select: none;
+}
+.transcript-words:focus-visible {
+  outline: none;
+  box-shadow: var(--focus);
+}
+.transcript-words p {
+  margin: 0 0 10px;
+}
+.transcript-time {
+  display: inline-block;
+  margin-right: 6px;
+  color: var(--faint);
+  font-size: var(--size-xs);
+  font-variant-numeric: tabular-nums;
+}
+.word {
+  border-radius: 4px;
+  padding: 1px 0;
+  cursor: pointer;
+}
+.word:hover {
+  background: var(--raised-hover);
+}
+.word.filler {
+  color: var(--faint);
+}
+.word.fast {
+  color: var(--muted);
+  font-style: italic;
+}
+.word.cut,
+.word.out {
+  color: var(--faint);
+  text-decoration: line-through;
+}
+.word.out {
+  opacity: 0.6;
+}
+.word.fixed {
+  text-decoration: underline dotted var(--muted);
+  text-underline-offset: 3px;
+}
+.word.match {
+  box-shadow: inset 0 -2px var(--card);
+}
+.word.spoken {
+  color: var(--accent);
+}
+.word.selected {
+  background: var(--accent-soft);
+  color: var(--text);
+}
+.word-field {
+  height: 24px;
+  padding: 0 6px;
+  border-radius: 6px;
+  border: none;
+  background: var(--raised-active);
+  color: var(--text);
+  font: inherit;
+}
+.word-field:focus-visible {
+  outline: none;
+  box-shadow: var(--focus);
+}
+.transcript-actions {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: var(--raised);
+  box-shadow: 0 -8px 16px var(--panel);
+}
+.transcript-actions .hint {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* the mic not transcribed yet, at the top of the Auto and Transcript tabs */
 .speech-note {
   display: flex;
   flex-direction: column;

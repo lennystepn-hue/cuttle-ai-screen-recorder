@@ -7,6 +7,10 @@ export interface RenderArgs {
   format?: string;
   out?: string;
   encoder?: string;
+  /** false: no captions burned in, whatever the project says (`--no-captions`). */
+  captions?: boolean;
+  srt?: boolean;
+  vtt?: boolean;
 }
 
 /** What @cuttle/export's exportProject returns (the CLI does not import the Electron package). */
@@ -14,6 +18,8 @@ export interface RenderResult {
   out: string;
   frames: number;
   seconds: number;
+  /** Subtitle files written next to it (`--srt`, `--vtt`). */
+  subtitles?: string[];
   stats: { gpu: string; codec: string; hardwareAcceleration: string; bitrate: number; totalMs: number } & Record<string, unknown>;
 }
 
@@ -30,9 +36,16 @@ export async function renderCommand(projectDir: string, args: RenderArgs, output
       out,
       ...(args.format !== undefined && { format: args.format }),
       ...(args.encoder !== undefined && { encoder: args.encoder }),
+      ...(args.captions === false && { captions: false }),
+      ...((args.srt || args.vtt) && { subtitles: [...(args.srt ? ['srt'] : []), ...(args.vtt ? ['vtt'] : [])] }),
     },
     signal,
   );
-  output.result(result, () => `rendered ${result.out}: ${result.frames} frames, ${result.seconds.toFixed(2)} s, in ${(result.stats.totalMs / 1000).toFixed(1)} s`);
+  output.result(result, () =>
+    [
+      `rendered ${result.out}: ${result.frames} frames, ${result.seconds.toFixed(2)} s, in ${(result.stats.totalMs / 1000).toFixed(1)} s`,
+      ...(result.subtitles ?? []).map((path) => `subtitles: ${path}`),
+    ].join('\n'),
+  );
   return result;
 }

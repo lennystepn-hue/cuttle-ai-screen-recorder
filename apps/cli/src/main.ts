@@ -10,6 +10,7 @@ import { renderCommand } from './commands/render';
 import { suggestCommand } from './commands/suggest';
 import { modelsDownloadCommand, modelsListCommand, modelsRemoveCommand } from './commands/models';
 import { transcribeCommand } from './commands/transcribe';
+import { transcriptCommand } from './commands/transcript';
 import { CliError, EXIT, toCliError } from './errors';
 import { createOutput, type Output, type Streams } from './output';
 
@@ -214,11 +215,22 @@ export async function runCli(argv: readonly string[], streams?: Streams): Promis
     .option('--format <format>', '16:9, 1:1 or 9:16 (default: the project output)')
     .option('-o, --out <file>', 'output file (default: out/<format>.mp4 in the project)')
     .addOption(new Option('--encoder <encoder>', 'H.264 encoder').choices(['auto', 'hardware', 'software']))
+    .option('--no-captions', 'no captions burned in, whatever the project says')
+    .option('--srt', 'also write the captions as <name>.srt next to the video')
+    .option('--vtt', 'also write the captions as <name>.vtt next to the video')
     .action(
-      action((output, project, options: { format?: string; out?: string; encoder?: string }) =>
+      action((output, project, options: { format?: string; out?: string; encoder?: string; captions: boolean; srt?: boolean; vtt?: boolean }) =>
         withSignal(output, (signal) => renderCommand(project, options, output, signal)),
       ),
     );
+
+  program
+    .command('transcript')
+    .description('what the mic said (cuttle transcribe), with your fixes: as JSON, or as captions on the video\'s time')
+    .option('--srt', 'the captions as SubRip')
+    .option('--vtt', 'the captions as WebVTT')
+    .option('--text', 'the words as plain text')
+    .action(action((output, project, options: { srt?: boolean; vtt?: boolean; text?: boolean }) => transcriptCommand(project, options, output)));
 
   program
     .command('recover <take>')

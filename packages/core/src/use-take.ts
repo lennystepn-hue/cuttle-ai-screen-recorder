@@ -9,6 +9,8 @@ export interface TakeFiles {
   markers?: string;
   /** What the mic said (`transcript.json`), when the take was transcribed. */
   transcript?: string;
+  /** The cleaned-up mic, made with the transcription. */
+  cleanMic?: string;
   seconds: number;
 }
 
@@ -35,6 +37,7 @@ export function useTake(file: ProjectFile, take: TakeFiles, keepEdit = false): b
     ...(take.events && { events: take.events }),
     ...(take.markers && { markers: take.markers }),
     ...(take.transcript && { transcript: take.transcript }),
+    ...(take.cleanMic && { cleanMic: take.cleanMic }),
   };
   if (keepEdit) {
     if (scenes.length === 0) file.raw.scenes = [{ type: 'clip', from: 0, to: Math.floor(take.seconds * 1000) / 1000 }];

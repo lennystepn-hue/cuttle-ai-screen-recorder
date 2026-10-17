@@ -11,6 +11,8 @@ export const CURSOR_SHAPES = ['arrow', 'text', 'pointer', 'wait', 'crosshair', '
 export const EASES = ['smooth', 'linear'] as const;
 export const MASK_STYLES = ['fill', 'blur'] as const;
 export const TEXT_POSITIONS = ['top', 'center', 'bottom'] as const;
+/** How captions look: classic subtitles on a dark box, the spoken word in colour, or a few big words at a time. */
+export const CAPTION_STYLES = ['subtitle', 'karaoke', 'bold'] as const;
 export const STILL_MOTIONS = ['none', 'kenburns', 'scroll'] as const;
 export const WEBCAM_SHAPES = ['circle', 'rounded'] as const;
 export const WEBCAM_CORNERS = ['top-left', 'top-right', 'bottom-left', 'bottom-right'] as const;
@@ -50,6 +52,8 @@ const SourcesSchema = z.strictObject({
   markers: z.string().min(1).optional(),
   /** What the mic said, word by word (`cuttle transcribe`, the app after a take). */
   transcript: z.string().min(1).optional(),
+  /** The mic cleaned up (made with the transcription): less noise, even loudness, in step with the mic. */
+  cleanMic: z.string().min(1).optional(),
 });
 
 // Cross-field checks live on the object they belong to, so zod reports them in the same pass
@@ -97,6 +101,8 @@ const WebcamSchema = z.strictObject({
 const AudioSchema = z.strictObject({
   enabled: z.boolean().default(true),
   muteSpedUp: z.boolean().default(true),
+  /** Play the cleaned-up mic (`sources.cleanMic`: less noise, even loudness) where there is one. */
+  cleanup: z.boolean().default(true),
 });
 
 const TransitionSchema = z.strictObject({
@@ -179,6 +185,23 @@ const MaskSchema = z
   })
   .refine((mask) => mask.to > mask.from, { message: '"to" must be greater than "from"', path: ['to'] });
 
+/** A fix the person made to the transcript: the words spoken in [at, end) (source seconds) read as `text` ("" for none). */
+const CaptionFixSchema = z
+  .strictObject({ at: seconds, end: seconds, text: z.string().max(200) })
+  .refine((fix) => fix.end > fix.at, { message: '"end" must be greater than "at"', path: ['end'] });
+
+/** Captions from the take's transcript (`sources.transcript`); none without one. */
+const CaptionsSchema = z.strictObject({
+  enabled: z.boolean().default(true),
+  style: z.enum(CAPTION_STYLES).default('subtitle'),
+  position: z.enum(TEXT_POSITIONS).default('bottom'),
+  /** Scale of the style's text size. */
+  size: z.number().min(0.5).max(2).default(1),
+  /** The spoken word's colour (`karaoke`, `bold`). */
+  color: hexColor.default('#D97757'),
+  fixes: z.array(CaptionFixSchema).default([]),
+});
+
 /** A source range taken out of every clip that covers it: a jump cut, no crossfade. */
 const CutSchema = z
   .strictObject({
@@ -225,6 +248,7 @@ export const ProjectSchema = z
     texts: z.array(TextSchema).default([]),
     cuts: z.array(CutSchema).default([]),
     autoEdits: AutoEditsSchema.prefault({}),
+    captions: CaptionsSchema.prefault({}),
   })
   // Runs once everything else is valid (see the note above BackgroundSchema).
   .superRefine((project, ctx) => {
@@ -262,6 +286,7 @@ export type StillMotion = (typeof STILL_MOTIONS)[number];
 export type BackgroundPreset = (typeof BACKGROUND_PRESETS)[number];
 export type FrameStyle = (typeof FRAME_STYLES)[number];
 export type TextStyle = (typeof TEXT_STYLES)[number];
+export type CaptionStyle = (typeof CAPTION_STYLES)[number];
 export type CuttleProject = z.output<typeof ProjectSchema>;
 export type CuttleProjectInput = z.input<typeof ProjectSchema>;
 export type Look = CuttleProject['look'];
@@ -277,3 +302,5 @@ export type TextOverlay = CuttleProject['texts'][number];
 export type Cut = CuttleProject['cuts'][number];
 export type AutoKind = (typeof AUTO_KINDS)[number];
 export type AutoEdits = CuttleProject['autoEdits'];
+export type Captions = CuttleProject['captions'];
+export type CaptionFix = Captions['fixes'][number];

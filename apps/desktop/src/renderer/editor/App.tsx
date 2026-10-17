@@ -725,7 +725,7 @@ const REPEATING = new Set(['ArrowLeft', 'ArrowRight']);
 /**
  * The editor's keys (the command menu lists them): Space (K pauses, L plays, J a second back),
  * arrows (Shift: a second), Home/End, S split, Delete, Ctrl+D, R/Shift+R speed, V/Z/M/T tools, Shift+Z
- * fit, Ctrl+Z/Ctrl+Shift+Z/Ctrl+Y, Ctrl+K or ? the menu, Ctrl+E export, Esc back out. Typing in a
+ * fit, Ctrl+Z/Ctrl+Shift+Z/Ctrl+Y, Ctrl+K or ? the menu, Ctrl+E export, Ctrl+F find in the transcript, Esc back out. Typing in a
  * field, and Space or Enter on a focused button outside the timeline, keep their own meaning.
  */
 function useShortcuts(): void {
@@ -740,6 +740,12 @@ function useShortcuts(): void {
       if (command && key === 'k' && !menuOpen) {
         event.preventDefault();
         if (!event.repeat) openMenu();
+        return;
+      }
+      // Ctrl+F finds a word in the transcript, from anywhere
+      if (command && key === 'f' && !menuOpen) {
+        event.preventDefault();
+        store.set({ tab: 'transcript', findRequest: (store.get().findRequest ?? 0) + 1 });
         return;
       }
       if (menuOpen || target?.closest('input, select, textarea, [contenteditable]:not([contenteditable="false"])')) return;

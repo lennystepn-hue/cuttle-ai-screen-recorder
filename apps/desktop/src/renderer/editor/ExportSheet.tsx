@@ -39,11 +39,18 @@ export function ExportSheet() {
   const targets = useMemo<ExportTarget[]>(() => ['project', ...FORMATS.filter((name) => name !== own)], [own]);
   const [chosen, setChosen] = useState<ExportTarget[]>([]);
   const [encoder, setEncoder] = useState<keyof typeof ENCODERS>('auto');
+  // subtitles: burned in as the project has them (Look tab), and the files beside the video
+  const [burned, setBurned] = useState<'in' | 'off'>('in');
+  const [subtitleFiles, setSubtitleFiles] = useState<('srt' | 'vtt')[]>([]);
+  const transcribed = project?.sources.transcript !== undefined;
   const [files, setFiles] = useState<{ format: ExportTarget; out: string; modified?: number }[]>([]);
   const sheet = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (open && !exporting) setChosen([format ?? 'project']);
+    if (open && !exporting) {
+      setChosen([format ?? 'project']);
+      setBurned(project?.captions.enabled === false ? 'off' : 'in');
+    }
   }, [open]);
 
   // Which files the chosen formats write, and when an export already there was made.
@@ -146,6 +153,37 @@ export function ExportSheet() {
                 testId="encoder"
               />
             </div>
+            {transcribed && (
+              <div className="row">
+                Subtitles
+                <Select
+                  value={burned}
+                  options={[
+                    { value: 'in', label: 'In the video' },
+                    { value: 'off', label: 'Not in the video' },
+                  ]}
+                  onChange={setBurned}
+                  label="Subtitles"
+                  variant="compact"
+                  testId="export-subtitles"
+                />
+                <span className="subtitle-files" role="group" aria-label="Subtitle files">
+                  {(['srt', 'vtt'] as const).map((kind) => (
+                    <button
+                      key={kind}
+                      type="button"
+                      className="chip"
+                      aria-pressed={subtitleFiles.includes(kind)}
+                      onClick={() => setSubtitleFiles((list) => (list.includes(kind) ? list.filter((item) => item !== kind) : [...list, kind].sort()))}
+                      title={`Also save the subtitles as a .${kind} file next to the video`}
+                      data-testid={`export-${kind}`}
+                    >
+                      .{kind}
+                    </button>
+                  ))}
+                </span>
+              </div>
+            )}
             {files.length > 0 && (
               <div className="note" data-testid="export-note">
                 Saves {files.map((file, i) => (
@@ -169,7 +207,13 @@ export function ExportSheet() {
               <button className="ghost" onClick={closeExport}>
                 Cancel
               </button>
-              <button className="primary" disabled={chosen.length === 0} onClick={() => void startExport(chosen, encoder)} data-testid="export-start" data-autofocus>
+              <button
+                className="primary"
+                disabled={chosen.length === 0}
+                onClick={() => void startExport(chosen, encoder, transcribed ? { captions: burned === 'in', files: subtitleFiles } : {})}
+                data-testid="export-start"
+                data-autofocus
+              >
                 Export {chosen.length > 1 ? `${chosen.length} formats` : chosen[0] ? targetName(chosen[0], output) : ''}
               </button>
             </div>
@@ -222,6 +266,7 @@ export function ExportSheet() {
                   {fileName(file.out)}
                   <small>
                     {targetName(file.format, output)} · {formatDuration(file.seconds)} · {formatBytes(file.bytes)}
+                    {file.subtitles && ` · with ${file.subtitles.map((path) => `.${path.split('.').at(-1)}`).join(' and ')}`}
                   </small>
                 </div>
                 <button className="ghost" onClick={() => void bridge.invoke('project:reveal', file.out)} title="Show in folder">

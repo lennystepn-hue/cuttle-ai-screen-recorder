@@ -1,8 +1,7 @@
 // The speech edits: filler words and long pauses cut out where the picture rests. Pure: the inputs
 // are the transcript, the screen's still stretches and the input events, in source seconds.
-import { newId, type InputEvent, type TranscriptWord } from '@cuttle/project';
+import { SHORT_SPELLINGS, fillerLexicon, newId, normWord, type InputEvent, type TranscriptWord } from '@cuttle/project';
 import { gaps, union, type Span } from '../suggest/spans';
-import { normWord } from './whisper';
 
 export const SPEECH_EDIT_RULES = {
   /** Kept on both sides of a filler's cut, up to the words around it. */
@@ -22,15 +21,6 @@ export const SPEECH_EDIT_RULES = {
   /** The pointer moving less than this (source pixels) while the picture rests does not count. */
   pointerSlack: 12,
 };
-
-/** Fillers in German, in English, and those safe whatever the language ("um" and "er" are German words). */
-const FILLERS: Record<'de' | 'en' | 'auto', ReadonlySet<string>> = {
-  de: new Set(['äh', 'ähm', 'öh', 'öhm', 'ehm', 'hm', 'hmm', 'mhm', 'ähh', 'ähmm']),
-  en: new Set(['uh', 'uhm', 'um', 'umm', 'er', 'erm', 'hm', 'hmm', 'mhm', 'ehm']),
-  auto: new Set(['äh', 'ähm', 'öh', 'öhm', 'ehm', 'hm', 'hmm', 'mhm', 'uh', 'uhm', 'erm']),
-};
-/** How whisper writes fillers it misheard (the spike: "Äh" as "E.", "Ähm" as "M."), when alone between pauses. */
-const SHORT_SPELLINGS: ReadonlySet<string> = new Set(['e', 'eh', 'ee', 'm', 'mm', 'hm', 'ä', 'äh', 'ah', 'uh']);
 
 export interface SpeechCut {
   from: number;
@@ -81,17 +71,9 @@ export function restingAt(span: Span, input: Pick<SpeechEditInput, 'still' | 'ev
   return !busy.some((other) => other.from < span.to && span.from < other.to);
 }
 
-const fillerSet = (language: string) => FILLERS[language === 'de' || language === 'en' ? language : 'auto'];
-
-/** Whether a word is likely a filler: in the language's lexicon, or one of whisper's short spellings of one. */
-export const likelyFiller = (text: string, language: string): boolean => {
-  const word = normWord(text);
-  return fillerSet(language).has(word) || SHORT_SPELLINGS.has(word);
-};
-
 /** The filler words of a transcript: in the lexicon, or a short spelling alone between pauses. */
 export function fillerWords(words: readonly TranscriptWord[], language: string, rules = SPEECH_EDIT_RULES): number[] {
-  const lexicon = fillerSet(language);
+  const lexicon = fillerLexicon(language);
   const found: number[] = [];
   words.forEach((word, n) => {
     const text = normWord(word.text);

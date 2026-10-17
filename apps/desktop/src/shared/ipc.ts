@@ -11,6 +11,8 @@ export const EXPORT_FORMATS = ['16:9', '1:1', '9:16'] as const;
 export const EXPORT_TARGETS = ['project', ...EXPORT_FORMATS] as const;
 export type ExportTarget = (typeof EXPORT_TARGETS)[number];
 export const ENCODERS = ['auto', 'hardware', 'software'] as const;
+/** Subtitle files an export can write next to the video (as @cuttle/export's SUBTITLE_FORMATS). */
+export const SUBTITLE_FILES = ['srt', 'vtt'] as const;
 
 /** The origin of the media protocol in an editor window: `cuttle-media://project/<path in the project>`. */
 export const MEDIA_ORIGIN = 'cuttle-media://project';
@@ -59,6 +61,8 @@ export interface ExportFile {
   out: string;
   seconds: number;
   bytes: number;
+  /** The subtitle files written next to it. */
+  subtitles?: string[];
 }
 
 export type ExportEnd =
@@ -179,6 +183,10 @@ export const REQUESTS = {
   'export:start': z.strictObject({
     formats: z.array(z.enum(EXPORT_TARGETS)).min(1).max(4),
     encoder: z.enum(ENCODERS),
+    /** Burn the subtitles in (default: the project's `captions.enabled`). */
+    captions: z.boolean().optional(),
+    /** Subtitle files next to each video. */
+    subtitles: z.array(z.enum(SUBTITLE_FILES)).max(2).optional(),
   }),
   'export:cancel': z.undefined(),
   // pill

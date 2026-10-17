@@ -299,6 +299,50 @@ describe('cuttle models and transcribe', () => {
   }, 30_000);
 });
 
+describe('cuttle transcript', () => {
+  it('gives the words with the fixes, and the captions on the video\'s time as JSON, SRT, VTT or text', async () => {
+    const dir = temp();
+    takeFixture(dir);
+    expect((await cli('--json', '-C', dir, 'transcript')).json).toEqual({ error: { code: 'usage', message: 'the project has no transcript: run "cuttle transcribe" first' } });
+    writeFileSync(
+      join(dir, 'takes', '1', 'transcript.json'),
+      JSON.stringify({ version: 1, language: 'de', model: 'small', words: [{ t: 1, end: 1.4, text: 'Das' }, { t: 1.4, end: 1.8, text: 'ist' }, { t: 1.8, end: 2.4, text: 'Holofisch.' }, { t: 6, end: 6.5, text: 'Weg' }] }),
+    );
+    const path = join(dir, 'cuttle.json');
+    const raw = JSON.parse(readFileSync(path, 'utf8'));
+    writeFileSync(
+      path,
+      JSON.stringify({
+        ...raw,
+        sources: { ...raw.sources, transcript: 'takes/1/transcript.json' },
+        // the second clip starts at 1 s of the video; "Weg" lies in the cut
+        scenes: [{ type: 'clip', from: 0.5, to: 3 }, { type: 'clip', from: 5, to: 8 }],
+        cuts: [{ from: 5.9, to: 6.6 }],
+        captions: { fixes: [{ at: 1.8, end: 2.4, text: 'Holofish.' }] },
+      }),
+    );
+    const { code, json } = await cli('--json', '-C', dir, 'transcript');
+    expect(code).toBe(0);
+    expect(json).toEqual({
+      transcript: 'takes/1/transcript.json',
+      language: 'de',
+      model: 'small',
+      words: [
+        { t: 1, end: 1.4, text: 'Das' },
+        { t: 1.4, end: 1.8, text: 'ist' },
+        { t: 1.8, end: 2.4, text: 'Holofish.' },
+        { t: 6, end: 6.5, text: 'Weg' },
+      ],
+      cues: [{ start: 0.5, end: 2.5, text: 'Das ist Holofish.' }],
+    });
+    expect((await cli('-C', dir, 'transcript', '--srt')).stdout).toBe('1\n00:00:00,500 --> 00:00:02,500\nDas ist Holofish.\n');
+    expect((await cli('-C', dir, 'transcript', '--vtt')).stdout).toBe('WEBVTT\n\n00:00:00.500 --> 00:00:02.500\nDas ist Holofish.\n');
+    expect((await cli('-C', dir, 'transcript', '--text')).stdout).toBe('Das ist Holofish. Weg\n');
+    expect((await cli('--json', '-C', dir, 'transcript', '--srt')).json).toEqual({ format: 'srt', content: '1\n00:00:00,500 --> 00:00:02,500\nDas ist Holofish.\n' });
+    expect((await cli('--json', '-C', dir, 'transcript', '--srt', '--vtt')).json).toEqual({ error: { code: 'usage', message: 'choose one of --srt, --vtt and --text' } });
+  });
+});
+
 describe('cuttle suggest and recover', () => {
   let fixture: string;
   beforeAll(() => {

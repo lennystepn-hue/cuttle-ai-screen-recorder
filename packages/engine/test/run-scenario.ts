@@ -12,7 +12,7 @@ export async function renderScenario(scenario: Scenario, assets: EngineAssets): 
   if (!parsed.ok) throw new Error(`scenario ${scenario.name}: ${JSON.stringify(parsed.issues)}`);
   const project = parsed.project;
   const cursor = scenario.events ? createCursorTrack(scenario.events) : undefined;
-  const state = createTimeline(project, { screenSize: SCREEN, cursor }).frameAt(scenario.t);
+  const state = createTimeline(project, { screenSize: SCREEN, cursor, ...(scenario.transcript && { transcript: scenario.transcript }) }).frameAt(scenario.t);
 
   const fake = await fixtures();
   const sources: FrameSources = { screens: new Map(), webcams: new Map(), stills: new Map() };

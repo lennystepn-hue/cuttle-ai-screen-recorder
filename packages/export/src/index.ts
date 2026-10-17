@@ -4,3 +4,5 @@ export { ExportError } from './errors';
 export { EXPORT_FORMATS, isExportFormat, type ExportFormat } from './formats';
 export type { EncoderPreference, ExportErrorCode } from './job';
 export { renderStills, stillName, type StillsOptions, type StillsResult } from './main/stills';
+export { MOTION_SCHEME_PRIVILEGES } from './main/motion';
+export type { MotionItemReport } from './main/motion-host';

@@ -10,4 +10,6 @@ contextBridge.exposeInMainWorld('cuttleHost', {
   write: (data, position) => ipcRenderer.invoke('cuttle-export:write', data, position),
   progress: (done, total) => ipcRenderer.send('cuttle-export:progress', done, total),
   writeStill: (name, data) => ipcRenderer.invoke('cuttle-export:write-still', name, data),
+  motionFrame: (request) => ipcRenderer.invoke('cuttle-export:motion-frame', request),
+  motionDone: (key) => ipcRenderer.send('cuttle-export:motion-done', key),
 });

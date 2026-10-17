@@ -11,6 +11,7 @@ import { withFormat, type ExportFormat } from '../formats';
 import { CHANNELS, type EncoderPreference, type ExportJob, type PageResult, type PageStillsSuccess, type PageSuccess } from '../job';
 import { checkFfmpeg, runFfmpeg } from './ffmpeg';
 import { FileHost } from './files';
+import { MotionHost, motionWarnings, serveMotion, type MotionItemReport } from './motion-host';
 import { loadSources, samePath } from './sources';
 import { writeTypingTrack } from './typing-track';
 import { openExportWindow, type ExportWindow } from './window';
@@ -58,6 +59,8 @@ export interface ExportResult {
   seconds: number;
   /** The subtitle files written next to it. */
   subtitles?: string[];
+  /** What the motion items' pages said (errors and console), when the project has any. */
+  motion?: MotionItemReport[];
   stats: ExportStats;
 }
 
@@ -218,6 +221,7 @@ export async function exportProject(opts: ExportOptions): Promise<ExportResult> 
     ...(opts.captions !== undefined && { captions: opts.captions }),
     stills: sources.stills,
     backgroundImage: sources.backgroundImage,
+    ...(sources.motion && { motion: sources.motion }),
     encoder: opts.encoder ?? 'auto',
   };
   try {
@@ -232,6 +236,7 @@ export async function exportProject(opts: ExportOptions): Promise<ExportResult> 
   let work: string | undefined;
   let files: FileHost | undefined;
   let window: ExportWindow | undefined;
+  const motion = sources.motion ? new MotionHost(project, sources.motion) : undefined;
   try {
     work = await mkdtemp(join(tmpdir(), WORK_PREFIX));
     const video = join(work, 'video.mp4');
@@ -256,9 +261,12 @@ export async function exportProject(opts: ExportOptions): Promise<ExportResult> 
       guard.progress(done);
       opts.onProgress?.(done, total);
     });
+    serveMotion(ipc, motion, guard.alive);
 
     const page = await runPage<PageSuccess>(window, guard.stalled, cancel.promise);
     guard.stop();
+    const said = await motion?.close();
+    for (const warning of motionWarnings(said ?? [])) console.warn(`warning: ${warning}`);
     // The window stays open until the end: closing an app's last window quits it by default.
     await host.close(); // flushes the video-only MP4 before ffmpeg reads it
 
@@ -297,6 +305,7 @@ export async function exportProject(opts: ExportOptions): Promise<ExportResult> 
       frames: page.frames,
       seconds,
       ...(written.length > 0 && { subtitles: written }),
+      ...(said && { motion: said }),
       stats: {
         gpu: page.gpu,
         codec: page.codec,
@@ -314,6 +323,7 @@ export async function exportProject(opts: ExportOptions): Promise<ExportResult> 
   } finally {
     guard.stop();
     cancel.dispose();
+    await motion?.close().catch(() => {});
     if (window && !window.win.isDestroyed()) window.win.destroy();
     await files?.close();
     if (work) {

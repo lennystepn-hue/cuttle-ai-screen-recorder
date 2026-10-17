@@ -3,16 +3,27 @@ import type { RenderState, Timeline } from '@cuttle/timeline';
 /** Where one scene is visible in the export and which source times its clip frames come from. */
 export interface ScenePlan {
   index: number;
-  kind: 'clip' | 'still' | 'card';
+  kind: 'clip' | 'still' | 'card' | 'motion';
   /** First and last output frame (inclusive) on which the scene is drawn, crossfades included. */
   firstFrame: number;
   lastFrame: number;
   /**
    * Clip scenes: every source time the frames ask for, in frame order, without repeats (seconds
-   * of the screen track). Ascending: the timeline never goes back within a clip. Empty for still
-   * and card scenes.
+   * of the screen track). Ascending: the timeline never goes back within a clip. Empty for still,
+   * card and motion scenes.
    */
   sourceTimes: number[];
+}
+
+/** Where one showing of a motion overlay (`ActiveOverlay.key`) is visible in the export. */
+export interface OverlayPlan {
+  key: string;
+  /** Its place in the project's `overlays`. */
+  index: number;
+  /** How long the showing lasts, in output seconds. */
+  duration: number;
+  firstFrame: number;
+  lastFrame: number;
 }
 
 export interface FramePlan {
@@ -21,6 +32,8 @@ export interface FramePlan {
   frames: number;
   /** Scenes in the order they first appear. */
   scenes: ScenePlan[];
+  /** Motion overlays' showings, in the order they first appear. */
+  overlays: OverlayPlan[];
 }
 
 /** Frames for `duration` output seconds: every started frame counts, so the video never ends early. */
@@ -53,7 +66,7 @@ export function shownSourceTime(state: RenderState): number | undefined {
 export function planFrames(timeline: Timeline, fps: number): FramePlan {
   if (timeline.spans.length === 0) throw new Error('planFrames: the project has no scenes');
   const frames = frameCount(timeline.duration, fps);
-  return { fps, frames, scenes: planScenes(timeline, fps, Array.from({ length: frames }, (_, frame) => frame)) };
+  return { fps, frames, ...planScenes(timeline, fps, Array.from({ length: frames }, (_, frame) => frame)) };
 }
 
 /**
@@ -64,7 +77,7 @@ export function planFrames(timeline: Timeline, fps: number): FramePlan {
 export function planStills(timeline: Timeline, fps: number, frames: readonly number[]): FramePlan {
   if (timeline.spans.length === 0) throw new Error('planStills: the project has no scenes');
   const sorted = [...new Set(frames)].sort((a, b) => a - b);
-  return { fps, frames: sorted.length, scenes: planScenes(timeline, fps, sorted) };
+  return { fps, frames: sorted.length, ...planScenes(timeline, fps, sorted) };
 }
 
 /**
@@ -72,10 +85,16 @@ export function planStills(timeline: Timeline, fps: number, frames: readonly num
  * in it is one plan: its pieces follow each other and only jump forward in source time, so one
  * decoder reads them all.
  */
-function planScenes(timeline: Timeline, fps: number, frames: readonly number[]): ScenePlan[] {
+function planScenes(timeline: Timeline, fps: number, frames: readonly number[]): Pick<FramePlan, 'scenes' | 'overlays'> {
   const byIndex = new Map<number, ScenePlan>();
+  const byKey = new Map<string, OverlayPlan>();
   for (const frame of frames) {
     for (const layer of timeline.frameAt(frame / fps).layers) {
+      for (const overlay of layer.overlays) {
+        const seen = byKey.get(overlay.key);
+        if (seen) seen.lastFrame = frame;
+        else byKey.set(overlay.key, { key: overlay.key, index: overlay.index, duration: overlay.duration, firstFrame: frame, lastFrame: frame });
+      }
       let plan = byIndex.get(layer.sceneIndex);
       if (!plan) {
         plan = { index: layer.sceneIndex, kind: layer.kind, firstFrame: frame, lastFrame: frame, sourceTimes: [] };
@@ -91,5 +110,5 @@ function planScenes(timeline: Timeline, fps: number, frames: readonly number[]):
     }
   }
   // Map order is first appearance: frame order, and within a frame the layers back to front.
-  return [...byIndex.values()];
+  return { scenes: [...byIndex.values()], overlays: [...byKey.values()] };
 }

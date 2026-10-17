@@ -316,6 +316,8 @@ It also records the lessons from the treg demo:
 
 ## Desktop app (phase 2 guidelines)
 
+Detailed, and in places revised, in `2026-10-17-cuttle-desktop-design.md`.
+
 - Idle: a small floating pill or tray icon with "New recording".
 - Source picker: overlay across all monitors; hover highlights a monitor or window, drag selects a
   region with the outside dimmed, live size label, 16:9 snapping. Chips for webcam, mic, cursor and
@@ -358,6 +360,6 @@ It also records the lessons from the treg demo:
 
 ## Open points for later phases
 
-- Phase 2 spec: app windows, state machine, IPC, design system.
+- Phase 2 spec: `2026-10-17-cuttle-desktop-design.md` (app windows, flows, IPC, design system).
 - Phase 3 spec: cursor smoothing model and auto-zoom clustering.
 - Optional later: share links via a Cloudflare Worker and R2.

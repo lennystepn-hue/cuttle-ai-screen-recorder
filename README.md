@@ -5,7 +5,9 @@ then turn the take into a polished demo with cuts, speed-ups, smooth zooms, mask
 on a designed background, text overlays and an end card. A desktop app for people, a CLI and a
 skill for Claude, one project file (`cuttle.json`) and one render engine for both.
 
-Status: phase 1 in progress. Spec: `docs/superpowers/specs/2026-10-16-cuttle-design.md`.
+Status: phase 1 (engine, CLI, skill) done; phase 2 (the desktop app) in progress. Specs:
+`docs/superpowers/specs/2026-10-16-cuttle-design.md` and `2026-10-17-cuttle-desktop-design.md`;
+design mockups in `docs/design/desktop/`.
 
 ## Packages
 

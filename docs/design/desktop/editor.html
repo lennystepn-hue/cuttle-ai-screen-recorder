@@ -1,0 +1,224 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Cuttle editor: a selected zoom in the source view</title>
+<link rel="stylesheet" href="tokens.css">
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; width: 1600px; height: 1000px; background: var(--bg); color: var(--text); font: var(--size-m)/1.4 var(--font); overflow: hidden; -webkit-font-smoothing: antialiased; }
+  svg { display: block; }
+  .app { display: grid; grid-template-rows: 44px 1fr 352px; grid-template-columns: 1fr 300px; height: 100%; }
+
+  .titlebar { grid-column: 1 / 3; display: flex; align-items: center; gap: 12px; padding: 0 150px 0 14px; border-bottom: 1px solid var(--line); position: relative; }
+  .mark { width: 22px; height: 22px; border-radius: 7px; background: linear-gradient(135deg, #f0956f, #c45a3f); display: grid; place-items: center; }
+  .project b { font-weight: 600; } .project span { color: var(--faint); font-size: var(--size-s); margin-left: 10px; }
+  .grow { flex: 1; }
+  .seg { display: flex; background: var(--raised); border-radius: var(--radius-m); padding: 2px; gap: 2px; }
+  .seg span { padding: 3px 10px; border-radius: 7px; color: var(--muted); font-size: var(--size-s); font-weight: 500; }
+  .seg span.on { background: #2b2b33; color: var(--text); }
+  .iconbtn { width: 28px; height: 28px; border-radius: 8px; display: grid; place-items: center; color: var(--muted); }
+  .primary { height: 28px; padding: 0 14px; border-radius: 8px; background: var(--accent); color: var(--accent-text); font-weight: 600; display: flex; align-items: center; gap: 7px; }
+  .winctl { position: absolute; right: 0; top: 0; height: 44px; width: 138px; display: flex; color: var(--faint); }
+  .winctl span { flex: 1; display: grid; place-items: center; font-size: 12px; }
+
+  /* stage in the source view: the source frame fills it, the zoom's outside is dimmed */
+  .stage { background: var(--stage); position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; }
+  .viewchip { z-index: 2; position: absolute; top: 14px; left: 50%; transform: translateX(-50%); height: 26px; display: flex; align-items: center; gap: 8px; padding: 0 10px; border-radius: 999px; background: var(--overlay); box-shadow: var(--shadow-float); font-size: var(--size-s); color: var(--muted); }
+  .viewchip b { color: var(--text); font-weight: 600; } .viewchip kbd { font: 600 10px var(--font); background: var(--raised); color: var(--muted); padding: 1px 5px; border-radius: 4px; }
+  .source { width: 1020px; height: 574px; position: relative; overflow: hidden; border-radius: 4px; background: #0f0f12; }
+  .term { padding: 16px 22px; font: 13px/1.62 var(--mono); color: #c9c9d1; }
+  .term .p { color: #d97757; } .term .ok { color: #4fd1a1; } .term .dim { color: #6b6b75; }
+  .hook { position: absolute; left: 0; top: 0; width: 296px; height: 46px; outline: 1.5px dashed rgba(167,123,255,.85); outline-offset: -1px; }
+  .hook span { position: absolute; left: 4px; top: 48px; font-size: 10px; color: var(--mask); font-weight: 600; }
+  .zoombox { position: absolute; left: 236px; top: 262px; width: 576px; height: 288px; border: 1.5px solid var(--zoom); box-shadow: 0 0 0 9999px rgba(8,8,10,.58); }
+  .zoombox .h { position: absolute; width: 9px; height: 9px; background: #fff; border-radius: 2px; box-shadow: 0 0 0 1.5px var(--zoom); }
+  .zoombox .tag { position: absolute; top: -27px; left: -1.5px; height: 21px; display: flex; align-items: center; gap: 6px; background: var(--zoom); color: #04122a; font-size: var(--size-xs); font-weight: 600; padding: 0 8px; border-radius: 6px; white-space: nowrap; }
+  .tools { position: absolute; left: 18px; top: 50%; transform: translateY(-50%); display: flex; flex-direction: column; gap: 4px; background: var(--overlay); border-radius: 12px; padding: 5px; box-shadow: var(--shadow-float); }
+  .tool { width: 36px; height: 36px; border-radius: 8px; display: grid; place-items: center; color: var(--muted); position: relative; }
+  .tool.on { background: rgba(90,162,255,.16); color: var(--zoom); }
+  .tool kbd { position: absolute; right: 2px; bottom: 1px; font: 600 10px var(--font); color: var(--faint); }
+  .transport { width: 1060px; display: flex; align-items: center; gap: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .play { width: 32px; height: 32px; border-radius: 50%; background: var(--text); color: #111; display: grid; place-items: center; }
+  .time b { color: var(--text); font-weight: 500; } .time em { color: var(--faint); font-style: normal; margin-left: 8px; }
+
+  /* inspector: two tabs */
+  .inspector { grid-row: 2 / 4; grid-column: 2; background: var(--panel); border-left: 1px solid var(--line); display: flex; flex-direction: column; }
+  .tabs { display: flex; gap: 4px; padding: 10px 12px 0; border-bottom: 1px solid var(--line); }
+  .tabs span { padding: 8px 10px; color: var(--muted); font-weight: 500; border-bottom: 2px solid transparent; }
+  .tabs span.on { color: var(--text); border-bottom-color: var(--text); }
+  .head { padding: 14px 16px 6px; display: flex; align-items: center; gap: 10px; }
+  .kind { width: 30px; height: 30px; border-radius: 9px; background: rgba(90,162,255,.14); color: var(--zoom); display: grid; place-items: center; }
+  .head .name { height: 30px; flex: 1; border-radius: 8px; background: var(--raised); display: flex; align-items: center; padding: 0 10px; font-weight: 600; }
+  .fields { padding: 8px 16px; display: flex; flex-direction: column; gap: 12px; }
+  .field label { display: flex; justify-content: space-between; color: var(--muted); font-size: var(--size-s); margin-bottom: 6px; }
+  .field label em { font-style: normal; color: var(--faint); }
+  .input { height: 30px; background: var(--raised); border-radius: 8px; display: flex; align-items: center; padding: 0 10px; font-variant-numeric: tabular-nums; justify-content: space-between; box-shadow: inset 0 0 0 1px var(--line); }
+  .input em { color: var(--faint); font-style: normal; }
+  .two { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; } .four { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+  .four .input { padding: 0 8px; justify-content: flex-start; gap: 6px; } .four .input em { font-size: 11px; }
+  .chips { display: flex; gap: 6px; } .chip { flex: 1; height: 30px; border-radius: 8px; background: var(--raised); display: grid; place-items: center; color: var(--muted); font-size: var(--size-s); }
+  .chip.on { background: #2b2b33; color: var(--text); box-shadow: inset 0 0 0 1px var(--line-strong); }
+  .row { display: flex; align-items: center; justify-content: space-between; height: 30px; color: var(--muted); font-size: var(--size-s); }
+  .toggle { width: 30px; height: 18px; border-radius: 9px; background: #34343c; position: relative; } .toggle::after { content: ''; position: absolute; left: 2px; top: 2px; width: 14px; height: 14px; border-radius: 50%; background: #c9c9d1; }
+  .actions { display: flex; gap: 8px; padding: 4px 16px 0; }
+  .ghost { flex: 1; height: 30px; border-radius: 8px; display: grid; place-items: center; color: var(--muted); background: var(--raised); font-size: var(--size-s); }
+  .ghost.danger { color: var(--danger); }
+  .hint { margin: 14px 16px 0; color: var(--faint); font-size: var(--size-s); line-height: 1.5; }
+
+  /* timeline */
+  .timeline { background: var(--panel); border-top: 1px solid var(--line); display: flex; flex-direction: column; position: relative; }
+  .tl-bar { height: 38px; display: flex; align-items: center; gap: 4px; padding: 0 12px; border-bottom: 1px solid var(--line); color: var(--muted); font-size: var(--size-s); }
+  .tl-bar .sep { width: 1px; height: 18px; background: var(--line-strong); margin: 0 4px; }
+  .tl-bar .act { height: 26px; padding: 0 8px; border-radius: 7px; display: flex; align-items: center; gap: 6px; white-space: nowrap; }
+  .tl-bar kbd { font: 600 10px var(--font); color: var(--faint); background: var(--raised); padding: 1px 5px; border-radius: 4px; }
+  .tl-bar .dot { width: 8px; height: 8px; border-radius: 2px; display: block; }
+  .status { color: var(--faint); }
+  .scale { width: 100px; height: 4px; border-radius: 2px; background: var(--raised); position: relative; } .scale::after { content: ''; position: absolute; left: 40%; top: -4px; width: 12px; height: 12px; border-radius: 50%; background: var(--muted); }
+  .lanes { position: relative; flex: 1; }
+  .markers { height: 26px; margin-left: 88px; position: relative; }
+  .flag { position: absolute; top: 5px; height: 17px; padding: 0 6px 0 5px; border-radius: 5px; font-size: 10.5px; font-weight: 600; display: flex; align-items: center; gap: 5px; background: #24242b; color: var(--muted); white-space: nowrap; }
+  .flag i { width: 6px; height: 6px; border-radius: 50%; display: block; }
+  .ruler { height: 20px; margin-left: 88px; position: relative; color: var(--faint); font-size: 10px; font-variant-numeric: tabular-nums; border-bottom: 1px solid var(--line); }
+  .ruler span { position: absolute; top: 3px; }
+  .lane { height: 38px; display: flex; align-items: center; }
+  .lane.big { height: 52px; }
+  .lane .name { width: 88px; padding-left: 14px; color: var(--faint); font-size: var(--size-s); }
+  .track { position: relative; flex: 1; height: 100%; }
+  .clip { position: absolute; top: 5px; bottom: 5px; border-radius: 7px; overflow: hidden; background: var(--raised); display: flex; align-items: flex-end; }
+  .clip .thumbs { position: absolute; inset: 0; display: flex; }
+  .clip .thumbs i { flex: 0 0 62px; height: 100%; background: linear-gradient(180deg, #24242c, #19191f); border-right: 1px solid #0f0f13; }
+  .clip .lbl { position: relative; margin: 0 0 5px 7px; background: rgba(10,10,12,.78); padding: 1px 6px; border-radius: 5px; font-size: 11px; color: #d6d6dc; font-weight: 500; white-space: nowrap; }
+  .clip .lbl b { font-weight: 600; color: #fff; }
+  .clip.still { background: linear-gradient(180deg, rgba(60,198,201,.28), rgba(60,198,201,.12)); box-shadow: inset 0 0 0 1px rgba(60,198,201,.45); }
+  .clip.card { background: linear-gradient(180deg, rgba(242,179,74,.26), rgba(242,179,74,.1)); box-shadow: inset 0 0 0 1px rgba(242,179,74,.45); }
+  .item { position: absolute; top: 8px; bottom: 8px; border-radius: 6px; font-size: 11px; font-weight: 600; display: flex; align-items: center; padding: 0 8px; white-space: nowrap; overflow: hidden; }
+  .item.zoom { background: rgba(90,162,255,.16); box-shadow: inset 0 0 0 1px rgba(90,162,255,.55); color: var(--zoom); }
+  .item.zoom.sel { background: rgba(90,162,255,.28); box-shadow: inset 0 0 0 2px var(--accent); }
+  .item.mask { background: rgba(167,123,255,.15); box-shadow: inset 0 0 0 1px rgba(167,123,255,.5); color: var(--mask); }
+  .item.cap { background: rgba(79,209,161,.13); box-shadow: inset 0 0 0 1px rgba(79,209,161,.5); color: var(--caption); }
+  .wave { flex: 1; height: 24px; display: flex; align-items: center; gap: 1px; }
+  .wave i { flex: 1; background: #3b3b46; border-radius: 1px; }
+  .bars { flex: 1; height: 16px; display: flex; align-items: flex-end; gap: 1px; } .bars i { flex: 1; background: #34343e; border-radius: 1px; }
+  .playhead { position: absolute; top: 26px; bottom: 0; width: 2px; background: var(--accent); }
+  .playhead::before { content: ''; position: absolute; top: 0; left: -5px; width: 12px; height: 10px; border-radius: 2px 2px 6px 6px; background: var(--accent); }
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="titlebar">
+    <div class="mark"><svg width="12" height="12" viewBox="0 0 12 12"><path d="M2 2h5l3 4-3 4H2z" fill="#1b0f0a"/></svg></div>
+    <div class="project"><b>treg launch demo</b><span>2:33 recorded · 23.8 s video · saved</span></div>
+    <div class="grow"></div>
+    <div class="seg"><span class="on">16:9</span><span>1:1</span><span>9:16</span></div>
+    <div class="iconbtn"><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M5 4 2 7l3 3"/><path d="M2.5 7H10a4 4 0 0 1 0 8H8"/></svg></div>
+    <div class="iconbtn"><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><path d="m11 4 3 3-3 3"/><path d="M13.5 7H6a4 4 0 0 0 0 8h2"/></svg></div>
+    <div class="primary"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 2v9M4 7l4 4 4-4M3 14h10"/></svg>Export</div>
+    <div class="winctl"><span>—</span><span>▢</span><span>✕</span></div>
+  </div>
+
+  <div class="stage">
+    <div class="viewchip"><b>Source view</b> the take at 151.6 s, 2560 × 1440 <kbd>Esc</kbd> back to the video</div>
+    <div class="tools">
+      <div class="tool"><svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M3 2l9 5.2-4 .9-1.9 3.9z"/></svg><kbd>V</kbd></div>
+      <div class="tool on"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="7" cy="7" r="4.5"/><path d="m10.5 10.5 3.5 3.5M5 7h4M7 5v4"/></svg><kbd>Z</kbd></div>
+      <div class="tool"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="2" y="4" width="12" height="8" rx="1.5"/><path d="M2 9l5-5M6 12l8-8M10 12l4-4"/></svg><kbd>M</kbd></div>
+      <div class="tool"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 3h10M8 3v10"/></svg><kbd>T</kbd></div>
+    </div>
+    <div class="source">
+      <div class="term">
+        <div class="dim">  UserPromptSubmit hook error</div>
+        <div class="dim">  connect ECONNREFUSED 127.0.0.1:47821</div>
+        <div>● I'll get set up: load the session's project context and the web-access skill, then search.</div>
+        <div class="dim">● Ran 4 shell commands</div>
+        <div>● The routed endpoint treg.google.serp.maps looks right (~$0.00015/hit).</div>
+        <div class="dim">● Ran 2 shell commands</div>
+        <div>● One call, one hit: crawl4ai.google.serp.maps, charged $0.00015, 20 places.</div>
+        <div class="ok">● Write(index.html) — 257 lines</div>
+        <br>
+        <div>The 8 picks, ranked by rating then review volume:</div>
+        <div>1. Classic — Specialty Coffee — 4.9★ (613) · Kreuzberg</div>
+        <div>2. Flying Roasters — 4.9★ (644) · Wedding</div>
+        <div>3. Chestnut Coffee — 4.9★ (521) · Prenzlauer Berg</div>
+        <div>4. Noys — 4.9★ (152) · Mitte</div>
+        <div>5. Sophien Coffee — 4.8★ (587) · Mitte</div>
+        <div>6. Garçon de Café — 4.8★ (505) · Moabit</div>
+      </div>
+      <div class="hook"><span>Mask · Hook error</span></div>
+      <div class="zoombox"><span class="tag">Zoom · Answer · 16:9</span><i class="h" style="left:-5px;top:-5px"></i><i class="h" style="right:-5px;top:-5px"></i><i class="h" style="left:-5px;bottom:-5px"></i><i class="h" style="right:-5px;bottom:-5px"></i></div>
+    </div>
+    <div class="transport">
+      <div class="play"><svg width="12" height="12" viewBox="0 0 12 12"><path d="M3 1.5v9l7.5-4.5z" fill="currentColor"/></svg></div>
+      <div class="time"><b>0:13.40</b> / 0:23.77 <em>source 151.6 s</em></div>
+    </div>
+  </div>
+
+  <div class="inspector">
+    <div class="tabs"><span class="on">Selection</span><span>Look</span></div>
+    <div class="head">
+      <div class="kind"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="7" cy="7" r="4.5"/><path d="m10.5 10.5 3.5 3.5"/></svg></div>
+      <div class="name">Answer</div>
+    </div>
+    <div class="fields">
+      <div class="two">
+        <div class="field"><label>Starts <em>151.2 s src</em></label><div class="input">0:13.10</div></div>
+        <div class="field"><label>Length</label><div class="input">3.0 s</div></div>
+      </div>
+      <div class="field"><label>Area <em>source pixels</em></label><div class="four"><div class="input"><em>x</em>600</div><div class="input"><em>y</em>720</div><div class="input"><em>w</em>1536</div><div class="input"><em>h</em>864</div></div></div>
+      <div class="field"><label>Easing</label><div class="chips"><div class="chip on">Smooth</div><div class="chip">Linear</div></div></div>
+      <div class="row">Off<span class="toggle"></span></div>
+    </div>
+    <div class="actions"><div class="ghost">Duplicate</div><div class="ghost danger">Delete</div></div>
+    <div class="hint">Drag the box on the source frame; it keeps the video's shape. Suggested on Claude's answer.</div>
+  </div>
+
+  <div class="timeline">
+    <div class="tl-bar">
+      <span class="act"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="4" cy="4" r="2"/><circle cx="4" cy="12" r="2"/><path d="M14 2 5.5 10.5M14 14 5.5 5.5"/></svg>Split <kbd>S</kbd></span>
+      <span class="act">Speed <kbd>R</kbd></span>
+      <span class="sep"></span>
+      <span class="act"><i class="dot" style="background:var(--zoom)"></i>Zoom</span>
+      <span class="act"><i class="dot" style="background:var(--mask)"></i>Mask</span>
+      <span class="act"><i class="dot" style="background:var(--caption)"></i>Caption</span>
+      <span class="act"><i class="dot" style="background:var(--card)"></i>Card</span>
+      <span class="act"><i class="dot" style="background:var(--still)"></i>Page</span>
+      <span class="sep"></span>
+      <span class="act status">Cut by suggest · Show raw take</span>
+      <span class="grow"></span>
+      <span class="act">Fit <kbd>⇧Z</kbd></span>
+      <div class="scale"></div>
+    </div>
+    <div class="lanes">
+      <div class="markers">
+        <div class="flag" style="left:3.2%"><i style="background:#fff"></i>Prompt</div>
+        <div class="flag" style="left:13%"><i style="background:#8a8a95"></i>Bash ×2</div>
+        <div class="flag" style="left:33%"><i style="background:#8a8a95"></i>Write</div>
+        <div class="flag" style="left:56.3%"><i style="background:var(--caption)"></i>Answer</div>
+      </div>
+      <div class="ruler"><span style="left:0">0:00</span><span style="left:20%">0:05</span><span style="left:40%">0:10</span><span style="left:60%">0:15</span><span style="left:80%">0:20</span></div>
+      <div class="lane big"><div class="name">Video</div><div class="track">
+        <div class="clip" style="left:0;width:4.2%"><div class="thumbs"><i></i></div><span class="lbl">Prompt</span></div>
+        <div class="clip" style="left:4.4%;width:51.6%"><div class="thumbs"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div><span class="lbl"><b>12×</b> Claude at work · 145 s → 12 s</span></div>
+        <div class="clip" style="left:56.2%;width:10.5%"><div class="thumbs"><i></i><i></i></div><span class="lbl">Answer</span></div>
+        <div class="clip still" style="left:66.9%;width:24.6%"><span class="lbl">Page · scrolls</span></div>
+        <div class="clip card" style="left:91.7%;width:8.3%"><span class="lbl">End card</span></div>
+      </div></div>
+      <div class="lane"><div class="name">Zoom</div><div class="track"><div class="item zoom sel" style="left:56.8%;width:12%">Answer</div></div></div>
+      <div class="lane"><div class="name">Mask</div><div class="track">
+        <div class="item mask" style="left:0;width:4.1%">·</div>
+        <div class="item mask" style="left:4.4%;width:51.5%">Hook error</div>
+        <div class="item mask" style="left:56.2%;width:10.4%">Hook error</div>
+      </div></div>
+      <div class="lane"><div class="name">Caption</div><div class="track"><div class="item cap" style="left:0.6%;width:11%">One prompt</div></div></div>
+      <div class="lane"><div class="name">Mic</div><div class="wave">
+        <i style="height:20%"></i><i style="height:60%"></i><i style="height:90%"></i><i style="height:50%"></i><i style="height:15%"></i><i style="height:8%"></i><i style="height:8%"></i><i style="height:8%"></i><i style="height:8%"></i><i style="height:8%"></i><i style="height:8%"></i><i style="height:8%"></i><i style="height:8%"></i><i style="height:8%"></i><i style="height:8%"></i><i style="height:8%"></i><i style="height:8%"></i><i style="height:8%"></i><i style="height:8%"></i><i style="height:8%"></i><i style="height:8%"></i><i style="height:8%"></i><i style="height:30%"></i><i style="height:70%"></i><i style="height:45%"></i><i style="height:12%"></i><i style="height:8%"></i><i style="height:8%"></i><i style="height:8%"></i><i style="height:8%"></i><i style="height:8%"></i><i style="height:8%"></i><i style="height:8%"></i><i style="height:8%"></i><i style="height:8%"></i><i style="height:8%"></i><i style="height:8%"></i><i style="height:8%"></i><i style="height:8%"></i><i style="height:8%"></i>
+      </div></div>
+      <div class="lane" style="height:30px"><div class="name">Input</div><div class="bars">
+        <i style="height:30%"></i><i style="height:80%"></i><i style="height:100%"></i><i style="height:60%"></i><i style="height:10%"></i><i style="height:5%"></i><i style="height:5%"></i><i style="height:5%"></i><i style="height:5%"></i><i style="height:5%"></i><i style="height:5%"></i><i style="height:5%"></i><i style="height:5%"></i><i style="height:5%"></i><i style="height:5%"></i><i style="height:5%"></i><i style="height:5%"></i><i style="height:5%"></i><i style="height:5%"></i><i style="height:5%"></i><i style="height:5%"></i><i style="height:5%"></i><i style="height:5%"></i><i style="height:40%"></i><i style="height:70%"></i><i style="height:30%"></i><i style="height:5%"></i><i style="height:5%"></i><i style="height:5%"></i><i style="height:5%"></i><i style="height:5%"></i><i style="height:5%"></i><i style="height:5%"></i><i style="height:5%"></i><i style="height:5%"></i><i style="height:5%"></i><i style="height:5%"></i><i style="height:5%"></i><i style="height:5%"></i><i style="height:5%"></i>
+      </div></div>
+      <div class="playhead" style="left:calc(88px + (100% - 88px) * 0.564)"></div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

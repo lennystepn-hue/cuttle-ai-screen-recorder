@@ -1,0 +1,58 @@
+/* Cuttle desktop: design tokens (draft) */
+:root {
+  /* surfaces, darkest first */
+  --bg: #0c0c0f;          /* window background, behind the stage */
+  --stage: #08080a;       /* around the preview */
+  --panel: #131317;       /* inspector, timeline */
+  --raised: #1b1b21;      /* fields, chips, clips */
+  --raised-hover: #22222a;
+  --overlay: rgba(19, 19, 23, 0.86); /* floating bars over the preview or the desktop */
+  --line: rgba(255, 255, 255, 0.06);
+  --line-strong: rgba(255, 255, 255, 0.12);
+
+  /* text */
+  --text: #ececf1;
+  --muted: #9a9aa5;
+  --faint: #62626c;
+
+  /* one accent, used sparingly: Claude's orange for the primary action, the playhead and the selection outline */
+  --accent: #d97757;
+  --accent-text: #1b0f0a;
+  --accent-soft: rgba(217, 119, 87, 0.14);
+
+  /* item kinds (timeline lanes, preview overlays) */
+  --zoom: #5aa2ff;
+  --mask: #a77bff;
+  --caption: #4fd1a1;
+  --still: #3cc6c9;
+  --card: #f2b34a;
+
+  /* states */
+  --recording: #ff4d4f;
+  --danger: #ff6b6b;
+
+  /* type: Inter (bundled with the engine), tabular numbers for times */
+  --font: 'Inter', 'Segoe UI', system-ui, sans-serif;
+  --mono: 'JetBrains Mono', Consolas, monospace;
+  --size-xs: 11px;
+  --size-s: 12px;
+  --size-m: 13px;
+  --size-l: 15px;
+  --size-xl: 20px;
+
+  /* shape and space */
+  --radius-s: 6px;
+  --radius-m: 9px;
+  --radius-l: 14px;
+  --radius-pill: 999px;
+  --space: 4px; /* everything is a multiple */
+
+  /* motion: short, low-overshoot springs */
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --spring: cubic-bezier(0.34, 1.32, 0.64, 1);
+  --fast: 120ms;
+  --normal: 200ms;
+  --slow: 320ms;
+
+  --shadow-float: 0 16px 48px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.06);
+}

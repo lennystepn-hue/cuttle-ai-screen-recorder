@@ -1,0 +1,84 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<link rel="stylesheet" href="tokens.css">
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; width: 1600px; height: 1000px; overflow: hidden; font: var(--size-m)/1.4 var(--font); color: var(--text); -webkit-font-smoothing: antialiased; }
+  svg { display: block; }
+  /* a stand-in desktop: wallpaper and three app windows */
+  .desktop { position: absolute; inset: 0; background: linear-gradient(160deg, #2b3a55, #4a3f63 55%, #2a2238); }
+  .app { position: absolute; border-radius: 9px; overflow: hidden; box-shadow: 0 18px 50px rgba(0,0,0,.45); background: #f4f4f6; }
+  .app .bar { height: 30px; background: #e9e9ee; display: flex; align-items: center; padding: 0 12px; font-size: 12px; color: #444; gap: 8px; }
+  .term { background: #0f0f12 !important; } .term .bar { background: #1e1e23; color: #a0a0aa; }
+  .lines { padding: 12px 14px; font: 12px/1.6 var(--mono); color: #c9c9d1; }
+  .lines .p { color: #d97757; }
+  .doc { padding: 16px; display: flex; flex-direction: column; gap: 9px; } .doc i { height: 9px; border-radius: 4px; background: #d6d6de; display: block; }
+  .taskbar { position: absolute; left: 0; right: 0; bottom: 0; height: 44px; background: rgba(20,20,26,.85); display: flex; align-items: center; justify-content: center; gap: 10px; }
+  .taskbar i { width: 26px; height: 26px; border-radius: 7px; background: rgba(255,255,255,.14); display: block; }
+
+  /* the picker overlay: everything dims; the hovered window is lit and outlined */
+  .dim { position: absolute; inset: 0; background: rgba(6, 6, 9, 0.55); clip-path: polygon(0 0, 100% 0, 100% 100%, 0 100%, 0 0, 380px 160px, 380px 760px, 1270px 760px, 1270px 160px, 380px 160px); }
+  .target { position: absolute; left: 380px; top: 160px; width: 890px; height: 600px; border-radius: 9px; box-shadow: 0 0 0 2px var(--accent), 0 0 0 6px rgba(217,119,87,.22); }
+  .label { position: absolute; left: 380px; top: 124px; height: 28px; display: flex; align-items: center; gap: 8px; padding: 0 10px; border-radius: 8px; background: var(--accent); color: var(--accent-text); font-weight: 600; font-size: var(--size-s); }
+  .label span { font-weight: 500; opacity: .75; font-variant-numeric: tabular-nums; }
+
+  /* the bar under the target: sources and the record button */
+  .bar-rec { position: absolute; left: 50%; top: 784px; transform: translateX(-50%); display: flex; align-items: center; gap: 6px; padding: 6px; border-radius: 16px; background: var(--overlay); box-shadow: var(--shadow-float); backdrop-filter: blur(20px); }
+  .opt { height: 40px; border-radius: 11px; padding: 0 12px; display: flex; align-items: center; gap: 9px; color: var(--muted); font-size: var(--size-s); }
+  .opt.on { background: var(--raised); color: var(--text); }
+  .opt small { color: var(--faint); display: block; font-size: 10.5px; line-height: 1.1; max-width: 120px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .opt > div { min-width: 0; }
+  .opt .meter { width: 34px; height: 4px; border-radius: 2px; background: #2a2a33; overflow: hidden; } .opt .meter i { display: block; width: 60%; height: 100%; background: var(--caption); }
+  .divider { width: 1px; height: 26px; background: var(--line-strong); margin: 0 2px; }
+  .modes { display: flex; background: var(--raised); border-radius: 11px; padding: 3px; gap: 2px; }
+  .modes span { height: 34px; padding: 0 11px; border-radius: 8px; display: flex; align-items: center; gap: 7px; color: var(--muted); font-size: var(--size-s); }
+  .modes span.on { background: #2d2d36; color: var(--text); }
+  .rec { height: 40px; padding: 0 16px 0 12px; border-radius: 11px; background: var(--recording); color: #fff; font-weight: 600; display: flex; align-items: center; gap: 9px; }
+  .rec i { width: 12px; height: 12px; border-radius: 50%; background: #fff; display: block; }
+  .rec kbd { font: 600 10px var(--font); opacity: .8; }
+  .stopwhen { position: absolute; left: 50%; top: 846px; transform: translateX(-50%); color: rgba(255,255,255,.75); font-size: var(--size-s); display: flex; gap: 14px; }
+  .stopwhen b { color: #fff; font-weight: 600; }
+  .stopwhen kbd { font: 600 10.5px var(--font); background: rgba(255,255,255,.14); padding: 1px 6px; border-radius: 4px; color: #fff; }
+  .esc { position: absolute; right: 24px; top: 20px; color: rgba(255,255,255,.7); font-size: var(--size-s); display: flex; align-items: center; gap: 8px; }
+  .esc kbd { font: 600 10.5px var(--font); background: rgba(255,255,255,.14); padding: 2px 7px; border-radius: 4px; color: #fff; }
+  .cam { position: absolute; left: 404px; top: 616px; width: 120px; height: 120px; border-radius: 50%; background: radial-gradient(circle at 45% 38%, #e8c3a6 0 18%, #6b4a3c 19% 34%, #3b4a63 35%); box-shadow: 0 8px 24px rgba(0,0,0,.4), 0 0 0 3px rgba(255,255,255,.85); }
+</style>
+</head>
+<body>
+<div class="desktop"></div>
+<div class="app" style="left:90px;top:70px;width:520px;height:380px"><div class="bar">Notes</div><div class="doc"><i style="width:70%"></i><i></i><i style="width:85%"></i><i style="width:60%"></i><i></i><i style="width:40%"></i></div></div>
+<div class="app" style="left:1150px;top:120px;width:380px;height:520px"><div class="bar">Docs</div><div class="doc"><i style="width:80%"></i><i></i><i></i><i style="width:55%"></i><i style="width:70%"></i></div></div>
+<div class="app term" style="left:380px;top:160px;width:890px;height:600px"><div class="bar">claude · ~/treg-demo</div>
+  <div class="lines">
+    <div>╭─────────────────────────────────────────────╮</div>
+    <div>│ ✻ Welcome to Claude Code                     │</div>
+    <div>╰─────────────────────────────────────────────╯</div><br>
+    <div><span class="p">❯</span> find the 8 best specialty coffee shops in Berlin</div>
+  </div>
+</div>
+<div class="taskbar"><i></i><i></i><i></i><i></i><i></i></div>
+
+<div class="dim"></div>
+<div class="target"></div>
+<div class="label">Window · claude · ~/treg-demo <span>1780 × 1200 · records this area</span></div>
+<div class="cam"></div>
+<div class="esc"><kbd>Esc</kbd> cancel · <kbd>Tab</kbd> next window · drag for a region</div>
+
+<div class="bar-rec">
+  <div class="modes">
+    <span><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="1.5" y="2.5" width="13" height="9" rx="1.5"/><path d="M5 14h6"/></svg>Screen</span>
+    <span class="on"><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="1.5" y="2.5" width="13" height="11" rx="1.5"/><path d="M1.5 5.5h13"/></svg>Window</span>
+    <span><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-dasharray="2 2"><rect x="2" y="3" width="12" height="10" rx="1"/></svg>Region</span>
+  </div>
+  <div class="divider"></div>
+  <div class="opt on"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="1.5" y="4" width="9" height="8" rx="1.5"/><path d="m10.5 7 4-2.5v7l-4-2.5"/></svg><div>Camera<small>Logitech C920</small></div></div>
+  <div class="opt on"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="5.5" y="1.5" width="5" height="8.5" rx="2.5"/><path d="M3 7.5a5 5 0 0 0 10 0M8 12.5v2"/></svg><div>Mic<small>Microphone Array</small></div><div class="meter"><i></i></div></div>
+  <div class="opt"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M8 1.5v3M8 11.5v3M1.5 8h3M11.5 8h3"/><circle cx="8" cy="8" r="2"/></svg><div>Stop on Claude<small>~/treg-demo ▾</small></div></div>
+  <div class="divider"></div>
+  <div class="rec"><i></i>Record <kbd>Enter</kbd></div>
+</div>
+<div class="stopwhen"><span><b>3 s</b> countdown</span><span>stop <kbd>Ctrl Shift Alt S</kbd></span><span>marker <kbd>Ctrl Shift Alt M</kbd></span></div>
+</body>
+</html>

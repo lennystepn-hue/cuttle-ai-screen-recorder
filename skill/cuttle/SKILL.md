@@ -177,7 +177,8 @@ Then refine `cuttle.json` ([project.md](project.md)) and preview again:
   read off a `frame --grid`. Over a sped-up clip, durations are source seconds: 3 s at 12× is a
   quarter second on screen (see project.md).
 - **Look.** Set `look.frame.title` (e.g. `claude · ~/demo`) and a background preset, and add a
-  `texts` caption where a step is not obvious.
+  `texts` caption where a step is not obvious. Typing clicks softly, a click per key where the clip
+  is heard (`look.audio.typing`, `typingVolume`); switch it off when the user wants a quiet video.
 - **Pages.** `cuttle -C "<project>" --json capture-page <url or file> --scroll --add` appends a
   scrolling still of a web page (the result the agent built); add `--wait 2500` for slow maps or
   fonts. It goes after every scene, so capture pages before you add the end card (or move the

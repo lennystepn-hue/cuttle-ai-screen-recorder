@@ -14,7 +14,11 @@ import { makeFixture } from './fixture';
  * modules (koffi, uiohook-napi) load from outside it. Runs only with vitest --mode build.
  */
 const enabled = process.env.MODE === 'build';
-const EXE = fileURLToPath(new URL(`../build/Cuttle-${process.platform}-${process.arch}/Cuttle${process.platform === 'win32' ? '.exe' : ''}`, import.meta.url));
+const BUILD = fileURLToPath(new URL(`../build/Cuttle-${process.platform}-${process.arch}/`, import.meta.url));
+/** The executable and the resources folder: beside each other on Windows, inside Cuttle.app on macOS. */
+const mac = process.platform === 'darwin';
+const EXE = mac ? join(BUILD, 'Cuttle.app', 'Contents', 'MacOS', 'Cuttle') : join(BUILD, process.platform === 'win32' ? 'Cuttle.exe' : 'Cuttle');
+const RESOURCES = mac ? join(BUILD, 'Cuttle.app', 'Contents', 'Resources') : join(BUILD, 'resources');
 
 describe.runIf(enabled)('the unpacked Cuttle app', () => {
   let root: string;
@@ -59,7 +63,7 @@ describe.runIf(enabled)('the unpacked Cuttle app', () => {
   }, 90_000);
 
   it('runs its own copy of the CLI as the cuttle command would: the app as Node, and as Electron for a still', () => {
-    const entry = join(EXE, '..', 'resources', 'app.asar.unpacked', 'cli', 'cuttle.mjs');
+    const entry = join(RESOURCES, 'app.asar.unpacked', 'cli', 'cuttle.mjs');
     const env = { ...process.env, ELECTRON_RUN_AS_NODE: '1', CUTTLE_ELECTRON: EXE };
     const version = spawnSync(EXE, [entry, '--version'], { env, encoding: 'utf8', windowsHide: true, timeout: 30_000 });
     expect(version.stdout.trim()).toMatch(/^\d+\.\d+\.\d+$/);

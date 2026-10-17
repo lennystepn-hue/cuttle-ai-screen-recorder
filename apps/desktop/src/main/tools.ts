@@ -47,13 +47,21 @@ const shortPath = (path: string) => (path.toLowerCase().startsWith(homedir().toL
 const wingetLinks = () => join(process.env.LOCALAPPDATA ?? join(homedir(), 'AppData', 'Local'), 'Microsoft', 'WinGet', 'Links');
 
 /**
+ * Where macOS keeps commands a terminal finds but an app started from the Finder or the Dock does not
+ * (its PATH is /usr/bin:/bin:/usr/sbin:/sbin): Homebrew's on Apple silicon and on Intel, and ~/.local/bin.
+ */
+const macCommandDirs = () => ['/opt/homebrew/bin', '/usr/local/bin', join(homedir(), '.local', 'bin')];
+
+/**
  * The folders a command is looked for in: the PATH as the OS has it now (Windows: the machine's and
- * the user's from the registry), WinGet's links folder, then this process's PATH. The check gives
- * its own list in a file (CUTTLE_CHECK_PATH_FILE), so it can make ffmpeg appear.
+ * the user's from the registry), WinGet's links folder (macOS: Homebrew's and ~/.local/bin), then
+ * this process's PATH. The check gives its own list in a file (CUTTLE_CHECK_PATH_FILE), so it can
+ * make ffmpeg appear.
  */
 export async function searchPath(): Promise<string[]> {
   const file = CHECK ? process.env.CUTTLE_CHECK_PATH_FILE : undefined;
   if (file) return splitPath(readFileSync(file, 'utf8'));
+  if (process.platform === 'darwin') return unique([...splitPath(process.env.PATH), ...macCommandDirs()]);
   if (!windows) return unique(splitPath(process.env.PATH));
   const { machine, user } = await readPaths();
   return unique([...splitPath(machine), ...splitPath(user), wingetLinks(), ...splitPath(process.env.PATH)]);

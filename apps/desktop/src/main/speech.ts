@@ -107,7 +107,7 @@ export async function transcribeProject(dir: string, asked = false): Promise<{ s
   if (file.project.sources.transcript !== undefined && !asked) return { problem: 'already transcribed' };
   const model = SPEECH_MODELS.find((entry) => entry.name === speech.model)!;
   if (!(await modelInstalled(model.name))) return quiet(`Download the ${model.label} speech model in the settings first.`, true);
-  if (!(await hasWhisper(true).catch(() => false))) return quiet('This ffmpeg cannot transcribe: it needs version 8 or later (winget upgrade Gyan.FFmpeg, or on macOS brew upgrade ffmpeg).', true);
+  if (!(await hasWhisper(true).catch(() => false))) return quiet('Cuttle cannot transcribe yet: it needs ffmpeg with whisper (winget upgrade Gyan.FFmpeg) or, on a Mac, whisper.cpp (brew install whisper-cpp).', true);
   transcribing.add(dir);
   void (async () => {
     const status = (progress: number) => setEditorStatus(dir, { text: `Transcribing… ${Math.round(progress * 100)} %`, state: 'working' });

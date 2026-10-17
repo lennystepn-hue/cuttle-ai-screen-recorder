@@ -6,7 +6,9 @@ import { bridge } from '../bridge';
 import { CheckIcon, CloseIcon, CopyIcon, FolderIcon, Mark, WarningIcon } from '../icons';
 import { Select } from '../Select';
 
-const WINGET = 'winget install Gyan.FFmpeg';
+const MAC = navigator.userAgent.includes('Macintosh');
+/** The command that installs ffmpeg on this OS. */
+const INSTALL_FFMPEG = MAC ? 'brew install ffmpeg' : 'winget install Gyan.FFmpeg';
 
 type Devices = { cameras: string[]; mics: string[]; problem?: string };
 
@@ -59,7 +61,7 @@ export function Settings() {
     // Esc (not while a field or menu has it) and Ctrl+W close the window
     const onKey = (event: globalThis.KeyboardEvent) => {
       const typing = (event.target as HTMLElement | null)?.closest('input, select, textarea');
-      if ((event.key === 'Escape' && !typing && !event.defaultPrevented) || (event.ctrlKey && event.key.toLowerCase() === 'w')) {
+      if ((event.key === 'Escape' && !typing && !event.defaultPrevented) || ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'w')) {
         event.preventDefault();
         window.close();
       }
@@ -146,7 +148,7 @@ export function Settings() {
                 <Segmented<Motion>
                   value={view?.motion}
                   options={[
-                    ['system', 'Like Windows'],
+                    ['system', MAC ? 'Like macOS' : 'Like Windows'],
                     ['reduce', 'Less'],
                     ['full', 'Full'],
                   ]}
@@ -281,7 +283,7 @@ function SpeechSettings({ view, change }: { view: SettingsView | undefined; chan
                   : `The ${fetched?.label} model is downloading (${percent} % of ${megabytes(download.total)}): one download at a time.`
                 : model.installed
                   ? status?.whisper === false
-                    ? 'Downloaded, but this ffmpeg cannot transcribe: it needs version 8 or later (winget upgrade Gyan.FFmpeg, or on macOS brew upgrade ffmpeg).'
+                    ? 'Downloaded, but Cuttle cannot transcribe yet: it needs ffmpeg with whisper (winget upgrade Gyan.FFmpeg) or, on a Mac, whisper.cpp (brew install whisper-cpp).'
                     : `Downloaded: ${model.note}.`
                   : `${model.note[0]!.toUpperCase()}${model.note.slice(1)}. ${megabytes(model.bytes)} to download, once.`
           }
@@ -457,14 +459,14 @@ function Winget() {
     <button
       className="command"
       onClick={() => {
-        void bridge.invoke('tools:copy', WINGET);
+        void bridge.invoke('tools:copy', INSTALL_FFMPEG);
         setCopied(true);
         setTimeout(() => setCopied(false), 1600);
       }}
       title="Copy, then paste it in a terminal"
       data-testid="copy-winget"
     >
-      <code>{WINGET}</code>
+      <code>{INSTALL_FFMPEG}</code>
       {copied ? <CheckIcon size={13} /> : <CopyIcon size={13} />}
       <span>{copied ? 'Copied' : 'Copy'}</span>
     </button>

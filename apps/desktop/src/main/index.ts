@@ -32,7 +32,29 @@ if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
   registerSchemes();
-  Menu.setApplicationMenu(null);
+  // macOS keeps a menu for its own keys (Copy, Paste, Hide, Quit, Close); the editor handles Undo itself.
+  Menu.setApplicationMenu(
+    process.platform === 'darwin'
+      ? Menu.buildFromTemplate([
+          {
+            role: 'appMenu',
+            submenu: [
+              { role: 'about' },
+              { type: 'separator' },
+              { label: 'Settings…', accelerator: 'Command+,', click: () => void openSettings() },
+              { type: 'separator' },
+              { role: 'hide' },
+              { role: 'hideOthers' },
+              { role: 'unhide' },
+              { type: 'separator' },
+              { role: 'quit' },
+            ],
+          },
+          { label: 'Edit', submenu: [{ role: 'cut' }, { role: 'copy' }, { role: 'paste' }, { role: 'selectAll' }] },
+          { role: 'windowMenu' },
+        ])
+      : null,
+  );
 
   const actions: TrayActions = {
     record: () => void startPicking(),
@@ -69,11 +91,20 @@ if (!app.requestSingleInstanceLock()) {
     recorderHost.quit();
   });
 
+  // macOS: a click on the Dock icon when no window is in sight shows the pill (the app's home)
+  app.on('activate', (_event, hasVisibleWindows) => {
+    if (app.isReady() && !hasVisibleWindows && !HIDDEN) void showPill();
+  });
+
   void app.whenReady().then(async () => {
     // The default session (the export's hidden window uses it) grants nothing either.
     lockDown(session.defaultSession);
     const settings = await loadSettings();
-    if (!HIDDEN) createTray(assetPath(process.platform === 'win32' ? 'tray.png' : 'tray@2x.png'), settings.recent, actions);
+    // macOS: the Dock shows the app's icon also when it runs from the repository (Electron's own otherwise),
+    // and the menu bar a template image, which it tints for light and dark menu bars
+    if (process.platform === 'darwin') app.dock?.setIcon(assetPath('icon-mac.png'));
+    const trayIcon = process.platform === 'win32' ? 'tray.png' : process.platform === 'darwin' ? 'trayTemplate.png' : 'tray@2x.png';
+    if (!HIDDEN) createTray(assetPath(trayIcon), settings.recent, actions);
     await createPill();
     // A new recording from anywhere (the recorder's own keys stop it and set markers).
     if (!HIDDEN) globalShortcut.register('Control+Shift+Alt+R', () => void startPicking());

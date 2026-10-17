@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { copyFile, readdir, readFile, realpath, stat, writeFile } from 'node:fs/promises';
+import { copyFile, readdir, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises';
 import { basename, dirname, join, resolve } from 'node:path';
 import { app, BrowserWindow, dialog, Menu, screen, session, shell, type Session, type WebContents } from 'electron';
 import { PROJECT_FILE, backupFile, writeProjectFile, type ProjectFile } from '@cuttle/core';
@@ -16,15 +16,41 @@ import { ProjectMedia } from './media-service';
 import { LockedError, lockProject, openProjectFile, projectInfo } from './project';
 import { importImage, ProjectFileWatch } from './project-watch';
 import { APP_ORIGIN, assetPath, bundlePath, serveApp, serveMedia } from './protocols';
-import { cutIfPending, recut, startPicking, undoRestart } from './recording';
+import { cutIfPending, recut, startPicking, takesBusy, undoRestart } from './recording';
+import { deletableTakes, sizeText, trashName } from '../shared/takes';
 import { addRecent, loadSettings, motionSetting, updateSettings } from './settings';
 import { openSettings } from './settings-window';
 import { transcribeProject } from './speech';
 
 const BACKGROUND = '#0c0c0f';
 const TITLE_BAR_HEIGHT = 44;
+/** The traffic lights' height on macOS: centred in the title bar by `trafficLightPosition`. */
+const TRAFFIC_LIGHTS_HEIGHT = 14;
+
+/**
+ * The page draws the title bar: Windows draws its buttons over its right end in the app's colours,
+ * macOS its traffic lights over its left end, centred in it (the page leaves room on that side).
+ */
+export function titleBar(height: number) {
+  return {
+    titleBarStyle: 'hidden',
+    titleBarOverlay: { color: BACKGROUND, symbolColor: '#9a9aa5', height },
+    trafficLightPosition: { x: 16, y: Math.round((height - TRAFFIC_LIGHTS_HEIGHT) / 2) },
+  } as const;
+}
 /** The person's version that a save conflict could not carry over (the editor offers it back). */
 const DRAFT_FILE = 'cuttle.json.draft';
+
+/**
+ * Shows a window the person asked for, in front. macOS does not bring an app forward by itself: one
+ * started from a terminal or by the CLI opened its windows behind the app in front.
+ */
+export function bringToFront(window: BrowserWindow): void {
+  if (HIDDEN) return;
+  if (process.platform === 'darwin') app.focus({ steal: true });
+  window.show();
+  window.focus();
+}
 
 /** No permissions (camera, mic, notifications …), no downloads. */
 export function lockDown(ses: Session): void {
@@ -86,8 +112,7 @@ export async function openEditor(projectDir: string, options: { force?: boolean 
   const existing = editors.get(key);
   if (existing && !existing.window.isDestroyed()) {
     if (existing.window.isMinimized()) existing.window.restore();
-    if (!HIDDEN) existing.window.show();
-    existing.window.focus();
+    bringToFront(existing.window);
     return existing.window;
   }
   const pending = opening.get(key);
@@ -132,8 +157,7 @@ async function editorWindow(dir: string, key: string, file: ProjectFile, release
     show: false,
     title: `${basename(dir)} · Cuttle`,
     backgroundColor: BACKGROUND,
-    titleBarStyle: 'hidden',
-    titleBarOverlay: { color: BACKGROUND, symbolColor: '#9a9aa5', height: TITLE_BAR_HEIGHT },
+    ...titleBar(TITLE_BAR_HEIGHT),
     icon: assetPath('icon.png'),
     webPreferences: webPreferences('editor.cjs', ses),
   });
@@ -243,9 +267,7 @@ async function editorWindow(dir: string, key: string, file: ProjectFile, release
     // Closing the last editor returns to the pill (not while an editor is reopened on a new take).
     if (editors.size === 0 && opening.size === 0 && reopening === 0 && !quitting) void showPill();
   });
-  window.once('ready-to-show', () => {
-    if (!HIDDEN) window.show();
-  });
+  window.once('ready-to-show', () => bringToFront(window));
   // The end-to-end check asks for a hook to drive the player (CUTTLE_CHECK=1) and for frames from
   // the take itself rather than the proxy (CUTTLE_NO_PROXY=1), to compare them with the export's.
   const query = new URLSearchParams({
@@ -307,7 +329,7 @@ export async function reopenEditor(dir: string, options: { reload?: boolean } = 
     if (editor && !editor.window.isDestroyed()) {
       if (options.reload) {
         editor.contents.reload();
-        if (!HIDDEN) editor.window.show();
+        bringToFront(editor.window);
         return;
       }
       const closed = new Promise<void>((done) => editor.window.once('closed', () => done()));
@@ -344,6 +366,14 @@ async function takesMenu(dir: string, window: BrowserWindow): Promise<void> {
     )
   ).sort((a, b) => b.at - a.at);
   const time = (at: number) => new Date(at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  // every take but the one in use may go, with its size: what deleting it frees
+  const deletable = await Promise.all(
+    [
+      ...deletableTakes(names, current).map((take) => ({ rel: `takes/${take}`, label: `Take ${take}` })),
+      ...putAside.map((take) => ({ rel: `takes/.discarded/${take.name}`, label: `The take put aside at ${time(take.at)}` })),
+    ].map(async (take) => ({ ...take, bytes: await folderBytes(join(dir, take.rel)) })),
+  );
+  const busy = takesBusy(dir);
   Menu.buildFromTemplate([
     { label: `Take ${current ?? '?'} (now)`, enabled: false },
     ...(kept.length === 0
@@ -356,10 +386,77 @@ async function takesMenu(dir: string, window: BrowserWindow): Promise<void> {
           ...putAside.map((take) => ({ label: `Use the take from ${time(take.at)}`, click: () => void undoRestart(dir, ['takes', '.discarded', take.name].join('/')) })),
         ]
       : []),
+    ...(deletable.length > 0
+      ? [
+          { type: 'separator' as const },
+          {
+            label: 'Delete a take',
+            enabled: !busy,
+            submenu: deletable.map((take) => ({ label: `${take.label} · ${sizeText(take.bytes)}…`, click: () => void deleteTake(dir, take.rel, take.label, take.bytes) })),
+          },
+        ]
+      : []),
     { type: 'separator' },
     { label: 'Record a new take…', click: () => void startPicking(dir) },
   ]).popup({ window });
 }
+
+/** A folder's size in bytes, its files' sizes added up (0 when it cannot be read). */
+async function folderBytes(path: string): Promise<number> {
+  const entries = await readdir(path, { withFileTypes: true }).catch(() => []);
+  const sizes = await Promise.all(
+    entries.map(async (entry) => {
+      const child = join(path, entry.name);
+      if (entry.isDirectory()) return folderBytes(child);
+      return (await stat(child).catch(() => undefined))?.size ?? 0;
+    }),
+  );
+  return sizes.reduce((sum, size) => sum + size, 0);
+}
+
+/**
+ * Deletes a take folder (`takes/<n>`, or one a restart put aside) after the person confirmed it: it
+ * goes to the Trash (Recycle Bin on Windows), never away for good. Never the take the project uses
+ * now, nor while a take is recorded into the project or cut for it. The check confirms without a
+ * dialog and deletes for good (no check fills the Trash). Returns whether it was deleted.
+ */
+export async function deleteTake(dir: string, rel: string, label: string, bytes: number): Promise<boolean> {
+  const say = (message: string) => (HIDDEN ? console.error(message) : void dialog.showMessageBox({ type: 'warning', title: 'Cuttle', message }));
+  if (takesBusy(dir)) {
+    say('Cuttle is recording or cutting a take of this project: delete takes once it is done.');
+    return false;
+  }
+  const current = currentTake(await openProjectFile(dir).catch(() => ({ raw: {} })));
+  if (current !== undefined && rel === `takes/${current}`) {
+    say(`Take ${current} is the one this project uses: it cannot be deleted.`);
+    return false;
+  }
+  const trash = trashName(process.platform);
+  if (!HIDDEN) {
+    const { response } = await dialog.showMessageBox({
+      type: 'warning',
+      title: 'Cuttle',
+      message: `Delete ${label.charAt(0).toLowerCase()}${label.slice(1)}?`,
+      detail: `${sizeText(bytes)} in ${rel} go to the ${trash}. The take this project uses now stays.`,
+      buttons: ['Cancel', `Move to the ${trash}`],
+      defaultId: 0,
+      cancelId: 0,
+    });
+    if (response !== 1) return false;
+  }
+  try {
+    const path = join(dir, ...rel.split('/'));
+    if (CHECK) await rm(path, { recursive: true, force: true });
+    else await shell.trashItem(path);
+    return true;
+  } catch (error) {
+    say(`Cuttle could not delete ${label.toLowerCase()}: ${(error as Error).message}`);
+    return false;
+  }
+}
+
+// The check deletes takes as the menu does (a native menu cannot be clicked from a page).
+if (CHECK) (globalThis as { __deleteTake?: typeof deleteTake }).__deleteTake = deleteTake;
 
 /** Makes an earlier take the project's again, with the edit it had; the current one stays restorable. */
 async function backToTake(dir: string, take: string): Promise<void> {

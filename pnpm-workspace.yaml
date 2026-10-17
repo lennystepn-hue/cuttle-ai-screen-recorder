@@ -3,5 +3,7 @@ packages:
   - apps/*
   - skill
 allowBuilds:
+  # its postinstall downloads the Electron binary (checked against its checksums)
+  electron: true
   koffi: false
   uiohook-napi: false

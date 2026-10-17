@@ -1,9 +1,10 @@
 // Zooms that follow the clicks of a take: clicks close in time and place make one zoom that eases
-// in as the first click happens, stays while the work goes on there, and leaves. Fewer, better
-// zooms: never in waiting that is sped up, never one that would barely zoom, never two at once, and
-// at most one starting in any 5 output seconds (counting the zooms that are there). Times are as
-// people see them: output seconds, turned into source seconds at the clip's speed. Pure; `suggest`
-// and the editor share it.
+// in as the first click happens, stays while the work goes on there, and leaves. When the work moves
+// on soon after, elsewhere, the zoom moves along to it (`moves`) instead of leaving the clicks there
+// outside the view. Fewer, better zooms: never in waiting that is sped up, never one that would
+// barely zoom, never two at once, and at most one starting in any 5 output seconds (counting the
+// zooms that are there). Times are as people see them: output seconds, turned into source seconds at
+// the clip's speed. Pure; `suggest` and the editor share it.
 import type { InputEvent, Rect } from '@cuttle/project';
 
 /** A click joins the zoom being formed when it comes this soon after its last click (output s)… */
@@ -31,6 +32,13 @@ export const MERGE_OVERLAP = 0.6;
 export const MERGE_GAP_SECONDS = 1.5;
 /** At most one zoom starts in any this many output seconds. */
 export const MIN_OUTPUT_GAP = 5;
+/**
+ * Clicks elsewhere whose zoom would start this soon after the zoom before ends (output s) are
+ * followed by it: it moves there, 0.6 s before the first of them, instead of a zoom of their own
+ * (which `MIN_OUTPUT_GAP` would not allow). With `LEAD_SECONDS` and `TAIL_SECONDS` it leaves no
+ * click between following and a zoom of its own.
+ */
+export const FOLLOW_GAP_SECONDS = 3.2;
 /** No zoom starts or ends this close to its clip's cut (a cut and a zoom at once is too much; output s). */
 export const EDGE_SECONDS = 1;
 
@@ -47,6 +55,8 @@ export interface ClickZoom {
   at: number;
   duration: number;
   rect: Rect;
+  /** Where it moves on to, for clicks elsewhere soon after (source seconds); none when it stays. */
+  moves?: { at: number; rect: Rect }[];
   /** How many clicks it follows. */
   clicks: number;
 }
@@ -162,18 +172,35 @@ export function clickZooms(events: readonly InputEvent[], clips: readonly ClipSp
   // in the order people see them (scenes can be moved out of source order)
   zooms = merged.sort((a, b) => outputAt(a.at, a.clip) - outputAt(b.at, b.clip));
 
+  // work that moves on soon after, elsewhere in the same clip: the zoom before moves along to it
+  type Station = { at: number; points: { x: number; y: number }[] };
+  const chains: ((typeof zooms)[number] & { stations: Station[] })[] = [];
+  for (const zoom of zooms) {
+    const previous = chains.at(-1);
+    const s = clips[zoom.clip]!.speed;
+    if (previous && previous.clip === zoom.clip && zoom.at > previous.at && (zoom.at - previous.end) / s <= FOLLOW_GAP_SECONDS) {
+      const last = previous.stations.at(-1)!;
+      previous.stations.push({ at: Math.max(zoom.at, last.at + 0.1 * s), points: zoom.points });
+      previous.end = Math.max(previous.end, zoom.end);
+      previous.clicks += zoom.clicks;
+      continue;
+    }
+    chains.push({ ...zoom, stations: [{ at: zoom.at, points: zoom.points }] });
+  }
+
   // where the zooms already there start, in output seconds
   const starts = avoid.map((other) => shownAt(other.at)).filter((t): t is number => t !== undefined);
   const result: ClickZoom[] = [];
   let lastEnd = -Infinity;
-  for (const zoom of zooms) {
-    const rect = zoomRectFor(boxOf(zoom.points), screen);
+  for (const zoom of chains) {
+    const rect = zoomRectFor(boxOf(zoom.stations[0]!.points), screen);
     if ((rect[2] * rect[3]) / (screen.width * screen.height) > MAX_AREA) continue;
     if (avoid.some((other) => zoom.at < other.at + other.duration && other.at < zoom.end)) continue;
     // one at a time, and not too often (the zooms already there count)
     const start = outputAt(zoom.at, zoom.clip);
     if (start < lastEnd || starts.some((other) => Math.abs(start - other) < MIN_OUTPUT_GAP)) continue;
-    result.push({ at: round(zoom.at), duration: round(zoom.end - zoom.at), rect, clicks: zoom.clicks });
+    const moves = zoom.stations.slice(1).map((station) => ({ at: round(station.at), rect: zoomRectFor(boxOf(station.points), screen) }));
+    result.push({ at: round(zoom.at), duration: round(zoom.end - zoom.at), rect, ...(moves.length > 0 && { moves }), clicks: zoom.clicks });
     starts.push(start);
     lastEnd = outputAt(zoom.end, zoom.clip);
   }

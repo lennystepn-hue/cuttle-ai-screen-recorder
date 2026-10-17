@@ -1,5 +1,5 @@
-// Input sources: the global mouse and keyboard hook with the pointer shape (Windows), or synthetic
-// input for the test backend. Both deliver wall-clock seconds and desktop pixels.
+// Input sources: the global mouse and keyboard hook with the pointer shape (Windows), an event tap
+// (macOS), or synthetic input for the test backend. All deliver wall-clock seconds and desktop pixels.
 import type { Platform } from './sources';
 import type { HotkeyAction, RawInput } from './types';
 
@@ -8,6 +8,8 @@ export interface InputSource {
   initial(time: number): RawInput[];
   /** Stops delivering input; calling it again does nothing. */
   stop(): void;
+  /** Why input is not logged (macOS without the Input Monitoring permission): the take warns. */
+  warning?: string;
 }
 
 export type InputSink = (input: RawInput) => void;
@@ -57,7 +59,8 @@ export function wheelInput(event: { x: number; y: number; rotation: number; dire
 }
 
 export async function startInput(platform: Platform, onInput: InputSink, onHotkey: HotkeySink): Promise<InputSource> {
-  return platform === 'test' ? startTestInput(onInput) : startWindowsInput(onInput, onHotkey);
+  if (platform === 'test') return startTestInput(onInput);
+  return platform === 'macos' ? startMacInput(onInput, onHotkey) : startWindowsInput(onInput, onHotkey);
 }
 
 /** How often the pointer shape is read (Windows has no event for it). */
@@ -203,6 +206,63 @@ async function startWindowsInput(onInput: InputSink, onHotkey: HotkeySink): Prom
       detach();
       if (--hookUsers === 0) uIOhook.stop();
     },
+  };
+}
+
+/** macOS virtual key codes of the hotkeys' letters (kVK_ANSI_S, _M, _P, _X). */
+const MAC_HOTKEYS = new Map<number, HotkeyAction>([[0x01, 'stop'], [0x2e, 'marker'], [0x23, 'pause'], [0x07, 'retake']]);
+const WHERE_INPUT_MONITORING = 'allow the app that runs Cuttle (your terminal, or Cuttle) under System Settings > Privacy & Security > Input Monitoring';
+
+/**
+ * macOS: an event tap of darwin.ts (see there why not uiohook) in desktop pixels, each event at its
+ * own timestamp (a caret read or a busy moment of this thread does not shift it); the pointer's
+ * shape read as on Windows. Without Input Monitoring only the mouse is logged (no key counts, no
+ * hotkeys, no caret); the caret also needs the Accessibility permission (without it, zooms on
+ * typing follow what the screen changes).
+ */
+async function startMacInput(onInput: InputSink, onHotkey: HotkeySink): Promise<InputSource> {
+  const { loadDarwin } = await import('./darwin');
+  const mac = await loadDarwin();
+  const keyboard = mac.keyboardAccess();
+  // modifier keys come as flag changes, not as key presses: none to leave out
+  const keys = keyHandler(new Set(), MAC_HOTKEYS, onInput, onHotkey);
+  let typedAt = -Infinity;
+  const tap = mac.watchInput(keyboard, (event) => {
+    const { time } = event;
+    if (event.type === 'key') {
+      const key = { keycode: event.keycode, ctrlKey: event.ctrl, shiftKey: event.shift, altKey: event.alt };
+      if (event.down) typedAt = time;
+      return event.down ? keys.down(key) : keys.up(key);
+    }
+    if (event.type === 'move') return onInput({ type: 'move', time, x: event.x, y: event.y });
+    if (event.type === 'down') return onInput({ type: 'click', time, x: event.x, y: event.y, button: event.button });
+    onInput({ type: 'scroll', time, x: event.x, y: event.y, dx: event.dx, dy: event.dy });
+  });
+  const warning = !tap
+    ? `the mouse and the keyboard are not logged (no clicks, no zooms on them, no hotkeys): ${WHERE_INPUT_MONITORING}`
+    : !keyboard
+      ? `the keyboard is not logged (no typing activity, no hotkeys): ${WHERE_INPUT_MONITORING}`
+      : undefined;
+  // the pointer's shape and the caret, read as on Windows (the caret a few times a second while keys come)
+  const caret = caretWatch(() => mac.caret(), onInput);
+  let shape = mac.cursorShape();
+  const poll = tap
+    ? setInterval(() => {
+        const current = mac.cursorShape();
+        if (current !== shape) {
+          shape = current;
+          onInput({ type: 'shape', time: now(), shape });
+        }
+        if (keyboard) caret(now(), typedAt);
+      }, SHAPE_POLL_MS)
+    : undefined;
+  return {
+    initial: (time) => [{ type: 'move', time, ...mac.cursorPosition() }, { type: 'shape', time, shape }],
+    stop: () => {
+      clearInterval(poll);
+      tap?.stop();
+    },
+    ...(warning && { warning }),
   };
 }
 

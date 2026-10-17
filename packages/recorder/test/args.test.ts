@@ -20,11 +20,24 @@ describe('ffmpeg arguments', () => {
     expect(args.slice(-2)).toEqual(['-y', 'screen.mp4']);
   });
 
+  it('puts a prefilter before everything else (macOS crops there)', () => {
+    expect(screenArgs(input, 'screen.mp4', undefined, 'crop=800:500:40:92')).toContain(`[0:v]crop=800:500:40:92,${BT709}[out]`);
+    expect(screenArgs(input, 'screen.mp4', 4, 'crop=800:500:40:92')).toContain(
+      `[0:v]crop=800:500:40:92,split[rec][idle];[idle]scale=320:-2,format=gray,freezedetect=n=-60dB:d=4,nullsink;[rec]${BT709}[out]`,
+    );
+  });
+
   it('adds a freezedetect branch only for untilIdleSeconds', () => {
     expect(screenArgs(input, 'screen.mp4').join(' ')).not.toContain('freezedetect');
     expect(screenArgs(input, 'screen.mp4', 4)).toContain(
       `[0:v]split[rec][idle];[idle]scale=320:-2,format=gray,freezedetect=n=-60dB:d=4,nullsink;[rec]${BT709}[out]`,
     );
+  });
+
+  it("keeps the device's own timestamps when asked (macOS's capture times)", () => {
+    expect(micArgs(input, 'mic.m4a', false)).not.toContain('-use_wallclock_as_timestamps');
+    expect(webcamArgs(input, 'webcam.mp4', false)).not.toContain('-use_wallclock_as_timestamps');
+    expect(micArgs(input, 'mic.m4a').slice(0, 2)).toEqual(['-use_wallclock_as_timestamps', '1']);
   });
 
   it('cuts the mic into 1 s fragments and watches it for digital silence', () => {

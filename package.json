@@ -4,6 +4,7 @@
   "type": "module",
   "packageManager": "pnpm@11.20.0",
   "scripts": {
+    "postinstall": "node packages/recorder/native/build-macos.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
     "engine:electron": "vite build --config packages/engine/electron/vite.config.ts && electron packages/engine/electron/main.mjs",
@@ -11,7 +12,7 @@
     "export:build": "vite build --config packages/export/electron/vite.main.config.ts && vite build --config packages/export/electron/vite.page.config.ts",
     "export:check": "pnpm export:build && electron packages/export/dist/check.mjs",
     "recorder:real": "vitest run --mode real --silent=false packages/recorder/test/real.test.ts",
-    "cli:build": "vite build --config apps/cli/vite.config.ts && vite build --config packages/export/electron/vite.page.config.ts --outDir ../../../apps/cli/dist/export-page",
+    "cli:build": "vite build --config apps/cli/vite.config.ts && vite build --config packages/export/electron/vite.page.config.ts --outDir ../../../apps/cli/dist/export-page && node packages/recorder/native/build-macos.mjs apps/cli/dist",
     "cli:install": "pnpm cli:build && node apps/cli/scripts/install.mjs",
     "cli:uninstall": "node apps/cli/scripts/install.mjs --uninstall",
     "cli:check": "pnpm cli:build && vitest run --mode cli apps/cli/test/electron.check.test.ts",
@@ -20,6 +21,7 @@
     "app": "pnpm app:build:js && electron apps/desktop/dist/main/index.mjs",
     "app:check": "pnpm app:build:js && pnpm cli:build && vitest run --mode app apps/desktop/test/app.check.test.ts",
     "app:build": "pnpm app:build:js && pnpm cli:build && node apps/desktop/scripts/package.mjs && vitest run --mode build apps/desktop/test/build.check.test.ts",
+    "icons:mac": "electron tools/mac-icons.mjs",
     "skill:install": "node skill/install.mjs",
     "skill:uninstall": "node skill/install.mjs --uninstall"
   },

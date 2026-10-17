@@ -15,7 +15,7 @@ export { changedRegion, zoomRect } from './suggest/region';
 export { gaps, length, union, type Span } from './suggest/spans';
 export { transcriptMarkers } from './suggest/transcript';
 export { DEFAULT_MODEL, MODEL_NAMES, SPEECH_MODELS, chooseModel, downloadFile, downloadModel, installedModels, modelInstalled, modelPath, modelUrl, modelsDir, removeModel, speechModel, type DownloadOptions, type ModelName, type SpeechModel } from './speech/models';
-export { filterValue, hasWhisper, parseWhisperLines, runWhisper, type HeardWord, type WhisperOptions } from './speech/whisper';
+export { filterValue, hasWhisper, NO_WHISPER, parseWhisperCliJson, parseWhisperLines, runWhisper, whisperCliPath, whisperEngine, type HeardWord, type WhisperEngine, type WhisperOptions } from './speech/whisper';
 export { LEVEL_SECONDS, SPEECH_RULES, micLevels, speechStretches } from './speech/levels';
 export { ALIGN_RULES, alignWords, guessLanguage, type Alignment } from './speech/align';
 export { SPEECH_EDIT_RULES, fillerCuts, fillerWords, inputSpans, mergeCuts, pauseCuts, restingAt, speechCuts, type RawCut, type SpeechCut, type SpeechEditInput } from './speech/edits';

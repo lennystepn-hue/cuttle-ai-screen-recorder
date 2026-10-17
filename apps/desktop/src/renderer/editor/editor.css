@@ -18,6 +18,10 @@
   -webkit-app-region: drag;
   min-width: 0;
 }
+/* macOS: the traffic lights sit over its left end instead (trafficLightPosition) */
+:root[data-platform='darwin'] .titlebar {
+  padding: 0 14px 0 84px;
+}
 .titlebar button,
 .titlebar .seg {
   -webkit-app-region: no-drag;

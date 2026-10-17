@@ -161,7 +161,9 @@ export function autoZoomClicks(): void {
     if (free === 0) return toast('Every click is under a zoom already.');
     return toast(`No zoom fits ${free === 1 ? 'the click' : `the ${free} clicks`} left: sped up, or near a cut or a zoom.`);
   }
-  const commands = zooms.map((zoom) => ({ type: 'add', list: 'zooms', item: { label: zoom.clicks === 1 ? 'Click' : 'Clicks', at: zoom.at, duration: zoom.duration, rect: zoom.rect, auto: 'click' } }) as Command);
+  const commands = zooms.map(
+    (zoom) => ({ type: 'add', list: 'zooms', item: { label: zoom.clicks === 1 ? 'Click' : 'Clicks', at: zoom.at, duration: zoom.duration, rect: zoom.rect, ...(zoom.moves && { moves: zoom.moves }), auto: 'click' } }) as Command,
+  );
   if (edit(commands, 'Zoom on clicks')) toast(`Added ${zooms.length} zoom${zooms.length === 1 ? '' : 's'} on clicks.`, { undo: true });
 }
 

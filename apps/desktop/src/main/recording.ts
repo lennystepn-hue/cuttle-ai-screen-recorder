@@ -4,12 +4,13 @@
 import { existsSync, realpathSync } from 'node:fs';
 import { copyFile, mkdir, readdir, rename, rmdir, statfs } from 'node:fs/promises';
 import { basename, dirname, join, relative, resolve, sep } from 'node:path';
-import { BrowserWindow, dialog, globalShortcut, screen, session, type Rectangle } from 'electron';
+import { BrowserWindow, desktopCapturer, dialog, globalShortcut, screen, session, shell, systemPreferences, type Rectangle } from 'electron';
 import { PROJECT_FILE, newProjectFile, projectExists, readProjectFile, recoverTake, useTake, writeProjectFile } from '@cuttle/core';
 import { focusWindow, recentClaudeFolders, type Devices, type RecorderEvent, type Take } from '@cuttle/recorder';
 import type { HudState, PickedTarget, PickerSetup, RecordChoices } from '../shared/ipc';
-import { captureSourceFor, hudPosition, hudWarning, monitorAt, recordingFailure, stopOptionsFor, type PickerDisplay, type PickerWindow } from '../shared/recording';
-import { COUNTDOWN, HIDDEN, TEST_BACKEND } from './check';
+import { captureSourceFor, hudPosition, hudWarning, recordingFailure, stopOptionsFor, type PickerDisplay, type PickerWindow } from '../shared/recording';
+import { displayPixels, monitorOf, setMonitors, toDesktopPixels, toDip } from './desktop-pixels';
+import { CHECK, COUNTDOWN, HIDDEN, TEST_BACKEND } from './check';
 import { bindRequests, send } from './ipc';
 import { cutTake } from './media-service';
 import { APP_ORIGIN, serveApp, bundlePath } from './protocols';
@@ -44,6 +45,12 @@ const finishing = new Set<string>();
 let writing: Promise<void> | undefined;
 /** The app quits: no recording starts any more, and a take written now is cut at its next open. */
 let quitting = false;
+
+/** Whether a take is being recorded into this project, or finished or cut for it: its takes stay as they are meanwhile. */
+export function takesBusy(dir: string): boolean {
+  const key = keyOf(dir);
+  return finishing.has(key) || (busy && pickingFor !== undefined && keyOf(pickingFor) === key);
+}
 
 /** A project's key, as the editors key it: the real path (a junction or a short name is the same folder). */
 export function keyOf(dir: string): string {
@@ -86,14 +93,16 @@ function overlay(bounds: Rectangle, preload: string, options: Electron.BrowserWi
     hasShadow: false,
     backgroundColor: '#00000000',
     title: 'Cuttle',
+    // macOS keeps windows below the menu bar: the overlay covers it too, as the page expects
+    enableLargerThanScreen: true,
     webPreferences: webPreferences(preload, pickerSessionOnce()),
     ...options,
   });
   // Electron fits a new window into the work area; the overlay covers the taskbar's strip too.
+  window.setAlwaysOnTop(true, 'screen-saver');
   window.setBounds(bounds);
   guard(window.webContents);
   window.setContentProtection(true);
-  window.setAlwaysOnTop(true, 'screen-saver');
   return window;
 }
 
@@ -102,10 +111,10 @@ function overlay(bounds: Rectangle, preload: string, options: Electron.BrowserWi
  * (by order with the test backend, whose monitors are its own).
  */
 function pickerDisplays(devices: Devices): PickerDisplay[] {
+  setMonitors(devices.monitors);
   return screen.getAllDisplays().map((display, order) => {
-    const physical = screen.dipToScreenRect(null, display.bounds);
-    const centre = screen.dipToScreenPoint({ x: display.bounds.x + display.bounds.width / 2, y: display.bounds.y + display.bounds.height / 2 });
-    const monitor = TEST_BACKEND ? devices.monitors[order] : monitorAt(devices.monitors, centre);
+    const physical = displayPixels(display);
+    const monitor = TEST_BACKEND ? devices.monitors[order] : monitorOf(display, devices.monitors);
     return {
       id: display.id,
       bounds: display.bounds,
@@ -126,7 +135,7 @@ function windowsOn(display: PickerDisplay, devices: Devices): PickerWindow[] {
       id: window.id,
       title: window.title,
       className: window.className,
-      bounds: TEST_BACKEND ? window.bounds : screen.screenToDipRect(null, window.bounds),
+      bounds: TEST_BACKEND ? window.bounds : toDip(window.bounds),
       pixels: { width: window.bounds.width, height: window.bounds.height },
     }));
 }
@@ -172,12 +181,14 @@ function withTimeout<T>(promise: Promise<T>, ms: number, what: string): Promise<
   return Promise.race([promise, new Promise<T>((_, reject) => setTimeout(() => reject(new Error(`${what} did not answer in ${ms / 1000} s`)), ms))]);
 }
 
+/** How ffmpeg is installed on this OS. */
+const FFMPEG_INSTALL = process.platform === 'darwin' ? 'brew install ffmpeg' : 'winget install Gyan.FFmpeg';
 const messageOf = (error: unknown) => (error instanceof Error ? error.message : String(error));
 const ffmpegMissing = (error: unknown) => /ffmpeg/i.test(messageOf(error)) && /ENOENT|not found|cannot find/i.test(messageOf(error));
 
 /** Why the recorder cannot list the devices, said for people. */
 function listingProblem(error: unknown): string {
-  if (ffmpegMissing(error)) return 'Cuttle needs ffmpeg to record. Install it (winget install Gyan.FFmpeg), then press Try again.';
+  if (ffmpegMissing(error)) return `Cuttle needs ffmpeg to record. Install it (${FFMPEG_INSTALL}), then press Try again.`;
   return `Cuttle cannot record: ${messageOf(error).split('\n')[0]}`;
 }
 
@@ -192,6 +203,7 @@ export async function startPicking(projectDir?: string, options: { fromPill?: bo
   if (projectDir && finishing.has(keyOf(projectDir))) {
     return say('Cuttle is still cutting the last take of this project. Record again once the cut is in the editor.');
   }
+  if (!(await screenAllowed())) return;
   busy = true;
   // "New recording" on the pill: the pill is not in the video; it comes back when no editor opens.
   pillHidden = options.fromPill ?? false;
@@ -529,7 +541,7 @@ async function record(target: PickedTarget, display: PickerDisplay, displays: Pi
         },
       });
       bindRequests(countdown.webContents, 'countdown', {});
-      const deadZone = () => screen.dipToScreenRect(null, hud.getBounds());
+      const deadZone = () => toDesktopPixels(hud.getBounds());
       hud.on('moved', () => recorderHost.setDeadZones([deadZone()]));
       // Windows ends the session (sign out, shut down): the end waits while the take is stopped and written.
       hud.on('query-session-end', (event) => {
@@ -554,7 +566,7 @@ async function record(target: PickedTarget, display: PickerDisplay, displays: Pi
       /** Whether a window's physical bounds left where it was picked (DIP bounds converted back). */
       const moved = (bounds: { x: number; y: number }) => {
         if (!pickedWindow) return false;
-        const origin = TEST_BACKEND ? pickedWindow.bounds : screen.dipToScreenRect(null, roundRect(pickedWindow.bounds));
+        const origin = TEST_BACKEND ? pickedWindow.bounds : toDesktopPixels(roundRect(pickedWindow.bounds));
         return Math.abs(bounds.x - origin.x) > 2 || Math.abs(bounds.y - origin.y) > 2;
       };
       const watchTake = async () => {
@@ -635,6 +647,7 @@ async function record(target: PickedTarget, display: PickerDisplay, displays: Pi
       let take: Take;
       try {
         if (quitting) throw new RecordingError('cancelled', 'The app quits');
+        await askForMedia(choices);
         take = await recorderHost.record(
           {
             projectDir,
@@ -644,6 +657,8 @@ async function record(target: PickedTarget, display: PickerDisplay, displays: Pi
             stop: stopOptionsFor(choices),
             countdownSeconds: countdownFor,
             deadZones: [deadZone()],
+            // macOS: the app's own windows (the HUD above all) stay out of the take, as Windows keeps them out by content protection
+            hideWindowsOf: [process.pid],
           },
           onEvent,
         );
@@ -882,6 +897,39 @@ export async function recut(dir: string): Promise<void> {
 }
 
 /** Says something to the person in a dialog (a log line in the check), with the details apart. */
+/**
+ * macOS: whether Cuttle may record the screen. When not, asking for the screen's sources puts Cuttle
+ * on System Settings' list (macOS asks itself the first time), and the person is shown the way there.
+ */
+async function screenAllowed(): Promise<boolean> {
+  // the checks list devices and record test patterns only: no screen to ask for
+  if (process.platform !== 'darwin' || TEST_BACKEND || CHECK || systemPreferences.getMediaAccessStatus('screen') === 'granted') return true;
+  await desktopCapturer.getSources({ types: ['screen'], thumbnailSize: { width: 0, height: 0 } }).catch(() => []);
+  if (HIDDEN) {
+    console.error('Cuttle may not record the screen (System Settings > Privacy & Security > Screen & System Audio Recording)');
+    return false;
+  }
+  const { response } = await dialog.showMessageBox({
+    type: 'info',
+    title: 'Cuttle',
+    message: 'Allow Cuttle to record the screen',
+    detail: 'Turn Cuttle on under System Settings > Privacy & Security > Screen & System Audio Recording, then quit and reopen Cuttle.',
+    buttons: ['Open System Settings', 'Not now'],
+    defaultId: 0,
+    cancelId: 1,
+  });
+  if (response === 0) void shell.openExternal('x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture');
+  return false;
+}
+
+/** macOS: asks for the camera and the mic a take uses, the first time (the recorder's ffmpeg runs as Cuttle). */
+async function askForMedia(choices: RecordChoices): Promise<void> {
+  if (process.platform !== 'darwin' || TEST_BACKEND) return;
+  for (const [kind, name] of [['camera', choices.camera], ['microphone', choices.mic]] as const) {
+    if (name && systemPreferences.getMediaAccessStatus(kind) === 'not-determined') await systemPreferences.askForMediaAccess(kind);
+  }
+}
+
 function say(message: string, detail?: string): void {
   if (HIDDEN) {
     console.error(detail ? `${message}\n${detail}` : message);

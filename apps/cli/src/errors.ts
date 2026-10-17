@@ -15,6 +15,7 @@ const EXIT_CODES: Record<string, number> = {
   'device-not-found': EXIT.device,
   'ffmpeg-missing': EXIT.device,
   capture: EXIT.device,
+  'permission-denied': EXIT.device,
   'unsupported-platform': EXIT.device,
   cancelled: EXIT.cancelled,
   // @cuttle/export

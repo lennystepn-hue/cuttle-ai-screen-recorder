@@ -1,10 +1,10 @@
 import { spawnSync } from 'node:child_process';
-import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
 import { createServer, type Server, type ServerResponse } from 'node:http';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
-import { basename, dirname, join } from 'node:path';
+import { basename, delimiter, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { PNG } from 'pngjs';
 import { _electron, type ElectronApplication, type Page } from 'playwright';
@@ -216,7 +216,8 @@ describe.runIf(enabled)('the Cuttle app', () => {
   const editorTitles = () => app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().filter((window) => window.webContents.getURL().includes('/editor.html')).map((window) => window.getTitle()));
 
   beforeAll(async () => {
-    root = mkdtempSync(join(tmpdir(), 'cuttle-app-'));
+    // the real path: macOS's temporary folder is behind a link (/var is /private/var), the app keeps real paths
+    root = realpathSync(mkdtempSync(join(tmpdir(), 'cuttle-app-')));
     project = join(root, 'demo');
     mkdirSync(project);
     makeFixture(project);
@@ -899,7 +900,11 @@ describe.runIf(enabled)('the Cuttle app', () => {
   }, 60_000);
 
   it('refuses to export edits that are not saved, and saves them on Try again', async () => {
-    chmodSync(projectFile(), 0o444); // a lock (OneDrive, a scanner) or no right to write
+    // a lock (OneDrive, a scanner) or no right to write; a write renames over the file, which POSIX
+    // allows for a read-only file in a folder that may be written: the folder is locked there too
+    const lockFolder = (mode: number) => process.platform !== 'win32' && chmodSync(project, mode);
+    chmodSync(projectFile(), 0o444);
+    lockFolder(0o555);
     try {
       await seek(1);
       await editor.keyboard.press('s');
@@ -911,6 +916,7 @@ describe.runIf(enabled)('the Cuttle app', () => {
       expect(await editor.locator('.sheet .error-text').textContent()).toContain('your latest edits are not saved');
       await editor.keyboard.press('Escape');
     } finally {
+      lockFolder(0o755);
       chmodSync(projectFile(), 0o644);
     }
     await click(editor, '[data-testid=save-state]');
@@ -1066,6 +1072,18 @@ describe.runIf(enabled)('the Cuttle app', () => {
     // The first take's edit is kept next to it, for "Back to take 1".
     expect(JSON.parse(readFileSync(join(dir, 'takes', '1', 'cuttle.json'), 'utf8')).sources.screen).toBe('takes/1/screen.mp4');
   }, 120_000);
+
+  it('deletes an earlier take from the take menu, never the one in use', async () => {
+    const dir = join(root, 'projects', readdirSync(join(root, 'projects'))[0]!);
+    const deleteTake = (rel: string) =>
+      app.evaluate((_electron, [project, take]) => (globalThis as unknown as { __deleteTake(dir: string, rel: string, label: string, bytes: number): Promise<boolean> }).__deleteTake(project, take, 'Take', 0), [dir, rel] as const);
+    expect(await deleteTake('takes/2')).toBe(false);
+    expect(existsSync(join(dir, 'takes', '2', 'screen.mp4'))).toBe(true);
+    expect(await deleteTake('takes/1')).toBe(true);
+    expect(existsSync(join(dir, 'takes', '1'))).toBe(false);
+    // the project still plays its take
+    expect(JSON.parse(readFileSync(join(dir, 'cuttle.json'), 'utf8')).sources.screen).toBe('takes/2/screen.mp4');
+  }, 30_000);
 
   it('keeps a take whose capture broke off: recover repairs it and the editor opens on it', async () => {
     const projects = join(root, 'projects');
@@ -1490,7 +1508,9 @@ describe.runIf(enabled)('the first run', () => {
     await page.waitForSelector('[data-testid=tool-ffmpeg][data-state=missing]');
     // installed meanwhile (winget): Check again finds it, without a restart
     const ffmpeg = spawnSync(process.platform === 'win32' ? 'where' : 'which', ['ffmpeg'], { encoding: 'utf8' }).stdout.split(/\r?\n/)[0]!;
-    writeFileSync(pathFile(), dirname(ffmpeg));
+    // elsewhere than Windows the app cannot put its command's folder on PATH (it gives the line for the
+    // shell profile): here the profile has it, as ~/.local/bin is on most Macs' PATH
+    writeFileSync(pathFile(), process.platform === 'win32' ? dirname(ffmpeg) : [dirname(ffmpeg), join(root, 'bin')].join(delimiter));
     await click(page, '[data-testid=check-again]');
     await page.waitForSelector('[data-testid=tool-ffmpeg][data-state=ok]');
     await click(page, '[data-testid=install-tools]');

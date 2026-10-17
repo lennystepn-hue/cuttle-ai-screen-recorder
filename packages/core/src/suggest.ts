@@ -18,7 +18,7 @@ import { readMarkers, speechActivity, withSpeechCuts, wordStretches } from './sp
 import type { RawCut } from './speech/edits';
 import { chooseModel } from './speech/models';
 import { readTranscript, transcribeTake } from './speech/transcribe';
-import { hasWhisper } from './speech/whisper';
+import { hasWhisper, NO_WHISPER } from './speech/whisper';
 
 export interface SuggestOptions {
   /** The folder Claude Code ran in (true: the current folder), for a take without Claude markers. */
@@ -243,7 +243,7 @@ export async function suggestProject(projectDir: string, args: SuggestOptions = 
     // the clicks the zooms there do not show, less those the click zooms follow
     const left = shownClicks(events, shown, there) - followed.reduce((sum, zoom) => sum + zoom.clicks, 0);
     for (const zoom of followed) {
-      add({ id: newId('zooms', taken), label: zoom.clicks === 1 ? 'Click' : 'Clicks', at: zoom.at, duration: zoom.duration, rect: zoom.rect, auto: 'click' });
+      add({ id: newId('zooms', taken), label: zoom.clicks === 1 ? 'Click' : 'Clicks', at: zoom.at, duration: zoom.duration, rect: zoom.rect, ...(zoom.moves && { moves: zoom.moves }), auto: 'click' });
     }
     if (followed.length > 0) notes.push(`${followed.length} zoom${followed.length === 1 ? '' : 's'} on clicks`);
     if (left > 0) notes.push(`${left} click${left === 1 ? '' : 's'} got no zoom: sped up, or near a cut or another zoom`);
@@ -348,7 +348,7 @@ async function transcribeFirst(projectDir: string, args: SuggestOptions, notes: 
     return;
   }
   if (!(await hasWhisper())) {
-    notes.push('the mic was not transcribed: this ffmpeg has no whisper filter (update it: winget upgrade Gyan.FFmpeg, or on macOS brew upgrade ffmpeg)');
+    notes.push(`the mic was not transcribed: ${NO_WHISPER}`);
     return;
   }
   try {

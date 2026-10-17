@@ -3,13 +3,14 @@ import { FRAME_RATE } from './args';
 import { RecorderError } from './errors';
 import type { Backend, Bounds, CaptureSource, Devices, Monitor } from './types';
 
-/** `test` works everywhere; real capture exists for Windows so far. */
-export type Platform = 'windows' | 'test';
+/** `test` works everywhere; real capture exists for Windows and macOS. */
+export type Platform = 'windows' | 'macos' | 'test';
 
 export function platformFor(backend: Backend = 'auto'): Platform {
   if (backend === 'test') return 'test';
   if (process.platform === 'win32') return 'windows';
-  throw new RecorderError('unsupported-platform', `recording on ${process.platform} is not supported yet; only Windows (and backend "test")`);
+  if (process.platform === 'darwin') return 'macos';
+  throw new RecorderError('unsupported-platform', `recording on ${process.platform} is not supported yet; only Windows and macOS (and backend "test")`);
 }
 
 /**
@@ -119,6 +120,11 @@ const MICROSECONDS = 'settb=1/1000000';
 /** ffmpeg input arguments of the screen track. */
 export function screenInput(platform: Platform, area: ScreenArea, drawMouse: boolean): string[] {
   const { monitor, crop } = area;
+  if (platform === 'macos') {
+    // the whole display in its backing pixels, as RGB like ddagrab's (the chain converts it to BT.709);
+    // a region or a window is cut from it by `screenFilter`
+    return ['-f', 'avfoundation', '-capture_cursor', drawMouse ? '1' : '0', '-framerate', String(FRAME_RATE), '-pixel_format', 'bgr0', '-i', `Capture screen ${monitor.index}:none`];
+  }
   if (platform === 'test') {
     const { width, height } = monitor.bounds;
     const pattern = `testsrc2=s=${width}x${height}:r=${FRAME_RATE}`;
@@ -132,12 +138,43 @@ export function screenInput(platform: Platform, area: ScreenArea, drawMouse: boo
   return ['-f', 'lavfi', '-i', `${grab},hwdownload,format=bgra,${MICROSECONDS}`];
 }
 
-export function webcamInput(platform: Platform, name: string): string[] {
+/** The filter that comes first on the screen track: macOS crops the captured display to the area. */
+export function screenFilter(platform: Platform, area: ScreenArea): string | undefined {
+  const { crop } = area;
+  return platform === 'macos' && crop ? `crop=${crop.width}:${crop.height}:${crop.x}:${crop.y}` : undefined;
+}
+
+/** A camera's picture size; avfoundation opens a camera at its smallest one unless asked. */
+export interface CameraMode {
+  width: number;
+  height: number;
+}
+
+export function webcamInput(platform: Platform, name: string, mode?: CameraMode): string[] {
   if (platform === 'test') {
     const end = name === 'Failing Test Camera' ? ':d=1' : '';
     return ['-f', 'lavfi', '-i', `testsrc=s=640x480:r=${FRAME_RATE}${end},realtime,${MICROSECONDS}`];
   }
+  if (platform === 'macos') {
+    const size = mode ? ['-video_size', `${mode.width}x${mode.height}`] : [];
+    return ['-f', 'avfoundation', '-framerate', String(FRAME_RATE), ...size, '-i', `${name}:none`];
+  }
   return ['-f', 'dshow', '-rtbufsize', '256M', '-i', `video=${name}`];
+}
+
+/**
+ * The camera mode to ask for, from the modes avfoundation lists (`  1280x720@[1.000000 30.000000]fps`):
+ * 1280×720 at 30 frames per second when the camera has it, otherwise its largest mode up to 1080
+ * lines that runs at 30; undefined when none does (the camera's default is used).
+ */
+export function pickCameraMode(log: string): CameraMode | undefined {
+  const modes: (CameraMode & { fps: number[] })[] = [];
+  for (const match of log.matchAll(/(\d+)x(\d+)@\[([\d.\s]+)\]fps/g)) {
+    modes.push({ width: Number(match[1]), height: Number(match[2]), fps: match[3]!.trim().split(/\s+/).map(Number) });
+  }
+  const at30 = modes.filter(({ fps }) => fps.length > 0 && Math.min(...fps) <= FRAME_RATE && Math.max(...fps) >= FRAME_RATE);
+  const best = at30.find(({ width, height }) => width === 1280 && height === 720) ?? at30.filter(({ height }) => height <= 1080).sort((a, b) => b.width * b.height - a.width * a.height)[0];
+  return best && { width: best.width, height: best.height };
 }
 
 /**
@@ -146,15 +183,33 @@ export function webcamInput(platform: Platform, name: string): string[] {
  */
 const MIC_BUFFER_MS = 50;
 
-/** Seconds to subtract from the mic's stamped start to get the time of its first sample. */
+/**
+ * Seconds a screen frame is older than its stamp (taken when ffmpeg reads it): what was on screen at
+ * a moment shows in the take this much later, so the screen's start is moved back by it, and the
+ * input and the other tracks line up with the picture. Measured with a clock on screen on an M1:
+ * ScreenCaptureKit through the helper about 37 ms, avfoundation about 80 ms; ddagrab is not measured.
+ */
+export function screenLatency(platform: Platform, helper: boolean): number {
+  return platform === 'macos' ? (helper ? 0.037 : 0.08) : 0;
+}
+
+/**
+ * Seconds to subtract from the mic's stamped start to get the time of its first sample. macOS needs
+ * none: its mic and camera keep avfoundation's own stamps, the time each buffer was captured
+ * (`deviceClock`).
+ */
 export function micLatency(platform: Platform): number {
   return platform === 'windows' ? MIC_BUFFER_MS / 1000 : 0;
 }
+
+/** Whether the camera and the mic keep the device's own timestamps (macOS) instead of the wall clock's at arrival. */
+export const deviceClock = (platform: Platform) => platform === 'macos';
 
 export function micInput(platform: Platform, name: string): string[] {
   if (platform === 'test') {
     const source = name === 'Silent Test Microphone' ? 'anullsrc=r=48000:cl=mono' : 'sine=frequency=440:sample_rate=48000';
     return ['-f', 'lavfi', '-i', `${source},arealtime`];
   }
+  if (platform === 'macos') return ['-f', 'avfoundation', '-i', `none:${name}`];
   return ['-f', 'dshow', '-audio_buffer_size', String(MIC_BUFFER_MS), '-i', `audio=${name}`];
 }

@@ -9,21 +9,27 @@ export interface Bounds {
 }
 
 export interface Monitor {
-  /** ffmpeg ddagrab `output_idx` (Windows): the order of the default adapter's outputs. */
+  /**
+   * Windows: ffmpeg ddagrab's `output_idx`, the order of the default adapter's outputs. macOS: the
+   * order of CGGetActiveDisplayList, avfoundation's "Capture screen <index>".
+   */
   index: number;
   name: string;
+  /** In desktop pixels: physical pixels on Windows, a display's backing pixels on macOS (see darwin.ts). */
   bounds: Bounds;
-  /** Display scale factor (1.25 at 125 %). */
+  /** Display scale factor (1.25 at 125 %; 2 on a Retina display). */
   scale: number;
   primary: boolean;
+  /** macOS: the display's CGDirectDisplayID, which is Electron's `Display.id`. */
+  displayId?: number;
 }
 
 export interface WindowInfo {
-  /** The window's handle (HWND) as a number: unique while the window exists. */
+  /** The window's handle (HWND; the window number on macOS) as a number: unique while the window exists. */
   id: number;
   /** The process that owns it. */
   pid: number;
-  /** Its window class, e.g. `CASCADIA_HOSTING_WINDOW_CLASS`. */
+  /** Its window class, e.g. `CASCADIA_HOSTING_WINDOW_CLASS` (macOS: the app's name). */
   className: string;
   title: string;
   /** The visible frame without the invisible resize border. */
@@ -80,6 +86,11 @@ export interface RecordOptions {
   drawMouse?: boolean;
   /** `test`: ffmpeg test sources and synthetic input instead of real devices (default `auto`). */
   backend?: Backend;
+  /**
+   * macOS: the windows of these processes are left out of the screen track (the app's own: its HUD,
+   * pill and pickers), when the capture helper is there. Windows leaves out content-protected windows itself.
+   */
+  hideWindowsOf?: number[];
   /**
    * Desktop areas (physical pixels) whose pointer input is not logged: the app's own controls, such
    * as a recording HUD, so no take shows the pointer going to them or a click on Stop.

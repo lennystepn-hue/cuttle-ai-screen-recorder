@@ -19,6 +19,10 @@
   font-weight: 600;
   -webkit-app-region: drag;
 }
+/* macOS: the traffic lights sit over its left end */
+:root[data-platform='darwin'] .settings header {
+  padding-left: 84px;
+}
 .settings header .mark {
   border-radius: 7px;
 }

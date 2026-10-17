@@ -25,10 +25,29 @@ describe('zooms on clicks', () => {
     }
   });
 
-  it('starts another zoom for clicks across the screen, once 5 output seconds have passed', () => {
+  it('moves along to clicks elsewhere soon after, and starts another zoom once the work rests a while', () => {
     const zooms = clickZooms([click(10, 200, 200), click(11, 1700, 900), click(20, 1700, 900)], whole, screen);
-    // the click at 11 s is elsewhere but too soon after the first zoom; the one at 20 s gets its own
+    // the click at 11 s is elsewhere: the first zoom moves there in time for it; the one at 20 s gets its own
     expect(zooms.map((zoom) => zoom.at)).toEqual([9.3, 19.3]);
+    expect(zooms[0]!.moves).toHaveLength(1);
+    expect(zooms[0]!.moves![0]!.at).toBe(10.3);
+    expect(zooms[0]!.clicks).toBe(2);
+    expect(zooms[1]!.moves).toBeUndefined();
+  });
+
+  it('follows the work across the screen: every click is in view when it happens', () => {
+    // first in the middle, then 4 s later far right (once too soon for a zoom of its own), then lower left
+    const clicks = [click(10, 960, 540), click(14, 1750, 300), click(17, 300, 900)];
+    const [zoom, ...rest] = clickZooms(clicks, whole, screen);
+    expect(rest).toEqual([]);
+    expect(zoom!.moves!.map((move) => move.at)).toEqual([13.3, 16.3]);
+    expect(zoom!.at + zoom!.duration).toBeCloseTo(18.2, 6);
+    // the view the zoom shows at each click holds it (each move ends 0.1 s before its click)
+    const views = [zoom!.rect, ...zoom!.moves!.map((move) => move.rect)];
+    clicks.forEach((each, index) => {
+      const [x, y, width, height] = views[index]!;
+      expect(each.type === 'click' && each.x >= x && each.x <= x + width && each.y >= y && each.y <= y + height).toBe(true);
+    });
   });
 
   it('keeps zooms out of waiting that is sped up, away from cuts, and off right clicks', () => {
@@ -52,9 +71,11 @@ describe('zooms on clicks', () => {
     expect(zooms[0]!.duration).toBeCloseTo(5.1, 6);
   });
 
-  it('zooms on one of two clicks far apart at once, and never over another zoom', () => {
-    // clicks spread over most of the screen within 3 s: two clusters (too wide for one), the second too soon
-    expect(clickZooms([click(10, 100, 100), click(10.5, 1800, 1000)], whole, screen)).toHaveLength(1);
+  it('follows two clicks far apart at once with one zoom that moves, and never zooms over another zoom', () => {
+    // clicks spread over most of the screen within 3 s: two clusters (too wide for one), one zoom moving between them
+    const apart = clickZooms([click(10, 100, 100), click(10.5, 1800, 1000)], whole, screen);
+    expect(apart).toHaveLength(1);
+    expect(apart[0]!.moves).toHaveLength(1);
     expect(clickZooms([click(10, 960, 540)], whole, screen, [{ at: 9, duration: 4 }])).toEqual([]);
   });
 
@@ -82,10 +103,10 @@ describe('zooms on clicks', () => {
     expect([shownClicks([click(25, 0, 0), click(32.5, 0, 0), click(70, 0, 0)], whole), shownClicks([click(25, 0, 0), click(32.5, 0, 0)], whole, answer)]).toEqual([2, 1]);
   });
 
-  it('merges neighbours only while their clicks still fit one zoom', () => {
+  it('merges neighbours only while their clicks still fit one zoom, and moves along past that', () => {
     // two clicks 600 px apart, then a third 180 px past the right one: nearly the same spot, but too wide together
     const zooms = clickZooms([click(10, 100, 540), click(11, 700, 540), click(14.3, 880, 540)], whole, screen);
-    expect(zooms.map((zoom) => zoom.clicks)).toEqual([2]);
+    expect(zooms.map((zoom) => [zoom.clicks, zoom.moves?.length ?? 0])).toEqual([[3, 1]]);
   });
 
   it('keeps a zoom on the screen at its edge', () => {

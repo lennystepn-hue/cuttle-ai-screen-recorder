@@ -79,8 +79,9 @@ export class ScreenReader {
 
   /** Starts the helper; `ocr-missing` where it cannot run (not Windows, PowerShell refused, no OCR language). */
   static async start(): Promise<ScreenReader> {
-    if (process.platform !== 'win32') throw new CoreError('ocr-missing', "the screen's text is read with Windows' own OCR, which this system does not have");
+    // the switch first: it says the same on every platform (the checks and the tests set it)
     if (process.env.CUTTLE_OCR === 'off') throw new CoreError('ocr-missing', 'reading the screen is switched off (CUTTLE_OCR=off)');
+    if (process.platform !== 'win32') throw new CoreError('ocr-missing', "the screen's text is read with Windows' own OCR, which this system does not have");
     const encoded = Buffer.from(SCRIPT, 'utf16le').toString('base64');
     const child = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', encoded], { windowsHide: true });
     child.stdin.setDefaultEncoding('utf8');

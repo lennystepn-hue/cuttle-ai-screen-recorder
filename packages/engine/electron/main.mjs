@@ -19,6 +19,14 @@ const ALLOWED_PIXELS = 0;
 // The slowest scenario takes about 150 ms; a crashed or stuck page must not hang the run.
 const STEP_TIMEOUT_MS = 30_000;
 
+// Electron's macOS build has SwiftShader's library but gives no WebGL2 through it (tried with and
+// without the GPU sandbox and ANGLE's switches); the GPU would not match the goldens' rasterizing.
+// The browser goldens (pnpm test) cover the engine there.
+if (process.platform === 'darwin') {
+  console.log('engine:electron is skipped on macOS: Electron gives no WebGL2 through SwiftShader there; pnpm test checks the goldens in headless Chromium');
+  process.exit(0);
+}
+
 app.disableHardwareAcceleration();
 app.commandLine.appendSwitch('enable-unsafe-swiftshader');
 

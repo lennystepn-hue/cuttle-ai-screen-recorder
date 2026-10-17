@@ -1,13 +1,19 @@
 import { readFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
-import { newId, parseEventsJsonl, parseMarkersJson, parseProject, parseTakeJson, usedIds, type InputEvent, type Marker, type Rect } from '@cuttle/project';
+import { newId, parseEventsJsonl, parseProject, parseTakeJson, usedIds, type InputEvent, type Marker, type Rect, type TranscriptFile } from '@cuttle/project';
 import { clickZooms, sceneSpans, shownClicks } from '@cuttle/timeline';
 import { CoreError } from './errors';
 import { readProjectFile, writeProjectFile } from './project-file';
-import { analyseScreen, grabGray } from './suggest/media';
+import { analyseScreen, grabGray, grayFrames } from './suggest/media';
 import { suggestClips } from './suggest/plan';
 import { changedRegion, zoomRect } from './suggest/region';
+import { screenStretches, typingZooms, type ScreenChange } from './suggest/typing';
 import { takeClock, transcriptMarkers } from './suggest/transcript';
+import { readMarkers, speechActivity, withSpeechCuts, wordStretches } from './speech/apply';
+import type { RawCut } from './speech/edits';
+import { chooseModel } from './speech/models';
+import { readTranscript, transcribeTake } from './speech/transcribe';
+import { hasWhisper } from './speech/whisper';
 
 export interface SuggestOptions {
   /** The folder Claude Code ran in (true: the current folder), for a take without Claude markers. */
@@ -18,8 +24,19 @@ export interface SuggestOptions {
   zoom?: boolean;
   /** Zooms that follow the clicks (default true; `zoom: false` turns them off too). */
   clickZooms?: boolean;
+  /** Zooms that follow typing (default true; `zoom: false` turns them off too). */
+  typingZooms?: boolean;
+  /**
+   * The mic's speech (default true): it is kept and never sped up, and the transcript's filler words
+   * and pauses are cut where the picture rests.
+   */
+  speech?: boolean;
+  /** Transcribe the mic first when it has no transcript and a speech model is downloaded (default true). */
+  transcribe?: boolean;
   /** Status for people while it runs. */
   onStatus?: (text: string) => void;
+  /** The transcription's progress, 0 to 1. */
+  onProgress?: (fraction: number) => void;
 }
 
 type ClipScene = { type: 'clip'; id: string; label?: string; from: number; to: number; speed?: number };
@@ -30,6 +47,10 @@ export interface SuggestResult {
   scenes: (ClipScene | Record<string, unknown>)[];
   /** Every zoom of the file afterwards: those kept (made by hand) and the new automatic ones, by start. */
   zooms: SuggestedZoom[];
+  /** Every cut of the file afterwards, when the speech edits were made (a transcript was there). */
+  cuts?: RawCut[];
+  /** Where the speech came from: the transcript, the mic's loudness, or none; and the cuts made for it. */
+  speech: { from: 'transcript' | 'mic' | 'none'; fillers: number; pauses: number; retakes: number };
   notes: string[];
   /** Where the markers came from. */
   markers: { from: 'take' | 'transcript' | 'none'; count: number };
@@ -43,6 +64,11 @@ const COMPARE_WIDTH = 480;
 /** The answer is compared with the screen this long before it. */
 const ANSWER_LOOKBACK = 6;
 const ZOOM_SECONDS = 4;
+/** Typing is read at this rate and width: typed letters are a few pixels at this size. */
+const TYPING_RATE = 2;
+const TYPING_WIDTH = 640;
+/** A change of fewer pixels is noise. */
+const TYPING_MIN_PIXELS = 8;
 
 /**
  * Suggests scenes from the take (quiet start and end trimmed, idle stretches cut, waiting
@@ -55,13 +81,23 @@ const ZOOM_SECONDS = 4;
  * ids no kept item uses and labels from Claude's markers.
  */
 export async function suggestProject(projectDir: string, args: SuggestOptions = {}): Promise<SuggestResult> {
+  const notes: string[] = [];
+  if (args.speech !== false && args.transcribe !== false && !args.dryRun) await transcribeFirst(projectDir, args, notes);
   const file = await readProjectFile(projectDir);
   const { sources } = file.project;
   const screen = resolve(file.dir, sources.screen);
   args.onStatus?.('reading the screen recording …');
   const screenInfo = await analyseScreen(screen);
   if (screenInfo.duration <= 0) throw new CoreError('invalid-media', `${screen} has no video frames`);
-  const notes: string[] = [];
+  let transcript: TranscriptFile | undefined;
+  let speech: { spans: { from: number; to: number }[]; from: SuggestResult['speech']['from'] } = { spans: [], from: 'none' };
+  if (args.speech !== false) {
+    const read = await readTranscript(file.dir, sources.transcript);
+    if (read.note) notes.push(read.note);
+    transcript = read.transcript;
+    speech = await speechActivity(file.dir, sources, transcript);
+    if (speech.from === 'mic' && speech.spans.length > 0) notes.push(`speech (${speech.spans.length} stretches, from the mic's loudness) is kept and never sped up`);
+  }
   let events: InputEvent[] = [];
   if (sources.events) {
     const read = await readEvents(resolve(file.dir, sources.events));
@@ -70,7 +106,7 @@ export async function suggestProject(projectDir: string, args: SuggestOptions = 
   }
   let markers = sources.markers ? await readMarkers(resolve(file.dir, sources.markers)) : [];
   let from: SuggestResult['markers']['from'] = markers.length > 0 ? 'take' : 'none';
-  if (args.claude !== undefined && !markers.some((marker) => marker.kind !== 'manual')) {
+  if (args.claude !== undefined && !markers.some(fromClaude)) {
     const cwd = args.claude === true ? process.cwd() : resolve(args.claude);
     await screenStart(dirname(screen)); // refuses a take without take.json
     const clock = await takeClock(dirname(screen));
@@ -87,7 +123,7 @@ export async function suggestProject(projectDir: string, args: SuggestOptions = 
     }
   }
 
-  const suggestion = suggestClips({ duration: screenInfo.duration, events, markers, still: screenInfo.still });
+  const suggestion = suggestClips({ duration: screenInfo.duration, events, markers, still: screenInfo.still, speech: speech.spans });
   notes.push(...suggestion.notes);
   // Page captures and cards stay where they were: before the first clip (a title card) or after it.
   const previous = (file.raw.scenes as Record<string, unknown>[] | undefined) ?? [];
@@ -109,14 +145,28 @@ export async function suggestProject(projectDir: string, args: SuggestOptions = 
     notes.push(`kept ${before.length + after.length} still or card scene(s)${before.length > 0 ? `, ${before.length} before the clips` : ''}`);
   }
   const scenes = [...before, ...clips, ...after];
+  // The retakes, then the filler words and pauses inside the new 1× clips, where the picture rests.
+  let cuts: RawCut[] | undefined;
+  let made = { fillers: 0, pauses: 0, retakes: 0 };
+  const hasRetakes = markers.some((marker) => marker.kind === 'retake') || ((file.raw.cuts as RawCut[] | undefined) ?? []).some((cut) => cut.auto === 'retake');
+  // the mistake key's retakes are cut even with the speech left out (then 5 s back)
+  if (transcript || hasRetakes) {
+    // the pauses before a slip: between the words, or between the mic's loud stretches
+    const pauses = transcript ? wordStretches(transcript) : speech.from === 'mic' ? speech.spans : [];
+    const clips = suggestion.clips.map(({ from: start, to, speed }) => ({ from: start, to, speed }));
+    const result = withSpeechCuts(file.raw, file.project, { ...(transcript && { transcript }), markers, speech: pauses, still: screenInfo.still, events, clips }, taken);
+    notes.push(...result.notes);
+    cuts = result.cuts;
+    made = { fillers: result.fillers, pauses: result.pauses, retakes: result.retakes };
+  }
   // The zooms suggest made before are replaced; the others stay, and the new ones avoid them.
   const rawZooms = (file.raw.zooms as SuggestedZoom[] | undefined) ?? [];
-  const isOurs = (zoom: { auto?: string }) => zoom.auto === 'answer' || zoom.auto === 'click';
+  const isOurs = (zoom: { auto?: string }) => zoom.auto === 'answer' || zoom.auto === 'typing' || zoom.auto === 'click';
   const kept = rawZooms.filter((zoom) => !isOurs(zoom));
   const switchedOff = file.project.zooms.filter((zoom) => isOurs(zoom) && !zoom.enabled);
   if (kept.length > 0) notes.push(`kept ${kept.length} zoom${kept.length === 1 ? '' : 's'} made or changed by hand`);
   const zooms: SuggestedZoom[] = [];
-  const add = (zoom: SuggestedZoom & { auto: 'answer' | 'click' }) => zooms.push(staysOff(zoom, switchedOff) ? { ...zoom, enabled: false } : zoom);
+  const add = (zoom: SuggestedZoom & { auto: 'answer' | 'typing' | 'click' }) => zooms.push(staysOff(zoom, switchedOff) ? { ...zoom, enabled: false } : zoom);
   const first = suggestion.clips[0];
   const last = suggestion.clips.at(-1);
   const keptOverlaps = (at: number, end: number) => kept.some((zoom) => at < zoom.at + zoom.duration && zoom.at < end);
@@ -138,11 +188,26 @@ export async function suggestProject(projectDir: string, args: SuggestOptions = 
       notes.push(region ? 'no zoom: most of the screen changed with the answer (add one by hand)' : 'no zoom: nothing changed around the answer');
     }
   }
+  // where each clip piece starts in the output, with the cards and pages around the clips and the cuts counted
+  const parsed = parseProject({ ...file.raw, scenes, ...(cuts && { cuts }), zooms: [] });
+  const spans = parsed.ok ? sceneSpans(parsed.project.scenes, parsed.project.cuts) : [];
+  const shown = spans.flatMap((span) => (span.scene.type === 'clip' ? [{ from: span.scene.from, to: span.scene.to, speed: span.scene.speed, start: span.start }] : []));
+  if (args.zoom !== false && args.typingZooms !== false && file.project.autoEdits.typingZooms && events.some((event) => event.type === 'keys')) {
+    // where the text goes: the caret, else what the screen changes while keys are typed
+    const changes = await typingChanges(screen, screenStretches(events, shown, screenInfo), screenInfo);
+    const typed = typingZooms({ events, clips: shown, screen: screenInfo, avoid: [...kept, ...zooms], changes });
+    for (const zoom of typed) {
+      add({ id: newId('zooms', taken), label: 'Typing', at: zoom.at, duration: zoom.duration, rect: zoom.rect, ...(zoom.moves.length > 0 && { moves: zoom.moves }), auto: 'typing' });
+    }
+    if (typed.length > 0) {
+      const moves = typed.reduce((sum, zoom) => sum + zoom.moves.length, 0);
+      const caret = typed.filter((zoom) => zoom.follows === 'caret').length;
+      notes.push(
+        `${typed.length} zoom${typed.length === 1 ? '' : 's'} while typing, ${moves} move${moves === 1 ? '' : 's'} following the text (${caret === typed.length ? 'the caret' : caret === 0 ? 'what the screen changed' : `the caret in ${caret}, the screen in the others`})`,
+      );
+    }
+  }
   if (args.zoom !== false && args.clickZooms !== false && file.project.autoEdits.clickZooms && events.length > 0) {
-    // where each clip piece starts in the output, with the cards and pages around the clips and the cuts counted
-    const parsed = parseProject({ ...file.raw, scenes, zooms: [] });
-    const spans = parsed.ok ? sceneSpans(parsed.project.scenes, parsed.project.cuts) : [];
-    const shown = spans.flatMap((span) => (span.scene.type === 'clip' ? [{ from: span.scene.from, to: span.scene.to, speed: span.scene.speed, start: span.start }] : []));
     const there = [...kept, ...zooms];
     const followed = clickZooms(events, shown, screenInfo, there);
     // the clicks the zooms there do not show, less those the click zooms follow
@@ -159,18 +224,46 @@ export async function suggestProject(projectDir: string, args: SuggestOptions = 
   if (!args.dryRun) {
     file.raw.scenes = scenes;
     file.raw.zooms = allZooms;
+    if (cuts && (cuts.length > 0 || file.raw.cuts !== undefined)) file.raw.cuts = cuts;
     ({ backup } = await writeProjectFile(file, 'suggest', { backup: true }));
   }
   const result: SuggestResult = {
     project: file.path,
     scenes,
     zooms: allZooms,
+    ...(cuts && { cuts }),
+    speech: { from: speech.from, ...made },
     notes,
     markers: { from, count: markers.length },
     written: !args.dryRun,
     ...(backup && { backup }),
   };
   return result;
+}
+
+/**
+ * Transcribes the mic before the cut when the take has one, it has no transcript yet, and a speech
+ * model is downloaded; says why not otherwise. A failed transcription is noted, not thrown: the
+ * cut goes on without the speech edits.
+ */
+async function transcribeFirst(projectDir: string, args: SuggestOptions, notes: string[]): Promise<void> {
+  const { project } = await readProjectFile(projectDir);
+  if (project.sources.mic === undefined || project.sources.transcript !== undefined) return;
+  if ((await chooseModel()) === undefined) {
+    notes.push('the mic was not transcribed: no speech model is downloaded ("cuttle models download small"), so filler words and pauses stay');
+    return;
+  }
+  if (!(await hasWhisper())) {
+    notes.push('the mic was not transcribed: this ffmpeg has no whisper filter (update it: winget upgrade Gyan.FFmpeg, or on macOS brew upgrade ffmpeg)');
+    return;
+  }
+  try {
+    const done = await transcribeTake(projectDir, { ...(args.onStatus && { onStatus: args.onStatus }), ...(args.onProgress && { onProgress: args.onProgress }) });
+    notes.push(`transcribed the mic with the ${done.model} model: ${done.words} words (${done.language}), in ${done.transcript}`, ...done.notes);
+  } catch (error) {
+    if (error instanceof CoreError && (error.code === 'cancelled' || error.code === 'conflict' || error.code === 'ffmpeg-missing')) throw error;
+    notes.push(`the mic could not be transcribed: ${(error as Error).message.split('\n')[0]}`);
+  }
 }
 
 /** A zoom as written to cuttle.json (kept ones as they were, with whatever fields they had). */
@@ -204,15 +297,31 @@ function staysOff(zoom: SuggestedZoom, off: readonly { at: number; duration: num
   });
 }
 
+/** What the screen changed in each stretch, frame by frame (`TYPING_RATE` a second), in screen pixels. */
+async function typingChanges(screen: string, stretches: readonly { from: number; to: number }[], size: { width: number; height: number; duration: number }): Promise<ScreenChange[]> {
+  const height = 2 * Math.round((TYPING_WIDTH * size.height) / size.width / 2);
+  const scale = size.width / TYPING_WIDTH;
+  const changes: ScreenChange[] = [];
+  for (const stretch of stretches) {
+    const from = Math.max(0, stretch.from);
+    const to = Math.min(size.duration, stretch.to);
+    if (!(to > from)) continue;
+    const frames = await grayFrames(screen, from, to, TYPING_RATE, TYPING_WIDTH, height);
+    for (let k = 1; k < frames.length; k++) {
+      const box = changedRegion(frames[k - 1]!, frames[k]!, TYPING_MIN_PIXELS);
+      if (box) changes.push({ t: frames[k]!.t, box: { x: box.x * scale, y: box.y * scale, width: box.width * scale, height: box.height * scale } });
+    }
+  }
+  return changes;
+}
+
+/** A marker Claude Code's session made (not the person's own, nor the mistake key's). */
+const fromClaude = (marker: Marker) => marker.kind === 'prompt' || marker.kind === 'tool' || marker.kind === 'answer';
+
 /** The events of events.jsonl; undefined when the file cannot be read. */
 async function readEvents(path: string): Promise<InputEvent[] | undefined> {
   const text = await readFile(path, 'utf8').catch(() => undefined);
   return text === undefined ? undefined : parseEventsJsonl(text).events;
-}
-
-async function readMarkers(path: string): Promise<Marker[]> {
-  const parsed = parseMarkersJson(await readFile(path, 'utf8').catch(() => ''));
-  return parsed.ok ? parsed.markers : [];
 }
 
 /** The screen track's start (wall-clock seconds) from the take.json next to it. */

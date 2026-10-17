@@ -31,7 +31,9 @@ export interface EditorState {
   player: PlayerState;
   selection?: Selection;
   tool: Tool;
-  tab: 'selection' | 'auto' | 'look';
+  tab: 'selection' | 'auto' | 'transcript' | 'look';
+  /** Ctrl+F asked for the Transcript tab's find field (a new number each time). */
+  findRequest?: number;
   /** Snapping on the timeline (Ctrl while dragging turns it off for that drag). */
   snap: boolean;
   mediaState: MediaState;
@@ -259,11 +261,20 @@ export function closeExport(): void {
 }
 
 /** Exports what is saved: every edit is written first (the export reads the file). */
-export async function startExport(formats: ExportTarget[], encoder: 'auto' | 'hardware' | 'software'): Promise<void> {
+export async function startExport(
+  formats: ExportTarget[],
+  encoder: 'auto' | 'hardware' | 'software',
+  subtitles: { captions?: boolean; files?: ('srt' | 'vtt')[] } = {},
+): Promise<void> {
   store.set({ exporting: true, exportEnd: undefined, exportProgress: undefined, exportStarted: Date.now() });
   try {
     if (!(await flush())) throw new Error(`your latest edits are not saved (${store.get().doc?.problem ?? 'cuttle.json has a mistake'}), so the export would not have them. Save them first (Try again in the title bar).`);
-    await bridge.invoke('export:start', { formats, encoder });
+    await bridge.invoke('export:start', {
+      formats,
+      encoder,
+      ...(subtitles.captions !== undefined && { captions: subtitles.captions }),
+      ...(subtitles.files && subtitles.files.length > 0 && { subtitles: subtitles.files }),
+    });
   } catch (error) {
     store.set({ exporting: false, exportEnd: { state: 'failed', files: [], format: formats[0]!, code: 'internal', message: (error as Error).message } });
   }

@@ -8,6 +8,9 @@ import { recordCommand } from './commands/record';
 import { recoverCommand } from './commands/recover';
 import { renderCommand } from './commands/render';
 import { suggestCommand } from './commands/suggest';
+import { modelsDownloadCommand, modelsListCommand, modelsRemoveCommand } from './commands/models';
+import { transcribeCommand } from './commands/transcribe';
+import { transcriptCommand } from './commands/transcript';
 import { CliError, EXIT, toCliError } from './errors';
 import { createOutput, type Output, type Streams } from './output';
 
@@ -133,12 +136,42 @@ export async function runCli(argv: readonly string[], streams?: Streams): Promis
 
   program
     .command('suggest')
-    .description('propose scenes (quiet start and end trimmed, idle cut, waiting sped up), a zoom on the answer and zooms on clicks')
+    .description('propose scenes (quiet start and end trimmed, idle cut, waiting sped up), a zoom on the answer, zooms that follow typing and zooms on clicks')
     .option('--claude [cwd]', "read Claude Code's transcript for a take without Claude markers (default: here)")
-    .option('--no-zoom', 'no zooms (neither on the answer nor on clicks)')
+    .option('--no-zoom', 'no zooms (neither on the answer, nor on typing, nor on clicks)')
+    .option('--no-typing-zooms', 'no zooms that follow typing')
     .option('--no-click-zooms', 'no zooms on clicks (the answer zoom stays)')
+    .option('--no-speech', 'leave the speech out: no filler, pause or spoken retake cuts, and speech does not keep a stretch')
+    .option('--no-transcribe', 'do not transcribe the mic first (when it has no transcript and a speech model is there)')
     .option('--dry-run', 'print the suggestion, leave cuttle.json as it is')
-    .action(action((output, project, options: { claude?: string | true; zoom: boolean; clickZooms: boolean; dryRun?: boolean }) => suggestCommand(project, options, output)));
+    .action(
+      action((output, project, options: { claude?: string | true; zoom: boolean; typingZooms: boolean; clickZooms: boolean; speech: boolean; transcribe: boolean; dryRun?: boolean }) =>
+        suggestCommand(project, options, output),
+      ),
+    );
+
+  program
+    .command('transcribe')
+    .description("what the mic said, word by word, into the take's transcript.json (a speech model is needed: cuttle models)")
+    .option('--model <name>', 'base, small or large-v3-turbo-q5_0 (default: small when downloaded)')
+    .option('--language <code>', 'auto, de, en, … (default: auto)')
+    .action(
+      action((output, project, options: { model?: string; language?: string }) => withSignal(output, (signal) => transcribeCommand(project, options, output, signal))),
+    );
+
+  const models = program.command('models').description('the speech models for transcribe: list, download or remove them');
+  models
+    .command('list', { isDefault: true })
+    .description('the models, and which are downloaded')
+    .action(action((output) => modelsListCommand(output)));
+  models
+    .command('download <name>')
+    .description('download a model once (base 148 MB, small 488 MB, large-v3-turbo-q5_0 574 MB), checked by its checksum')
+    .action(action((output, _project, name: string) => withSignal(output, (signal) => modelsDownloadCommand(name, output, signal))));
+  models
+    .command('remove <name>')
+    .description('remove a downloaded model')
+    .action(action((output, _project, name: string) => modelsRemoveCommand(name, output)));
 
   program
     .command('preview')
@@ -183,11 +216,22 @@ export async function runCli(argv: readonly string[], streams?: Streams): Promis
     .option('--format <format>', '16:9, 1:1 or 9:16 (default: the project output)')
     .option('-o, --out <file>', 'output file (default: out/<format>.mp4 in the project)')
     .addOption(new Option('--encoder <encoder>', 'H.264 encoder').choices(['auto', 'hardware', 'software']))
+    .option('--no-captions', 'no captions burned in, whatever the project says')
+    .option('--srt', 'also write the captions as <name>.srt next to the video')
+    .option('--vtt', 'also write the captions as <name>.vtt next to the video')
     .action(
-      action((output, project, options: { format?: string; out?: string; encoder?: string }) =>
+      action((output, project, options: { format?: string; out?: string; encoder?: string; captions: boolean; srt?: boolean; vtt?: boolean }) =>
         withSignal(output, (signal) => renderCommand(project, options, output, signal)),
       ),
     );
+
+  program
+    .command('transcript')
+    .description('what the mic said (cuttle transcribe), with your fixes: as JSON, or as captions on the video\'s time')
+    .option('--srt', 'the captions as SubRip')
+    .option('--vtt', 'the captions as WebVTT')
+    .option('--text', 'the words as plain text')
+    .action(action((output, project, options: { srt?: boolean; vtt?: boolean; text?: boolean }) => transcriptCommand(project, options, output)));
 
   program
     .command('recover <take>')

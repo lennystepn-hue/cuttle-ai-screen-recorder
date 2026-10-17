@@ -1,7 +1,7 @@
 // The project's media in the editor, read through the cuttle-media protocol (Range requests).
 import { ALL_FORMATS, Input, UrlSource, type InputAudioTrack, type InputVideoTrack, type VideoSinkDecoderOptions } from 'mediabunny';
 import { createCursorTrack, type CursorTrack } from '@cuttle/timeline';
-import { parseEventsJsonl, parseMarkersJson, parseProject, type CuttleProject, type InputEvent, type Marker } from '@cuttle/project';
+import { parseEventsJsonl, parseMarkersJson, parseProject, parseTranscriptJson, type CuttleProject, type InputEvent, type Marker, type TranscriptFile } from '@cuttle/project';
 import { plainIssue } from '../../shared/format';
 import { MEDIA_ORIGIN, type ProjectInfo } from '../../shared/ipc';
 
@@ -150,10 +150,15 @@ export interface EditorMedia {
   screen: VideoSource;
   webcam?: VideoSource & { offset: number };
   mic?: AudioSource;
+  /** The file `mic` was opened from: the mic, or its cleaned-up copy (`look.audio.cleanup`). */
+  micPath?: string;
   events: InputEvent[];
   /** The pointer's track from the input events (drawn when the look's cursor is on). */
   cursor?: CursorTrack;
   markers: Marker[];
+  /** What the mic said (`sources.transcript`), and the path it was read from: it can be linked after the editor opened. */
+  transcript?: TranscriptFile;
+  transcriptPath?: string;
   /** Still images by their project path. */
   stills: Map<string, ImageBitmap>;
   backgroundImage?: ImageBitmap;
@@ -211,6 +216,23 @@ export async function openProjectMedia(info: ProjectInfo, project: CuttleProject
 export async function ensureMedia(media: EditorMedia, project: CuttleProject): Promise<boolean> {
   const { sources, look } = project;
   let added = false;
+  if (sources.transcript !== media.transcriptPath) {
+    // the speech edits link the transcript once it is there; Undo can take it away again
+    media.transcriptPath = sources.transcript;
+    delete media.transcript;
+    if (sources.transcript) {
+      const path = sources.transcript;
+      const text = await optional(media, path, async () => {
+        const found = await fetchText(path);
+        if (found === undefined) throw new MediaError(`${path} cannot be read: no subtitles.`);
+        return found;
+      });
+      const parsed = text === undefined ? undefined : parseTranscriptJson(text);
+      if (parsed?.ok) media.transcript = parsed.transcript;
+      else if (parsed) media.warnings.push(`${path} is invalid: no subtitles.`);
+    }
+    added = true;
+  }
   for (const scene of project.scenes) {
     if (scene.type !== 'still' || media.stills.has(scene.image)) continue;
     media.stills.set(scene.image, (await optional(media, scene.image, () => loadImage(scene.image, MAX_IMAGE, 'The image of a page'))) ?? (await placeholder(scene.image)));
@@ -229,14 +251,17 @@ export async function ensureMedia(media: EditorMedia, project: CuttleProject): P
       added = true;
     }
   }
-  if (sources.mic && look.audio.enabled && !media.mic) {
-    const mic = await optional(media, sources.mic, async () => {
-      const audio = await openAudio(sources.mic!, media.offsets.mic);
+  // the cleaned-up mic plays in the mic's place when the look asks for it and there is one
+  const micPath = sources.mic && (look.audio.cleanup && sources.cleanMic ? sources.cleanMic : sources.mic);
+  if (micPath && look.audio.enabled && media.micPath !== micPath) {
+    const mic = await optional(media, micPath, async () => {
+      const audio = await openAudio(micPath, media.offsets.mic);
       if (audio) return audio;
-      throw (await present(sources.mic!)) ? new MediaError(`The mic recording (${sources.mic}) cannot be played.`) : missing(sources.mic!);
+      throw (await present(micPath)) ? new MediaError(`The mic recording (${micPath}) cannot be played.`) : missing(micPath);
     });
     if (mic) {
       media.mic = mic;
+      media.micPath = micPath;
       added = true;
     }
   }

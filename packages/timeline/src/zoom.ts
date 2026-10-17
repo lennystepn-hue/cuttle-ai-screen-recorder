@@ -1,8 +1,10 @@
 import type { Rect, Zoom } from '@cuttle/project';
-import { clamp, lerpRect } from './easing';
+import { clamp, ease, lerpRect } from './easing';
 
 /** Length of a zoom's ramps in output seconds (see `rampAmount`). */
 export const ZOOM_RAMP_SECONDS = 0.6;
+/** How long a zoom that follows takes from one rect of its path to the next: output seconds, centred on the move. */
+export const ZOOM_MOVE_SECONDS = 0.6;
 
 /** Grows `rect` around its centre to the aspect ratio of `full`, shrinks it to fit inside `full`, then shifts it inside `full`. Source pixels. */
 export function fitZoomRect(rect: Rect, full: Rect): Rect {
@@ -23,16 +25,32 @@ export function fitZoomRect(rect: Rect, full: Rect): Rect {
 }
 
 /**
- * Crop rect at `sourceTime` (source seconds): the enabled zooms whose range contains it fold in
- * `at` order, each `amountOf(zoom)` (0 to 1, its ramp) of the way from the rect before it to its
- * own. `full` is the screen rect in source pixels; the result is a new array.
+ * Where a zoom aims at `sourceTime` (source seconds): its `rect`, then each move's rect in turn,
+ * eased over `ZOOM_MOVE_SECONDS` output seconds centred on the move (`speed`: the clip's, which
+ * turns them into source seconds). Moves closer than that blend into one another without a jump.
  */
-export function zoomRectAt(zooms: readonly Zoom[], sourceTime: number, amountOf: (zoom: Zoom) => number, full: Rect): Rect {
+export function zoomTargetAt(zoom: Pick<Zoom, 'rect' | 'moves'>, sourceTime: number, speed = 1): Rect {
+  const half = (ZOOM_MOVE_SECONDS / 2) * speed;
+  let rect = zoom.rect;
+  for (const move of zoom.moves ?? []) {
+    if (sourceTime <= move.at - half) break;
+    rect = lerpRect(rect, move.rect, ease('smooth', (sourceTime - (move.at - half)) / (2 * half)));
+  }
+  return rect;
+}
+
+/**
+ * Crop rect at `sourceTime` (source seconds): the enabled zooms whose range contains it fold in
+ * `at` order, each `amountOf(zoom)` (0 to 1, its ramp) of the way from the rect before it to where
+ * it aims then. `full` is the screen rect in source pixels, `speed` the clip's; the result is a
+ * new array.
+ */
+export function zoomRectAt(zooms: readonly Zoom[], sourceTime: number, amountOf: (zoom: Zoom) => number, full: Rect, speed = 1): Rect {
   const active = zooms
     .filter((zoom) => zoom.enabled && sourceTime >= zoom.at && sourceTime < zoom.at + zoom.duration)
     .sort((a, b) => a.at - b.at);
 
   let rect: Rect = [...full];
-  for (const zoom of active) rect = lerpRect(rect, fitZoomRect(zoom.rect, full), amountOf(zoom));
+  for (const zoom of active) rect = lerpRect(rect, fitZoomRect(zoomTargetAt(zoom, sourceTime, speed), full), amountOf(zoom));
   return rect;
 }

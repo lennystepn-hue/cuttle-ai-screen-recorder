@@ -96,6 +96,8 @@ function TitleBar() {
   const media = useStore(store, (state) => state.media);
   const status = useStore(store, (state) => state.status);
   useStore(store, (state) => state.doc?.project);
+  // the player takes a new version a moment after the document: its length comes with its state
+  useStore(store, (state) => state.player.duration);
   const duration = currentPlayer()?.duration ?? 0;
   const recorded = media ? media.screen.end - media.screen.start : 0;
   return (
@@ -113,9 +115,14 @@ function TitleBar() {
       {phase === 'ready' && <RestartChip />}
       <div className="grow" />
       {status?.state === 'failed' ? (
-        <button className="chip-status warn" onClick={() => void bridge.invoke('project:cut')} title={`${status.text}. Click to try again.`} data-testid="project-status">
+        <button
+          className="chip-status warn"
+          onClick={() => void bridge.invoke(status.retry === 'speech' ? 'project:transcribe' : 'project:cut')}
+          title={`${status.text}. Click to try again.`}
+          data-testid="project-status"
+        >
           <WarningIcon size={14} />
-          <span className="chip-text">The take could not be cut</span> · Try again
+          <span className="chip-text">{status.retry === 'speech' ? 'The speech could not be transcribed' : 'The take could not be cut'}</span> · Try again
         </button>
       ) : (
         status && (
@@ -686,6 +693,7 @@ function Transport() {
   const format = useStore(store, (state) => state.format);
   const output = useStore(store, (state) => state.doc?.project.output);
   const own = ownFormat(output);
+  useStore(store, (state) => state.player.duration);
   const duration = currentPlayer()?.duration ?? 0;
   return (
     <div className="transport">
@@ -717,7 +725,7 @@ const REPEATING = new Set(['ArrowLeft', 'ArrowRight']);
 /**
  * The editor's keys (the command menu lists them): Space (K pauses, L plays, J a second back),
  * arrows (Shift: a second), Home/End, S split, Delete, Ctrl+D, R/Shift+R speed, V/Z/M/T tools, Shift+Z
- * fit, Ctrl+Z/Ctrl+Shift+Z/Ctrl+Y, Ctrl+K or ? the menu, Ctrl+E export, Esc back out. Typing in a
+ * fit, Ctrl+Z/Ctrl+Shift+Z/Ctrl+Y, Ctrl+K or ? the menu, Ctrl+E export, Ctrl+F find in the transcript, Esc back out. Typing in a
  * field, and Space or Enter on a focused button outside the timeline, keep their own meaning.
  */
 function useShortcuts(): void {
@@ -732,6 +740,12 @@ function useShortcuts(): void {
       if (command && key === 'k' && !menuOpen) {
         event.preventDefault();
         if (!event.repeat) openMenu();
+        return;
+      }
+      // Ctrl+F finds a word in the transcript, from anywhere
+      if (command && key === 'f' && !menuOpen) {
+        event.preventDefault();
+        store.set({ tab: 'transcript', findRequest: (store.get().findRequest ?? 0) + 1 });
         return;
       }
       if (menuOpen || target?.closest('input, select, textarea, [contenteditable]:not([contenteditable="false"])')) return;

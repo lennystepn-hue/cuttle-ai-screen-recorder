@@ -1,3 +1,5 @@
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { playwright } from '@vitest/browser-playwright';
 import { defineConfig } from 'vitest/config';
 import { matchGolden } from './tools/vitest/golden-command.ts';
@@ -12,6 +14,8 @@ export default defineConfig({
           environment: 'node',
           include: ['packages/*/test/**/*.test.ts', 'apps/*/test/**/*.test.ts', 'skill/test/**/*.test.ts'],
           exclude: ['packages/*/test/**/*.browser.test.ts'],
+          // No speech model unless a test asks for one: a take with a mic is never transcribed by chance.
+          env: { CUTTLE_MODELS_DIR: join(tmpdir(), 'cuttle-test-no-models') },
         },
       },
       {

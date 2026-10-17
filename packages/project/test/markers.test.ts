@@ -8,6 +8,7 @@ const file = {
     { t: 2.25, kind: 'tool', label: 'Bash' },
     { t: 7, kind: 'answer' },
     { t: 8, kind: 'manual', label: 'nice bit' },
+    { t: 9.5, kind: 'retake' },
   ],
 };
 

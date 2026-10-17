@@ -251,6 +251,98 @@ function takeFixture(projectDir: string, take = 'takes/1'): void {
   );
 }
 
+describe('cuttle models and transcribe', () => {
+  it('lists the speech models, none downloaded here', async () => {
+    const { code, json } = await cli('--json', 'models');
+    expect(code).toBe(0);
+    const list = json as { dir: string; models: { name: string; installed: boolean; default: boolean; bytes: number }[] };
+    // the tests' own empty folder (vitest.config.ts), never the user's
+    expect(list.dir).toBe(process.env.CUTTLE_MODELS_DIR);
+    expect(list.models.map((model) => [model.name, model.installed, model.default, Math.round(model.bytes / 1e6)])).toEqual([
+      ['base', false, false, 148],
+      ['small', false, true, 488],
+      ['large-v3-turbo-q5_0', false, false, 574],
+    ]);
+    const text = await cli('models');
+    expect(text.stdout).toContain('download one: cuttle models download small');
+    expect((await cli('--json', 'models', 'download', 'huge')).json).toEqual({
+      error: { code: 'usage', message: 'unknown speech model "huge" (one of base, small, large-v3-turbo-q5_0)' },
+    });
+  });
+
+  it('says what transcribe needs (a mic, then a model), and suggest goes on without it', async () => {
+    const dir = temp();
+    takeFixture(dir);
+    const noMic = await cli('--json', '-C', dir, 'transcribe');
+    expect(noMic.code).toBe(1);
+    expect(noMic.json).toEqual({ error: { code: 'usage', message: 'the take has no mic track: record with --mic to transcribe what was said' } });
+    const result = spawnSync('ffmpeg', ['-hide_banner', '-v', 'error', '-f', 'lavfi', '-i', 'sine=duration=20', '-c:a', 'aac', '-y', join(dir, 'takes', '1', 'mic.m4a')]);
+    if (result.status !== 0) throw new Error(String(result.stderr));
+    const path = join(dir, 'cuttle.json');
+    const project = JSON.parse(readFileSync(path, 'utf8'));
+    writeFileSync(path, JSON.stringify({ ...project, sources: { ...project.sources, mic: 'takes/1/mic.m4a' } }));
+    const noModel = await cli('--json', '-C', dir, 'transcribe', '--language', 'de');
+    expect(noModel.code).toBe(1);
+    expect(noModel.json).toEqual({ error: { code: 'model-missing', message: 'no speech model is downloaded: run "cuttle models download small" (488 MB, once)' } });
+    expect((await cli('--json', '-C', dir, 'transcribe', '--language', 'Deutsch')).json).toEqual({
+      error: { code: 'usage', message: '--language takes "auto" or a language code such as "de" or "en", not "Deutsch"' },
+    });
+    const suggested = await cli('--json', '-C', dir, 'suggest');
+    expect(suggested.code).toBe(0);
+    const { notes, speech } = suggested.json as { notes: string[]; speech: unknown };
+    expect(notes[0]).toBe('the mic was not transcribed: no speech model is downloaded ("cuttle models download small"), so filler words and pauses stay');
+    // a steady tone is not speech
+    expect(speech).toEqual({ from: 'mic', fillers: 0, pauses: 0, retakes: 0 });
+    // --no-speech leaves the mic out altogether
+    const without = await cli('--json', '-C', dir, 'suggest', '--dry-run', '--no-speech');
+    expect((without.json as { notes: string[]; speech: unknown }).speech).toEqual({ from: 'none', fillers: 0, pauses: 0, retakes: 0 });
+  }, 30_000);
+});
+
+describe('cuttle transcript', () => {
+  it('gives the words with the fixes, and the captions on the video\'s time as JSON, SRT, VTT or text', async () => {
+    const dir = temp();
+    takeFixture(dir);
+    expect((await cli('--json', '-C', dir, 'transcript')).json).toEqual({ error: { code: 'usage', message: 'the project has no transcript: run "cuttle transcribe" first' } });
+    writeFileSync(
+      join(dir, 'takes', '1', 'transcript.json'),
+      JSON.stringify({ version: 1, language: 'de', model: 'small', words: [{ t: 1, end: 1.4, text: 'Das' }, { t: 1.4, end: 1.8, text: 'ist' }, { t: 1.8, end: 2.4, text: 'Holofisch.' }, { t: 6, end: 6.5, text: 'Weg' }] }),
+    );
+    const path = join(dir, 'cuttle.json');
+    const raw = JSON.parse(readFileSync(path, 'utf8'));
+    writeFileSync(
+      path,
+      JSON.stringify({
+        ...raw,
+        sources: { ...raw.sources, transcript: 'takes/1/transcript.json' },
+        // the second clip starts at 1 s of the video; "Weg" lies in the cut
+        scenes: [{ type: 'clip', from: 0.5, to: 3 }, { type: 'clip', from: 5, to: 8 }],
+        cuts: [{ from: 5.9, to: 6.6 }],
+        captions: { fixes: [{ at: 1.8, end: 2.4, text: 'Holofish.' }] },
+      }),
+    );
+    const { code, json } = await cli('--json', '-C', dir, 'transcript');
+    expect(code).toBe(0);
+    expect(json).toEqual({
+      transcript: 'takes/1/transcript.json',
+      language: 'de',
+      model: 'small',
+      words: [
+        { t: 1, end: 1.4, text: 'Das' },
+        { t: 1.4, end: 1.8, text: 'ist' },
+        { t: 1.8, end: 2.4, text: 'Holofish.' },
+        { t: 6, end: 6.5, text: 'Weg' },
+      ],
+      cues: [{ start: 0.5, end: 2.5, text: 'Das ist Holofish.' }],
+    });
+    expect((await cli('-C', dir, 'transcript', '--srt')).stdout).toBe('1\n00:00:00,500 --> 00:00:02,500\nDas ist Holofish.\n');
+    expect((await cli('-C', dir, 'transcript', '--vtt')).stdout).toBe('WEBVTT\n\n00:00:00.500 --> 00:00:02.500\nDas ist Holofish.\n');
+    expect((await cli('-C', dir, 'transcript', '--text')).stdout).toBe('Das ist Holofish. Weg\n');
+    expect((await cli('--json', '-C', dir, 'transcript', '--srt')).json).toEqual({ format: 'srt', content: '1\n00:00:00,500 --> 00:00:02,500\nDas ist Holofish.\n' });
+    expect((await cli('--json', '-C', dir, 'transcript', '--srt', '--vtt')).json).toEqual({ error: { code: 'usage', message: 'choose one of --srt, --vtt and --text' } });
+  });
+});
+
 describe('cuttle suggest and recover', () => {
   let fixture: string;
   beforeAll(() => {
@@ -301,6 +393,12 @@ describe('cuttle suggest and recover', () => {
             "type": "clip",
           },
         ],
+        "speech": {
+          "fillers": 0,
+          "from": "none",
+          "pauses": 0,
+          "retakes": 0,
+        },
         "written": true,
         "zooms": [
           {
@@ -334,13 +432,17 @@ describe('cuttle suggest and recover', () => {
       { t: 6.6, type: 'click', x: 430, y: 320, button: 'left' },
     ].sort((a, b) => a.t - b.t);
     writeFileSync(join(dir, 'takes/1/events.jsonl'), events.map((event) => `${JSON.stringify(event)}\n`).join(''));
-    const { code, json } = await cli('--json', '-C', dir, 'suggest', '--dry-run');
+    type Zooms = { zooms: { label: string; at: number; duration: number; rect: number[] }[]; notes: string[] };
+    // the typing comes first: its zoom follows what the screen changes, over the clicks
+    const typed = (await cli('--json', '-C', dir, 'suggest', '--dry-run')).json as Zooms;
+    expect(typed.zooms.map((zoom) => zoom.label)).toEqual(['Typing', 'Answer']);
+    const { code, json } = await cli('--json', '-C', dir, 'suggest', '--dry-run', '--no-typing-zooms');
     expect(code).toBe(0);
-    const zooms = (json as { zooms: { label: string; at: number; duration: number; rect: number[] }[] }).zooms;
+    const zooms = (json as Zooms).zooms;
     expect(zooms.find((zoom) => zoom.label === 'Clicks')).toMatchObject({ at: 5.3, duration: 2.5, rect: [127, 148, 576, 324] });
-    expect((json as { notes: string[] }).notes).toContain('1 zoom on clicks');
-    const without = await cli('--json', '-C', dir, 'suggest', '--dry-run', '--no-click-zooms');
-    expect((without.json as { zooms: { label: string }[] }).zooms.map((zoom) => zoom.label)).not.toContain('Clicks');
+    expect((json as Zooms).notes).toContain('1 zoom on clicks');
+    const without = await cli('--json', '-C', dir, 'suggest', '--dry-run', '--no-typing-zooms', '--no-click-zooms');
+    expect((without.json as Zooms).zooms.map((zoom) => zoom.label)).not.toContain('Clicks');
   }, 30_000);
 
   it('replaces only the zooms it made: hand-made ones stay, one switched off stays off, a kind switched off is not made', async () => {
@@ -352,7 +454,8 @@ describe('cuttle suggest and recover', () => {
       { t: 6.6, type: 'click', x: 430, y: 320, button: 'left' },
     ].sort((a, b) => a.t - b.t);
     writeFileSync(join(dir, 'takes/1/events.jsonl'), events.map((event) => `${JSON.stringify(event)}\n`).join(''));
-    const first = await cli('--json', '-C', dir, 'suggest');
+    // the click zooms' rules here: the typing over the clicks gets no zoom
+    const first = await cli('--json', '-C', dir, 'suggest', '--no-typing-zooms');
     expect(first.code).toBe(0);
     type Zoom = { id: string; label?: string; at: number; duration: number; rect: number[]; auto?: string; enabled?: boolean };
     const made = (first.json as { zooms: Zoom[] }).zooms;
@@ -366,7 +469,7 @@ describe('cuttle suggest and recover', () => {
       { id: 'z9', label: 'Mine', at: answer!.at, duration: 2, rect: [0, 0, 800, 450] },
     ];
     writeFileSync(join(dir, 'cuttle.json'), JSON.stringify(file, null, 2));
-    const again = (await cli('--json', '-C', dir, 'suggest')).json as { zooms: Zoom[]; notes: string[] };
+    const again = (await cli('--json', '-C', dir, 'suggest', '--no-typing-zooms')).json as { zooms: Zoom[]; notes: string[] };
     expect(again.zooms.find((zoom) => zoom.id === 'z9')).toMatchObject({ label: 'Mine', at: answer!.at });
     expect(again.zooms.find((zoom) => zoom.auto === 'click')).toMatchObject({ enabled: false });
     expect(again.notes).toContain('kept 1 zoom made or changed by hand');
@@ -376,8 +479,49 @@ describe('cuttle suggest and recover', () => {
     // click zooms switched off as a kind: none made
     const off = JSON.parse(readFileSync(join(dir, 'cuttle.json'), 'utf8'));
     writeFileSync(join(dir, 'cuttle.json'), JSON.stringify({ ...off, autoEdits: { clickZooms: false } }, null, 2));
-    const none = (await cli('--json', '-C', dir, 'suggest', '--dry-run')).json as { zooms: Zoom[] };
+    const none = (await cli('--json', '-C', dir, 'suggest', '--dry-run', '--no-typing-zooms')).json as { zooms: Zoom[] };
     expect(none.zooms.map((zoom) => zoom.auto)).not.toContain('click');
+  }, 60_000);
+
+  it('zooms on typing and follows the text along the line, from the screen alone or from the caret', async () => {
+    const dir = temp();
+    mkdirSync(join(dir, 'takes', '1'), { recursive: true });
+    // a 1280×720 screen where 50 letters are typed on a line at y 400, from x 80 to 1062, between 2 and 9.35 s
+    const letters = Array.from({ length: 50 }, (_, k) => `drawbox=x=${80 + 20 * k}:y=400:w=14:h=22:color=white:t=fill:enable='gte(t,${(2 + 0.15 * k).toFixed(2)})'`);
+    const made = spawnSync('ffmpeg', ['-hide_banner', '-v', 'error', '-f', 'lavfi', '-i', `color=c=0x202020:s=1280x720:r=30:d=14,${letters.join(',')}`, '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', '-y', join(dir, 'takes', '1', 'screen.mp4')]);
+    expect(made.status, String(made.stderr)).toBe(0);
+    const keys = Array.from({ length: 15 }, (_, k) => ({ t: 2 + 0.5 * k, type: 'keys', count: 3 }));
+    const write = (events: unknown[]) => writeFileSync(join(dir, 'takes', '1', 'events.jsonl'), events.map((event) => `${JSON.stringify(event)}\n`).join(''));
+    write(keys);
+    writeFileSync(join(dir, 'takes', '1', 'take.json'), JSON.stringify({ version: 1, tracks: { screen: { file: 'screen.mp4', start: 1000 } } }));
+    writeFileSync(join(dir, 'cuttle.json'), JSON.stringify({ version: 1, sources: { screen: 'takes/1/screen.mp4', events: 'takes/1/events.jsonl' } }));
+    type Rect = [number, number, number, number];
+    type Result = { zooms: { label: string; at: number; duration: number; rect: Rect; moves?: { at: number; rect: Rect }[]; auto: string }[]; notes: string[] };
+    const fromScreen = (await cli('--json', '-C', dir, 'suggest', '--dry-run')).json as Result;
+    const typing = fromScreen.zooms.find((zoom) => zoom.auto === 'typing')!;
+    // the quiet start is trimmed (the clip starts at 1.2 s), and no zoom starts within 1 s of a clip's edge
+    expect(typing).toMatchObject({ label: 'Typing', at: 2.2 });
+    // the view (576 px wide) starts on the first letters and moves right along the line, with the letters in it
+    const [x, y, width, height] = typing.rect;
+    expect(x).toBeLessThanOrEqual(80);
+    expect(y < 400 && y + height > 422 && width === 576).toBe(true);
+    const moves = typing.moves ?? [];
+    expect(moves.length).toBeGreaterThanOrEqual(2);
+    for (const [i, move] of moves.entries()) {
+      expect(move.rect[0]).toBeGreaterThan(i === 0 ? x : moves[i - 1]!.rect[0]);
+      // the letter typed then lies in the view
+      const letter = 80 + 20 * Math.floor((move.at - 2) / 0.15);
+      expect(letter >= move.rect[0] && letter < move.rect[0] + width).toBe(true);
+    }
+    expect(fromScreen.notes.some((note) => /^1 zoom while typing, \d+ moves following the text \(what the screen changed\)$/.test(note))).toBe(true);
+    // with the caret the zoom follows it instead (here it says the letters are 100 px lower)
+    write([...keys, ...Array.from({ length: 25 }, (_, k) => ({ t: 2.1 + 0.3 * k, type: 'caret', rect: [80 + 40 * k, 500, 2, 22] }))].sort((a, b) => a.t - b.t));
+    const fromCaret = (await cli('--json', '-C', dir, 'suggest', '--dry-run')).json as Result;
+    const following = fromCaret.zooms.find((zoom) => zoom.auto === 'typing')!;
+    expect(following.rect[1] + following.rect[3] / 2).toBeCloseTo(511, 0);
+    expect(fromCaret.notes.some((note) => note.endsWith('following the text (the caret)'))).toBe(true);
+    const none = (await cli('--json', '-C', dir, 'suggest', '--dry-run', '--no-typing-zooms')).json as Result;
+    expect(none.zooms.filter((zoom) => zoom.auto === 'typing')).toEqual([]);
   }, 60_000);
 
   it('leaves cuttle.json alone with --dry-run', async () => {

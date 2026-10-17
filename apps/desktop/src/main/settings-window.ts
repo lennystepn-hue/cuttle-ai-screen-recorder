@@ -12,6 +12,7 @@ import { bindRequests, send } from './ipc';
 import { APP_ORIGIN, assetPath, bundlePath, serveApp } from './protocols';
 import { keyOf, listCamerasAndMics, recordingRuns } from './recording';
 import { loadSettings, sameDir, settingsView, updateSettings } from './settings';
+import { cancelSpeechDownload, downloadSpeechModel, onSpeechStatus, removeSpeechModel, speechStatus } from './speech';
 import { installTools, skillFolder, toolsStatus } from './tools';
 import { bringToFront, guard, lockDown, openEditorOrSay, showPill, titleBar, webPreferences } from './windows';
 
@@ -86,6 +87,8 @@ export async function openSettings(options: { welcome?: boolean } = {}): Promise
         if (change.mic !== undefined) settings.record.mic = change.mic ?? undefined;
         if (change.launchAtLogin !== undefined) settings.launchAtLogin = change.launchAtLogin;
         if (change.motion !== undefined) settings.motion = change.motion;
+        if (change.speechModel !== undefined) settings.speech.model = change.speechModel;
+        if (change.speechLanguage !== undefined) settings.speech.language = change.speechLanguage;
       });
       if (change.launchAtLogin !== undefined) applyLoginItem(change.launchAtLogin);
       if (change.motion !== undefined) broadcastMotion(change.motion);
@@ -136,7 +139,16 @@ export async function openSettings(options: { welcome?: boolean } = {}): Promise
       if ('dir' in answer) changed(await viewNow());
       return answer;
     },
+    'speech:status': () => speechStatus(),
+    'speech:download': (name) => downloadSpeechModel(name),
+    'speech:cancel': () => cancelSpeechDownload(),
+    'speech:remove': (name) => removeSpeechModel(name),
   });
+  // a download goes on while the window is closed; an open one follows it
+  const offSpeech = onSpeechStatus((status) => {
+    if (!contents.isDestroyed()) send(contents, 'speech:status', status);
+  });
+  window.on('closed', offSpeech);
   // the first run counts as seen once it was closed, however
   if (options.welcome) {
     window.on('closed', () => {

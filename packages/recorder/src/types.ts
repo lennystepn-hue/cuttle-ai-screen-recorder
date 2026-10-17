@@ -137,6 +137,8 @@ export interface Recording {
   stop(): Promise<Take>;
   /** Adds a manual marker at the current time (while paused: where the take paused). */
   marker(label?: string): void;
+  /** Marks a slip (the mistake key): Cuttle cuts back to the pause before it. */
+  retake(): void;
   /**
    * Pauses the take: every track stops (each file is complete) and nothing is captured or logged
    * until `resume()`. The take's time stands still meanwhile; the stop joins the pieces. Events:
@@ -156,6 +158,8 @@ export type RawInput =
   | { type: 'click'; time: number; x: number; y: number; button: 'left' | 'right' | 'middle' }
   | { type: 'scroll'; time: number; x: number; y: number; dx: number; dy: number }
   | { type: 'shape'; time: number; shape: CursorShape }
-  | { type: 'key'; time: number };
+  | { type: 'key'; time: number }
+  /** The system caret (where text is typed), where the app keeps one. */
+  | { type: 'caret'; time: number; x: number; y: number; width: number; height: number };
 
-export type HotkeyAction = 'stop' | 'marker' | 'pause';
+export type HotkeyAction = 'stop' | 'marker' | 'pause' | 'retake';

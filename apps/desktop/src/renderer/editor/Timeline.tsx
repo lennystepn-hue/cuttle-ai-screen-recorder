@@ -8,7 +8,7 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import { createPortal } from 'react-dom';
 import type { CuttleProject, MarkerKind } from '@cuttle/project';
-import { sceneSpans } from '@cuttle/timeline';
+import { applyCaptionFixes, captionCues, captionWords, sceneSpans } from '@cuttle/timeline';
 import type { Command, OverlayList } from '../../shared/document';
 import { dragRange, overlayRange, rangeFields, snapTime } from '../../shared/edit';
 import { formatTime } from '../../shared/format';
@@ -67,7 +67,7 @@ const SNAP_PX = 6;
  */
 let pointerSeekUntil = 0;
 
-const MARKER_DOT: Record<MarkerKind, string> = { prompt: '#ececf1', tool: '#7a7a85', answer: '#4fd1a1', manual: '#9a9aa5' };
+const MARKER_DOT: Record<MarkerKind, string> = { prompt: '#ececf1', tool: '#7a7a85', answer: '#4fd1a1', manual: '#9a9aa5', retake: '#f2b34a' };
 
 interface Layout {
   heights: Record<'markers' | 'ruler' | 'video' | OverlayKind | 'mic' | 'input', number>;
@@ -127,6 +127,11 @@ export function Timeline() {
   const spans = useMemo(() => (project ? sceneSpans(project.scenes, project.cuts) : []), [project]);
   const duration = spans.at(-1)?.end ?? 0;
   const model = useMemo(() => (project ? timelineModel(project, spans, media?.markers) : undefined), [project, spans, media]);
+  // the subtitles over the mic's waveform: where each one shows, as the video has them
+  const cues = useMemo(
+    () => (project && media?.transcript ? captionCues(captionWords(applyCaptionFixes(media.transcript.words, project.captions.fixes), spans), project.captions.style) : []),
+    [project, spans, media],
+  );
   const layout = useMemo(() => layoutOf(model), [model]);
 
   /** The whole video is in view: it stays so when the window changes size, until the person scales it. */
@@ -503,6 +508,8 @@ export function Timeline() {
                         >
                           {blockWidth >= 14 && <i className="edge start" data-edge="start" />}
                           {blockWidth >= LABEL_MIN_PX && <span style={{ marginLeft: inset }}>{block.title}</span>}
+                          {/* a zoom that follows: where it moves on */}
+                          {block.marks?.map((mark) => <i key={mark} className="move-mark" style={{ left: (mark - block.start) * pps }} />)}
                           {blockWidth >= 14 && <i className="edge end" data-edge="end" />}
                         </button>
                       );
@@ -519,6 +526,29 @@ export function Timeline() {
                   mirrored
                   deps={[peaks, spans, project]}
                 />
+                {cues.map((cue) => {
+                  const left = cue.start * pps;
+                  const width = (cue.end - cue.start) * pps;
+                  if (left + width < view.left || left > view.left + view.width) return null;
+                  const text = cue.lines.map((line) => line.map((word) => word.text).join(' ')).join(' ');
+                  return (
+                    <button
+                      key={cue.start}
+                      type="button"
+                      className={`subtitle-cue${project.captions.enabled ? '' : ' off'}`}
+                      style={{ left, width: Math.max(2, width - 1), top: tops.mic + 2 }}
+                      title={`${text}${project.captions.enabled ? '' : ' (subtitles are off)'} · click to go there`}
+                      onPointerDown={(event) => {
+                        event.stopPropagation();
+                        void currentPlayer()?.seek(cue.start);
+                      }}
+                      tabIndex={-1}
+                      data-testid="subtitle-cue"
+                    >
+                      {width >= 28 && text}
+                    </button>
+                  );
+                })}
                 <ColumnsCanvas
                   top={tops.input}
                   height={heights.input}

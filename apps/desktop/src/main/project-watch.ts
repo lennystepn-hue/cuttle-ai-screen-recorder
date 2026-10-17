@@ -7,7 +7,7 @@ import { basename, extname, join, relative, sep } from 'node:path';
 import { CoreError, PROJECT_FILE, projectHash, readProjectFile, writeProjectFile } from '@cuttle/core';
 import { parseProject, parseProjectJson } from '@cuttle/project';
 import { locateJsonIssue, plainIssue } from '../shared/format';
-import type { ProjectFileEvent, Responses } from '../shared/ipc';
+import type { ChangeOrigin, ProjectFileEvent, Responses } from '../shared/ipc';
 import { isInside } from '../shared/media-path';
 
 const firstLine = (message: string) => message.split('\n')[0]!;
@@ -23,8 +23,8 @@ export class ProjectFileWatch {
   private timer: ReturnType<typeof setTimeout> | undefined;
   /** The last version reported did not parse: the next that does is reported even when known (a fix back to it). */
   private broken = false;
-  /** Who the next outside change comes from: the app's own suggest, while it cuts a take. */
-  origin: 'outside' | 'suggest' = 'outside';
+  /** Who the next outside change comes from: the app's own suggest while it cuts a take, or its speech edits. */
+  origin: ChangeOrigin = 'outside';
   /**
    * Looks and saves, one at a time: a look that read the file while a save replaced it would take
    * the version before the save for someone else's (fast undos), and report a version already gone.

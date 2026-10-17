@@ -1,6 +1,7 @@
 import { spawnSync } from 'node:child_process';
 import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
+import { createServer, type Server, type ServerResponse } from 'node:http';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { basename, delimiter, dirname, join } from 'node:path';
@@ -8,7 +9,7 @@ import { fileURLToPath } from 'node:url';
 import { PNG } from 'pngjs';
 import { _electron, type ElectronApplication, type Page } from 'playwright';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { FIXTURE_OUTPUT, makeFixture } from './fixture';
+import { FIXTURE_OUTPUT, makeFixture, makeSpokenFixture } from './fixture';
 
 /**
  * The app end to end, its windows never shown: open a project, play, scrub, select, compare the
@@ -27,6 +28,18 @@ const enabled = process.env.MODE === 'app';
 const MAIN = fileURLToPath(new URL('../dist/main/index.mjs', import.meta.url));
 const CLI = fileURLToPath(new URL('../../cli/dist/cuttle.mjs', import.meta.url));
 const SHOTS = process.env.CUTTLE_CHECK_SHOTS;
+/** The English text-to-speech take of the core tests, and the true start of each of its words. */
+const SPOKEN = fileURLToPath(new URL('../../../packages/core/test/fixtures/speech/en.m4a', import.meta.url));
+const SPOKEN_WORDS = fileURLToPath(new URL('../../../packages/core/test/fixtures/speech/en.words.json', import.meta.url));
+/**
+ * The `base` speech model where one is downloaded (`CUTTLE_TEST_MODELS`, else the user's models
+ * folder): the check downloads it from a server of its own, so the model can be checked end to end.
+ */
+const BASE_MODEL = [process.env.CUTTLE_TEST_MODELS, process.env.LOCALAPPDATA && join(process.env.LOCALAPPDATA, 'Cuttle', 'models')]
+  .filter((dir): dir is string => !!dir)
+  .map((dir) => join(dir, 'ggml-base.bin'))
+  .find((path) => existsSync(path));
+const hasWhisper = /\swhisper\s/.test(spawnSync('ffmpeg', ['-hide_banner', '-filters'], { encoding: 'utf8', windowsHide: true }).stdout ?? '');
 
 interface CheckState {
   t: number;
@@ -112,6 +125,9 @@ describe.runIf(enabled)('the Cuttle app', () => {
   let root: string;
   let project: string;
   let app: ElectronApplication;
+  /** Serves the speech models: `base` from BASE_MODEL, `small` broken, `large-v3-turbo-q5_0` never ending. */
+  let models: Server;
+  const hanging: ServerResponse[] = [];
   let editor: Page;
   const pageErrors: string[] = [];
   // The page's hook (`__cuttleCheck`); each call is its own function, as the page's CSP allows no eval.
@@ -156,6 +172,39 @@ describe.runIf(enabled)('the Cuttle app', () => {
     });
     writeFileSync(join(SHOTS, `${name}.png`), Buffer.from(png, 'base64'));
   };
+  /** A screenshot of the window whose URL has `part` and whose title is `title` (when given). */
+  const shotOf = async (name: string, part: string, title?: string) => {
+    if (!SHOTS) return;
+    const png = await app.evaluate(
+      async ({ BrowserWindow }, { part, title }) => {
+        const window = BrowserWindow.getAllWindows().find((candidate) => candidate.webContents.getURL().includes(part) && (title === undefined || candidate.getTitle() === title))!;
+        // the first capture of a window never shown can be its first paint: the second is now
+        for (let round = 0; round < 2; round++) {
+          window.webContents.invalidate();
+          await new Promise((resolve) => setTimeout(resolve, 1600));
+          await window.webContents.capturePage();
+        }
+        return (await window.webContents.capturePage()).toPNG().toString('base64');
+      },
+      { part, title },
+    );
+    writeFileSync(join(SHOTS, `${name}.png`), Buffer.from(png, 'base64'));
+  };
+  /** Opens a project folder as a second launch would, and finds its editor (others may be open: the takes recorded before). */
+  const openEditor = async (dir: string): Promise<Page> => {
+    const name = basename(dir);
+    await launchAgain(['--open', dir]);
+    await expect.poll(editorTitles, { timeout: 30_000 }).toContain(`${name} · Cuttle`);
+    const page = await waitForPage(
+      app,
+      async (candidate) =>
+        candidate.url().includes('/editor.html') &&
+        basename((await candidate.evaluate(() => (window as unknown as { cuttle: { invoke(channel: string): Promise<{ dir: string }> } }).cuttle.invoke('project:info'))).dir) === name,
+    );
+    await page.waitForSelector('.app[data-phase="ready"]', { timeout: 30_000 });
+    await page.setViewportSize({ width: 1440, height: 900 });
+    return page;
+  };
   /** Asks the running app to open `argv` as a second launch would, `times` times at once. */
   const launchAgain = (argv: string[], times = 1) =>
     app.evaluate(
@@ -176,6 +225,17 @@ describe.runIf(enabled)('the Cuttle app', () => {
     // New recordings go into a folder of the check's own.
     mkdirSync(join(root, 'user-data'));
     writeFileSync(join(root, 'user-data', 'settings.json'), JSON.stringify({ projectsFolder: join(root, 'projects') }));
+    models = createServer((request, response) => {
+      if (request.url === '/ggml-base.bin' && BASE_MODEL) return void response.end(readFileSync(BASE_MODEL));
+      if (request.url === '/ggml-small.bin') return void response.end('not a model');
+      if (request.url === '/ggml-large-v3-turbo-q5_0.bin') {
+        response.write(Buffer.alloc(1_000_000));
+        return void hanging.push(response);
+      }
+      response.statusCode = 404;
+      response.end();
+    });
+    await new Promise<void>((resolve) => models.listen(0, '127.0.0.1', () => resolve()));
     app = await _electron.launch({
       executablePath: electronPath(),
       args: [MAIN, '--cuttle-check', '--open', project],
@@ -187,6 +247,9 @@ describe.runIf(enabled)('the Cuttle app', () => {
         CUTTLE_USER_DATA: join(root, 'user-data'),
         CUTTLE_RECORDER_BACKEND: 'test',
         CUTTLE_COUNTDOWN: '0',
+        // the check's own models folder (empty at first), and the models from the check's server
+        CUTTLE_MODELS_DIR: join(root, 'models'),
+        CUTTLE_MODELS_URL: `http://127.0.0.1:${(models.address() as { port: number }).port}/`,
       },
     });
     // Unhandled rejections in the main process are bugs: collect them for the last test.
@@ -214,6 +277,9 @@ describe.runIf(enabled)('the Cuttle app', () => {
 
   afterAll(async () => {
     await app?.close().catch(() => {});
+    for (const response of hanging) response.destroy();
+    models?.closeAllConnections();
+    models?.close();
     await rm(root, { recursive: true, force: true });
   });
 
@@ -627,6 +693,52 @@ describe.runIf(enabled)('the Cuttle app', () => {
     await editor.waitForFunction(() => document.querySelectorAll('[data-testid=cut-notch]').length === 0);
   }, 45_000);
 
+  it('shows a zoom that follows typing: its moves on the timeline, its path in the source view; a drag takes the path along, Hold still ends it', async () => {
+    const original = readFileSync(projectFile(), 'utf8');
+    type Following = { id: string; rect: number[]; moves?: { at: number; rect: number[] }[]; auto?: string };
+    const following = (file: Written) => file.zooms.find((zoom) => zoom.id === 'z8') as unknown as Following;
+    // suggest's typing zoom in the first clip: from the left, to the middle at 1.2 s, down to the right at 2 s
+    const outside = onDisk() as unknown as { zooms: unknown[] };
+    outside.zooms.push({ id: 'z8', label: 'Typing', at: 0.3, duration: 2.5, rect: [100, 100, 576, 360], moves: [{ at: 1.2, rect: [400, 100, 576, 360] }, { at: 2, rect: [600, 300, 576, 360] }], auto: 'typing' });
+    writeFileSync(projectFile(), `${JSON.stringify(outside, null, 2)}\n`);
+    await editor.waitForSelector('.item.zoom[data-id=z8] .move-mark');
+    expect(await editor.locator('.item.zoom[data-id=z8] .move-mark').count()).toBe(2);
+    // selected (from the Auto tab, which goes to its start), the source view shows its path, and it
+    // where it is at the playhead
+    await click(editor, '#tab-auto');
+    await click(editor, '[data-testid=auto-group-typing] .auto-toggle');
+    await click(editor, '[data-testid=auto-group-typing] .auto-item');
+    await editor.waitForSelector('[data-testid=zoom-path]');
+    expect(await editor.locator('[data-testid=zoom-path] rect').count()).toBe(3);
+    const left = async () => {
+      const [box, view] = await Promise.all([editor.locator('.source-box.zoom.selected').boundingBox(), editor.locator('[data-testid=source-view]').boundingBox()]);
+      return (box!.x - view!.x) / view!.width;
+    };
+    const start = await left();
+    // at 1.6 s it has moved on from x 100 to x 400 (of 1280)
+    await seek(1.6);
+    await expect.poll(left).toBeGreaterThan(start + 0.1);
+    await click(editor, '#tab-selection');
+    await editor.waitForSelector('[data-testid=zoom-hold]');
+    await shot('32-typing-zoom');
+    // a drag at the playhead takes the whole path along: the person's zoom now
+    await drag('.source-box.selected', [40, 0]);
+    await savedWhen((file) => following(file).rect[0]! > 100);
+    const dragged = following(onDisk());
+    const by = dragged.rect[0]! - 100;
+    expect(dragged.moves!.map((move) => move.rect[0]! - by)).toEqual([400, 600]);
+    expect(dragged.auto).toBeUndefined();
+    await click(editor, '[data-testid=zoom-hold]');
+    await savedWhen((file) => following(file).moves === undefined);
+    await editor.waitForSelector('[data-testid=zoom-path]', { state: 'detached' });
+    expect((await doc()).undo).toBe('Hold the zoom still');
+    await editor.keyboard.press('Escape');
+    await undoAll();
+    // back to the file as it was (Claude reverting)
+    writeFileSync(projectFile(), original);
+    await editor.waitForFunction(() => document.querySelectorAll('.item.zoom[data-id=z8]').length === 0);
+  }, 45_000);
+
   it('crops a clip in the source view: the window takes the crop’s shape; the crop is switched off in the inspector', async () => {
     const original = readFileSync(projectFile(), 'utf8');
     await press('.scene[data-id=s1]');
@@ -1005,6 +1117,35 @@ describe.runIf(enabled)('the Cuttle app', () => {
     await opened.waitForSelector('.app[data-phase="ready"]', { timeout: 30_000 });
   }, 120_000);
 
+  it('marks a slip from the HUD (the mistake key): it says what to do next, and the cut goes back from there', async () => {
+    const before = new Set(existsSync(join(root, 'projects')) ? readdirSync(join(root, 'projects')) : []);
+    await recordThroughPicker(pillRecord, { stop: 'none', camera: undefined }, false);
+    const hud = await runningHud();
+    await wait(2500);
+    await click(hud, '[data-testid=hud-retake]');
+    await expect.poll(() => hud.locator('[data-testid=hud-note]').textContent(), { timeout: 5_000 }).toBe('Slip marked: do it again');
+    // the hint fits the HUD whole
+    expect(await hud.evaluate(() => [...document.querySelectorAll('[data-testid=hud-note], [data-testid=hud-note] *')].every((element) => element.scrollWidth <= element.clientWidth + 1))).toBe(true);
+    await shotOf('31-hud-retake', '/hud.html');
+    await click(hud, '[data-testid=hud-stop]');
+    const dir = await newProject(before);
+    const written = (await projectWhen(dir, (file) => file.scenes[0]?.id !== undefined)) as unknown as { cuts?: { to: number; auto?: string; label?: string }[] };
+    const { markers } = JSON.parse(readFileSync(join(dir, 'takes', '1', 'markers.json'), 'utf8')) as { markers: { t: number; kind: string }[] };
+    const slip = markers.find((marker) => marker.kind === 'retake');
+    expect(slip?.t).toBeGreaterThan(2);
+    // no speech in this take: the cut goes back 5 s at most (not before the clip) to just past the key
+    expect((written.cuts ?? []).filter((cut) => cut.auto === 'retake')).toEqual([expect.objectContaining({ label: 'Retake', to: expect.closeTo(slip!.t + 0.15, 2) })]);
+    const opened = await waitForPage(app, async (page) => page.url().includes('/editor.html') && (await page.title()) === `${basename(dir)} · Cuttle`);
+    await opened.waitForSelector('.app[data-phase="ready"]', { timeout: 30_000 });
+    // once Cuttle's cut is in, the slip is a notch (its pin lies in the cut), and a row in the Auto tab
+    await expect.poll(() => opened.evaluate(() => (window as unknown as { __cuttleCheck: Check }).__cuttleCheck.doc().undo), { timeout: 15_000 }).toBe("Cuttle's cut");
+    await click(opened, '[data-testid=cut-notch]');
+    await opened.waitForSelector('[data-testid=auto-note]');
+    expect(await opened.locator('.inspector .kind-head .name').textContent()).toBe('Retake');
+    await click(opened, '#tab-auto');
+    expect(await opened.locator('[data-testid=auto-group-retakes] .auto-count').textContent()).toBe('1 on');
+  }, 120_000);
+
   it('restarts from the HUD on a held press only: the take is put aside, and Undo restart brings it back', async () => {
     const before = new Set(readdirSync(join(root, 'projects')));
     await recordThroughPicker(pillRecord, { stop: 'none' }, false);
@@ -1084,6 +1225,182 @@ describe.runIf(enabled)('the Cuttle app', () => {
     expect(existsSync(project)).toBe(true);
     await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find((window) => window.webContents.getURL().includes('/settings.html'))?.close());
   }, 60_000);
+
+  it('downloads a speech model in the settings (checked, cancelled, failed), and transcribes a spoken take from the Auto tab: its filler words and pauses cut as one step', async () => {
+    await launchAgain(['--settings']);
+    const settings = await waitForPage(app, async (page) => page.url().includes('/settings.html') && (await page.locator('[data-testid=speech-line]').count()) === 1);
+    const saved = () => JSON.parse(readFileSync(join(root, 'user-data', 'settings.json'), 'utf8')) as { speech?: { model: string; language: string } };
+    const line = () => settings.locator('[data-testid=speech-line] .row-hint').textContent();
+    const choose = async (label: string) => {
+      await settings.locator('[data-testid=speech-model]').evaluate((element) => (element as HTMLElement).click());
+      await settings.waitForSelector('.select-list [role=option]');
+      await settings.evaluate((label) => {
+        const option = [...document.querySelectorAll('.select-list [role=option]')].find((item) => item.querySelector('.option-label')?.textContent?.startsWith(label));
+        if (!option) throw new Error(`no option "${label}"`);
+        (option as HTMLElement).click();
+      }, label);
+    };
+    // Good (small), the default: not downloaded here; its download breaks off, and says so
+    expect(await line()).toBe('German and English, about 5× real time. 488 MB to download, once.');
+    await click(settings, '[data-testid=speech-download]');
+    await expect.poll(line).toMatch(/^The download failed: the download from .* ended at 11 of 487601967 bytes$/);
+    expect(await settings.locator('[data-testid=speech-download]').textContent()).toBe('Try again');
+    expect(existsSync(join(root, 'models'))).toBe(true);
+    expect(readdirSync(join(root, 'models'))).toEqual([]);
+    // Best: its download runs on (progress) until it is cancelled
+    await choose('Best');
+    await expect.poll(() => saved().speech?.model).toBe('large-v3-turbo-q5_0');
+    await expect.poll(line).toBe('The most accurate, about 2.6× real time. 574 MB to download, once.');
+    await click(settings, '[data-testid=speech-download]');
+    await settings.waitForSelector('[data-testid=speech-line] progress.download');
+    expect(await line()).toBe('Downloading… 0 % of 574 MB');
+    // another model chosen meanwhile: the line still shows the download, to cancel it
+    await choose('Good');
+    await expect.poll(line).toBe('The Best model is downloading (0 % of 574 MB): one download at a time.');
+    await choose('Best');
+    await expect.poll(line).toBe('Downloading… 0 % of 574 MB');
+    await settings.locator('[data-testid=speech-line]').evaluate((element) => element.scrollIntoView({ block: 'center' }));
+    await shotOf('25-speech-download', '/settings.html');
+    await click(settings, '[data-testid=speech-cancel]');
+    await settings.waitForSelector('[data-testid=speech-download]');
+    expect(await line()).toBe('The most accurate, about 2.6× real time. 574 MB to download, once.');
+    expect(readdirSync(join(root, 'models'))).toEqual([]);
+    // the language spoken
+    await click(settings, '[data-testid=speech-language] button:nth-child(3)');
+    await expect.poll(() => saved().speech?.language).toBe('en');
+    if (!BASE_MODEL || !hasWhisper) {
+      await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find((window) => window.webContents.getURL().includes('/settings.html'))?.close());
+      return;
+    }
+    // Fast (base): downloaded from the check's server, its checksum right
+    await choose('Fast');
+    await expect.poll(line).toBe('Good for English, weak for German. 148 MB to download, once.');
+    await click(settings, '[data-testid=speech-download]');
+    await settings.waitForSelector('[data-testid=speech-remove]', { timeout: 60_000 });
+    expect(await line()).toBe('Downloaded: good for English, weak for German.');
+    expect(readdirSync(join(root, 'models'))).toEqual(['ggml-base.bin']);
+    await settings.locator('[data-testid=speech-line]').evaluate((element) => element.scrollIntoView({ block: 'center' }));
+    await shotOf('26-speech-ready', '/settings.html');
+    await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find((window) => window.webContents.getURL().includes('/settings.html'))?.close());
+
+    // a spoken take, opened: the Auto tab offers to transcribe it
+    const spoken = join(root, 'spoken');
+    makeSpokenFixture(spoken, SPOKEN);
+    const page = await openEditor(spoken);
+    await click(page, '#tab-auto');
+    await page.waitForSelector('[data-testid=speech-note]');
+    await click(page, '[data-testid=transcribe]');
+    // the title bar says how far it is; the cuts arrive as one step, "Cuttle's speech edits"
+    const file = () => JSON.parse(readFileSync(join(spoken, 'cuttle.json'), 'utf8')) as { sources: { transcript?: string }; cuts?: { auto?: string; from: number; to: number }[] };
+    await expect.poll(() => file().sources.transcript, { timeout: 60_000 }).toBe('takes/1/transcript.json');
+    const cuts = file().cuts ?? [];
+    const fillers = cuts.filter((cut) => cut.auto === 'filler').length;
+    const pauses = cuts.filter((cut) => cut.auto === 'pause').length;
+    expect(fillers).toBeGreaterThanOrEqual(1);
+    expect(pauses).toBeGreaterThanOrEqual(1);
+    // "Uh" at 2.02 s is gone from the video, and "Um, it zooms on clicks. Again." (7.55 to 10.8 s)
+    // with it: a slip said again
+    expect(cuts.filter((cut) => cut.auto === 'retake')).toEqual([expect.objectContaining({ label: 'Retake: “Again”' })]);
+    for (const at of [2.1, 7.7, 9, 10.5]) expect(cuts.some((cut) => cut.from <= at && at < cut.to), `a cut at ${at} s`).toBe(true);
+    await page.waitForSelector('[data-testid=auto-group-fillers]');
+    await page.waitForSelector('[data-testid=speech-note]', { state: 'detached' });
+    expect(await page.locator('[data-testid=auto-group-fillers] .auto-count').textContent()).toBe(`${fillers} on`);
+    expect(await page.locator('[data-testid=auto-group-pauses] .auto-count').textContent()).toBe(`${pauses} on`);
+    expect(await page.locator('[data-testid=auto-group-retakes] .auto-count').textContent()).toBe('1 on');
+    const pageDoc = () => page.evaluate(() => (window as unknown as Hooked).__cuttleCheck.doc());
+    expect((await pageDoc()).undo).toBe("Cuttle's speech edits");
+    expect((await pageDoc()).toast?.text).toBe(`Cuttle cut 1 retake, and ${fillers} filler word${fillers === 1 ? '' : 's'} and ${pauses} pause${pauses === 1 ? '' : 's'} where the picture rests.`);
+    expect(await page.locator('[data-testid=project-status]').count()).toBe(0);
+    // the video is shorter by the cuts, in the player and the title bar
+    const removed = cuts.reduce((sum, cut) => sum + (cut.to - cut.from), 0);
+    await expect.poll(async () => (await page.evaluate(() => (window as unknown as Hooked).__cuttleCheck.state())).duration).toBeCloseTo(19.5 - removed, 1);
+    const duration = (await page.evaluate(() => (window as unknown as Hooked).__cuttleCheck.state())).duration;
+    expect(await page.locator('.titlebar .project-name span').textContent()).toBe(`19.5 s recorded · ${Math.floor(duration * 10 + 1e-6) / 10} s video`);
+    await click(page, '[data-testid=auto-group-fillers] .auto-toggle');
+    await shotOf('27-speech-edits', '/editor.html', 'spoken · Cuttle');
+    await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find((window) => window.getTitle() === 'spoken · Cuttle')?.close());
+  }, 120_000);
+
+  it('shows the transcript (a click goes to a word, a fix reads in the subtitles, Delete cuts words and Restore brings them back), styles the subtitles, and exports them as .srt', async () => {
+    const dir = join(root, 'subtitled');
+    makeSpokenFixture(dir, SPOKEN);
+    // the transcript the spoken take gets, from its words' true starts: no speech model needed here
+    const truth = JSON.parse(readFileSync(SPOKEN_WORDS, 'utf8')) as { t: number; text: string }[];
+    const words = truth.map((word, i) => ({ t: word.t, end: Math.min(truth[i + 1]?.t ?? word.t + 0.5, word.t + 0.5), text: word.text }));
+    const take = join(dir, 'takes', '1');
+    writeFileSync(join(take, 'transcript.json'), JSON.stringify({ version: 1, language: 'en', model: 'small', words }));
+    cpSync(join(take, 'mic.m4a'), join(take, 'mic.clean.m4a'));
+    const path = join(dir, 'cuttle.json');
+    const raw = JSON.parse(readFileSync(path, 'utf8')) as { sources: Record<string, string> };
+    writeFileSync(path, JSON.stringify({ ...raw, sources: { ...raw.sources, transcript: 'takes/1/transcript.json', cleanMic: 'takes/1/mic.clean.m4a' } }, null, 2));
+    type Saved = { cuts?: { label?: string }[]; captions?: { style?: string; fixes?: { at: number; end: number; text: string }[] }; look?: { audio?: { cleanup?: boolean } } };
+    const saved = () => JSON.parse(readFileSync(path, 'utf8')) as Saved;
+    const page = await openEditor(dir);
+    const pageState = () => page.evaluate(() => (window as unknown as Hooked).__cuttleCheck.state());
+    const index = (text: string) => words.findIndex((word) => word.text === text);
+    const word = (text: string) => `[data-testid=transcript] .word[data-index="${index(text)}"]`;
+    // the subtitles over the mic's waveform
+    await page.waitForSelector('[data-testid=subtitle-cue]');
+    // the Transcript tab: every word; a click goes there
+    await click(page, '#tab-transcript');
+    await page.waitForSelector('[data-testid=transcript] .word');
+    expect(await page.locator('[data-testid=transcript] .word').count()).toBe(words.length);
+    await click(page, word('records'));
+    await expect.poll(async () => (await pageState()).t).toBeCloseTo(words[index('records')]!.t, 1);
+    // a double click fixes a word; the fix is one step in the file
+    await page.evaluate((selector) => document.querySelector(selector)!.dispatchEvent(new MouseEvent('dblclick', { bubbles: true })), word('Cuttle'));
+    await page.fill('[data-testid=word-field]', 'Cuttle!');
+    await page.press('[data-testid=word-field]', 'Enter');
+    const cuttle = words[index('Cuttle')]!;
+    await expect.poll(() => saved().captions?.fixes).toEqual([{ at: cuttle.t, end: cuttle.end, text: 'Cuttle!' }]);
+    // one word for one: it keeps its place in the list
+    await page.waitForSelector(`${word('Cuttle')}.fixed`);
+    // Delete cuts the selected word out of the video; Restore brings it back
+    await click(page, word('every'));
+    await page.keyboard.press('Delete');
+    await expect.poll(() => saved().cuts?.map((cut) => cut.label)).toEqual(['Words: “every”']);
+    await page.waitForSelector(`${word('every')}.cut`);
+    await click(page, '[data-testid=transcript-restore]');
+    await expect.poll(() => saved().cuts ?? []).toEqual([]);
+    // Ctrl+F finds words; Enter goes to the next one after the selected word ("every"), Shift+Enter back
+    await page.keyboard.press('Control+F');
+    await expect.poll(() => page.evaluate(() => (document.activeElement as HTMLElement | null)?.dataset.testid)).toBe('transcript-find');
+    await page.keyboard.type('click');
+    expect(await page.locator('.transcript-count').textContent()).toBe('2 found');
+    await page.keyboard.press('Enter');
+    await page.waitForSelector(`${word('click')}.selected`);
+    await page.keyboard.press('Shift+Enter');
+    await page.waitForSelector(`${word('clicks')}.selected`);
+    await shotOf('28-transcript', '/editor.html', 'subtitled · Cuttle');
+    // the Look tab: the subtitles' style, and the clean voice
+    await click(page, '#tab-look');
+    await page.waitForSelector('[data-testid=captions-enabled][aria-checked=true]');
+    await page.locator('[data-testid=captions-style]').evaluate((element) => (element as HTMLElement).click());
+    await page.waitForSelector('.select-list [role=option]');
+    await page.evaluate(() => {
+      const option = [...document.querySelectorAll('.select-list [role=option]')].find((item) => item.querySelector('.option-label')?.textContent === 'Karaoke');
+      (option as HTMLElement).click();
+    });
+    await expect.poll(() => saved().captions?.style).toBe('karaoke');
+    await click(page, '[data-testid=audio-cleanup]');
+    await expect.poll(() => saved().look?.audio?.cleanup).toBe(false);
+    await page.evaluate((t) => (window as unknown as Hooked).__cuttleCheck.seek(t), words[index('zooms')]!.t + 0.1);
+    await page.locator('[data-testid=captions-style]').evaluate((element) => element.scrollIntoView({ block: 'center' }));
+    await shotOf('29-subtitles-karaoke', '/editor.html', 'subtitled · Cuttle');
+    // the export writes the subtitles next to the video
+    await page.keyboard.press('Control+E');
+    await page.waitForSelector('[data-testid=export-subtitles]');
+    await click(page, '[data-testid=export-srt]');
+    await page.waitForSelector('[data-testid=export-srt][aria-pressed=true]');
+    await shotOf('30-export-subtitles', '/editor.html', 'subtitled · Cuttle');
+    await click(page, '[data-testid=export-start]');
+    await page.waitForSelector('[data-testid=export-file]', { timeout: 120_000 });
+    expect(await page.locator('[data-testid=export-file] small').textContent()).toContain('with .srt');
+    const srt = readFileSync(join(dir, 'out', 'export.srt'), 'utf8');
+    expect(srt.startsWith('1\n00:00:00,100 --> ')).toBe(true);
+    expect(srt).toContain('Cuttle!');
+    await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find((window) => window.getTitle() === 'subtitled · Cuttle')?.close());
+  }, 180_000);
 
   it('had no unhandled rejection in the main process, and no error in the editor', async () => {
     expect(await app.evaluate(() => (globalThis as unknown as { __rejections: string[] }).__rejections)).toEqual([]);

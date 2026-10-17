@@ -43,6 +43,7 @@ export function record(options: RecordOptions): Recording {
       return done;
     },
     marker: (label) => control.marker(label),
+    retake: () => control.retake(),
     pause: () => control.setPaused(true),
     resume: () => control.setPaused(false),
     setDeadZones: (zones) => (control.deadZones = [...zones]),
@@ -53,7 +54,7 @@ export function record(options: RecordOptions): Recording {
 /** Stop requests, pauses and manual markers from the caller, the hotkeys and the triggers. */
 class Control {
   reason: StopReason | undefined;
-  onMarker: ((label?: string) => void) | undefined;
+  onMarker: ((label?: string, kind?: 'manual' | 'retake') => void) | undefined;
   /** Pointer input inside these is not logged. */
   deadZones: Bounds[] = [];
   private waiters: ((reason: StopReason) => void)[] = [];
@@ -106,6 +107,10 @@ class Control {
 
   marker(label?: string): void {
     this.onMarker?.(label);
+  }
+
+  retake(): void {
+    this.onMarker?.(undefined, 'retake');
   }
 }
 
@@ -258,7 +263,7 @@ async function recordTake({ options, control, platform, area, cameraMode, projec
     reporter.emit({ type: 'marker', marker: entry });
   };
   saveMarkers();
-  control.onMarker = (label) => addMarker({ kind: 'manual', ...(label && { label }) }, now());
+  control.onMarker = (label, kind = 'manual') => addMarker({ kind, ...(label && { label }) }, now());
 
   const writeSegments = (joined = false) => {
     const file = path(FILES.segments);
@@ -401,7 +406,7 @@ async function recordTake({ options, control, platform, area, cameraMode, projec
         lastInput = raw.time;
         writer.push(raw);
       },
-      (action) => (action === 'stop' ? control.request('hotkey') : action === 'pause' ? control.toggle() : control.marker()),
+      (action) => (action === 'stop' ? control.request('hotkey') : action === 'pause' ? control.toggle() : action === 'retake' ? control.retake() : control.marker()),
     );
     if (input.warning) reporter.warn(input.warning);
 

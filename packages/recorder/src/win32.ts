@@ -1,4 +1,4 @@
-// Windows APIs through koffi: monitors in ddagrab order, windows, pointer position and shape.
+// Windows APIs through koffi: monitors in ddagrab order, windows, pointer position and shape, the caret.
 import type { CursorShape } from '@cuttle/project';
 import type { Monitor, WindowInfo } from './types';
 
@@ -12,6 +12,11 @@ export interface Win32 {
   /** Brings a window (`WindowInfo.id`) to the front; false when it is gone or Windows refused. */
   focus(id: number): boolean;
   cursorShape(): CursorShape;
+  /**
+   * The system caret of a thread (the foreground's when 0) in physical desktop pixels, at least 1 px
+   * each way; undefined where the app keeps none (many draw their own).
+   */
+  caret(thread?: number): { x: number; y: number; width: number; height: number } | undefined;
 }
 
 let loaded: Promise<Win32> | undefined;
@@ -73,6 +78,17 @@ async function create(): Promise<Win32> {
   const RECT = koffi.struct(typeName('RECT'), { left: 'int32', top: 'int32', right: 'int32', bottom: 'int32' });
   const POINT = koffi.struct(typeName('POINT'), { x: 'int32', y: 'int32' });
   const CURSORINFO = koffi.struct(typeName('CURSORINFO'), { cbSize: 'uint32', flags: 'uint32', hCursor: 'void *', ptScreenPos: POINT });
+  const GUITHREADINFO = koffi.struct(typeName('GUITHREADINFO'), {
+    cbSize: 'uint32',
+    flags: 'uint32',
+    hwndActive: 'void *',
+    hwndFocus: 'void *',
+    hwndCapture: 'void *',
+    hwndMenuOwner: 'void *',
+    hwndMoveSize: 'void *',
+    hwndCaret: 'void *',
+    rcCaret: RECT,
+  });
   const DXGI_OUTPUT_DESC = koffi.struct(typeName('DXGI_OUTPUT_DESC'), {
     DeviceName: koffi.array('uint16', 32),
     DesktopCoordinates: RECT,
@@ -87,6 +103,8 @@ async function create(): Promise<Win32> {
   // that was already made system-aware).
   const GetPhysicalCursorPos = user32.func('__stdcall', 'GetPhysicalCursorPos', 'int', [koffi.out(koffi.pointer(POINT))]);
   const GetCursorInfo = user32.func('__stdcall', 'GetCursorInfo', 'int', [koffi.inout(koffi.pointer(CURSORINFO))]);
+  const GetGUIThreadInfo = user32.func('__stdcall', 'GetGUIThreadInfo', 'int', ['uint32', koffi.inout(koffi.pointer(GUITHREADINFO))]);
+  const ClientToScreen = user32.func('__stdcall', 'ClientToScreen', 'int', ['void *', koffi.inout(koffi.pointer(POINT))]);
   const LoadCursorW = user32.func('__stdcall', 'LoadCursorW', 'void *', ['void *', 'uintptr_t']);
   const EnumWindows = user32.func('__stdcall', 'EnumWindows', 'int', [koffi.pointer(WNDENUMPROC), 'intptr_t']);
   const IsWindowVisible = user32.func('__stdcall', 'IsWindowVisible', 'int', ['void *']);
@@ -213,6 +231,7 @@ async function create(): Promise<Win32> {
 
   const point = { x: 0, y: 0 };
   const info = { cbSize: koffi.sizeof(CURSORINFO), flags: 0, hCursor: null as unknown, ptScreenPos: { x: 0, y: 0 } };
+  const rect = () => ({ left: 0, top: 0, right: 0, bottom: 0 });
   return {
     monitors: () => outputs().map(({ monitor }) => monitor),
     windows,
@@ -227,6 +246,14 @@ async function create(): Promise<Win32> {
     cursorShape() {
       if (!GetCursorInfo(info) || info.hCursor === null) return 'arrow';
       return cursorShapes.get(koffi.address(info.hCursor)) ?? 'arrow';
+    },
+    caret(thread = 0) {
+      const gui = { cbSize: koffi.sizeof(GUITHREADINFO), flags: 0, hwndActive: null, hwndFocus: null, hwndCapture: null, hwndMenuOwner: null, hwndMoveSize: null, hwndCaret: null as unknown, rcCaret: rect() };
+      if (!GetGUIThreadInfo(thread, gui) || !gui.hwndCaret) return undefined;
+      // the caret's rect is in its window's client pixels
+      const corner = { x: gui.rcCaret.left, y: gui.rcCaret.top };
+      if (!ClientToScreen(gui.hwndCaret, corner)) return undefined;
+      return { x: corner.x, y: corner.y, width: Math.max(1, gui.rcCaret.right - gui.rcCaret.left), height: Math.max(1, gui.rcCaret.bottom - gui.rcCaret.top) };
     },
   };
 }

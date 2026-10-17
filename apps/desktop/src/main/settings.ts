@@ -4,7 +4,7 @@ import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { app } from 'electron';
 import { z } from 'zod';
-import { MOTIONS, type Motion, type SettingsView } from '../shared/ipc';
+import { MOTIONS, SPEECH_LANGUAGES, SPEECH_MODEL_NAMES, type Motion, type SettingsView } from '../shared/ipc';
 
 const RECENT_MAX = 10;
 
@@ -28,6 +28,14 @@ const SettingsSchema = z.object({
   launchAtLogin: z.boolean().catch(false).default(false),
   /** Motion in the app's windows: the OS's "reduce motion" (system), or always reduced, or always full. */
   motion: z.enum(MOTIONS).catch('system').default('system'),
+  /** Transcribing a take after its cut: the speech model (`small` until the person picks), and the language spoken. */
+  speech: z
+    .object({
+      model: z.enum(['off', ...SPEECH_MODEL_NAMES]).catch('small').default('small'),
+      language: z.enum(SPEECH_LANGUAGES).catch('auto').default('auto'),
+    })
+    .catch({ model: 'small' as const, language: 'auto' as const })
+    .default({ model: 'small' as const, language: 'auto' as const }),
   /** The picker bar's choices, kept between recordings (the camera and mic are the defaults in the settings). */
   record: z
     .object({ camera: z.string().optional(), mic: z.string().optional(), stop: z.enum(['none', 'claude', 'idle']).default('none'), claudeFolder: z.string().optional() })
@@ -120,6 +128,7 @@ export async function settingsView(): Promise<SettingsView> {
     ...(settings.record.mic !== undefined && { mic: settings.record.mic }),
     launchAtLogin: settings.launchAtLogin,
     motion: settings.motion,
+    speech: { ...settings.speech },
     recent: settings.recent,
     version: appVersion(),
   };

@@ -24,6 +24,9 @@ const EXIT_CODES: Record<string, number> = {
   render: EXIT.render,
   // @cuttle/core
   conflict: EXIT.usage,
+  'model-missing': EXIT.usage,
+  download: EXIT.device,
+  'ffmpeg-old': EXIT.device,
 };
 
 /** A failure the CLI reports with a code and an exit code. */

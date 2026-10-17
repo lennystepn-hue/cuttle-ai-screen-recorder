@@ -14,6 +14,7 @@ export const WINDOW_CHANNELS = {
       'project:record',
       'project:takes',
       'project:cut',
+      'project:transcribe',
       'project:save',
       'project:import-image',
       'project:draft',
@@ -33,7 +34,7 @@ export const WINDOW_CHANNELS = {
     events: ['picker:open', 'picker:active', 'picker:choices', 'picker:devices', 'app:motion'],
   },
   hud: {
-    requests: ['hud:stop', 'hud:marker', 'hud:pause', 'hud:resume', 'hud:restart'],
+    requests: ['hud:stop', 'hud:marker', 'hud:retake', 'hud:pause', 'hud:resume', 'hud:restart'],
     events: ['hud:state', 'app:motion'],
   },
   countdown: {
@@ -56,8 +57,12 @@ export const WINDOW_CHANNELS = {
       'recent:reveal',
       'recent:forget',
       'recent:rename',
+      'speech:status',
+      'speech:download',
+      'speech:cancel',
+      'speech:remove',
     ],
-    events: ['settings:changed', 'app:motion'],
+    events: ['settings:changed', 'speech:status', 'app:motion'],
   },
 } as const satisfies Record<string, { requests: readonly Request[]; events: readonly Event[] }>;
 

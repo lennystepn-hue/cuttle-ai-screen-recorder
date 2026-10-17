@@ -75,6 +75,18 @@ export interface Gray {
   data: Uint8Array;
 }
 
+/**
+ * Grey pictures of the screen track from `from` to `to` (source seconds), `rate` a second, each
+ * `width` × `height`, with its time.
+ */
+export async function grayFrames(path: string, from: number, to: number, rate: number, width: number, height: number): Promise<(Gray & { t: number })[]> {
+  const { stdout } = await runFfmpeg(['-ss', from.toFixed(3), '-t', (to - from).toFixed(3), '-i', path, '-vf', `fps=${rate},scale=${width}:${height},format=gray`, '-f', 'rawvideo', '-']);
+  const size = width * height;
+  const frames: (Gray & { t: number })[] = [];
+  for (let k = 0; (k + 1) * size <= stdout.length; k++) frames.push({ t: from + k / rate, width, height, data: new Uint8Array(stdout.buffer, stdout.byteOffset + k * size, size) });
+  return frames;
+}
+
 export async function grabGray(path: string, t: number, width: number): Promise<Gray> {
   const { stdout } = await runFfmpeg(['-ss', t.toFixed(3), '-i', path, '-frames:v', '1', '-vf', `scale=${width}:-2,format=gray`, '-f', 'rawvideo', '-']);
   return { width, height: Math.floor(stdout.length / width), data: new Uint8Array(stdout) };

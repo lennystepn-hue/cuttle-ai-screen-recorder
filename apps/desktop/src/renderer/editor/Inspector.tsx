@@ -6,6 +6,7 @@ import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 
 import { EXPORT_FORMATS } from '@cuttle/export/formats';
 import {
   BACKGROUND_PRESETS,
+  CAPTION_STYLES,
   CLICK_EFFECTS,
   CURSOR_STYLES,
   EASES,
@@ -26,6 +27,7 @@ import type { Command, ListName } from '../../shared/document';
 import { formatDuration, formatSource, formatSpeed, formatTime } from '../../shared/format';
 import {
   BACKGROUND_NAMES,
+  CAPTION_STYLE_NAMES,
   CLICK_NAMES,
   CORNER_NAMES,
   CURSOR_NAMES,
@@ -45,10 +47,12 @@ import { edit, preview } from './doc';
 import { currentPlayer, engineAssets, select, setTool, store, type Selection, type Tool } from './session';
 import { isColoured, swatch, type SwatchKey } from './swatches';
 import { useStore } from './store';
+import { SpeechNote, TranscriptPanel } from './Transcript';
 
 const TABS = [
   { id: 'selection', name: 'Selection' },
   { id: 'auto', name: 'Auto' },
+  { id: 'transcript', name: 'Transcript' },
   { id: 'look', name: 'Look' },
 ] as const;
 
@@ -84,7 +88,7 @@ export function Inspector() {
       </div>
       <div className="panel-body" id="inspector-panel" role="tabpanel" aria-labelledby={`tab-${tab}`}>
         <fieldset className="panel-fields" disabled={broken}>
-          {tab === 'selection' ? <SelectionPanel /> : tab === 'auto' ? <AutoPanel /> : <LookPanel />}
+          {tab === 'selection' ? <SelectionPanel /> : tab === 'auto' ? <AutoPanel /> : tab === 'transcript' ? <TranscriptPanel /> : <LookPanel />}
         </fieldset>
       </div>
     </aside>
@@ -104,7 +108,7 @@ function Row({ label, children, note, wide, plain, inline }: { label: string; ch
       <span className="field-label">{label}</span>
       <span className="field-input">
         {children}
-        {note !== undefined && <em>{note}</em>}
+        {note !== undefined && <em title={typeof note === 'string' ? note : undefined}>{note}</em>}
       </span>
     </Tag>
   );
@@ -439,6 +443,7 @@ function AutoPanel() {
   if (groups.length === 0) {
     return (
       <div className="auto-empty" data-testid="auto-empty">
+        <SpeechNote />
         <p>
           <b>Nothing automatic yet.</b>
         </p>
@@ -456,6 +461,7 @@ function AutoPanel() {
   return (
     <div className="auto-panel" data-testid="auto-panel">
       <p className="hint auto-intro">What Cuttle did on its own. Switch a kind off and it leaves the video and is not made again; change an item and it is yours.</p>
+      <SpeechNote />
       {groups.map(({ group, items }) => {
         const on = items.filter((item) => item.enabled).length;
         const kindOn = group.key ? project.autoEdits[group.key] : on > 0;
@@ -765,10 +771,10 @@ function Details({ project, selection }: { project: CuttleProject; selection: Se
     );
   };
 
-  const area = (list: 'zooms' | 'masks', rect: Rect, label: string) => (
+  const area = (list: 'zooms' | 'masks', rect: Rect, label: string, title = 'Area, in source pixels') => (
     <div className="field">
       <span className="field-label">
-        Area, in source pixels
+        {title}
         <button type="button" className="link" onClick={() => setTool(list === 'zooms' ? 'zoom' : 'mask')}>
           Draw on the video
         </button>
@@ -801,7 +807,14 @@ function Details({ project, selection }: { project: CuttleProject; selection: Se
           <TextInput value={zoom.label ?? ''} placeholder="Zoom" onCommit={(value) => set('zooms', id, { label: value.trim() || undefined }, 'Rename zoom')} />
         </Row>
         {timing('zooms', zoom.at, zoom.at + zoom.duration)}
-        {area('zooms', zoom.rect, 'zoom')}
+        {area('zooms', zoom.rect, 'zoom', zoom.moves?.length ? 'Start, in source pixels' : undefined)}
+        {zoom.moves && zoom.moves.length > 0 && (
+          <Row label="Follows" note={`${zoom.moves.length} move${zoom.moves.length === 1 ? '' : 's'}`} plain>
+            <button type="button" className="ghost small" onClick={() => set('zooms', id, { moves: undefined }, 'Hold the zoom still')} data-testid="zoom-hold">
+              Hold still
+            </button>
+          </Row>
+        )}
         <Row label="Easing">
           <Select value={zoom.ease} options={EASES} names={EASE_NAMES} onChange={(ease) => set('zooms', id, { ease }, 'Change easing')} />
         </Row>
@@ -854,20 +867,23 @@ function Details({ project, selection }: { project: CuttleProject; selection: Se
 // ---- the look ------------------------------------------------------------------------------------
 
 const look = (path: string[], value: unknown, label: string) => edit([{ type: 'look', path, value } as Command], label);
+const caption = (field: 'enabled' | 'style' | 'position' | 'size' | 'color', value: unknown, label: string) => edit([{ type: 'captions', field, value }], label);
 
 /**
  * A colour well: the video follows the picker while it moves, and the colour is one step to undo
- * once the picker closes (its native change), not one per move.
+ * once the picker closes (its native change), not one per move. It sets `look.<path>`, or what
+ * `toCommand` makes of the colour.
  */
-function ColorInput({ value, path, label, upper }: { value: string; path: string[]; label: string; upper?: boolean }) {
+function ColorInput({ value, path = [], label, upper, toCommand }: { value: string; path?: string[]; label: string; upper?: boolean; toCommand?: (colour: string) => Command }) {
   const input = useRef<HTMLInputElement>(null);
   const shape = (colour: string) => (upper ? colour.toUpperCase() : colour);
+  const command = (colour: string): Command => toCommand?.(colour) ?? ({ type: 'look', path, value: colour } as Command);
   useEffect(() => {
     const element = input.current;
     if (!element) return;
     const commit = () => {
       preview(undefined);
-      look(path, shape(element.value), label);
+      edit([command(shape(element.value))], label);
     };
     element.addEventListener('change', commit);
     return () => element.removeEventListener('change', commit);
@@ -879,7 +895,7 @@ function ColorInput({ value, path, label, upper }: { value: string; path: string
       ref={input}
       type="color"
       defaultValue={value.toLowerCase()}
-      onInput={(event) => preview([{ type: 'look', path, value: shape((event.target as HTMLInputElement).value) } as Command])}
+      onInput={(event) => preview([command(shape((event.target as HTMLInputElement).value))])}
       aria-label={label}
     />
   );
@@ -895,7 +911,7 @@ function LookPanel() {
   const project = useStore(store, (state) => state.doc?.project);
   const raw = useStore(store, (state) => state.doc?.raw);
   if (!project || !raw) return null;
-  const { look: current, output, sources } = project;
+  const { look: current, output, sources, captions } = project;
   const size = SIZES.find((item) => item.width === output.width && item.height === output.height);
   return (
     <>
@@ -1034,10 +1050,42 @@ function LookPanel() {
         </>
       )}
 
+      <div className="section-title">Subtitles</div>
+      <Row label="Subtitles" inline note={sources.transcript ? undefined : 'the take is not transcribed yet'}>
+        <Toggle checked={captions.enabled} label="Subtitles" onChange={(on) => caption('enabled', on, on ? 'Subtitles on' : 'Subtitles off')} testId="captions-enabled" />
+      </Row>
+      {captions.enabled && (
+        <>
+          <div className="grid2">
+            <Row label="Style">
+              <Select value={captions.style} options={CAPTION_STYLES} names={CAPTION_STYLE_NAMES} onChange={(style) => caption('style', style, `Subtitles: ${CAPTION_STYLE_NAMES[style]}`)} testId="captions-style" />
+            </Row>
+            <Row label="Position">
+              <Select value={captions.position} options={TEXT_POSITIONS} names={POSITION_NAMES} onChange={(position) => caption('position', position, 'Subtitles position')} testId="captions-position" />
+            </Row>
+          </div>
+          <div className="grid2">
+            <Row label="Size">
+              <NumberInput value={captions.size} min={0.5} max={2} step={0.1} onCommit={(size) => caption('size', size, 'Subtitles size')} testId="captions-size" />
+            </Row>
+            {captions.style !== 'subtitle' && (
+              <Row label="Spoken word">
+                <ColorInput value={captions.color} label="Spoken word colour" upper toCommand={(color) => ({ type: 'captions', field: 'color', value: color })} />
+              </Row>
+            )}
+          </div>
+        </>
+      )}
+
       <div className="section-title">Sound and transitions</div>
       <Row label="Mic" inline>
         <Toggle checked={current.audio.enabled} label="Mic sound" onChange={(on) => look(['audio', 'enabled'], on, on ? 'Sound on' : 'Sound off')} />
       </Row>
+      {current.audio.enabled && sources.cleanMic && (
+        <Row label="Clean voice" inline note="less noise">
+          <Toggle checked={current.audio.cleanup} label="Clean voice" onChange={(on) => look(['audio', 'cleanup'], on, on ? 'Clean voice on' : 'Clean voice off')} testId="audio-cleanup" />
+        </Row>
+      )}
       {current.audio.enabled && (
         <Row label="Sped-up clips" inline>
           <Toggle checked={current.audio.muteSpedUp} label="Silent when sped up" onChange={(on) => look(['audio', 'muteSpedUp'], on, on ? 'Sped-up clips silent' : 'Sped-up clips heard')} />

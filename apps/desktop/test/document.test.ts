@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { parseProject } from '@cuttle/project';
 import { applyCommand, clampRect, describeChange, DocumentError, ensureIds, firstChanged, pinIds, replayCommands, type Command, type Raw } from '../src/shared/document';
-import { adjustRect, dragRange, drawnRect, fitInside, overlayRange, rangeFields, snapTime, toSource, toStage } from '../src/shared/edit';
+import { adjustRect, dragRange, drawnRect, fitInside, movePath, overlayRange, rangeFields, snapTime, toSource, toStage } from '../src/shared/edit';
 
 const base: Raw = {
   version: 1,
@@ -304,5 +304,74 @@ describe('automatic items in the document', () => {
     expect(describeChange(project(tagged), project(switched))).toBe('the automatic edits changed');
     const cut = applyCommand(tagged, { type: 'add', list: 'cuts', item: { from: 5, to: 6 } }, limits);
     expect(describeChange(project(tagged), project(cut))).toBe('1 cut added');
+  });
+});
+
+describe('a zoom that follows, in the document', () => {
+  // the typing zoom 4–8 s in the 4× clip (3–8 s): from the left, to the middle at 5 s, to the right at 7 s
+  const following: Raw = {
+    ...base,
+    scenes: [{ type: 'clip', id: 's1', from: 0, to: 12 }],
+    zooms: [{ id: 'z1', at: 4, duration: 4, rect: [0, 200, 640, 400], moves: [{ at: 5, rect: [300, 200, 640, 400] }, { at: 7, rect: [600, 200, 640, 400] }], auto: 'typing' }],
+  };
+  const zoom = (raw: Raw) => (raw.zooms as Raw[])[0]!;
+
+  it('takes its path along when it moves as a whole, by a drag, the inspector, a shift or a copy', () => {
+    const dragged = applyCommand(following, { type: 'set', list: 'zooms', id: 'z1', fields: { at: 5, duration: 4 } }, limits);
+    expect(zoom(dragged)).toMatchObject({ at: 5, rect: [0, 200, 640, 400], moves: [{ at: 6 }, { at: 8 }] });
+    expect(zoom(dragged).auto).toBeUndefined();
+    expect(zoom(applyCommand(following, { type: 'set', list: 'zooms', id: 'z1', fields: { at: 3.5 } }, limits)).moves).toMatchObject([{ at: 4.5 }, { at: 6.5 }]);
+    expect(zoom(applyCommand(following, { type: 'shift', list: 'zooms', id: 'z1', by: -0.25 }, limits)).moves).toMatchObject([{ at: 4.75 }, { at: 6.75 }]);
+    const copied = applyCommand(following, { type: 'duplicate', list: 'zooms', id: 'z1', shift: 4 }, limits);
+    expect((copied.zooms as Raw[])[1]).toMatchObject({ at: 8, moves: [{ at: 9 }, { at: 11 }] });
+  });
+
+  it('keeps its path in the take when an edge moves: what falls outside goes, a later start starts where the path was', () => {
+    const later = zoom(applyCommand(following, { type: 'set', list: 'zooms', id: 'z1', fields: { at: 5.5, duration: 2.5 } }, limits));
+    expect(later).toMatchObject({ at: 5.5, rect: [300, 200, 640, 400], moves: [{ at: 7, rect: [600, 200, 640, 400] }] });
+    const shorter = zoom(applyCommand(following, { type: 'set', list: 'zooms', id: 'z1', fields: { duration: 2.5 } }, limits));
+    expect(shorter.moves).toEqual([{ at: 5, rect: [300, 200, 640, 400] }]);
+    const none = zoom(applyCommand(following, { type: 'set', list: 'zooms', id: 'z1', fields: { duration: 0.5 } }, limits));
+    expect(none).not.toHaveProperty('moves');
+  });
+
+  it('stretches its path with its clip\'s speed, holds still on request, and keeps its moves on the screen', () => {
+    const sped = applyCommand({ ...following, scenes: [{ type: 'clip', id: 's1', from: 0, to: 20 }] }, { type: 'speed', id: 's1', speed: 2 }, limits);
+    expect(zoom(sped)).toMatchObject({ at: 4, duration: 8, moves: [{ at: 6 }, { at: 10 }] });
+    const still = zoom(applyCommand(following, { type: 'set', list: 'zooms', id: 'z1', fields: { moves: undefined } }, limits));
+    expect(still).not.toHaveProperty('moves');
+    expect(still.auto).toBeUndefined();
+    const off = zoom(applyCommand(following, { type: 'set', list: 'zooms', id: 'z1', fields: { moves: [{ at: 5, rect: [1000, 700, 640, 400] }] } }, limits));
+    expect(off.moves).toEqual([{ at: 5, rect: [1000, 700, 280, 100] }]);
+    expect(project(applyCommand(following, { type: 'set', list: 'zooms', id: 'z1', fields: { at: 0.5 } }, limits)).zooms[0]!.moves).toHaveLength(2);
+  });
+
+  it('moves and scales the whole path the way the box at the playhead was dragged', () => {
+    const path = { rect: [0, 200, 640, 400] as [number, number, number, number], moves: [{ at: 5, rect: [300, 200, 640, 400] as [number, number, number, number] }] };
+    // the box at the playhead (on the move) went 100 px right and 50 px down
+    expect(movePath(path, [300, 200, 640, 400], [400, 250, 640, 400])).toEqual({ rect: [100, 250, 640, 400], moves: [{ at: 5, rect: [400, 250, 640, 400] }] });
+    // and half as big from its corner
+    expect(movePath(path, [300, 200, 640, 400], [300, 200, 320, 200])).toEqual({ rect: [150, 200, 320, 200], moves: [{ at: 5, rect: [300, 200, 320, 200] }] });
+  });
+});
+
+describe('captions in the document', () => {
+  it('sets their fields, and fixes words: a fix takes the place of those it overlaps, and none leaves no list', () => {
+    const styled = applyCommand(base, { type: 'captions', field: 'style', value: 'karaoke' }, limits);
+    expect(styled.captions).toEqual({ style: 'karaoke' });
+    expect(describeChange(project(base), project(styled))).toBe('the subtitles changed');
+    const fixed = applyCommand(styled, { type: 'caption-fix', at: 3.1, end: 3.6, text: 'Holofish' }, limits);
+    const again = applyCommand(fixed, { type: 'caption-fix', at: 3.4, end: 4, text: 'Holofish App' }, limits);
+    expect((again.captions as Raw).fixes).toEqual([{ at: 3.4, end: 4, text: 'Holofish App' }]);
+    const both = applyCommand(fixed, { type: 'caption-fix', at: 1, end: 1.2, text: '' }, limits);
+    expect((both.captions as Raw).fixes).toEqual([{ at: 1, end: 1.2, text: '' }, { at: 3.1, end: 3.6, text: 'Holofish' }]);
+    const undone = applyCommand(fixed, { type: 'caption-fix', at: 3, end: 3.2, text: undefined }, limits);
+    expect(undone.captions).toEqual({ style: 'karaoke' });
+    expect(() => applyCommand(base, { type: 'caption-fix', at: 2, end: 2, text: 'x' }, limits)).toThrow(DocumentError);
+  });
+
+  it('says that a take was transcribed, not that it is another take', () => {
+    const transcribed = { ...base, sources: { ...(base.sources as Raw), transcript: 'takes/1/transcript.json' } };
+    expect(describeChange(project(base), project(transcribed))).toBe('the take was transcribed');
   });
 });

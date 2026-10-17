@@ -317,6 +317,15 @@ describe('overlay ramps in output time', () => {
     }
   });
 
+  it('moves a zoom that follows in output time, at the clip\'s speed', () => {
+    const scenes = [{ type: 'clip', from: 0, to: 20 }];
+    const zooms = [{ at: 2, duration: 8, rect: zoomRect, moves: [{ at: 6, rect: [1280, 720, 1280, 720] }] }];
+    const timeline = createTimeline(project(look, { scenes, zooms, masks: [], texts: [] }), { screenSize });
+    expect(timeline.frameAt(5.5).layers[0]?.zoom).toEqual(zoomRect);
+    expect(timeline.frameAt(6).layers[0]?.zoom?.map((value) => Math.round(value * 1e6) / 1e6)).toEqual([640, 360, 1280, 720]);
+    expect(timeline.frameAt(6.5).layers[0]?.zoom).toEqual([1280, 720, 1280, 720]);
+  });
+
   it('lands fully zoomed where a cut jumps into the middle of a zoom', () => {
     // the zoom is source 10–16; the second clip starts at 12, inside it
     const timeline = createTimeline(

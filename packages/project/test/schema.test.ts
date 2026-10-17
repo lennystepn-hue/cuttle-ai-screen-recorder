@@ -29,7 +29,7 @@ describe('ProjectSchema', () => {
     expect(p.look.frame).toEqual({ enabled: true, style: 'mac-dark', title: '', radius: 14, shadow: true });
     expect(p.look.cursor).toEqual({ enabled: true, style: 'system', size: 1, color: '#D97757', clickEffect: 'ripple', smoothing: 0.5 });
     expect(p.look.webcam).toEqual({ enabled: false, shape: 'circle', corner: 'bottom-left', size: 0.18 });
-    expect(p.look.audio).toEqual({ enabled: true, muteSpedUp: true });
+    expect(p.look.audio).toEqual({ enabled: true, muteSpedUp: true, cleanup: true });
     expect(p.look.transition).toEqual({ enabled: true, duration: 0.3 });
     expect(p.scenes).toEqual([]);
     expect(p.zooms).toEqual([]);
@@ -114,6 +114,16 @@ describe('ProjectSchema', () => {
 
   it('rejects zero-sized rects and a speed of zero', () => {
     expect(pathsOf({ ...minimal, zooms: [{ at: 0, duration: 1, rect: [0, 0, 0, 10] }] })).toContain('zooms.0.rect.2');
+  });
+
+  it('takes a zoom that follows: its moves come in time order, inside the zoom', () => {
+    const zoom = { at: 2, duration: 4, rect: [0, 0, 800, 450] };
+    const moves = [{ at: 3, rect: [100, 0, 800, 450] }, { at: 4.5, rect: [100, 200, 800, 450] }];
+    expect(ProjectSchema.parse({ ...minimal, zooms: [{ ...zoom, moves }] }).zooms[0]!.moves).toEqual(moves);
+    expect(pathsOf({ ...minimal, zooms: [{ ...zoom, moves: [{ at: 2, rect: [0, 0, 8, 4] }] }] })).toEqual(['zooms.0.moves.0.at']);
+    expect(pathsOf({ ...minimal, zooms: [{ ...zoom, moves: [moves[1], moves[0]] }] })).toEqual(['zooms.0.moves.1.at']);
+    expect(pathsOf({ ...minimal, zooms: [{ ...zoom, moves: [{ at: 6, rect: [0, 0, 8, 4] }] }] })).toEqual(['zooms.0.moves.0.at']);
+    expect(pathsOf({ ...minimal, zooms: [{ ...zoom, moves: [{ at: 3, rect: [0, 0, 0, 4] }] }] })).toEqual(['zooms.0.moves.0.rect.2']);
     expect(pathsOf({ ...minimal, scenes: [{ type: 'clip', from: 0, to: 1, speed: 0 }] })).toContain('scenes.0.speed');
   });
 
@@ -241,5 +251,22 @@ describe('automatic edits in the project', () => {
     expect(pathsOf({ ...minimal, zooms: [{ at: 1, duration: 2, rect: [0, 0, 10, 10], auto: 'magic' }] })).toEqual(['zooms.0.auto']);
     expect(pathsOf({ ...minimal, scenes: [{ type: 'clip', from: 0, to: 2, crop: { rect: [0, 0, 10, 10], auto: 'click' } }] })).toEqual(['scenes.0.crop.auto']);
     expect(pathsOf({ ...minimal, zooms: [{ id: 'c1', at: 1, duration: 2, rect: [0, 0, 10, 10] }], cuts: [{ id: 'c1', from: 1, to: 2 }] })).toEqual(['cuts.0.id']);
+  });
+});
+
+describe('captions', () => {
+  it('are on, as subtitles at the bottom, by default', () => {
+    expect(ProjectSchema.parse(minimal).captions).toEqual({ enabled: true, style: 'subtitle', position: 'bottom', size: 1, color: '#D97757', fixes: [] });
+  });
+
+  it('read a style, a size and fixes of the transcript', () => {
+    const p = ProjectSchema.parse({ ...minimal, captions: { style: 'karaoke', size: 1.4, fixes: [{ at: 3.12, end: 3.58, text: 'Holofish' }, { at: 5, end: 5.2, text: '' }] } });
+    expect(p.captions).toMatchObject({ enabled: true, style: 'karaoke', size: 1.4, fixes: [{ at: 3.12, end: 3.58, text: 'Holofish' }, { at: 5, end: 5.2, text: '' }] });
+  });
+
+  it('refuse an unknown style, a size out of range and a fix that ends before it starts', () => {
+    expect(pathsOf({ ...minimal, captions: { style: 'marquee' } })).toEqual(['captions.style']);
+    expect(pathsOf({ ...minimal, captions: { size: 3 } })).toEqual(['captions.size']);
+    expect(pathsOf({ ...minimal, captions: { fixes: [{ at: 2, end: 1, text: 'x' }] } })).toEqual(['captions.fixes.0.end']);
   });
 });

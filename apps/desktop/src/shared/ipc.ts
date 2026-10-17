@@ -11,6 +11,8 @@ export const EXPORT_FORMATS = ['16:9', '1:1', '9:16'] as const;
 export const EXPORT_TARGETS = ['project', ...EXPORT_FORMATS] as const;
 export type ExportTarget = (typeof EXPORT_TARGETS)[number];
 export const ENCODERS = ['auto', 'hardware', 'software'] as const;
+/** Subtitle files an export can write next to the video (as @cuttle/export's SUBTITLE_FORMATS). */
+export const SUBTITLE_FILES = ['srt', 'vtt'] as const;
 
 /** The origin of the media protocol in an editor window: `cuttle-media://project/<path in the project>`. */
 export const MEDIA_ORIGIN = 'cuttle-media://project';
@@ -59,6 +61,8 @@ export interface ExportFile {
   out: string;
   seconds: number;
   bytes: number;
+  /** The subtitle files written next to it. */
+  subtitles?: string[];
 }
 
 export type ExportEnd =
@@ -92,6 +96,8 @@ export interface HudState {
   /** Seconds recorded before it (the take's time stands still while paused). */
   recorded?: number;
   markers: number;
+  /** How often the mistake key was pressed (its markers are not counted in `markers`). */
+  retakes?: number;
   /** A warning in a few words ("Mic is silent: muted?"), or "Stopping…". */
   message?: string;
   /** The whole warning, for the tooltip. */
@@ -103,8 +109,27 @@ export interface HudState {
 /** What the main process is doing to a project, shown in its editor's title bar. */
 export interface ProjectStatus {
   text?: string;
-  /** `working`: cutting the take (a spinner); `failed`: it could not (Try again); `recording`: a new take records (the player pauses). */
+  /** `working`: cutting the take or transcribing it (a spinner); `failed`: it could not (Try again); `recording`: a new take records (the player pauses). */
   state?: 'working' | 'failed' | 'recording';
+  /** What Try again does after a failure: cut the take again (the default), or transcribe it again. */
+  retry?: 'cut' | 'speech';
+}
+
+/** The speech models (as @cuttle/core's MODEL_NAMES; a contract test keeps them alike). */
+export const SPEECH_MODEL_NAMES = ['base', 'small', 'large-v3-turbo-q5_0'] as const;
+export type SpeechModelName = (typeof SPEECH_MODEL_NAMES)[number];
+export const SPEECH_LANGUAGES = ['auto', 'de', 'en'] as const;
+export type SpeechLanguage = (typeof SPEECH_LANGUAGES)[number];
+
+/** The speech models on this computer, and a download under way or the last one that failed. */
+export interface SpeechStatus {
+  /** Where the models are kept. */
+  dir: string;
+  models: { name: SpeechModelName; label: string; bytes: number; note: string; installed: boolean }[];
+  /** Whether ffmpeg can transcribe (its `whisper` filter); undefined without ffmpeg. */
+  whisper?: boolean;
+  download?: { name: SpeechModelName; received: number; total: number };
+  failure?: { name: SpeechModelName; message: string };
 }
 
 /** The tools around the app: ffmpeg, and for Claude Code the cuttle command and the skill. */
@@ -139,6 +164,8 @@ export interface SettingsView {
   mic?: string;
   launchAtLogin: boolean;
   motion: Motion;
+  /** Transcribing a take after its cut: the model (or off) and the language spoken. */
+  speech: { model: SpeechModelName | 'off'; language: SpeechLanguage };
   /** `open`: the project is open in Cuttle, here (`here`) or on the computer named. */
   recent: { dir: string; name: string; opened: number; open?: string }[];
   version: string;
@@ -158,6 +185,10 @@ export const REQUESTS = {
   'export:start': z.strictObject({
     formats: z.array(z.enum(EXPORT_TARGETS)).min(1).max(4),
     encoder: z.enum(ENCODERS),
+    /** Burn the subtitles in (default: the project's `captions.enabled`). */
+    captions: z.boolean().optional(),
+    /** Subtitle files next to each video. */
+    subtitles: z.array(z.enum(SUBTITLE_FILES)).max(2).optional(),
   }),
   'export:cancel': z.undefined(),
   // pill
@@ -171,6 +202,8 @@ export const REQUESTS = {
   'project:takes': z.undefined(),
   // cut the take with suggest again, after it failed
   'project:cut': z.undefined(),
+  // transcribe the take's mic (after it failed, or a model came later) and cut its filler words and pauses
+  'project:transcribe': z.undefined(),
   // picker
   'picker:setup': z.undefined(),
   'picker:hover': z.undefined(),
@@ -191,6 +224,8 @@ export const REQUESTS = {
   // HUD
   'hud:stop': z.undefined(),
   'hud:marker': z.undefined(),
+  /** The mistake key: Cuttle cuts back to the pause before it. */
+  'hud:retake': z.undefined(),
   'hud:pause': z.undefined(),
   'hud:resume': z.undefined(),
   /** Puts the take aside and records again with the same settings (the HUD asks for a press held 600 ms). */
@@ -222,6 +257,8 @@ export const REQUESTS = {
     mic: z.string().min(1).max(512).nullable().optional(),
     launchAtLogin: z.boolean().optional(),
     motion: z.enum(MOTIONS).optional(),
+    speechModel: z.enum(['off', ...SPEECH_MODEL_NAMES]).optional(),
+    speechLanguage: z.enum(SPEECH_LANGUAGES).optional(),
   }),
   /** Asks for the projects folder (a folder dialog) and keeps it. */
   'settings:choose-folder': z.undefined(),
@@ -242,6 +279,11 @@ export const REQUESTS = {
   'recent:forget': z.string().min(1).max(4096),
   /** Renames a recent project's folder (not while it is open or recording). */
   'recent:rename': z.strictObject({ dir: z.string().min(1).max(4096), name: z.string().trim().min(1).max(120) }),
+  'speech:status': z.undefined(),
+  /** Downloads a speech model (checked by size and checksum); answers once it is there or failed. */
+  'speech:download': z.enum(SPEECH_MODEL_NAMES),
+  'speech:cancel': z.undefined(),
+  'speech:remove': z.enum(SPEECH_MODEL_NAMES),
 } as const;
 
 export type Request = keyof typeof REQUESTS;
@@ -267,6 +309,8 @@ export interface Responses {
   'project:record': void;
   'project:takes': void;
   'project:cut': void;
+  /** Started (the title bar shows it), or why not, and whether Settings is the place to fix it. */
+  'project:transcribe': { started: true } | { problem: string; settings?: boolean };
   'picker:setup': PickerSetup | undefined;
   'picker:hover': void;
   'picker:choices': void;
@@ -276,11 +320,12 @@ export interface Responses {
   'picker:retry': void;
   'hud:stop': void;
   'hud:marker': void;
+  'hud:retake': void;
   'hud:pause': void;
   'hud:resume': void;
   'hud:restart': void;
   /** Written (its new hash); or the file changed meanwhile (the version on disk now); or it could not be written. */
-  'project:save': { hash: string } | { conflict: ProjectVersion & { origin: 'outside' | 'suggest' } } | { problem: string };
+  'project:save': { hash: string } | { conflict: ProjectVersion & { origin: ChangeOrigin } } | { problem: string };
   /** An image chosen by the person, copied into the project when it lay outside (a path inside the project). */
   'project:import-image': { path: string } | undefined;
   /** The person's version a save conflict could not carry over, written to cuttle.json.draft. */
@@ -306,6 +351,10 @@ export interface Responses {
   'recent:forget': SettingsView;
   /** The project's new folder, or why it could not be renamed. */
   'recent:rename': { dir: string } | { problem: string };
+  'speech:status': SpeechStatus;
+  'speech:download': SpeechStatus;
+  'speech:cancel': void;
+  'speech:remove': SpeechStatus;
 }
 
 /** A version of cuttle.json: as written, and the SHA-256 of its bytes. */
@@ -316,9 +365,13 @@ export interface ProjectVersion {
 
 /**
  * cuttle.json changed on disk, not by this window: a new version (`origin`: `suggest` when the app's
- * own suggest cut the take, else another program, Claude or the CLI), or one that does not parse.
+ * own suggest cut the take, `speech` when the app cut its filler words and pauses, else another
+ * program, Claude or the CLI), or one that does not parse.
  */
-export type ProjectFileEvent = (ProjectVersion & { origin: 'outside' | 'suggest' }) | { issues: string[] };
+export type ProjectFileEvent = (ProjectVersion & { origin: ChangeOrigin }) | { issues: string[] };
+
+/** Who changed cuttle.json outside the editor: another program, or the app's own cut or speech edits. */
+export type ChangeOrigin = 'outside' | 'suggest' | 'speech';
 
 /** Events (main → window). */
 export interface Events {
@@ -344,6 +397,8 @@ export interface Events {
   /** A note for the editor's person once the take is in, said there (an undone restart). */
   'project:note': { text: string };
   'settings:changed': SettingsView;
+  /** The speech models changed, or a download moved on. */
+  'speech:status': SpeechStatus;
   /** Every window: how motion is set now (`data-motion` on the page's root). */
   'app:motion': Motion;
 }

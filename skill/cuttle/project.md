@@ -28,7 +28,9 @@ errors, and every command names the path of a problem, counting from 0
     "screen": "takes/1/screen.mp4",
     "mic": "takes/1/mic.m4a",
     "events": "takes/1/events.jsonl",
-    "markers": "takes/1/markers.json"
+    "markers": "takes/1/markers.json",
+    "transcript": "takes/1/transcript.json",
+    "cleanMic": "takes/1/mic.clean.m4a"
   },
   "look": {
     "background": { "preset": "sunset-sky" },
@@ -54,7 +56,12 @@ errors, and every command names the path of a problem, counting from 0
 `cuttle render --format` overrides the size: `16:9` is 1920×1080, `1:1` is 1080×1080, `9:16` is
 1080×1920.
 
-`sources`: paths relative to the project folder. `cuttle record` sets them.
+`sources`: paths relative to the project folder. `cuttle record` sets them; `transcript` is set
+once the mic was transcribed (`cuttle transcribe`, or `suggest` with a speech model). Never edit
+transcript.json: `{ "language", "model", "words": [{ "t", "end", "text" }], "sounds": [{ "t", "end" }] }`,
+in source seconds; `sounds` are stretches the mic heard without a word (a cough, a dropped filler).
+`cleanMic` is the mic cleaned up with it (less noise, even loudness), played instead of the mic
+while `look.audio.cleanup` is on.
 
 `look` (every field is optional):
 
@@ -64,7 +71,7 @@ errors, and every command names the path of a problem, counting from 0
 | `frame` | `enabled` (`true`), `style` (`mac-dark`, `mac-light`, `browser-light`, `none`), `title` (`""`), `radius` (`14`), `shadow` (`true`) |
 | `cursor` | `enabled` (`true`), `style` (`system`, `arrow-white`, `arrow-black`, `dot`, `ring`, `spotlight`), `size` (`1`, up to 4), `color` (`"#D97757"`: tints dot, ring, spotlight and the click ripple), `clickEffect` (`ripple`, `none`), `smoothing` (`0.5`: 0 draws the path as recorded, up to 1 very smooth; clicks stay exact) |
 | `webcam` | `enabled` (`false`), `shape` (`circle`, `rounded`), `corner` (`bottom-left`, `bottom-right`, `top-left`, `top-right`), `size` (`0.18` of the output's short side, up to 0.5) |
-| `audio` | `enabled` (`true`), `muteSpedUp` (`true`: sped-up clips are silent) |
+| `audio` | `enabled` (`true`), `muteSpedUp` (`true`: sped-up clips are silent), `cleanup` (`true`: the cleaned-up mic plays, where there is one) |
 | `transition` | `enabled` (`true`: a crossfade between scenes), `duration` (`0.3` s, up to 2) |
 
 Two clips where the second starts where the first ends (within 1 ms), as `suggest`'s speed-ups and
@@ -87,7 +94,10 @@ there are not two cursors.
 (`true`). The rect is widened to the screen's aspect and kept inside the screen. The zoom eases in
 and out over 0.6 output seconds each where it starts and ends on screen (a cut into its middle
 lands zoomed), so give it 2 output seconds or more (`2 × speed` source seconds over a sped-up
-clip).
+clip). A zoom that follows (a typing zoom from `suggest`) has `moves`: `[{ "at", "rect" }]`, each
+`at` (source seconds) after the one before and inside the zoom. It starts on `rect` and goes to each
+move's rect in turn, eased over 0.6 output seconds centred on the move's `at`. To move the whole
+path, change every rect by the same amount; without `moves` it holds still.
 
 `masks` hide private things: `from` and `to` (source seconds), `rect`, `style` (`fill`: the colour
 around it, safest for tokens and keys; `blur`) and `enabled` (`true`). Make the rect generous: a
@@ -98,9 +108,18 @@ page).
 `position` (`top`, `center`, `bottom`) and `enabled` (`true`). A `top` text sits over the window's
 title bar; `bottom` keeps the title visible. Texts fade in and out over 0.25 output seconds.
 
+`captions`: the subtitles from the transcript (none without one). `enabled` (`true`), `style`
+(`subtitle`: two lines on a dark box; `karaoke`: the spoken word in `color`; `bold`: a few big words),
+`position` (`bottom`, `top`, `center`), `size` (`1`, 0.5 to 2), `color` (`#D97757`), and `fixes`:
+`[{ "at", "end", "text" }]`, the words spoken in `[at, end)` (source seconds) read as `text`, `""`
+for none. Take `at` and `end` from the words in transcript.json. Words in sped-up clips and in
+cuts have no subtitle.
+
 `cuts` take a stretch out of whatever clip covers it, without splitting the clip: `from` and `to`
 (source seconds) and `enabled` (`true`). The video jumps there (no crossfade); zooms, masks and
-texts run on across it. Use them for a slip, a filler or a pause inside a clip.
+texts run on across it. Use them for a slip, a filler or a pause inside a clip; `suggest` makes
+them for slips ("Retake": the mistake key, or a spoken "nochmal" with the bit said again), filler
+words ("Filler: äh") and pauses ("Pause: 2.4 s") from the transcript.
 
 Every scene, zoom, mask, text and cut may have an `id` (1 to 64 letters, digits, `-` or `_`,
 unique in the whole project) and a `label` (a name for people, shown in the Cuttle app). `suggest`
@@ -122,7 +141,11 @@ it is yours and the next `suggest` keeps it (switching it on or off keeps the ta
 - `cuttle --json frame <source second> --grid` writes that frame of the screen track at full size
   with a numbered grid every 100 pixels (stronger lines every 500). Read the PNG and take rects off
   the grid; `frames/<t>s-grid.png` is the default file.
-- `takes/<n>/markers.json` lists the prompt, each tool call and Claude's answer in source seconds.
+- `takes/<n>/markers.json` lists the prompt, each tool call and Claude's answer in source seconds,
+  and each press of the mistake key (kind `retake`).
+- `takes/<n>/events.jsonl` has the input: `move`, `click` and `scroll` with `x` and `y`, `keys`
+  (presses per half second, never which keys) and the pointer's `shape`; on Windows also `caret`
+  with a `rect` (where text is typed, while it is, where the app keeps a system caret).
 - `cuttle --json suggest` prints notes with source seconds (`sped up 112.9 s without input 12×
   (7.5–120.4 s)`).
 - To get from output to source seconds by hand, walk the scenes. A clip lasts

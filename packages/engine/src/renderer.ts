@@ -1,6 +1,7 @@
 import type { CardScene, CuttleProject, FrameStyle, Rect, Scene, StillScene, TextOverlay } from '@cuttle/project';
-import type { ActiveText, RenderState, SceneFrame } from '@cuttle/timeline';
+import type { ActiveCaption, ActiveText, RenderState, SceneFrame } from '@cuttle/timeline';
 import type { EngineAssets } from './assets';
+import { CAPTION_LOOKS, drawCaption } from './captions';
 import { createRenderTarget, deleteRenderTarget, type RenderTarget } from './gl/target';
 import { createTexture, sourceSize, uploadTexture } from './gl/texture';
 import { placeBadge, placeOverlay, stillCrop, unitFor, uvRect, webcamRect, windowLayout, type Size, type WindowLayout } from './layout';
@@ -221,6 +222,17 @@ export function createRenderer(canvas: HTMLCanvasElement | OffscreenCanvas, proj
     }
   }
 
+  /** The caption over the whole frame (also over a crossfade), clear of the webcam bubble. */
+  function drawCaptionOver(caption: ActiveCaption): void {
+    const { style, color, size, position } = project.captions;
+    const lines = caption.cue.lines.map((line) => line.map((word) => word.text));
+    const maxWidth = Math.round(output.width * CAPTION_LOOKS[style].maxWidth);
+    const key = JSON.stringify(['caption', lines, caption.current, style, color, unit, size, maxWidth]);
+    const sprite = sprites.drawn(key, () => drawCaption(lines, caption.current, style, color, unit, size, maxWidth));
+    const [x, y] = placeOverlay(output, sprite.box, position, 'center', webcamArea ? [webcamArea] : []);
+    spritePass.drawSprite(sprite, x, y, 1);
+  }
+
   function drawLayer(layer: SceneFrame, sources: FrameSources, t: number): void {
     const scene = scenes[layer.sceneIndex];
     if (!scene) throw new Error(`render: the project has no scene ${layer.sceneIndex}`);
@@ -254,6 +266,7 @@ export function createRenderer(canvas: HTMLCanvasElement | OffscreenCanvas, proj
         gl.bindFramebuffer(gl.FRAMEBUFFER, null);
         spritePass.draw(layerTarget.texture, [0, 0, output.width, output.height], layer.opacity, true);
       }
+      if (state.caption) drawCaptionOver(state.caption);
       sprites.endFrame();
     },
     drawnTexts: () => drawn,

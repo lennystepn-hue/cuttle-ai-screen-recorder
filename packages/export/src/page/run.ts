@@ -71,6 +71,8 @@ async function withRendering<T>(job: PageJob, makePlan: (timeline: Timeline) => 
     const timeline = createTimeline(project, {
       screenSize: screen.size,
       cursor: job.events ? createCursorTrack(job.events) : undefined,
+      ...(job.transcript && { transcript: job.transcript }),
+      ...(job.captions !== undefined && { captions: job.captions }),
     });
     const plan = makePlan(timeline);
     if (job.backgroundImage) background = await loadImage(job.backgroundImage, probeMaxTextureSize(), 'the background image');

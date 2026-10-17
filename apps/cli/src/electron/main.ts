@@ -52,9 +52,14 @@ function subtitleFormats(formats: readonly string[]): SubtitleFormat[] {
   return formats as SubtitleFormat[];
 }
 
-/** The project with the checked page as its only scene (its look and output stay). */
+/** The project with the checked page as its only scene, or the checked overlay as its only one (its look and output stay). */
 function motionCheckProject(project: CuttleProject, check: MotionCheck): CuttleProject {
-  return { ...project, scenes: [{ type: 'motion', label: 'check', ...check }], overlays: [], cuts: [] };
+  if (check.overlay !== undefined) {
+    const overlay = project.overlays[check.overlay];
+    return { ...project, overlays: overlay ? [overlay] : [] };
+  }
+  const { overlay: _overlay, ...page } = check;
+  return { ...project, scenes: [{ type: 'motion', label: 'check', ...page }], overlays: [], cuts: [] };
 }
 
 async function handle(request: ElectronRequest): Promise<unknown> {

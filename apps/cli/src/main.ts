@@ -4,7 +4,7 @@ import { devices } from './commands/devices';
 import { fitCommand } from './commands/fit';
 import { frameCommand } from './commands/frame';
 import { init } from './commands/init';
-import { motionCheckCommand } from './commands/motion';
+import { motionCheckCommand, motionNewCommand, motionTemplatesCommand } from './commands/motion';
 import { previewCommand } from './commands/preview';
 import { recordCommand } from './commands/record';
 import { recoverCommand } from './commands/recover';
@@ -194,6 +194,18 @@ export async function runCli(argv: readonly string[], streams?: Streams): Promis
     );
 
   const motion = program.command('motion').description('motion pages: scenes and overlays drawn by code (HTML, CSS, canvas, WebGL)');
+  motion
+    .command('new <template>')
+    .description('copy a template into motion/<name>/ and add it: a scene at the end, or an overlay over the clips (motion templates lists them)')
+    .option('--name <name>', 'the folder in motion/ (default: the template\'s name)')
+    .option('--at <seconds>', 'an overlay\'s start, in source seconds (default: the first clip\'s start)', seconds)
+    .option('--duration <seconds>', 'how long it lasts (default: the template\'s; a callout or caption overlay: the whole take)', positive)
+    .option('--first', 'a scene goes first instead of last (an intro)')
+    .action(action((output, project, template: string, options: { name?: string; at?: number; duration?: number; first?: boolean }) => motionNewCommand(project, template, options, output)));
+  motion
+    .command('templates')
+    .description('the templates motion new copies: their kind and what they show')
+    .action(action((output) => motionTemplatesCommand(output)));
   motion
     .command('check <src>')
     .description('render a motion page frame by frame as the export draws it: PNGs, a contact sheet, its errors and console')

@@ -345,7 +345,7 @@ describe('motion', () => {
     const project = parse({ look: { ...solid, frame: { enabled: false } }, scenes: [{ type: 'clip', from: 0, to: 1 }], overlays: [{ src: 'o.html', at: 0, duration: 1 }] });
     const sources = { ...NO_SOURCES, screens: new Map([[0, fakeScreen()]]), overlays: new Map([['0@0', motionFrame([0, 0, 0, 0], [0, 255, 0, 255])]]) };
     const plain = render(project, { t: 0, layers: [layer(0, 1, 'clip')] }, sources).pixels;
-    const shown = render(project, { t: 0, layers: [{ ...layer(0, 1, 'clip'), overlays: [{ index: 0, key: '0@0', local: 0, duration: 1 }] }] }, sources).pixels;
+    const shown = render(project, { t: 0, layers: [{ ...layer(0, 1, 'clip'), overlays: [{ index: 0, key: '0@0', start: 0, local: 0, duration: 1 }] }] }, sources).pixels;
     expect(pixelAt(shown, 32, 30)).toEqual([0, 255, 0, 255]);
     expect(pixelAt(shown, 1, 30)).toEqual([0, 255, 0, 255]);
     expect(pixelAt(shown, 32, 5)).toEqual(pixelAt(plain, 32, 5));

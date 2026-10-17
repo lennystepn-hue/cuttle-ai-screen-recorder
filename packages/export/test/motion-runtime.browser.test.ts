@@ -1,8 +1,9 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { motionRuntime, type CuttleApi, type MotionInit } from '../src/motion/runtime';
+import { motionRuntime, type CuttleApi, type MotionInit, type TakeData } from '../src/motion/runtime';
 
 const INIT: MotionInit = {
   duration: 2,
+  start: 0,
   fps: 30,
   width: 320,
   height: 180,
@@ -10,12 +11,14 @@ const INIT: MotionInit = {
   params: { title: 'Hi' },
   theme: { '--cuttle-accent': '#d97757' },
   seed: 7,
+  fonts: [{ family: 'Inter', weight: '700', style: 'normal', src: 'cuttle-motion://kit/fonts/inter-latin-700-normal.woff2' }],
+  take: null,
 };
 
 type Page = Window &
   typeof globalThis & {
     cuttle: CuttleApi;
-    __cuttleDraw(ms: number): Promise<number>;
+    __cuttleDraw(ms: number, view?: import('../src/motion/runtime').MotionView): Promise<number>;
     __cuttleReady(): Promise<void>;
     __cuttleErrors: string[];
     seen: unknown[];
@@ -92,6 +95,49 @@ describe('the motion runtime', () => {
     await win.__cuttleDraw(0);
     await win.__cuttleDraw(1000 / 30);
     expect(win.seen).toEqual([0, 1 / 30]);
+  });
+
+  it('declares the kit\'s fonts before the page is parsed', () => {
+    const win = page('', '');
+    const faces = win.document.adoptedStyleSheets.flatMap((sheet) => [...sheet.cssRules]).filter((rule) => rule.constructor.name === 'CSSFontFaceRule');
+    expect(faces.map((rule) => rule.cssText)).toEqual([expect.stringMatching(/font-family: Inter; font-weight: 700;.*inter-latin-700-normal\.woff2/)]);
+  });
+
+  it('gives the page the take: where a moment plays in the video, the pointer, and where a point of the screen is in this frame', async () => {
+    const take: TakeData = {
+      screen: { width: 2000, height: 1000 },
+      events: [
+        { t: 12, type: 'click', x: 500, y: 250, button: 'left' },
+        { t: 12.5, type: 'keys', count: 3 },
+      ],
+      words: [{ t: 12.2, end: 12.6, text: 'Hello' }],
+      markers: [{ t: 11, kind: 'prompt' }],
+      zooms: [],
+      masks: [],
+      clips: [
+        { start: 2, end: 6, from: 10, to: 14, speed: 1 },
+        { start: 6, end: 11, from: 20, to: 40, speed: 4 },
+      ],
+      cursor: { fps: 10, start: 10, points: [0, 0, 10, 20, 20, 40] },
+      window: { from: 11, to: 16 },
+    };
+    const win = page('', '', { ...INIT, start: 3, take });
+    const { take: api } = win.cuttle;
+    expect(api.clicks).toEqual([take.events[0]]);
+    expect([api.words, api.markers, api.window]).toEqual([take.words, take.markers, take.window]);
+    expect([api.toOutput(12), api.toOutput(24), api.toOutput(15)]).toEqual([4, 7, null]);
+    expect([api.toSource(5), api.toSource(8), api.toSource(1)]).toEqual([13, 28, null]);
+    const between = api.cursorAt(10.05)!;
+    expect([between.x, between.y].map((value) => Math.round(value * 1e6) / 1e6)).toEqual([5, 10]);
+    expect([api.cursorAt(9), api.cursorAt(99)]).toEqual([{ x: 0, y: 0 }, { x: 20, y: 40 }]);
+    // before a frame with a view (and in a scene) nothing of the screen is in the frame
+    expect([api.toScreen(500, 250), api.cursor, api.source]).toEqual([null, null, null]);
+    await win.__cuttleDraw(500, { source: 12.5, zoom: [0, 0, 1000, 500], content: [100, 50, 800, 400], cursor: { x: 500, y: 250 } });
+    expect(win.cuttle.videoTime).toBe(3.5);
+    expect(api.source).toBe(12.5);
+    expect(api.toScreen(500, 250)).toEqual({ x: 500, y: 250, inside: true });
+    expect(api.toScreen(1500, 250)).toEqual({ x: 1300, y: 250, inside: false });
+    expect(api.cursor).toEqual({ x: 500, y: 250, inside: true });
   });
 
   it('seeds Math.random: the same seed gives the same numbers', () => {

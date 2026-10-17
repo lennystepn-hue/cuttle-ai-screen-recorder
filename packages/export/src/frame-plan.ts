@@ -20,7 +20,8 @@ export interface OverlayPlan {
   key: string;
   /** Its place in the project's `overlays`. */
   index: number;
-  /** How long the showing lasts, in output seconds. */
+  /** Where the showing starts and how long it lasts, in output seconds. */
+  start: number;
   duration: number;
   firstFrame: number;
   lastFrame: number;
@@ -93,7 +94,7 @@ function planScenes(timeline: Timeline, fps: number, frames: readonly number[]):
       for (const overlay of layer.overlays) {
         const seen = byKey.get(overlay.key);
         if (seen) seen.lastFrame = frame;
-        else byKey.set(overlay.key, { key: overlay.key, index: overlay.index, duration: overlay.duration, firstFrame: frame, lastFrame: frame });
+        else byKey.set(overlay.key, { key: overlay.key, index: overlay.index, start: overlay.start, duration: overlay.duration, firstFrame: frame, lastFrame: frame });
       }
       let plan = byIndex.get(layer.sceneIndex);
       if (!plan) {

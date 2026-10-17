@@ -1,0 +1,200 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Title</title>
+    <!-- A kinetic title: an eyebrow line, the title's words rising out of a blur, an accent line
+         that draws under them, a subtitle; everything leaves upward at the end. -->
+    <script type="application/json" id="cuttle-params">
+      [
+        { "name": "title", "label": "Title", "type": "text", "default": "Built with Claude Code" },
+        { "name": "subtitle", "label": "Subtitle", "type": "text", "default": "" },
+        { "name": "eyebrow", "label": "Small line above", "type": "text", "default": "" },
+        { "name": "align", "label": "Align", "type": "select", "default": "center", "options": ["center", "left"] },
+        { "name": "background", "label": "Own background", "type": "bool", "default": true }
+      ]
+    </script>
+    <style>
+      :root {
+        --u: calc(100vmin / 1080);
+      }
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        overflow: hidden;
+      }
+      body {
+        font-family: 'Archivo', var(--cuttle-font);
+        color: var(--cuttle-fg);
+        display: grid;
+        place-items: center;
+      }
+      canvas {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+      }
+      .block {
+        position: relative;
+        width: 84vw;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        text-align: center;
+      }
+      .left .block {
+        align-items: flex-start;
+        text-align: left;
+      }
+      .eyebrow {
+        display: flex;
+        align-items: center;
+        gap: calc(16 * var(--u));
+        font: 600 calc(26 * var(--u)) / 1 var(--cuttle-mono);
+        letter-spacing: 0.28em;
+        text-transform: uppercase;
+        color: var(--cuttle-accent);
+        margin-bottom: calc(34 * var(--u));
+      }
+      .eyebrow i {
+        display: block;
+        width: calc(56 * var(--u));
+        height: calc(2 * var(--u));
+        background: var(--cuttle-accent);
+        transform-origin: left;
+      }
+      h1 {
+        margin: 0;
+        font-weight: 800;
+        font-stretch: 112%;
+        font-size: calc(132 * var(--u));
+        line-height: 0.98;
+        letter-spacing: -0.035em;
+        perspective: calc(900 * var(--u));
+      }
+      h1 span {
+        will-change: transform, filter, opacity;
+      }
+      .line {
+        height: calc(8 * var(--u));
+        width: 38%;
+        margin-top: calc(34 * var(--u));
+        border-radius: calc(4 * var(--u));
+        background: linear-gradient(90deg, var(--cuttle-accent), color-mix(in srgb, var(--cuttle-accent) 40%, white) 70%, transparent);
+        box-shadow: 0 0 calc(40 * var(--u)) color-mix(in srgb, var(--cuttle-accent) 60%, transparent);
+        transform-origin: left;
+      }
+      .center .line {
+        transform-origin: center;
+      }
+      .subtitle {
+        margin-top: calc(30 * var(--u));
+        font: 400 italic calc(58 * var(--u)) / 1.2 "Instrument Serif", serif;
+        color: color-mix(in srgb, var(--cuttle-fg) 78%, transparent);
+      }
+    </style>
+  </head>
+  <body>
+    <canvas id="bg"></canvas>
+    <div class="block">
+      <div class="eyebrow" id="eyebrow"><i></i><span id="eyebrow-text"></span></div>
+      <h1 id="title"></h1>
+      <div class="line" id="line"></div>
+      <div class="subtitle" id="subtitle"></div>
+    </div>
+    <script type="module">
+      import { at, ease, fit, random, stagger, split } from 'cuttle';
+
+      const { params, duration, size } = cuttle;
+      document.body.classList.add(params.align === 'left' ? 'left' : 'center');
+      const title = document.getElementById('title');
+      title.textContent = params.title || 'Title';
+      const subtitle = document.getElementById('subtitle');
+      subtitle.textContent = params.subtitle || '';
+      const eyebrow = document.getElementById('eyebrow');
+      document.getElementById('eyebrow-text').textContent = params.eyebrow || '';
+      if (!params.eyebrow) eyebrow.remove();
+      if (!params.subtitle) subtitle.remove();
+
+      // the title fits the width (once its font is in), then its words are split for their entrance
+      let words = [];
+      cuttle.ready(
+        document.fonts.load('800 100px Archivo').then(() => {
+          fit(title, { width: size.width * 0.84, max: parseFloat(getComputedStyle(title).fontSize), min: 24 });
+          words = split(title, 'word');
+        }),
+      );
+
+      // the background: the theme's tone, two soft lights drifting, film grain
+      const canvas = document.getElementById('bg');
+      const g = canvas.getContext('2d');
+      canvas.width = size.width;
+      canvas.height = size.height;
+      const css = getComputedStyle(document.documentElement);
+      const tone = css.getPropertyValue('--cuttle-bg').trim() || '#16161a';
+      const accent = css.getPropertyValue('--cuttle-accent').trim() || '#d97757';
+      const grain = document.createElement('canvas');
+      grain.width = grain.height = 256;
+      const noise = grain.getContext('2d').createImageData(256, 256);
+      const rand = random(11);
+      for (let i = 0; i < noise.data.length; i += 4) {
+        const v = 128 + (rand() - 0.5) * 70;
+        noise.data.set([v, v, v, 14], i);
+      }
+      grain.getContext('2d').putImageData(noise, 0, 0);
+      const pattern = g.createPattern(grain, 'repeat');
+
+      function background(t) {
+        if (!params.background) return g.clearRect(0, 0, size.width, size.height);
+        const { width: w, height: h } = size;
+        g.fillStyle = tone;
+        g.fillRect(0, 0, w, h);
+        const glow = (x, y, r, color, a) => {
+          const grad = g.createRadialGradient(x, y, 0, x, y, r);
+          grad.addColorStop(0, color + Math.round(a * 255).toString(16).padStart(2, '0'));
+          grad.addColorStop(1, color + '00');
+          g.fillStyle = grad;
+          g.fillRect(0, 0, w, h);
+        };
+        const m = Math.max(w, h);
+        glow(w * (0.28 + 0.05 * Math.sin(t * 0.6)), h * (0.32 + 0.04 * Math.cos(t * 0.5)), m * 0.55, accent, 0.42);
+        glow(w * (0.76 - 0.04 * Math.sin(t * 0.4)), h * (0.72 + 0.05 * Math.sin(t * 0.7)), m * 0.5, '#6b7cff', 0.3);
+        const vignette = g.createRadialGradient(w / 2, h / 2, m * 0.25, w / 2, h / 2, m * 0.75);
+        vignette.addColorStop(0, 'rgba(0,0,0,0)');
+        vignette.addColorStop(1, 'rgba(0,0,0,0.55)');
+        g.fillStyle = vignette;
+        g.fillRect(0, 0, w, h);
+        g.fillStyle = pattern;
+        g.fillRect(0, 0, w, h);
+      }
+
+      const line = document.getElementById('line');
+      const bar = eyebrow.isConnected ? eyebrow.querySelector('i') : null;
+      const leave = Math.max(1.6, duration - 0.65);
+      cuttle.onFrame((t) => {
+        background(t);
+        // in: the eyebrow, then the words one after another, the line, the subtitle
+        if (bar) {
+          bar.style.transform = `scaleX(${at(t, 0.05, 0.6, ease.outExpo)})`;
+          eyebrow.style.opacity = at(t, 0.05, 0.4) * (1 - at(t, leave, 0.45, ease.in));
+        }
+        words.forEach((word, i) => {
+          const p = at(t, 0.15 + stagger(i, words.length, 0.09), 0.85, ease.outExpo);
+          const out = at(t, leave + stagger(i, words.length, 0.04), 0.5, ease.in);
+          const y = (1 - p) * 0.55 - out * 0.35;
+          word.style.transform = `translateY(${y}em) rotateX(${(1 - p) * -55}deg)`;
+          word.style.filter = `blur(${(1 - p) * 14 + out * 10}px)`;
+          word.style.opacity = Math.min(p * 1.4, 1) * (1 - out);
+        });
+        line.style.transform = `scaleX(${at(t, 0.55, 0.9, ease.smooth) * (1 - at(t, leave, 0.45, ease.in))})`;
+        if (subtitle.isConnected) {
+          const p = at(t, 0.8, 0.8, ease.outExpo);
+          subtitle.style.transform = `translateY(${(1 - p) * 30}px)`;
+          subtitle.style.opacity = p * (1 - at(t, leave + 0.1, 0.4, ease.in));
+        }
+      });
+    </script>
+  </body>
+</html>

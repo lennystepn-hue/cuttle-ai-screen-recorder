@@ -2,11 +2,15 @@
 // a hidden offscreen window, sandboxed, that reaches only the project's files (`cuttle-motion:`)
 // and no network; the page's clock is virtual (`motionRuntime`, injected before its scripts), and
 // each frame is the paint whose marker pixel names it. Frames come out as premultiplied RGBA, the
-// page's transparency kept, the same on every render.
+// page's transparency kept, the same on every render. The motion kit (Three.js, lottie-web, fonts,
+// Cuttle's helpers) is served at cuttle-motion://kit/, and every page of the project gets an
+// import map for its bare names (`three`, `cuttle`).
 import { readFile } from 'node:fs/promises';
 import { extname, isAbsolute, relative, resolve, sep } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { KIT_FOLDER, withImportMap } from '@cuttle/motion-kit';
 import { BrowserWindow, session, type NativeImage, type Session } from 'electron';
-import { motionRuntime, type MotionInit } from '../motion/runtime';
+import { motionRuntime, type MotionInit, type MotionView } from '../motion/runtime';
 
 export const MOTION_SCHEME = 'cuttle-motion';
 
@@ -45,6 +49,15 @@ export interface MotionPageOptions {
   network?: boolean;
   frameTimeout?: number;
   loadTimeout?: number;
+  /** The motion kit's folder (default: next to this bundle). */
+  kitDir?: string;
+  /** Motion blur: each frame the average of `samples` moments over `shutter` of a frame, centred on it. */
+  motionBlur?: { samples: number; shutter: number };
+}
+
+/** The motion kit next to the bundle that contains this code (each build copies it there). */
+export function defaultKitDir(): string {
+  return fileURLToPath(new URL(`./${KIT_FOLDER}/`, import.meta.url));
 }
 
 const TYPES: Record<string, string> = {
@@ -95,39 +108,43 @@ function inside(base: string, path: string): boolean {
 
 let sessions = 0;
 /**
- * Sessions no page uses, by project folder and network switch. Electron keeps every session for the
+ * Sessions no page uses, by project folder, network switch and kit. Electron keeps every session for the
  * app's life, so the app's many exports take them from here, emptied, instead of making new ones.
  */
 const idle = new Map<string, Session[]>();
-const poolKey = (root: string, network: boolean) => `${resolve(root)}|${network}`;
+const poolKey = (root: string, network: boolean, kitDir: string) => `${resolve(root)}|${network}|${resolve(kitDir)}`;
 
-/** A session of its own for one page: its files from `root`, no permissions, no network unless asked. */
-function takeSession(root: string, network: boolean): Session {
-  return idle.get(poolKey(root, network))?.pop() ?? pageSession(root, network);
+/** A session of its own for one page: its files from `root` and the kit's, no permissions, no network unless asked. */
+function takeSession(root: string, network: boolean, kitDir: string): Session {
+  return idle.get(poolKey(root, network, kitDir))?.pop() ?? pageSession(root, network, kitDir);
 }
 
 /** A page is done with `ses`: what the page stored is wiped, and the next page may take it. */
-function giveBack(ses: Session, root: string, network: boolean): void {
+function giveBack(ses: Session, root: string, network: boolean, kitDir: string): void {
   void ses
     .clearStorageData()
     .catch(() => {})
     .then(() => {
-      const key = poolKey(root, network);
+      const key = poolKey(root, network, kitDir);
       idle.set(key, [...(idle.get(key) ?? []), ses]);
     });
 }
 
-function pageSession(root: string, network: boolean): Session {
+function pageSession(root: string, network: boolean, kitDir: string): Session {
   const ses = session.fromPartition(`cuttle-motion-${process.pid}-${++sessions}`, { cache: false });
-  const base = resolve(root);
+  const bases: Record<string, string> = { project: resolve(root), kit: resolve(kitDir) };
   const policy = contentPolicy(network);
   ses.protocol.handle(MOTION_SCHEME, async (request) => {
     const url = new URL(request.url);
-    const path = resolve(base, decodeURIComponent(url.pathname).replace(/^\/+/, ''));
-    if (url.host !== 'project' || !inside(base, path)) return new Response('not found', { status: 404 });
+    const base = bases[url.host];
+    const path = base === undefined ? undefined : resolve(base, decodeURIComponent(url.pathname).replace(/^\/+/, ''));
+    if (base === undefined || path === undefined || !inside(base, path)) return new Response('not found', { status: 404 });
     try {
       const type = TYPES[extname(path).toLowerCase()] ?? 'application/octet-stream';
-      return new Response(await readFile(path), { headers: { 'Content-Type': type, 'Content-Security-Policy': policy, 'Cache-Control': 'no-store' } });
+      const bytes = await readFile(path);
+      // the project's pages get the kit's import map; the kit's files are served as they are
+      const body = url.host === 'project' && type === 'text/html' ? withImportMap(bytes.toString('utf8')) : bytes;
+      return new Response(body, { headers: { 'Content-Type': type, 'Content-Security-Policy': policy, 'Cache-Control': 'no-store' } });
     } catch {
       return new Response('not found', { status: 404 });
     }
@@ -194,9 +211,13 @@ export class MotionPage {
     });
   }
 
+  private static kitOf(options: MotionPageOptions): string {
+    return options.kitDir ?? defaultKitDir();
+  }
+
   static async open(options: MotionPageOptions): Promise<MotionPage> {
     const { width, height } = options.init;
-    const ses = takeSession(options.root, options.network === true);
+    const ses = takeSession(options.root, options.network === true, MotionPage.kitOf(options));
     const win = new BrowserWindow({
       show: false,
       // a few rows more than the page: the frame marker sits below it (Electron rounds small heights up)
@@ -275,15 +296,42 @@ export class MotionPage {
     return bitmap[at + 2] === (draw & 255) && bitmap[at + 1] === ((draw >> 8) & 255) && bitmap[at] === 200;
   }
 
-  /** Frame `n` of the page: its clock moves to n / fps seconds, and the paint that shows it comes back. */
-  async frame(n: number): Promise<MotionFrame> {
+  /**
+   * Frame `n` of the page: its clock moves to n / fps seconds (`view`: an overlay's view of the take),
+   * and the paint that shows it comes back; with motion blur, the average of the paints while the
+   * shutter is open around it.
+   */
+  async frame(n: number, view?: MotionView): Promise<MotionFrame> {
     if (!Number.isInteger(n) || n < 0) throw new Error(`a motion frame is a whole number from 0, not ${n}`);
     if (n < this.drawn) throw new Error(`the motion page is past frame ${n} (it drew ${this.drawn}); open it again to go back`);
     if (n === this.drawn && this.last) return this.last;
     if (this.failure) throw new Error(this.failure);
+    const { fps } = this.options.init;
+    const blur = this.options.motionBlur;
+    let frame: MotionFrame;
+    if (!blur) frame = await this.paint((n * 1000) / fps, view, n);
+    else {
+      // the moments centred on the frame (never before 0): a frame's last comes before the next frame's first
+      const moments = Array.from({ length: blur.samples }, (_, k) => Math.max(0, ((n + ((k + 0.5) / blur.samples - 0.5) * blur.shutter) * 1000) / fps));
+      const sum = new Uint32Array(this.options.init.width * this.options.init.height * 4);
+      for (const ms of moments) {
+        const { data } = await this.paint(ms, view, n);
+        for (let i = 0; i < data.length; i++) sum[i] = sum[i]! + data[i]!;
+      }
+      const data = new Uint8Array(sum.length);
+      for (let i = 0; i < sum.length; i++) data[i] = Math.round(sum[i]! / moments.length);
+      frame = { width: this.options.init.width, height: this.options.init.height, data };
+    }
+    this.drawn = n;
+    this.last = frame;
+    return frame;
+  }
+
+  /** The page drawn at `ms` on its clock, from the paint whose marker shows that draw. */
+  private async paint(at: number, view: MotionView | undefined, n: number): Promise<MotionFrame> {
     const { init } = this.options;
     const ms = this.options.frameTimeout ?? FRAME_TIMEOUT_MS;
-    const script = `window.__cuttleDraw(${(n * 1000) / init.fps})`;
+    const script = `window.__cuttleDraw(${at}${view ? `, ${JSON.stringify(view)}` : ''})`;
     const draw = await this.timed(this.win.webContents.executeJavaScript(script) as Promise<number>, ms, `to draw frame ${n}`);
     const deadline = Date.now() + ms;
     let asked = false;
@@ -304,10 +352,7 @@ export class MotionPage {
       const scale = width / init.width;
       image = image.crop({ x: 0, y: 0, width, height: Math.round(init.height * scale) }).resize({ width: init.width, height: init.height, quality: 'best' });
     }
-    const frame = { width: init.width, height: init.height, data: toRgba(new Uint8Array(image.toBitmap())) };
-    this.drawn = n;
-    this.last = frame;
-    return frame;
+    return { width: init.width, height: init.height, data: toRgba(new Uint8Array(image.toBitmap())) };
   }
 
   /** What went wrong in the page so far (uncaught errors and rejections), and its console. */
@@ -319,6 +364,6 @@ export class MotionPage {
   close(): void {
     if (this.win.isDestroyed()) return;
     this.win.destroy();
-    giveBack(this.ses, this.options.root, this.options.network === true);
+    giveBack(this.ses, this.options.root, this.options.network === true, MotionPage.kitOf(this.options));
   }
 }

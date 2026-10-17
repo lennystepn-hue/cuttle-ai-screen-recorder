@@ -13,7 +13,8 @@ export interface ActiveOverlay {
   index: number;
   /** One showing of it (a clip shown twice shows it twice): the overlay and where its stretch starts. */
   key: string;
-  /** Output seconds into this showing, and how long it lasts (its source stretch on the output timeline). */
+  /** Where this showing starts (output seconds), how far into it the frame is, and how long it lasts. */
+  start: number;
   local: number;
   duration: number;
 }
@@ -145,7 +146,8 @@ export function createTimeline(project: CuttleProject, opts: TimelineOptions): T
       overlays: project.overlays.flatMap((overlay, index) => {
         const occurrence = overlay.enabled ? overlayShown[index]?.[span.index] : undefined;
         if (!occurrence || shownAt < occurrence.start - 1e-9 || shownAt >= occurrence.end - 1e-9) return [];
-        return [{ index, key: `${index}@${round(occurrence.start)}`, local: round(shownAt - occurrence.start), duration: round(occurrence.end - occurrence.start) }];
+        const start = round(occurrence.start);
+        return [{ index, key: `${index}@${start}`, start, local: round(shownAt - occurrence.start), duration: round(occurrence.end - occurrence.start) }];
       }),
       badge: badgeFor(scene),
       cursor,

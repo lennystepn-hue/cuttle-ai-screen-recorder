@@ -135,7 +135,7 @@ describe('planFrames with motion', () => {
       { index: 1, kind: 'clip', firstFrame: 10, lastFrame: 49, times: 40 },
     ]);
     // source 1–3 shows at output 2–4: frames 20 to 39
-    expect(result.overlays).toEqual([{ key: '0@2', index: 0, duration: 2, firstFrame: 20, lastFrame: 39 }]);
+    expect(result.overlays).toEqual([{ key: '0@2', index: 0, start: 2, duration: 2, firstFrame: 20, lastFrame: 39 }]);
   });
 });
 

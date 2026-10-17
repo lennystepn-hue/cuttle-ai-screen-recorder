@@ -214,7 +214,7 @@ export async function exportProject(opts: ExportOptions): Promise<ExportResult> 
   const job: ExportJob = {
     kind: 'video',
     project,
-    screen: sources.screen,
+    ...(sources.screen && { screen: sources.screen }),
     webcam: sources.webcam,
     events: sources.events,
     ...(sources.transcript && { transcript: sources.transcript }),
@@ -236,12 +236,12 @@ export async function exportProject(opts: ExportOptions): Promise<ExportResult> 
   let work: string | undefined;
   let files: FileHost | undefined;
   let window: ExportWindow | undefined;
-  const motion = sources.motion ? new MotionHost(project, sources.motion) : undefined;
+  const motion = sources.motion && sources.motionTake ? new MotionHost(project, sources.motion, sources.motionTake) : undefined;
   try {
     work = await mkdtemp(join(tmpdir(), WORK_PREFIX));
     const video = join(work, 'video.mp4');
     const images = [...Object.values(sources.stills), ...(sources.backgroundImage ? [sources.backgroundImage] : [])];
-    const host = new FileHost([sources.screen, ...(sources.webcam ? [sources.webcam.path] : [])], video, images);
+    const host = new FileHost([...(sources.screen ? [sources.screen] : []), ...(sources.webcam ? [sources.webcam.path] : [])], video, images);
     files = host;
     window = await openExportWindow(opts.pageDir ?? defaultPageDir());
     throwIfCancelled();

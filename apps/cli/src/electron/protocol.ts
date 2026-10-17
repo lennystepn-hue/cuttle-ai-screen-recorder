@@ -2,13 +2,18 @@
 // answer and a cancel go over Node's IPC channel (Electron's main process reads no stdin on
 // Windows, and the console's Ctrl+C does not reach it). Pure: both sides import it.
 
-/** A motion page to check: rendered as the only scene of the project (`cuttle motion check`). */
+/**
+ * A motion page to check (`cuttle motion check`): a scene is rendered as the project's only scene;
+ * an overlay (`overlay`: its place in `overlays`) over the project's video, the only overlay.
+ */
 export interface MotionCheck {
   /** The page, from the project folder. */
   src: string;
   duration: number;
   params: Record<string, string | number | boolean | null>;
   network: boolean;
+  motionBlur?: { samples: number; shutter: number };
+  overlay?: number;
 }
 
 export type ElectronRequest = (

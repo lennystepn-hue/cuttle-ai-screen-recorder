@@ -34,20 +34,25 @@ describe('motion pages are told', () => {
     expect(Number.isInteger(motionSeed('o1')) && motionSeed('o1') >= 0 && motionSeed('o1') < 2 ** 32).toBe(true);
   });
 
-  it('their length, the output, their params, and a seed from their id (else their place)', () => {
+  it('where the showing starts and how long it lasts, the output, their params over the page\'s defaults, the kit\'s fonts, the take, and a seed from their id (else their place)', () => {
     const p = project({ output: { width: 1080, height: 1920, fps: 60 }, scenes: [{ type: 'motion', src: 'a.html', duration: 2, params: { title: 'Hi' } }] });
     const scene = p.scenes[0]!;
     if (scene.type !== 'motion') throw new Error('not a motion scene');
-    expect(motionInit(p, scene, 'scenes[0]', 2)).toEqual({
+    const fonts = [{ family: 'Inter', weight: '400', style: 'normal', src: 'cuttle-motion://kit/fonts/inter-latin-400-normal.woff2' }];
+    const context = { take: null, fonts, defaults: { title: 'Hello', color: '#ffffff' } };
+    expect(motionInit(p, scene, 'scenes[0]', { start: 1.5, duration: 2 }, context)).toEqual({
       duration: 2,
+      start: 1.5,
       fps: 60,
       width: 1080,
       height: 1920,
       format: '9:16',
-      params: { title: 'Hi' },
+      params: { title: 'Hi', color: '#ffffff' },
       theme: motionTheme(p),
       seed: motionSeed('scenes[0]'),
+      fonts,
+      take: null,
     });
-    expect(motionInit(p, { ...scene, id: 's7' }, 'scenes[0]', 2).seed).toBe(motionSeed('s7'));
+    expect(motionInit(p, { ...scene, id: 's7' }, 'scenes[0]', { start: 0, duration: 2 }, context).seed).toBe(motionSeed('s7'));
   });
 });

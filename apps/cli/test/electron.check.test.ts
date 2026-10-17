@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
@@ -197,6 +197,90 @@ describe.runIf(enabled)('cuttle in Electron', () => {
       rmSync(secret, { force: true });
     }
   }, 120_000);
+
+  it('makes a video without a recording: a project of motion scenes from the kit\'s templates', () => {
+    const reel = join(mkdtempSync(join(tmpdir(), 'cuttle-reel-')), 'reel');
+    try {
+      expect(cuttle('init', reel).code).toBe(0);
+      expect(cuttle('-C', reel, 'motion', 'new', 'title', '--first').code).toBe(0);
+      expect(cuttle('-C', reel, 'motion', 'new', 'end-card').code).toBe(0);
+      const { code, json } = cuttle('-C', reel, 'render');
+      expect(code).toBe(0);
+      expect(json).toMatchObject({ frames: 225, seconds: 7.5 });
+      expect((json.motion as { errors: string[] }[]).flatMap((report) => report.errors)).toEqual([]);
+      expect(probe(json.out as string).split(/\r?\n/)[0]).toBe('h264,1920,1080');
+      // the title is on screen at 1.5 s: its light letters over its dark background, in the middle
+      const still = cuttle('-C', reel, 'preview', '--at', '1.5', '-o', join(reel, 'still'));
+      const png = PNG.sync.read(readFileSync((still.json.stills as { file: string }[])[0]!.file));
+      let light = 0;
+      for (let x = 300; x < 1620; x += 2) light += png.data[(540 * png.width + x) * 4]! > 200 ? 1 : 0;
+      expect(light).toBeGreaterThan(40);
+    } finally {
+      rmSync(dirname(reel), { recursive: true, force: true });
+    }
+  }, 180_000);
+
+  it('lands callouts on the take\'s clicks and kinetic captions on its words, over the video', () => {
+    const dir = join(mkdtempSync(join(tmpdir(), 'cuttle-take-')), 'take');
+    cpSync(project, dir, { recursive: true });
+    try {
+      const file = join(dir, 'cuttle.json');
+      const raw = JSON.parse(readFileSync(file, 'utf8')) as Record<string, unknown> & { sources: Record<string, string> };
+      writeFileSync(join(dir, 'takes', '1', 'events.jsonl'), '{"t":0.95,"type":"move","x":640,"y":360}\n{"t":1,"type":"click","x":640,"y":360,"button":"left"}\n');
+      writeFileSync(join(dir, 'takes', '1', 'transcript.json'), JSON.stringify({ version: 1, language: 'en', model: 'small', words: [{ t: 1, end: 1.4, text: 'Look' }, { t: 1.4, end: 1.9, text: 'here' }] }));
+      writeFileSync(file, JSON.stringify({ ...raw, scenes: [{ type: 'clip', from: 0, to: 3 }], overlays: [], captions: { enabled: false }, sources: { ...raw.sources, events: 'takes/1/events.jsonl', transcript: 'takes/1/transcript.json' } }));
+      expect(cuttle('-C', dir, 'motion', 'new', 'click-callouts').code).toBe(0);
+      expect(cuttle('-C', dir, 'motion', 'new', 'kinetic-captions').code).toBe(0);
+      const still = (name: string) => PNG.sync.read(readFileSync((cuttle('-C', dir, 'preview', '--at', '1.3', '-o', join(dir, name)).json.stills as { file: string }[])[0]!.file));
+      const shown = still('with');
+      writeFileSync(file, JSON.stringify({ ...JSON.parse(readFileSync(file, 'utf8')), overlays: [] }));
+      const plain = still('without');
+      const rgb = (png: PNG, x: number, y: number) => [...png.data.subarray((y * png.width + x) * 4, (y * png.width + x) * 4 + 3)];
+      // the click at (640, 360) of the 1280×720 screen is at (960, 558) of the 16:9 video, in the
+      // mac-dark window (content 146, 100, 1628×916): the callout's dot is there, in the accent colour
+      expect(rgb(shown, 960, 558).every((value, i) => Math.abs(value - [0xd9, 0x77, 0x57][i]!) <= 24)).toBe(true);
+      // the captions: the bottom of the video changes, its top does not
+      const differs = (top: number, bottom: number) => {
+        for (let y = top; y < bottom; y += 2) for (let x = 0; x < 1920; x += 4) if (shown.data[(y * 1920 + x) * 4] !== plain.data[(y * 1920 + x) * 4]) return true;
+        return false;
+      };
+      expect(differs(880, 1000)).toBe(true);
+      expect(differs(0, 400)).toBe(false);
+    } finally {
+      rmSync(dirname(dir), { recursive: true, force: true });
+    }
+  }, 180_000);
+
+  it('blurs fast motion: the moments while the shutter is open, averaged', () => {
+    const dir = join(mkdtempSync(join(tmpdir(), 'cuttle-blur-')), 'blur');
+    try {
+      expect(cuttle('init', dir).code).toBe(0);
+      mkdirSync(join(dir, 'motion', 'fast'), { recursive: true });
+      // a white square that crosses the frame at 3000 px a second
+      writeFileSync(
+        join(dir, 'motion', 'fast', 'index.html'),
+        '<!doctype html><body style="margin:0;background:#000"><div id="box" style="position:absolute;top:440px;width:200px;height:200px;background:#fff"></div><script>cuttle.onFrame((t) => (box.style.left = (t * 3000 - 200) + "px"))</script></body>',
+      );
+      const page = { type: 'motion', src: 'motion/fast/index.html', duration: 1 };
+      const raw = JSON.parse(readFileSync(join(dir, 'cuttle.json'), 'utf8'));
+      writeFileSync(join(dir, 'cuttle.json'), JSON.stringify({ ...raw, look: { transition: { enabled: false } }, scenes: [page, { ...page, motionBlur: { samples: 8, shutter: 0.5 } }] }));
+      const stills = cuttle('-C', dir, 'preview', '--at', '0.5', '--at', '1.5', '-o', join(dir, 'stills')).json.stills as { file: string }[];
+      // grey pixels along the square's middle row: a hard edge has none, a blurred one a band of them
+      const greys = (file: string) => {
+        const png = PNG.sync.read(readFileSync(file));
+        let count = 0;
+        for (let x = 0; x < png.width; x++) {
+          const value = png.data[(540 * png.width + x) * 4]!;
+          if (value > 20 && value < 235) count++;
+        }
+        return count;
+      };
+      expect(greys(stills[0]!.file)).toBeLessThan(4);
+      expect(greys(stills[1]!.file)).toBeGreaterThan(30);
+    } finally {
+      rmSync(dirname(dir), { recursive: true, force: true });
+    }
+  }, 180_000);
 
   it('renders a motion scene and a motion overlay into the video, as the preview shows them', () => {
     const file = join(project, 'cuttle.json');

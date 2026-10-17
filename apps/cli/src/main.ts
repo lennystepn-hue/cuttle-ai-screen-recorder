@@ -136,15 +136,16 @@ export async function runCli(argv: readonly string[], streams?: Streams): Promis
 
   program
     .command('suggest')
-    .description('propose scenes (quiet start and end trimmed, idle cut, waiting sped up), a zoom on the answer and zooms on clicks')
+    .description('propose scenes (quiet start and end trimmed, idle cut, waiting sped up), a zoom on the answer, zooms that follow typing and zooms on clicks')
     .option('--claude [cwd]', "read Claude Code's transcript for a take without Claude markers (default: here)")
-    .option('--no-zoom', 'no zooms (neither on the answer nor on clicks)')
+    .option('--no-zoom', 'no zooms (neither on the answer, nor on typing, nor on clicks)')
+    .option('--no-typing-zooms', 'no zooms that follow typing')
     .option('--no-click-zooms', 'no zooms on clicks (the answer zoom stays)')
     .option('--no-speech', 'leave the speech out: no filler, pause or spoken retake cuts, and speech does not keep a stretch')
     .option('--no-transcribe', 'do not transcribe the mic first (when it has no transcript and a speech model is there)')
     .option('--dry-run', 'print the suggestion, leave cuttle.json as it is')
     .action(
-      action((output, project, options: { claude?: string | true; zoom: boolean; clickZooms: boolean; speech: boolean; transcribe: boolean; dryRun?: boolean }) =>
+      action((output, project, options: { claude?: string | true; zoom: boolean; typingZooms: boolean; clickZooms: boolean; speech: boolean; transcribe: boolean; dryRun?: boolean }) =>
         suggestCommand(project, options, output),
       ),
     );

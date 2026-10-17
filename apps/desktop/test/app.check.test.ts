@@ -12,7 +12,10 @@ import { FIXTURE_OUTPUT, makeFixture } from './fixture';
 
 /**
  * The app end to end, its windows never shown: open a project, play, scrub, select, compare the
- * output view with the export's frames (`cuttle preview`), play the proxy, export, open a project
+ * output view with the export's frames (`cuttle preview`), play the proxy, export; edit (split,
+ * trim, move, speed, zooms and masks drawn in the source view, a caption typed on the video, the
+ * command menu), undo and redo, each checked in the file; a write from outside during a drag, a
+ * broken file, a save conflict kept as a draft; open a project
  * twice at once, close an editor during its export, close the pill; record through the picker with
  * the recorder's `test` backend, stop from the HUD, and land in the take cut by suggest; record
  * again. Runs only with `pnpm app:check` (vitest --mode app, after app:build:js and cli:build).
@@ -39,6 +42,16 @@ interface Check {
   playback(): { drawn: number; restarts: number; clock: number };
   pixels(): string;
   useProxy(): Promise<boolean>;
+  doc(): { hash: string; saving: boolean; problem?: string; issues?: string[]; toast?: { text: string; undo?: boolean; draft?: boolean }; undo?: string; redo?: string };
+  flush(): Promise<void>;
+}
+
+/** cuttle.json as the checks read it back. */
+interface Written {
+  scenes: { id: string; type: string; from?: number; to?: number; speed?: number }[];
+  zooms: { id: string; at: number; duration: number; rect: number[] }[];
+  masks: { id: string; from: number; to: number; rect: number[]; style?: string; label?: string }[];
+  texts: { id: string; text: string; position?: string }[];
 }
 
 const electronPath = (): string => createRequire(import.meta.url)('electron') as unknown as string;
@@ -187,6 +200,8 @@ describe.runIf(enabled)('the Cuttle app', () => {
       });
     });
     await editor.setViewportSize({ width: 1440, height: 900 });
+    // A window that is never shown runs no CSS animations: without motion, what opens shows at once in the screenshots.
+    await editor.emulateMedia({ reducedMotion: 'reduce' });
     await editor.waitForSelector('.app[data-phase="ready"]', { timeout: 30_000 });
   }, 60_000);
 
@@ -198,7 +213,7 @@ describe.runIf(enabled)('the Cuttle app', () => {
   it('opens the project: the timeline shows its scenes, overlays and markers', async () => {
     expect(await editor.title()).toBe('demo · Cuttle');
     expect(await editor.locator('.scene').count()).toBe(5);
-    expect(await editor.locator('.scene').first().getAttribute('title')).toBe('Prompt · 3 s');
+    expect(await editor.locator('.scene').first().getAttribute('title')).toBe('Prompt · 3 s · drag to move, edges to trim');
     expect(await editor.locator('.item.zoom').count()).toBe(1);
     // the mask (source 0–9) runs across the continuous cut into the 8× clip as one block, then
     // shows again after the jump cut to source 8.5
@@ -253,15 +268,11 @@ describe.runIf(enabled)('the Cuttle app', () => {
     const { t } = await state();
     expect(t).toBeGreaterThan(duration * 0.3);
     expect(t).toBeLessThan(duration * 0.7);
-    // dragging across a scene scrubs too, and leaves the selection alone
+    // a click selects the 8× clip, puts the playhead there and shows it in the inspector
     await seek(0);
-    await press('.scene:nth-child(1)', 60);
-    await editor.waitForTimeout(300);
-    expect((await state()).t).toBeGreaterThan(0);
-    expect(await editor.locator('.scene.selected').count()).toBe(0);
-    // a click selects the 8× clip and shows it in the inspector
-    await press('.scene:nth-child(2)');
+    await press('.scene[data-id=s2]');
     await editor.waitForSelector('.scene.selected');
+    await expect.poll(async () => (await state()).t).toBeGreaterThan(3);
     expect(await editor.locator('.inspector .kind-head .name').textContent()).toBe('8× Claude at work');
     await shot('03-selected');
     await editor.keyboard.press('Escape');
@@ -316,6 +327,242 @@ describe.runIf(enabled)('the Cuttle app', () => {
     await editor.keyboard.press('Escape');
     expect(await editor.locator('[data-testid=export-sheet]').count()).toBe(0);
   }, 150_000);
+
+  // ---- editing: every edit is checked in the file ----------------------------------------------
+
+  const projectFile = () => join(project, 'cuttle.json');
+  const onDisk = (): Written => JSON.parse(readFileSync(projectFile(), 'utf8')) as Written;
+  /** Waits until cuttle.json passes `ready` (an edit is saved when its gesture ends). */
+  const savedWhen = (ready: (file: Written) => boolean) =>
+    expect
+      .poll(
+        () => {
+          try {
+            return ready(onDisk());
+          } catch {
+            return false;
+          }
+        },
+        { timeout: 10_000 },
+      )
+      .toBe(true);
+  const doc = () => editor.evaluate(() => (window as unknown as Hooked).__cuttleCheck.doc());
+  /** Undoes until there is nothing left to undo (Ctrl+Z), and waits for the last save. */
+  const undoAll = async () => {
+    while ((await doc()).undo) await editor.keyboard.press('Control+Z');
+    await editor.evaluate(() => (window as unknown as Hooked).__cuttleCheck.flush());
+  };
+  /**
+   * A drag on an element (a window that is never shown gets no real mouse): pressed at `from` (a
+   * fraction of its box), moved by `by` px in eight steps, released unless `hold`; `release`
+   * ends a held one `by` px further on.
+   */
+  const drag = (selector: string, by: [number, number], options: { from?: [number, number]; hold?: boolean } = {}) =>
+    editor.evaluate(
+      ({ selector, by, from, hold }) => {
+        const element = document.querySelector(selector)!;
+        const box = element.getBoundingClientRect();
+        const start = { x: box.left + from[0] * box.width, y: box.top + from[1] * box.height };
+        const fire = (type: string, x: number, y: number) =>
+          element.dispatchEvent(new PointerEvent(type, { bubbles: true, clientX: x, clientY: y, button: 0, buttons: type === 'pointerup' ? 0 : 1, pointerId: 7 }));
+        fire('pointerdown', start.x, start.y);
+        for (let step = 1; step <= 8; step++) fire('pointermove', start.x + (by[0] * step) / 8, start.y + (by[1] * step) / 8);
+        const end = { x: start.x + by[0], y: start.y + by[1] };
+        if (hold) Object.assign(window, { __held: end });
+        else fire('pointerup', end.x, end.y);
+      },
+      { selector, by, from: options.from ?? [0.5, 0.5], hold: options.hold ?? false },
+    );
+  const release = (by: [number, number]) =>
+    editor.evaluate((by) => {
+      const at = (window as unknown as { __held: { x: number; y: number } }).__held;
+      const fire = (type: string, x: number, y: number) => window.dispatchEvent(new PointerEvent(type, { clientX: x, clientY: y, button: 0, buttons: type === 'pointerup' ? 0 : 1, pointerId: 7 }));
+      for (let step = 1; step <= 8; step++) fire('pointermove', at.x + (by[0] * step) / 8, at.y + (by[1] * step) / 8);
+      fire('pointerup', at.x + by[0], at.y + by[1]);
+    }, by);
+
+  it('splits, trims and moves scenes and sets a speed; undo and redo step through it, back to the file as it was, byte for byte', async () => {
+    await editor.keyboard.press('Escape');
+    const original = readFileSync(projectFile(), 'utf8');
+    await seek(1);
+    await editor.keyboard.press('s');
+    await savedWhen((file) => file.scenes.length === 6);
+    const [first, second] = onDisk().scenes;
+    // a continuous cut at the playhead's source second
+    expect(first!.to).toBeCloseTo(1, 3);
+    expect(second!.from).toBe(first!.to);
+    expect((await doc()).undo).toBe('Split clip');
+    await editor.keyboard.press('Control+Z');
+    await savedWhen((file) => file.scenes.length === 5);
+    expect((await doc()).redo).toBe('Split clip');
+    await editor.keyboard.press('Control+Shift+Z');
+    await savedWhen((file) => file.scenes.length === 6);
+
+    // the first clip's end edge, 30 px to the left: shorter at its end
+    await drag('.scene[data-id=s1] .edge.end', [-30, 0]);
+    await savedWhen((file) => file.scenes[0]!.to! < first!.to! - 0.1);
+    expect((await doc()).undo).toBe('Trim clip');
+
+    // the card, dragged before everything; the video shows it there (the renderer has the new order)
+    await drag('.scene[data-id=s5]', [-2000, 0]);
+    await savedWhen((file) => file.scenes[0]!.id === 's5');
+    expect((await doc()).undo).toBe('Move scene');
+    await seek(0.5);
+    await expect.poll(async () => (await state()).source).toBeUndefined();
+    expect((await state()).error).toBeUndefined();
+    await shot('07-edited');
+
+    // the 8× clip at 2×, from the timeline bar
+    await press('.scene[data-id=s2]');
+    await editor.selectOption('#speed-select', '2');
+    await savedWhen((file) => file.scenes.find((scene) => scene.id === 's2')!.speed === 2);
+
+    await undoAll();
+    expect(readFileSync(projectFile(), 'utf8')).toBe(original);
+  }, 30_000);
+
+  it('draws a zoom and a mask in the source view, moves and resizes them there, and sets the mask in the inspector', async () => {
+    const original = readFileSync(projectFile(), 'utf8');
+    await seek(1);
+    await editor.keyboard.press('z');
+    await editor.waitForSelector('[data-testid=source-view]');
+    // a zoom drawn on the screen keeps its shape (1280×800): what is drawn is what it shows
+    await drag('[data-testid=source-view]', [240, 60], { from: [0.3, 0.3] });
+    await savedWhen((file) => file.zooms.length === 2);
+    const zoom = onDisk().zooms.find((item) => item.id !== 'z1')!;
+    expect(zoom.at).toBeCloseTo(1, 1);
+    expect(zoom.rect[2]! / zoom.rect[3]!).toBeCloseTo(1280 / 800, 1);
+    await editor.waitForSelector('.source-box.zoom.selected');
+    await shot('08-source-view');
+    // its corner handle makes it larger, its body moves it
+    await drag('.source-box.selected .box-handle.se', [60, 0]);
+    await savedWhen((file) => file.zooms.find((item) => item.id === zoom.id)!.rect[2]! > zoom.rect[2]! + 20);
+    const larger = onDisk().zooms.find((item) => item.id === zoom.id)!;
+    expect(larger.rect[2]! / larger.rect[3]!).toBeCloseTo(1280 / 800, 1);
+    await drag('.source-box.selected', [-40, -20]);
+    await savedWhen((file) => file.zooms.find((item) => item.id === zoom.id)!.rect[0]! < larger.rect[0]! - 20);
+    // Esc: back to the video
+    await editor.keyboard.press('Escape');
+    expect(await editor.locator('[data-testid=source-view]').count()).toBe(0);
+
+    // a mask is free in its shape
+    await editor.keyboard.press('m');
+    await drag('[data-testid=source-view]', [160, 30], { from: [0.55, 0.6] });
+    await savedWhen((file) => file.masks.length === 2);
+    const mask = onDisk().masks.find((item) => item.id !== 'm1')!;
+    expect(mask.rect[2]! / mask.rect[3]!).toBeGreaterThan(3);
+    await editor.selectOption('.inspector label.field:has-text("Style") select', 'blur');
+    await savedWhen((file) => file.masks.find((item) => item.id === mask.id)!.style === 'blur');
+    await shot('08-mask');
+    // the look: a background swatch
+    await click(editor, '#tab-look');
+    await click(editor, '.swatch-button.bg-mesh');
+    await savedWhen((file) => (file as unknown as { look: { background: { preset: string } } }).look.background.preset === 'mesh');
+    await shot('08-look');
+    await click(editor, '#tab-selection');
+    await editor.keyboard.press('Escape');
+    await undoAll();
+    expect(readFileSync(projectFile(), 'utf8')).toBe(original);
+  }, 30_000);
+
+  it('types a caption on the video, selects it there with a click, and edits its text in the inspector', async () => {
+    const original = readFileSync(projectFile(), 'utf8');
+    await seek(1.2);
+    await editor.keyboard.press('t');
+    await editor.waitForSelector('[data-testid=caption-input]:focus');
+    await editor.keyboard.type('Ship it');
+    // shown while typed, saved on Enter
+    await shot('09-caption-typed');
+    expect(onDisk().texts).toHaveLength(1);
+    await editor.keyboard.press('Enter');
+    // at the top: the fixture's caption is at the bottom there
+    await savedWhen((file) => file.texts.some((text) => text.text === 'Ship it' && text.position === 'top'));
+    await editor.waitForSelector('.caption-box.selected');
+    const box = (await editor.locator('.caption-box.selected').boundingBox())!;
+    await shot('09-caption');
+    await editor.keyboard.press('Escape');
+    expect(await editor.locator('.caption-box.selected').count()).toBe(0);
+    // a click on it selects it again
+    await editor.evaluate(({ x, y }) => {
+      const canvas = document.querySelector('[data-testid=output]')!;
+      for (const type of ['pointermove', 'pointerdown', 'pointerup']) canvas.dispatchEvent(new PointerEvent(type, { bubbles: true, clientX: x, clientY: y, button: 0, pointerId: 7 }));
+    }, { x: box.x + box.width / 2, y: box.y + box.height / 2 });
+    await editor.waitForSelector('.caption-box.selected');
+    await editor.fill('[data-testid=caption-text]', 'Ship it today');
+    await editor.locator('[data-testid=caption-text]').blur();
+    await savedWhen((file) => file.texts.some((text) => text.text === 'Ship it today'));
+    await undoAll();
+    expect(readFileSync(projectFile(), 'utf8')).toBe(original);
+  }, 30_000);
+
+  it('runs a command from the menu (Ctrl+K), by typing part of its name', async () => {
+    await seek(1);
+    await editor.keyboard.press('Control+K');
+    await editor.waitForSelector('[data-testid=command-input]:focus');
+    await editor.keyboard.type('split');
+    await shot('10-command-menu');
+    await editor.keyboard.press('Enter');
+    expect(await editor.locator('[data-testid=command-input]').count()).toBe(0);
+    await savedWhen((file) => file.scenes.length === 6);
+    await undoAll();
+  }, 30_000);
+
+  it('keeps a drag going over a version written outside the app meanwhile: both are in the file, each undone on its own', async () => {
+    await press('.item.zoom');
+    await drag('.item.zoom', [40, 0], { hold: true });
+    // Claude writes cuttle.json during the drag: a mask added
+    const outside = onDisk();
+    outside.masks.push({ id: 'm9', label: 'From Claude', from: 1, to: 2, rect: [10, 10, 100, 40] });
+    writeFileSync(projectFile(), `${JSON.stringify(outside, null, 2)}\n`);
+    await editor.waitForFunction(() => (window as unknown as Hooked).__cuttleCheck.doc().toast?.text === 'Changed outside the app: 1 mask added');
+    expect(await editor.locator('[data-testid=toast-show]').count()).toBe(1);
+    await shot('11-outside-change');
+    await release([40, 0]);
+    await savedWhen((file) => file.masks.length === 2 && file.zooms[0]!.at > 8.8 + 0.1);
+    expect((await doc()).undo).toBe('Move zoom');
+    await editor.keyboard.press('Control+Z');
+    await savedWhen((file) => file.zooms[0]!.at === 8.8 && file.masks.length === 2);
+    expect((await doc()).undo).toBe('the outside change');
+    await editor.keyboard.press('Control+Z');
+    await savedWhen((file) => file.masks.length === 1);
+  }, 30_000);
+
+  it('keeps the last good version while cuttle.json does not parse, and takes the fix', async () => {
+    const good = readFileSync(projectFile(), 'utf8');
+    writeFileSync(projectFile(), '{ "version": 1, "scenes": [ }');
+    await editor.waitForSelector('[data-testid=issues]');
+    expect(await editor.locator('[data-testid=save-state]').textContent()).toBe('Editing waits');
+    await shot('12-broken-file');
+    // an edit waits too: the broken file stays as it is
+    await seek(1);
+    await editor.keyboard.press('s');
+    await editor.waitForTimeout(500);
+    expect(readFileSync(projectFile(), 'utf8')).toBe('{ "version": 1, "scenes": [ }');
+    writeFileSync(projectFile(), good);
+    await editor.waitForSelector('[data-testid=issues]', { state: 'detached' });
+    expect((await doc()).issues).toBeUndefined();
+  }, 30_000);
+
+  it('keeps an edit a newer version cannot take in cuttle.json.draft, and puts it back on "Use mine"', async () => {
+    await press('.item.zoom');
+    // Claude deletes the zoom just as it is deleted here (before the app sees Claude's write)
+    const outside = onDisk();
+    outside.zooms = [];
+    outside.masks.push({ id: 'm9', label: 'From Claude', from: 1, to: 2, rect: [10, 10, 100, 40] });
+    writeFileSync(projectFile(), `${JSON.stringify(outside, null, 2)}\n`);
+    await editor.keyboard.press('Delete');
+    await editor.waitForFunction(() => (window as unknown as Hooked).__cuttleCheck.doc().toast?.draft === true);
+    // the newer version shows; the person's is kept, with the zoom deleted and without Claude's mask
+    const draft = JSON.parse(readFileSync(join(project, 'cuttle.json.draft'), 'utf8')) as Written;
+    expect(draft.zooms).toEqual([]);
+    expect(draft.masks.map((item) => item.id)).toEqual(['m1']);
+    expect(onDisk().masks.map((item) => item.id)).toEqual(['m1', 'm9']);
+    await shot('13-draft');
+    await click(editor, '[data-testid=toast-use-draft]');
+    await savedWhen((file) => file.masks.length === 1 && file.zooms.length === 0);
+    expect((await doc()).undo).toBe('Use your version');
+    await undoAll();
+  }, 30_000);
 
   it('opens a project once when asked twice at once, and cancels its export when it closes', async () => {
     const second = join(root, 'second');
@@ -419,6 +666,8 @@ describe.runIf(enabled)('the Cuttle app', () => {
     const opened = await waitForPage(app, async (page) => page.url().includes('/editor.html') && (await page.title()) === `${made} · Cuttle`);
     await opened.waitForSelector('.app[data-phase="ready"]', { timeout: 30_000 });
     expect(await opened.locator('[data-testid=project-status]').count()).toBe(0);
+    // the cut came in as a change of the file: one step to undo
+    await expect.poll(() => opened.evaluate(() => (window as unknown as { __cuttleCheck: Check }).__cuttleCheck.doc().undo), { timeout: 10_000 }).toBe('Cut by suggest');
     expect(await opened.locator('.scene').count()).toBe(cut.scenes.length);
   }, 120_000);
 

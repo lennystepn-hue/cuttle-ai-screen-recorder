@@ -20,6 +20,8 @@ const START_TIMEOUT_SECONDS = 20;
 const FILE_POLL_MS = 200;
 const IDLE_POLL_MS = 200;
 
+/** A take is joined from at most this many pieces (each adds to one ffmpeg command line). */
+export const MAX_SEGMENTS = 100;
 const FILES = { screen: 'screen.mp4', webcam: 'webcam.mp4', mic: 'mic.m4a', events: 'events.jsonl', markers: 'markers.json', take: 'take.json', segments: 'segments.json' };
 /** How often maxSeconds is checked against the take's time (which stands still while paused). */
 const MAX_POLL_MS = 50;
@@ -58,7 +60,12 @@ class Control {
   private paused = false;
   private pauseWaiters: { paused: boolean; resolve: () => void }[] = [];
 
+  /** A pause that cannot be taken (the take has as many pieces as it may), and what to say then. */
+  pauseRefused: (() => boolean) | undefined;
+  onPauseRefused: (() => void) | undefined;
+
   setPaused(paused: boolean): void {
+    if (paused && !this.paused && this.pauseRefused?.()) return void this.onPauseRefused?.();
     this.paused = paused;
     const ready = this.pauseWaiters.filter((waiter) => waiter.paused === paused);
     this.pauseWaiters = this.pauseWaiters.filter((waiter) => waiter.paused !== paused);
@@ -287,6 +294,7 @@ async function recordTake({ options, control, platform, area, projectDir, dir, r
     if (finished) return; // a late Claude answer must not start a timer after the take ended
     const handle = repeat ? setInterval(callback, ms) : setTimeout(callback, ms);
     cleanups.push(() => clearTimeout(handle));
+    return handle;
   };
   /** Ends every trigger, the transcript watcher and the input: nothing new happens after this. */
   const finish = () => {
@@ -400,7 +408,12 @@ async function recordTake({ options, control, platform, area, projectDir, dir, r
     reporter.emit({ type: 'recording', dir: rel(dir) });
     // Claude's answer stops the take a little after it; while paused, a little after the resume.
     let claudeStop = false;
-    const stopForClaude = () => timer(() => control.request('claude'), CLAUDE_TAIL_SECONDS * 1000);
+    // one timer at a time; a pause clears it (the tail is recorded time), the resume starts it again
+    let claudeTimer: ReturnType<typeof setTimeout> | undefined;
+    const stopForClaude = () => {
+      clearTimeout(claudeTimer);
+      claudeTimer = timer(() => control.request('claude'), CLAUDE_TAIL_SECONDS * 1000);
+    };
     startTriggers(options.stop, recordedNow, control, () => capturing && tracks !== undefined && tracks.frozen && now() - lastInput >= (options.stop.untilIdleSeconds ?? Infinity), timer);
     claude?.attach((signal) => {
       addMarker({ kind: signal.kind, ...(signal.label !== undefined && { label: signal.label }) }, signal.time);
@@ -411,6 +424,8 @@ async function recordTake({ options, control, platform, area, projectDir, dir, r
 
     let reason: StopReason;
     let running = true;
+    control.pauseRefused = () => segments.length >= MAX_SEGMENTS;
+    control.onPauseRefused = () => reporter.warn(`this take cannot pause again: it has ${MAX_SEGMENTS} pieces; stop it and record another`);
     for (;;) {
       const next = await Promise.race([control.stopped(), tracks.failed, control.pauseWanted()]);
       if (next !== 'pause') {
@@ -419,6 +434,7 @@ async function recordTake({ options, control, platform, area, projectDir, dir, r
       }
       // Pause: every track finishes its file; the take's time stands still.
       capturing = false;
+      clearTimeout(claudeTimer);
       await Promise.all(all(tracks).map((capture) => capture.stop()));
       running = false;
       const segment = segments.at(-1)!;

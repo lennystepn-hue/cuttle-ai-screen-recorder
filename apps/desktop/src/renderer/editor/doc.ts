@@ -227,7 +227,7 @@ function save(): Promise<void> {
         setDoc({ problem: 'cuttle.json changed outside the app and has a mistake: your edit is saved once it is fixed' });
         return finish();
       }
-      const outside = conflict.origin === 'suggest' ? 'Cut by suggest' : 'the outside change';
+      const outside = conflict.origin === 'suggest' ? "Cuttle's cut" : 'the outside change';
       if (restoring) {
         // An undo or redo is a whole version: the newer one shows, as a step to undo (back to the
         // version the person had asked for).
@@ -352,9 +352,9 @@ export async function outsideChange(event: ProjectFileEvent): Promise<void> {
   } catch {
     return;
   }
-  undoStack.push({ raw: before.raw, label: event.origin === 'suggest' ? 'Cut by suggest' : 'the outside change' });
+  undoStack.push({ raw: before.raw, label: event.origin === 'suggest' ? "Cuttle's cut" : 'the outside change' });
   redoStack.length = 0;
   setDoc({ raw, project, hash: event.hash, preview: undefined });
   const show = firstChanged(before.project, project);
-  toast(event.origin === 'suggest' ? 'Cut by suggest' : `Changed outside the app: ${describeChange(before.project, project)}`, { undo: true, ...(show && event.origin !== 'suggest' && { show }) });
+  toast(event.origin === 'suggest' ? 'Cuttle cut the take.' : `Changed outside the app: ${describeChange(before.project, project)}`, { undo: true, ...(show && event.origin !== 'suggest' && { show }) });
 }

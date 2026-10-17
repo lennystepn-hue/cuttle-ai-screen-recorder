@@ -22,7 +22,7 @@ export const WINDOW_CHANNELS = {
       'project:undo-restart',
       'app:settings',
     ],
-    events: ['media:state', 'export:progress', 'export:end', 'project:status', 'project:file', 'project:closing', 'project:restarted', 'app:motion'],
+    events: ['media:state', 'export:progress', 'export:end', 'project:status', 'project:file', 'project:closing', 'project:restarted', 'project:note', 'app:motion'],
   },
   pill: {
     requests: ['pill:recent', 'pill:open', 'pill:hide', 'pill:menu', 'pill:record'],
@@ -51,6 +51,7 @@ export const WINDOW_CHANNELS = {
       'tools:check',
       'tools:install',
       'tools:copy',
+      'tools:reveal',
       'recent:open',
       'recent:reveal',
       'recent:forget',

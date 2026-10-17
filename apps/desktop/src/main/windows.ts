@@ -260,7 +260,7 @@ async function editorOf(dir: string): Promise<Editor | undefined> {
   return editors.get(keyOf(real));
 }
 
-/** The next outside change of the project comes from the app's own suggest ("Cut by suggest"). */
+/** The next outside change of the project comes from the app's own suggest ("Cuttle's cut"). */
 export async function expectSuggest(dir: string, expecting: boolean): Promise<void> {
   const editor = await editorOf(dir);
   if (editor) editor.watch.origin = expecting ? 'suggest' : 'outside';
@@ -324,11 +324,28 @@ async function takesMenu(dir: string, window: BrowserWindow): Promise<void> {
   const kept = names
     .filter((name) => /^\d+$/.test(name) && name !== current && existsSync(join(dir, 'takes', name, PROJECT_FILE)))
     .sort((a, b) => Number(b) - Number(a));
+  // takes a restart put aside: brought back as the next take (the newest first)
+  const aside = await readdir(join(dir, 'takes', '.discarded'), { withFileTypes: true }).catch(() => []);
+  const putAside = (
+    await Promise.all(
+      aside
+        .filter((entry) => entry.isDirectory())
+        .map(async (entry) => ({ name: entry.name, at: (await stat(join(dir, 'takes', '.discarded', entry.name)).catch(() => undefined))?.mtimeMs ?? 0 })),
+    )
+  ).sort((a, b) => b.at - a.at);
+  const time = (at: number) => new Date(at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   Menu.buildFromTemplate([
     { label: `Take ${current ?? '?'} (now)`, enabled: false },
     ...(kept.length === 0
       ? [{ label: 'No earlier take to go back to', enabled: false }]
       : kept.map((take) => ({ label: `Back to take ${take}`, click: () => void backToTake(dir, take) }))),
+    ...(putAside.length > 0
+      ? [
+          { type: 'separator' as const },
+          { label: 'Put aside by a restart', enabled: false },
+          ...putAside.map((take) => ({ label: `Use the take from ${time(take.at)}`, click: () => void undoRestart(dir, ['takes', '.discarded', take.name].join('/')) })),
+        ]
+      : []),
     { type: 'separator' },
     { label: 'Record a new take…', click: () => void startPicking(dir) },
   ]).popup({ window });

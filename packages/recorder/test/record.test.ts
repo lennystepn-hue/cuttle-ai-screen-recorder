@@ -222,7 +222,6 @@ describe.concurrent('record (test backend)', () => {
   }, SLOW);
 });
 
-// Not concurrent: these set CLAUDE_CONFIG_DIR, which the watcher reads when the recording starts.
 describe.concurrent('pausing a take (test backend)', () => {
   it('records nothing while paused, joins the segments with every track in step, and counts maxSeconds in take time', async () => {
     const projectDir = project();
@@ -327,6 +326,7 @@ describe.concurrent('pausing a take (test backend)', () => {
   }, SLOW);
 });
 
+// Not concurrent: these set CLAUDE_CONFIG_DIR, which the watcher reads when the recording starts.
 describe('record until a Claude Code turn ends (test backend)', () => {
   function transcripts() {
     const config = temp('cuttle-claude-');

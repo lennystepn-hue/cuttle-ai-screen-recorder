@@ -44,11 +44,11 @@ const LANES: { kind: OverlayKind; name: string; list: OverlayList }[] = [
   { kind: 'caption', name: 'Caption', list: 'texts' },
 ];
 const NOUN: Record<OverlayKind, string> = { zoom: 'zoom', mask: 'mask', caption: 'caption' };
-/** What an empty lane says: how to fill it. */
-const LANE_HINTS: Record<OverlayKind, string> = {
-  zoom: 'Z, then draw on the video: the part to zoom in on',
-  mask: 'M, then draw over what no one should see (a token, an address)',
-  caption: 'T, then type on the video',
+/** What an empty lane says: its key, and how to fill it. */
+const LANE_HINTS: Record<OverlayKind, [string, string]> = {
+  zoom: ['Z', 'and draw on the video: the part to zoom in on'],
+  mask: ['M', 'and draw over what no one should see (a token, an address)'],
+  caption: ['T', 'and type on the video'],
 };
 const TICKS = [0.1, 0.2, 0.5, 1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 1800];
 const MAX_PPS = 400;
@@ -424,6 +424,11 @@ export function Timeline() {
         </div>
         <div className="tl-scroll" ref={scroller} data-testid="timeline">
           <div className="tl-content" style={{ width: width + END_SPACE, height: layout.total }} onPointerDown={scrub}>
+            {model && project && model.scenes.length === 0 && (
+              <span className="lane-hint" style={{ top: tops.video + heights.video / 2, left: 10 }}>
+                The video's scenes show here once Cuttle cuts the take
+              </span>
+            )}
             {model && project && pps > 0 && (
               <>
                 <Markers model={model} pps={pps} />
@@ -440,14 +445,14 @@ export function Timeline() {
                 )}
                 {!project.sources.events && (
                   <span className="lane-hint" style={{ top: tops.input + heights.input / 2, left: view.left + 10 }}>
-                    No input recorded in this take
+                    No clicks or keys recorded in this take
                   </span>
                 )}
                 {LANES.map((lane) => (
                   <div key={lane.kind} className="tl-row" style={{ position: 'absolute', top: tops[lane.kind], height: heights[lane.kind], left: 0, right: 0 }}>
                     {model.lanes[lane.kind].blocks.length === 0 && model.lanes[lane.kind].cutOut === 0 && (
                       <span className="lane-hint" style={{ top: '50%', left: view.left + 10 }}>
-                        {LANE_HINTS[lane.kind]}
+                        <kbd>{LANE_HINTS[lane.kind][0]}</kbd> {LANE_HINTS[lane.kind][1]}
                       </span>
                     )}
                     {model.lanes[lane.kind].blocks.map((block, index, blocks) => {

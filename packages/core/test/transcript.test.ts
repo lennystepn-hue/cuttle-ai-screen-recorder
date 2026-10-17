@@ -49,12 +49,12 @@ describe('transcriptMarkers', () => {
     expect(await transcriptMarkers(join(config, 'nowhere'), (wall) => wall - 1000, 60)).toEqual([]);
   });
 
-  it("follows a paused take's clock: a prompt during the pause lands where it paused", async () => {
+  it("follows a paused take's clock: a prompt during the pause lands where it paused, one after the take is not in it", async () => {
     vi.stubEnv('CLAUDE_CONFIG_DIR', config);
     const cwd = join(config, 'paused');
     const dir = claudeTranscriptDir(cwd);
     mkdirSync(dir, { recursive: true });
-    writeFileSync(join(dir, 'paused.jsonl'), [prompt(3), prompt(10), tool(22, 't1', 'Bash'), answer(23, 'a1')].join(''));
+    writeFileSync(join(dir, 'paused.jsonl'), [prompt(3), prompt(10), tool(22, 't1', 'Bash'), answer(23, 'a1'), prompt(40), answer(41, 'a2')].join(''));
     const take = join(config, 'take');
     mkdirSync(take, { recursive: true });
     writeFileSync(join(take, 'take.json'), JSON.stringify({ version: 1, tracks: { screen: { file: 'screen.mp4', start: 1000 } } }));

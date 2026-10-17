@@ -111,12 +111,19 @@ export interface ProjectStatus {
 export interface ToolsStatus {
   /** ffmpeg where the OS's PATH has it now (or WinGet's links folder), with its version. */
   ffmpeg?: { path: string; version: string };
-  /** A `cuttle` command on that PATH: the app's own copy (`ours`), or another (the repository's, say). */
-  command?: { path: string; ours: boolean };
+  /**
+   * A `cuttle` command on that PATH: the app's own (`ours`; `moved`: written for another copy of
+   * the app, so Update), or another (the repository's, say).
+   */
+  command?: { path: string; ours: boolean; moved?: boolean };
   /** The cuttle skill in Claude Code's config folder: put there by Cuttle, missing, or someone else's folder. */
   skill: { dir: string; state: 'installed' | 'missing' | 'other' };
   /** The app's command folder was just put on the user's PATH: a terminal opened before does not see it. */
   newTerminal?: boolean;
+  /** What the last install could not do, per tool, said for people. */
+  problems?: { command?: string; skill?: string };
+  /** Off Windows: the shims are written but their folder is not on PATH; the line for the shell profile. */
+  pathLine?: string;
 }
 
 /** How motion is set: the OS's "reduce motion", or always on, or always off. */
@@ -132,7 +139,8 @@ export interface SettingsView {
   mic?: string;
   launchAtLogin: boolean;
   motion: Motion;
-  recent: { dir: string; name: string; opened: number }[];
+  /** `open`: the project is open in Cuttle, here (`here`) or on the computer named. */
+  recent: { dir: string; name: string; opened: number; open?: string }[];
   version: string;
 }
 
@@ -226,6 +234,8 @@ export const REQUESTS = {
   /** Installs the cuttle command (the app's own copy of the CLI) and the Claude skill. */
   'tools:install': z.undefined(),
   'tools:copy': z.string().min(1).max(200),
+  /** Shows the skill folder (one Cuttle did not install, to move away). */
+  'tools:reveal': z.undefined(),
   /** A recent project, by its folder (only folders in the recent list are accepted). */
   'recent:open': z.string().min(1).max(4096),
   'recent:reveal': z.string().min(1).max(4096),
@@ -287,9 +297,10 @@ export interface Responses {
   'settings:welcomed': void;
   'tools:status': ToolsStatus;
   'tools:check': ToolsStatus;
-  /** What is installed now, and what could not be (said for people). */
-  'tools:install': { status: ToolsStatus; problem?: string };
+  /** What is installed now, and in `problems` what could not be. */
+  'tools:install': ToolsStatus;
   'tools:copy': void;
+  'tools:reveal': void;
   'recent:open': void;
   'recent:reveal': void;
   'recent:forget': SettingsView;
@@ -320,7 +331,8 @@ export interface Events {
   'picker:devices': Pick<PickerSetup, 'cameras' | 'mics' | 'choices'>;
   'picker:active': { display: number };
   'picker:choices': RecordChoices;
-  'countdown:tick': { seconds: number };
+  /** `restart`: counting down again after a restart (the take before is kept). */
+  'countdown:tick': { seconds: number; restart?: boolean };
   'hud:state': HudState;
   /** What the main process is doing to the project (cutting the take), or nothing. */
   'project:status': ProjectStatus;
@@ -329,6 +341,8 @@ export interface Events {
   'project:closing': Record<string, never>;
   /** The take was restarted: the one before is kept in `discarded` (a folder relative to the project). */
   'project:restarted': { discarded: string };
+  /** A note for the editor's person once the take is in, said there (an undone restart). */
+  'project:note': { text: string };
   'settings:changed': SettingsView;
   /** Every window: how motion is set now (`data-motion` on the page's root). */
   'app:motion': Motion;

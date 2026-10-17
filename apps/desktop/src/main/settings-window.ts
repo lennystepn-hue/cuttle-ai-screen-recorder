@@ -2,33 +2,50 @@
 // skill, then the pill). One at a time: asking again brings it forward.
 import { existsSync } from 'node:fs';
 import { rename } from 'node:fs/promises';
-import { basename, dirname, join } from 'node:path';
+import { hostname } from 'node:os';
+import { basename, dirname, join, resolve } from 'node:path';
 import { app, BrowserWindow, clipboard, dialog, session, shell } from 'electron';
 import { editorLockOf } from '@cuttle/core';
 import type { Motion, SettingsView } from '../shared/ipc';
 import { CHECK, HIDDEN } from './check';
 import { bindRequests, send } from './ipc';
 import { APP_ORIGIN, assetPath, bundlePath, serveApp } from './protocols';
-import { listCamerasAndMics, recordingRuns } from './recording';
+import { keyOf, listCamerasAndMics, recordingRuns } from './recording';
 import { loadSettings, sameDir, settingsView, updateSettings } from './settings';
-import { installTools, toolsStatus } from './tools';
+import { installTools, skillFolder, toolsStatus } from './tools';
 import { guard, lockDown, openEditorOrSay, showPill, webPreferences } from './windows';
 
 const BACKGROUND = '#0c0c0f';
-/** The settings scroll; the first run fits without. */
+/** As the editor's, so Windows' buttons are the same in both. */
+const TITLE_BAR_HEIGHT = 44;
+/** The settings scroll; the first run fits without (Done stays in sight). */
 const SIZE = { width: 640, height: 720 };
-const WELCOME_SIZE = { width: 640, height: 580 };
+const WELCOME_SIZE = { width: 640, height: 640 };
 
 let current: BrowserWindow | undefined;
 
-/** Characters Windows does not take in a folder name, and names it keeps for devices. */
-const BAD_NAME = /[<>:"/\\|?*\u0000-\u001f]|^\.+$|^(con|prn|aux|nul|com\d|lpt\d)(\..*)?$/i;
+/** Characters Windows does not take in a folder name. */
+const BAD_NAME = /[<>:"/\\|?*\u0000-\u001f]|^\.+$/;
+/** Names Windows keeps for devices. */
+const RESERVED_NAME = /^(con|prn|aux|nul|com\d|lpt\d)(\..*)?$/i;
 
 /** The folder a recent entry names: only folders on the list are acted on, never one a page made up. */
 async function recentDir(dir: string): Promise<string> {
   const entry = (await loadSettings()).recent.find((candidate) => sameDir(candidate.dir, dir));
   if (!entry) throw new Error('that project is not in the recent list');
   return entry.dir;
+}
+
+/** The settings as the window shows them, with which recent projects are open in Cuttle now. */
+async function viewNow(): Promise<SettingsView> {
+  const view = await settingsView();
+  const recent = await Promise.all(
+    view.recent.map(async (entry) => {
+      const lock = await editorLockOf(entry.dir).catch(() => undefined);
+      return lock ? { ...entry, open: lock.host === hostname() ? 'here' : lock.host } : entry;
+    }),
+  );
+  return { ...view, recent };
 }
 
 /** Shows the settings window (`welcome`: the first run), or brings it forward. */
@@ -44,13 +61,13 @@ export async function openSettings(options: { welcome?: boolean } = {}): Promise
   const window = new BrowserWindow({
     ...(options.welcome ? WELCOME_SIZE : SIZE),
     minWidth: 560,
-    minHeight: 480,
+    minHeight: options.welcome ? 600 : 480,
     show: false,
     backgroundColor: BACKGROUND,
     title: options.welcome ? 'Welcome to Cuttle' : 'Cuttle settings',
     // the page draws the title bar; Windows draws its buttons over it, in the app's colours
     titleBarStyle: 'hidden',
-    titleBarOverlay: { color: BACKGROUND, symbolColor: '#9a9aa5', height: 40 },
+    titleBarOverlay: { color: BACKGROUND, symbolColor: '#9a9aa5', height: TITLE_BAR_HEIGHT },
     icon: assetPath('icon.png'),
     maximizable: false,
     fullscreenable: false,
@@ -64,7 +81,7 @@ export async function openSettings(options: { welcome?: boolean } = {}): Promise
   };
 
   bindRequests(contents, 'settings', {
-    'settings:get': () => settingsView(),
+    'settings:get': () => viewNow(),
     'settings:set': async (change) => {
       await updateSettings((settings) => {
         if (change.countdown !== undefined) settings.countdown = change.countdown;
@@ -75,7 +92,7 @@ export async function openSettings(options: { welcome?: boolean } = {}): Promise
       });
       if (change.launchAtLogin !== undefined) applyLoginItem(change.launchAtLogin);
       if (change.motion !== undefined) broadcastMotion(change.motion);
-      return changed(await settingsView());
+      return changed(await viewNow());
     },
     'settings:choose-folder': async () => {
       const chosen = CHECK
@@ -92,7 +109,7 @@ export async function openSettings(options: { welcome?: boolean } = {}): Promise
           settings.projectsFolder = chosen;
         });
       }
-      return changed(await settingsView());
+      return changed(await viewNow());
     },
     'settings:devices': () => listCamerasAndMics(),
     'settings:welcomed': async () => {
@@ -106,6 +123,7 @@ export async function openSettings(options: { welcome?: boolean } = {}): Promise
     'tools:check': () => toolsStatus(),
     'tools:install': () => installTools(),
     'tools:copy': (text) => clipboard.writeText(text),
+    'tools:reveal': () => shell.showItemInFolder(skillFolder()),
     'recent:open': async (dir) => openEditorOrSay(await recentDir(dir)),
     'recent:reveal': async (dir) => shell.showItemInFolder(await recentDir(dir)),
     'recent:forget': async (dir) => {
@@ -113,12 +131,12 @@ export async function openSettings(options: { welcome?: boolean } = {}): Promise
       await updateSettings((settings) => {
         settings.recent = settings.recent.filter((entry) => !sameDir(entry.dir, known));
       });
-      return changed(await settingsView());
+      return changed(await viewNow());
     },
     'recent:rename': async ({ dir, name }) => {
       const known = await recentDir(dir);
       const answer = await renameProject(known, name);
-      if ('dir' in answer) changed(await settingsView());
+      if ('dir' in answer) changed(await viewNow());
       return answer;
     },
   });
@@ -136,6 +154,8 @@ export async function openSettings(options: { welcome?: boolean } = {}): Promise
   window.on('closed', () => {
     if (current === window) current = undefined;
   });
+  // which projects are open changes while the window is away
+  window.on('focus', () => void viewNow().then(changed));
   window.once('ready-to-show', () => {
     if (!HIDDEN) window.show();
   });
@@ -150,10 +170,12 @@ export async function openSettings(options: { welcome?: boolean } = {}): Promise
  */
 export async function renameProject(dir: string, name: string): Promise<{ dir: string } | { problem: string }> {
   const clean = name.trim();
+  if (RESERVED_NAME.test(clean)) return { problem: `Windows keeps "${clean}" for itself. Pick another name.` };
   if (BAD_NAME.test(clean) || clean.endsWith('.') || clean.endsWith(' ')) return { problem: 'A folder name cannot have \\ / : * ? " < > | in it, or end in a dot or a space.' };
   if (clean === basename(dir)) return { dir };
   if (recordingRuns()) return { problem: 'Cuttle is recording. Rename the project after the stop.' };
-  if (await editorLockOf(dir)) return { problem: 'The project is open in Cuttle. Close its editor first.' };
+  const lock = await editorLockOf(dir);
+  if (lock) return { problem: lock.host === hostname() ? 'The project is open in Cuttle. Close its editor first.' : `The project is open in Cuttle on ${lock.host}. Close it there first.` };
   const target = join(dirname(dir), clean);
   // a name that differs only in case is the same folder on Windows: renamed in place
   if (existsSync(target) && !sameDir(target, dir)) return { problem: `There is already a folder named "${clean}" there.` };
@@ -165,7 +187,8 @@ export async function renameProject(dir: string, name: string): Promise<{ dir: s
   }
   await updateSettings((settings) => {
     settings.recent = settings.recent.map((entry) => (sameDir(entry.dir, dir) ? { ...entry, dir: target, name: clean } : entry));
-    settings.uncut = settings.uncut.map((entry) => (sameDir(entry, dir) ? target : entry));
+    // `uncut` holds keys as recording.ts makes them (real path, case folded on Windows)
+    settings.uncut = settings.uncut.map((entry) => (entry === keyOf(dir) || sameDir(entry, dir) ? keyOf(target) : entry));
   });
   return { dir: target };
 }
@@ -176,8 +199,8 @@ export function applyLoginItem(open: boolean): void {
     (globalThis as { __loginItem?: boolean }).__loginItem = open;
     return;
   }
-  // unpacked from the repository (pnpm app), Electron needs the app's folder as an argument
-  app.setLoginItemSettings({ openAtLogin: open, ...(!app.isPackaged && { path: process.execPath, args: [app.getAppPath()] }) });
+  // run from the repository (pnpm app), Electron needs the main script as an argument
+  app.setLoginItemSettings({ openAtLogin: open, ...(!app.isPackaged && { path: process.execPath, args: [resolve(process.argv[1] ?? app.getAppPath())] }) });
 }
 
 /** Tells every window how motion is set now. */

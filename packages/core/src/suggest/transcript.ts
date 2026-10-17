@@ -41,7 +41,13 @@ export async function takeClock(takeDir: string): Promise<((wall: number) => num
   if (!take.ok || take.take.tracks.screen.start === 0) return undefined;
   const start = take.take.tracks.screen.start;
   const manifest = parseSegmentsJson(await readFile(join(takeDir, 'segments.json'), 'utf8').catch(() => ''));
-  if (manifest.ok) return (wall) => takeTime(manifest.segments.segments, wall, true);
+  if (manifest.ok) {
+    const segments = manifest.segments.segments;
+    const last = segments.at(-1);
+    // after the take's end a signal is not in the take (during the last pause it is where it paused)
+    const end = last ? last.screen.start + (last.duration ?? Infinity) : Infinity;
+    return (wall) => (wall > end ? undefined : takeTime(segments, wall, true));
+  }
   return (wall) => wall - start;
 }
 

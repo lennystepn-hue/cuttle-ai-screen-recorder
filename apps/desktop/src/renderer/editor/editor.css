@@ -88,6 +88,12 @@
 .primary:hover:not(:disabled) {
   background: var(--accent-hover);
 }
+/* off: no accent (it belongs to the one action that can be taken) */
+.primary:disabled {
+  opacity: 1;
+  background: var(--raised);
+  color: var(--faint);
+}
 .ghost {
   height: 28px;
   padding: 0 12px;
@@ -1237,6 +1243,36 @@ button.chip-status:hover {
   white-space: nowrap;
   pointer-events: none;
 }
+/* after a restart: the offer to use the earlier take, quiet, in the title bar */
+.restart-chip {
+  -webkit-app-region: no-drag;
+  gap: 6px;
+  padding: 0 4px 0 10px;
+  border-radius: 8px;
+  background: var(--raised);
+}
+.restart-chip .chip-action {
+  height: 22px;
+  padding: 0 8px;
+  border-radius: 6px;
+  color: var(--text);
+  font-weight: 500;
+}
+.restart-chip .chip-action:hover,
+.restart-chip .chip-close:hover {
+  background: var(--raised-hover);
+}
+.restart-chip .chip-close {
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  display: grid;
+  place-items: center;
+}
+.lane-hint kbd {
+  margin-right: 2px;
+}
+
 /* a project without scenes: what to do, over the empty frame */
 .empty-stage {
   position: absolute;

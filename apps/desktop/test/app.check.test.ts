@@ -770,7 +770,7 @@ describe.runIf(enabled)('the Cuttle app', () => {
     await opened.waitForSelector('.app[data-phase="ready"]', { timeout: 30_000 });
     expect(await opened.locator('[data-testid=project-status]').count()).toBe(0);
     // the cut came in as a change of the file: one step to undo
-    await expect.poll(() => opened.evaluate(() => (window as unknown as { __cuttleCheck: Check }).__cuttleCheck.doc().undo), { timeout: 10_000 }).toBe('Cut by suggest');
+    await expect.poll(() => opened.evaluate(() => (window as unknown as { __cuttleCheck: Check }).__cuttleCheck.doc().undo), { timeout: 10_000 }).toBe("Cuttle's cut");
     expect(await opened.locator('.scene').count()).toBe(cut.scenes.length);
   }, 120_000);
 
@@ -881,12 +881,26 @@ describe.runIf(enabled)('the Cuttle app', () => {
     const opened = await waitForPage(app, async (page) => page.url().includes('/editor.html') && (await page.title()) === `${basename(dir)} · Cuttle`);
     // the offer outlasts suggest's note about its cut
     await opened.waitForSelector('[data-testid=undo-restart]', { timeout: 30_000 });
-    await expect.poll(() => opened.evaluate(() => (window as unknown as { __cuttleCheck: Check }).__cuttleCheck.doc().undo), { timeout: 15_000 }).toBe('Cut by suggest');
+    await expect.poll(() => opened.evaluate(() => (window as unknown as { __cuttleCheck: Check }).__cuttleCheck.doc().undo), { timeout: 15_000 }).toBe("Cuttle's cut");
     await click(opened, '[data-testid=undo-restart]');
     // the take from before the restart is the project's again (the new one stays as take 1)
     await projectWhen(dir, (written) => written.sources.screen === 'takes/2/screen.mp4' && written.scenes[0]?.id !== undefined);
     expect(existsSync(join(dir, 'takes', '1', 'screen.mp4'))).toBe(true);
     expect(existsSync(join(dir, 'takes', '.discarded', '1'))).toBe(false);
+  }, 120_000);
+
+  it('keeps the take a restart put aside when the next take fails, and offers it back', async () => {
+    const before = new Set(existsSync(join(root, 'projects')) ? readdirSync(join(root, 'projects')) : []);
+    // the failing test camera stops after a second: the take after the restart fails
+    await recordThroughPicker(pillRecord, { stop: 'none', camera: 'Failing Test Camera' }, false);
+    // at once: the camera fails a second in
+    const hud = await waitForPage(app, async (page) => page.url().includes('/hud.html') && (await page.locator('.hud.recording').count()) === 1);
+    await hud.evaluate(() => document.querySelector('[data-testid=hud-restart]')!.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0, pointerId: 4 })));
+    const dir = await newProject(before);
+    await expect.poll(() => existsSync(join(dir, 'takes', '.discarded', '1')), { timeout: 15_000 }).toBe(true);
+    // the recovered take opens, and the editor offers the one before the restart
+    const opened = await waitForPage(app, async (page) => page.url().includes('/editor.html') && (await page.title()) === `${basename(dir)} · Cuttle`);
+    await opened.waitForSelector('[data-testid=undo-restart]', { timeout: 60_000 });
   }, 120_000);
 
   it('opens the settings from a second launch: changes are kept, motion reaches every window, an open project is not renamed', async () => {
@@ -907,17 +921,19 @@ describe.runIf(enabled)('the Cuttle app', () => {
     await expect.poll(() => app.evaluate(() => (globalThis as { __loginItem?: boolean }).__loginItem)).toBe(true);
     await click(settings, '[data-testid=launch-at-login]');
     await expect.poll(() => saved().launchAtLogin).toBe(false);
-    // demo is open in its editor: its folder is not renamed
-    await settings.evaluate(() => {
+    // demo is open in its editor: Rename is off there, and the main process refuses it too
+    const demoRename = await settings.evaluate(() => {
       const row = [...document.querySelectorAll('.recent li')].find((item) => item.querySelector('b')?.textContent === 'demo')!;
-      (row.querySelector('[data-testid=recent-rename]') as HTMLElement).click();
+      const button = row.querySelector('[data-testid=recent-rename]') as HTMLButtonElement;
+      return { disabled: button.disabled, title: button.title };
     });
-    await settings.fill('[data-testid=rename-input]', 'demo renamed');
-    await settings.press('[data-testid=rename-input]', 'Enter');
-    await settings.waitForSelector('[data-testid=rename-problem]');
-    expect(await settings.locator('[data-testid=rename-problem]').textContent()).toContain('open in Cuttle');
+    expect(demoRename).toEqual({ disabled: true, title: 'Close its editor to rename it' });
+    const refused = await settings.evaluate(
+      (dir) => (window as unknown as { cuttle: { invoke(channel: string, argument: unknown): Promise<{ problem?: string }> } }).cuttle.invoke('recent:rename', { dir, name: 'demo renamed' }),
+      project,
+    );
+    expect(refused.problem).toContain('open in Cuttle');
     expect(existsSync(project)).toBe(true);
-    await settings.press('[data-testid=rename-input]', 'Escape');
     await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find((window) => window.webContents.getURL().includes('/settings.html'))?.close());
   }, 60_000);
 

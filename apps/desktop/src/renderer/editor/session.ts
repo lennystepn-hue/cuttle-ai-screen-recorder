@@ -7,7 +7,7 @@ import type { Command, EditLimits } from '../../shared/document';
 import type { ExportEnd, ExportProgress, ExportTarget, MediaState, ProjectInfo, ProjectStatus } from '../../shared/ipc';
 import type { OverlayKind } from '../../shared/timeline-model';
 import { bridge } from '../bridge';
-import { beforeClose, dismissToast, edit, flush, offerUndoRestart, openDocument, outsideChange, redo, undo, type DocState } from './doc';
+import { beforeClose, dismissToast, edit, flush, offerUndoRestart, openDocument, outsideChange, redo, toast, undo, type DocState } from './doc';
 import { ensureMedia, openProjectMedia, openVideo, type EditorMedia } from './media';
 import { Player, type PlayerState } from './player';
 import { createStore } from './store';
@@ -130,6 +130,8 @@ export async function openSession(canvas: HTMLCanvasElement): Promise<void> {
     bridge.on('project:file', (event) => void outsideChange(event));
     // A restarted take: the one before it is kept aside, and can be the take again.
     bridge.on('project:restarted', ({ discarded }) => offerUndoRestart(discarded));
+    // what happened to the take (an undone restart), once it is in
+    bridge.on('project:note', ({ text }) => toast(text));
   } catch (error) {
     store.set({ phase: 'failed', error: error instanceof Error ? error.message : String(error) });
   }

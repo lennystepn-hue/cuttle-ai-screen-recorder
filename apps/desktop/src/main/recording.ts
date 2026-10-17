@@ -45,7 +45,7 @@ let writing: Promise<void> | undefined;
 let quitting = false;
 
 /** A project's key, as the editors key it: the real path (a junction or a short name is the same folder). */
-function keyOf(dir: string): string {
+export function keyOf(dir: string): string {
   let path = resolve(dir);
   try {
     path = realpathSync.native(path);
@@ -500,7 +500,10 @@ async function record(target: PickedTarget, display: PickerDisplay, displays: Pi
       const hudState: HudState = { phase: 'countdown', markers: 0 };
       // a check of the drive or the window still under way may note something after the HUD closed
       const showHud = () => !hud.isDestroyed() && send(hud.webContents, 'hud:state', { ...hudState });
+      /** The last warning: a pause shows its own note, the resume brings the warning back. */
+      let warning: { message: string; detail: string } | undefined;
       const note = (message: string, detail: string, tone: HudState['tone']) => {
+        if (tone === 'warn') warning = { message, detail };
         hudState.message = message;
         hudState.detail = detail;
         hudState.tone = tone;
@@ -571,7 +574,7 @@ async function record(target: PickedTarget, display: PickerDisplay, displays: Pi
       const onEvent = (event: RecorderEvent) => {
         switch (event.type) {
           case 'countdown':
-            send(countdown.webContents, 'countdown:tick', { seconds: event.seconds });
+            send(countdown.webContents, 'countdown:tick', { seconds: event.seconds, ...(discarded.length > 0 && { restart: true }) });
             return;
           case 'recording':
             closeOverlays();
@@ -596,6 +599,10 @@ async function record(target: PickedTarget, display: PickerDisplay, displays: Pi
           case 'resumed':
             hudState.phase = 'recording';
             hudState.startedAt = Date.now();
+            if (warning) {
+              note(warning.message, warning.detail, 'warn');
+              return;
+            }
             delete hudState.message;
             delete hudState.detail;
             delete hudState.tone;
@@ -612,7 +619,8 @@ async function record(target: PickedTarget, display: PickerDisplay, displays: Pi
           }
           case 'stopping':
             hudState.phase = 'stopping';
-            note('Stopping…', 'Writing the take', 'info');
+            // a restart says so to the end ("Restarting…"), not "Stopping…"
+            if (!restarting) note('Stopping…', 'Writing the take', 'info');
             return;
         }
       };
@@ -652,9 +660,22 @@ async function record(target: PickedTarget, display: PickerDisplay, displays: Pi
           await giveUp();
           return false;
         }
-        // A take that had started is kept: repaired with recover, then opened like any other.
+        // A take that had started is kept: repaired with recover, then opened like any other (and
+        // the take a restart put aside is offered back there).
         if (takeDir) {
+          const previous = discarded.at(-1);
+          if (previous) restarted.set(keyOf(projectDir), previous);
           cutting = await recoverAndOpen(projectDir, takeDir, (error as Error).message, showEditor);
+          if (!cutting) restarted.delete(keyOf(projectDir));
+          return cutting;
+        }
+        // Nothing recorded after a restart: the take put aside is the take again.
+        const previous = discarded.pop();
+        const back = previous && (await bringBack(projectDir, previous).catch(() => undefined));
+        if (back) {
+          const failure = recordingFailure((error as Error).message);
+          say(`The recording could not start again. ${failure.text} The take from before the restart is kept.`, failure.detail);
+          cutting = await recoverAndOpen(projectDir, back, '', showEditor, true);
           return cutting;
         }
         await giveUp();
@@ -667,7 +688,10 @@ async function record(target: PickedTarget, display: PickerDisplay, displays: Pi
       if (!hud.isDestroyed()) hud.destroy();
       if (restarting && !quitting) {
         // put aside, not deleted ("Undo restart" in the editor), and counted down again
-        const aside = await putAside(projectDir, take.dir).catch(() => undefined);
+        const aside = await putAside(projectDir, take.dir).catch((error: Error) => {
+          say(`The take could not be put aside for a new one (${error.message.split('\n')[0]}): it is kept as the take.`);
+          return undefined;
+        });
         if (aside) {
           discarded.push(aside);
           continue;
@@ -685,6 +709,19 @@ async function record(target: PickedTarget, display: PickerDisplay, displays: Pi
   }
 }
 
+/** A folder rename that waits a moment for a file in it someone holds (a scanner on a take just written, OneDrive). */
+async function renameWhenFree(from: string, to: string): Promise<void> {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await rename(from, to);
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (attempt >= 8 || (code !== 'EPERM' && code !== 'EBUSY' && code !== 'EACCES')) throw error;
+      await new Promise((resolve) => setTimeout(resolve, 150 * attempt));
+    }
+  }
+}
+
 /** Moves a take into `takes/.discarded/` (a restart); returns its new folder relative to the project. */
 async function putAside(projectDir: string, takeDir: string): Promise<string> {
   const aside = join(projectDir, 'takes', '.discarded');
@@ -693,7 +730,7 @@ async function putAside(projectDir: string, takeDir: string): Promise<string> {
   const name = basename(takeDir);
   let target = name;
   for (let n = 2; taken.has(target); n++) target = `${name}-${n}`;
-  await rename(join(projectDir, takeDir), join(aside, target));
+  await renameWhenFree(join(projectDir, takeDir), join(aside, target));
   return ['takes', '.discarded', target].join('/');
 }
 
@@ -706,7 +743,7 @@ async function bringBack(projectDir: string, discarded: string): Promise<string 
   const names = await readdir(join(projectDir, 'takes')).catch(() => [] as string[]);
   const next = names.reduce((max, name) => (/^\d+$/.test(name) ? Math.max(max, Number(name)) : max), 0) + 1;
   await mkdir(dirname(join(projectDir, 'takes', String(next))), { recursive: true });
-  await rename(from, join(projectDir, 'takes', String(next)));
+  await renameWhenFree(from, join(projectDir, 'takes', String(next)));
   return `takes/${next}`;
 }
 
@@ -719,9 +756,14 @@ export async function undoRestart(projectDir: string, discarded: string): Promis
   const file = projectExists(dir) ? await readProjectFile(dir).catch(() => undefined) : undefined;
   const current = file && currentTake(file.raw);
   if (current && existsSync(join(dir, 'takes', current))) await copyFile(join(dir, PROJECT_FILE), join(dir, 'takes', current, PROJECT_FILE)).catch(() => {});
-  const back = await bringBack(dir, discarded);
-  if (!back) return say('The take put aside by the restart is not there any more.');
-  await recoverAndOpen(dir, back, '', async () => {}, true);
+  try {
+    const back = await bringBack(dir, discarded);
+    if (!back) return say('The take put aside by the restart is not there any more.');
+    notesAfterCut.set(keyOf(dir), `The take from before the restart is back (take ${back.split('/').at(-1)}). The other one is in Record again ▾.`);
+    await recoverAndOpen(dir, back, '', async () => {}, true);
+  } catch (error) {
+    say(`The take from before the restart could not be brought back: ${(error as Error).message.split('\n')[0]}`);
+  }
 }
 
 /**
@@ -782,10 +824,12 @@ export async function cutIfPending(dir: string): Promise<void> {
 
 /** Projects whose new take came after a restart: the take put aside, for the editor's "Undo restart". */
 const restarted = new Map<string, string>();
+/** What the editor of a project says once its take is cut (an undone restart). */
+const notesAfterCut = new Map<string, string>();
 
 /**
  * Opens the editor on the take at once while `suggest` cuts it in the background; the editor gets
- * the cut as a change of the file, one step to undo ("Cut by suggest").
+ * the cut as a change of the file, one step to undo ("Cuttle's cut").
  */
 async function cutAndShow(dir: string): Promise<void> {
   finishing.add(keyOf(dir));
@@ -793,8 +837,11 @@ async function cutAndShow(dir: string): Promise<void> {
     await reopenEditor(dir);
     const discarded = restarted.get(keyOf(dir));
     restarted.delete(keyOf(dir));
-    if (discarded) await sendToEditor(dir, 'project:restarted', { discarded });
+    const said = notesAfterCut.get(keyOf(dir));
+    notesAfterCut.delete(keyOf(dir));
     await cut(dir);
+    if (discarded) await sendToEditor(dir, 'project:restarted', { discarded });
+    if (said) await sendToEditor(dir, 'project:note', { text: said });
   } finally {
     finishing.delete(keyOf(dir));
   }
@@ -802,7 +849,7 @@ async function cutAndShow(dir: string): Promise<void> {
 
 /**
  * Cuts the project's take with `suggest`; the editor says so, gets the cut as a change of the file
- * (one step to undo, "Cut by suggest"), and says when it could not (with Try again).
+ * (one step to undo, "Cuttle's cut"), and says when it could not (with Try again).
  */
 async function cut(dir: string): Promise<void> {
   await setEditorStatus(dir, { text: 'Cutting the take…', state: 'working' });

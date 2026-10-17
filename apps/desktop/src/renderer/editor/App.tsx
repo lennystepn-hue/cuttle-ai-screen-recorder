@@ -109,6 +109,7 @@ function TitleBar() {
         )}
       </div>
       {phase === 'ready' && <SaveState />}
+      {phase === 'ready' && <RestartChip />}
       <div className="grow" />
       {status?.state === 'failed' ? (
         <button className="chip-status warn" onClick={() => void bridge.invoke('project:cut')} title={`${status.text}. Click to try again.`} data-testid="project-status">
@@ -398,7 +399,6 @@ function Stage({ canvas }: { canvas: React.RefObject<HTMLCanvasElement | null> }
       </div>
       <div className="top-notes">
         <DraftNote />
-        <RestartNote />
       </div>
       <ToastNote />
       <Transport />
@@ -621,26 +621,26 @@ function EmptyStage() {
   );
 }
 
-/** After a restart: the take before it is put aside, and can be the take again. */
-function RestartNote() {
+/** After a restart: a quiet offer in the title bar to use the take before it (it waits; the video stays clear). */
+function RestartChip() {
   const discarded = useStore(store, (state) => state.doc?.restartNote);
   if (!discarded) return null;
   return (
-    <div className="draft-note restart" role="status" data-testid="restart-note">
-      <span>Restarted. The take before it is put aside.</span>
+    <div className="chip-status restart-chip" role="status" data-testid="restart-note">
+      <span className="chip-text">Restarted: the earlier take is kept.</span>
       <button
-        className="toast-undo"
+        className="chip-action"
         onClick={() => {
-          void bridge.invoke('project:undo-restart', discarded);
           dismissRestart();
+          void bridge.invoke('project:undo-restart', discarded);
         }}
-        title="Use the take from before the restart again (this one stays in the takes menu)"
+        title="Use the take from before the restart (this one stays in Record again ▾)"
         data-testid="undo-restart"
       >
-        Undo restart
+        Use it instead
       </button>
-      <button className="toast-close" onClick={dismissRestart} aria-label="Keep this take" title={`Keep this take (the one before stays in ${discarded})`}>
-        <CloseIcon size={11} />
+      <button className="chip-close" onClick={dismissRestart} aria-label="Keep this take" title="Keep this take (the earlier one stays in Record again ▾)">
+        <CloseIcon size={10} />
       </button>
     </div>
   );
@@ -687,7 +687,13 @@ function Transport() {
   const duration = currentPlayer()?.duration ?? 0;
   return (
     <div className="transport">
-      <button className="play" onClick={() => currentPlayer()?.toggle()} disabled={duration <= 0} aria-label={playing ? 'Pause (Space)' : 'Play (Space)'} title={playing ? 'Pause (Space)' : 'Play (Space)'}>
+      <button
+        className="play"
+        onClick={() => currentPlayer()?.toggle()}
+        disabled={duration <= 0}
+        aria-label={playing ? 'Pause (Space)' : 'Play (Space)'}
+        title={duration <= 0 ? 'Nothing to play yet: the project has no scenes' : playing ? 'Pause (Space)' : 'Play (Space)'}
+      >
         {playing ? <PauseIcon size={14} /> : <PlayIcon size={14} />}
       </button>
       <span className="time tabular" data-testid="time">

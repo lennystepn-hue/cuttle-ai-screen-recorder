@@ -5,6 +5,11 @@
 // in sync however many pauses there were (AAC joined as it is drifts ~23 ms per pause).
 import { spawn } from 'node:child_process';
 import { renameSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import type { Segment } from '@cuttle/project';
+import { VIDEO_CODEC } from './args';
+import { RecorderError } from './errors';
+import { ffmpegMissing, ffmpegPath } from './ffmpeg';
 
 /**
  * A rename that waits a moment when Windows holds the file (a virus scanner on a file just written,
@@ -21,11 +26,6 @@ export function renameWhenFree(from: string, to: string): void {
     }
   }
 }
-import { join } from 'node:path';
-import type { Segment } from '@cuttle/project';
-import { VIDEO_CODEC } from './args';
-import { RecorderError } from './errors';
-import { ffmpegMissing, ffmpegPath } from './ffmpeg';
 
 const AUDIO_RATE = 48_000;
 const FPS = 30;

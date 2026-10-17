@@ -5,21 +5,27 @@
   flex-direction: column;
 }
 /* the title bar: dragged by the window's own top (Windows draws its buttons on the right) */
+/* the title bar: as the editor's (44 px, the mark, a line under it); Windows draws its buttons on the right */
 .settings header {
-  height: 40px;
+  height: 44px;
   flex: none;
   display: flex;
   align-items: center;
-  padding: 0 20px;
+  gap: 10px;
+  padding: 0 14px;
+  border-bottom: 1px solid var(--line);
   color: var(--muted);
   font-size: var(--size-s);
-  font-weight: 500;
+  font-weight: 600;
   -webkit-app-region: drag;
+}
+.settings header .mark {
+  border-radius: 7px;
 }
 .settings main {
   flex: 1;
   overflow-y: auto;
-  padding: 8px 28px 28px;
+  padding: 20px 28px 28px;
 }
 .settings section + section {
   margin-top: 24px;
@@ -120,6 +126,11 @@
 .settings .primary:hover:not(:disabled) {
   background: var(--accent-hover);
 }
+.settings .primary:disabled {
+  opacity: 1;
+  background: var(--raised);
+  color: var(--faint);
+}
 .settings .ghost {
   height: 30px;
   padding: 0 12px;
@@ -185,6 +196,7 @@
   width: 230px;
   height: 30px;
   padding: 0 8px;
+  font-size: var(--size-s);
   border: 0;
   border-radius: 8px;
   background: var(--raised);
@@ -194,7 +206,7 @@
   box-shadow: inset 0 0 0 1px var(--line-strong);
 }
 .settings select:focus-visible {
-  box-shadow: inset 0 0 0 1px var(--accent);
+  box-shadow: var(--focus);
 }
 
 /* the tools: a mark, what it is, where it is */
@@ -223,6 +235,23 @@
 .tool-mark.warn {
   background: rgba(242, 179, 74, 0.14);
   color: var(--card);
+}
+.tool-mark.failed {
+  background: rgba(255, 107, 107, 0.14);
+  color: var(--danger);
+}
+/* not installed is not a warning: an empty ring */
+.tool-mark.off {
+  background: none;
+  box-shadow: inset 0 0 0 1.5px var(--line-strong);
+}
+.error-inline {
+  color: var(--danger);
+}
+.keys {
+  display: inline-flex;
+  gap: 2px;
+  vertical-align: 1px;
 }
 .tool[data-state='ok'] .path-text {
   font-family: var(--mono);
@@ -255,6 +284,9 @@
 }
 .command:hover {
   color: var(--text);
+}
+.command:focus-visible {
+  box-shadow: var(--focus);
 }
 .tools-actions {
   display: flex;
@@ -318,9 +350,18 @@
   color: var(--muted);
   font-size: var(--size-s);
 }
-.recent-actions button:hover {
+.recent-actions button:hover:not(:disabled) {
   background: var(--raised-hover);
   color: var(--text);
+}
+.recent-actions button.icon {
+  width: 26px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+}
+.recent-actions button:disabled {
+  color: var(--faint);
 }
 .rename {
   flex: 1;
@@ -370,11 +411,16 @@
   margin: 4px 0 0;
   color: var(--muted);
 }
+/* the way out stays in sight at any size */
 .welcome-foot {
+  position: sticky;
+  bottom: -28px;
   display: flex;
   align-items: center;
   gap: 16px;
-  margin-top: 24px;
+  margin: 24px 0 -28px;
+  padding: 14px 0 28px;
+  background: var(--bg);
 }
 .welcome-foot .row-hint {
   flex: 1;

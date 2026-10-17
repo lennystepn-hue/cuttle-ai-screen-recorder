@@ -374,6 +374,19 @@ body.transparent #root {
   color: #fff;
   animation: pop 1s var(--ease-out);
 }
+.countdown em {
+  position: absolute;
+  top: 22px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-style: normal;
+  font-weight: 600;
+  color: #fff;
+  background: rgba(19, 19, 23, 0.72);
+  padding: 5px 12px;
+  border-radius: 8px;
+  white-space: nowrap;
+}
 .countdown small {
   position: absolute;
   bottom: 22px;

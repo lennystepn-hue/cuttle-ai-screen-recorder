@@ -13,6 +13,14 @@ const HOLD_MS = 600;
 
 export function Hud() {
   const [state, setState] = useState<HudState>({ phase: 'countdown', markers: 0 });
+  /** A note of the HUD's own for a moment (a restart let go too early). */
+  const [hint, setHint] = useState<string>();
+  const hintTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const showHint = (text: string) => {
+    clearTimeout(hintTimer.current);
+    setHint(text);
+    hintTimer.current = setTimeout(() => setHint(undefined), 2000);
+  };
   const [now, setNow] = useState(Date.now());
   const [flash, setFlash] = useState(false);
   useEffect(() => {
@@ -42,16 +50,20 @@ export function Hud() {
         <span className="time" data-testid="hud-time">
           {clock(seconds)}
         </span>
-        <span className={`note${state.tone === 'warn' ? ' warn' : ''}`} title={state.detail ?? state.message} role="status" data-testid="hud-note">
-          {state.message && (
+        <span className={`note${state.tone === 'warn' && !hint ? ' warn' : ''}`} title={hint ?? state.detail ?? state.message} role="status" data-testid="hud-note">
+          {hint ? (
+            <span>{hint}</span>
+          ) : (
+            state.message && (
             <>
               {state.tone === 'warn' && <WarningIcon size={13} />}
               <span>{state.message}</span>
             </>
+            )
           )}
         </span>
         <span className="sep" />
-        <RestartButton disabled={!live} />
+        <RestartButton disabled={!live} onShortPress={() => showHint('Hold to restart')} />
         <button
           className={`marker${flash ? ' flash' : ''}`}
           onClick={() => void bridge.invoke('hud:marker')}
@@ -93,7 +105,7 @@ export function Hud() {
 }
 
 /** Restart: held 600 ms (a ring fills meanwhile); let go earlier and nothing happens. */
-function RestartButton({ disabled }: { disabled: boolean }) {
+function RestartButton({ disabled, onShortPress }: { disabled: boolean; onShortPress: () => void }) {
   const [holding, setHolding] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
   const release = () => {
@@ -110,11 +122,17 @@ function RestartButton({ disabled }: { disabled: boolean }) {
         if (event.button !== 0) return;
         setHolding(true);
         timer.current = setTimeout(() => {
+          // held long enough: the release after this is not a short press
+          timer.current = undefined;
           setHolding(false);
           void bridge.invoke('hud:restart');
         }, HOLD_MS);
       }}
-      onPointerUp={release}
+      onPointerUp={() => {
+        // let go before the hold was long enough: say how it works
+        if (timer.current) onShortPress();
+        release();
+      }}
       onPointerLeave={release}
       onPointerCancel={release}
       title="Hold to restart: this take is put aside (the editor can bring it back) and the countdown starts again"

@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs';
-import { readFile, rm, writeFile } from 'node:fs/promises';
+import { readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { MARKERS_VERSION, TAKE_VERSION, parseEventsJsonl, parseMarkersJson, parseSegmentsJson, parseTakeJson, type Segment, type TakeFile } from '@cuttle/project';
 import { joinSegments } from '@cuttle/recorder';
@@ -170,8 +170,10 @@ async function joinPaused(dir: string, repaired: string[]): Promise<void> {
   };
   await writeFile(join(dir, FILES.take), `${JSON.stringify(take, null, 2)}\n`);
   await writeFile(manifest, `${JSON.stringify({ ...parsed.segments, segments, joined: true }, null, 2)}\n`);
-  for (const segment of parsed.segments.segments) for (const track of ['screen', 'webcam', 'mic'] as const) if (segment[track]) await rm(join(dir, segment[track].file), { force: true });
-  await rm(join(dir, 'segments.txt'), { force: true });
+  // the pieces, also those a resume started but the manifest never listed (a crash): their files go;
+  // one that cannot be removed now (held) is left, the take is joined all the same
+  const pieces = (await readdir(dir).catch(() => [] as string[])).filter((name) => /^(screen|webcam|mic)\.\d+\.(mp4|m4a)$/.test(name));
+  for (const name of [...pieces, 'segments.txt']) await rm(join(dir, name), { force: true }).catch(() => {});
   repaired.push(`joined the ${segments.length} segments of the paused take`);
 }
 

@@ -38,6 +38,8 @@ export class RecorderHost {
     const child = utilityProcess.fork(bundlePath('main', 'recorder-host.mjs'), TEST_BACKEND ? ['--test-backend'] : [], { serviceName: 'Cuttle recorder', stdio: 'ignore' });
     child.on('message', (message: HostReply) => this.receive(message));
     child.on('exit', (code) => {
+      // a host let go by refresh(): the new one's listings and recording are not its own
+      if (this.process !== child) return;
       this.process = undefined;
       for (const listing of this.listings.values()) listing.reject(new RecordingError('capture', 'the recorder stopped'));
       this.listings.clear();
@@ -139,7 +141,10 @@ export class RecorderHost {
 
   /** Ends the host while it does nothing, so the next one starts with the environment as it is now (ffmpeg found since). */
   refresh(): void {
-    if (!this.running && this.listings.size === 0) this.process?.kill();
+    if (this.running || this.listings.size > 0 || !this.process) return;
+    const old = this.process;
+    this.process = undefined;
+    old.kill();
   }
 }
 

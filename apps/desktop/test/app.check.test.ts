@@ -3,7 +3,7 @@ import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rea
 import { rm } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { PNG } from 'pngjs';
 import { _electron, type ElectronApplication, type Page } from 'playwright';
@@ -18,7 +18,9 @@ import { FIXTURE_OUTPUT, makeFixture } from './fixture';
  * broken file, a save conflict kept as a draft; open a project
  * twice at once, close an editor during its export, close the pill; record through the picker with
  * the recorder's `test` backend, stop from the HUD, and land in the take cut by suggest; record
- * again. Runs only with `pnpm app:check` (vitest --mode app, after app:build:js and cli:build).
+ * again; pause and restart from the HUD; the settings. Then the first run in an app of its own:
+ * ffmpeg found once installed, the cuttle command and the skill installed (into folders of the
+ * check's own). Runs only with `pnpm app:check` (vitest --mode app, after app:build:js and cli:build).
  * CUTTLE_CHECK_SHOTS=<folder> keeps screenshots.
  */
 const enabled = process.env.MODE === 'app';
@@ -647,6 +649,20 @@ describe.runIf(enabled)('the Cuttle app', () => {
     await editor.keyboard.press('Escape');
   }, 30_000);
 
+  it('says what to do when no scene is left: the whole take is one click away', async () => {
+    const original = readFileSync(projectFile(), 'utf8');
+    const emptied = JSON.parse(original) as { scenes: unknown[] };
+    emptied.scenes = [];
+    writeFileSync(projectFile(), `${JSON.stringify(emptied, null, 2)}\n`);
+    await editor.waitForSelector('[data-testid=empty-stage]');
+    expect(await editor.locator('.titlebar .primary').isDisabled()).toBe(true);
+    await click(editor, '[data-testid=empty-stage] .ghost');
+    await savedWhen((file) => file.scenes.length === 1 && file.scenes[0]!.type === 'clip');
+    expect(await editor.locator('[data-testid=empty-stage]').count()).toBe(0);
+    await undoAll();
+    expect(readFileSync(projectFile(), 'utf8')).toBe(original);
+  }, 30_000);
+
   it('opens a project once when asked twice at once, and cancels its export when it closes', async () => {
     const second = join(root, 'second');
     cpSync(project, second, { recursive: true, filter: (path) => !/[\\/](\.cuttle|out)$/.test(path) });
@@ -798,6 +814,113 @@ describe.runIf(enabled)('the Cuttle app', () => {
     await page.evaluate(() => (window as unknown as { cuttle: { invoke(channel: string): Promise<unknown> } }).cuttle.invoke('picker:cancel')).catch(() => {});
   }, 60_000);
 
+  /** The newest project the pill's recording made, once it is there. */
+  async function newProject(before: Set<string>): Promise<string> {
+    const projects = join(root, 'projects');
+    let made: string | undefined;
+    await expect.poll(() => (made = readdirSync(projects).find((name) => !before.has(name))), { timeout: 30_000 }).toBeDefined();
+    return join(projects, made!);
+  }
+  const pillRecord = () =>
+    app
+      .windows()
+      .find((page) => page.url().includes('/pill.html'))!
+      .evaluate(() => (window as unknown as { cuttle: { invoke(channel: string): Promise<unknown> } }).cuttle.invoke('pill:record'));
+  const runningHud = () => waitForPage(app, async (page) => page.url().includes('/hud.html') && (await page.locator('.hud.recording').count()) === 1 && (await page.locator('[data-testid=hud-time]').textContent()) !== '0:00');
+  const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+  it('pauses from the HUD: nothing is recorded while paused, and the pieces are joined into the take', async () => {
+    const before = new Set(readdirSync(join(root, 'projects')));
+    await recordThroughPicker(pillRecord, { stop: 'none', camera: undefined }, false);
+    const hud = await runningHud();
+    await wait(1000);
+    await click(hud, '[data-testid=hud-pause]');
+    await hud.waitForSelector('.hud.paused');
+    // the clock stands still while paused
+    const shown = await hud.locator('[data-testid=hud-time]').textContent();
+    await wait(2000);
+    expect(await hud.locator('[data-testid=hud-time]').textContent()).toBe(shown);
+    await click(hud, '[data-testid=hud-pause]');
+    await hud.waitForSelector('.hud.recording');
+    await wait(1000);
+    await click(hud, '[data-testid=hud-stop]');
+    const dir = await newProject(before);
+    await projectWhen(dir, (written) => written.scenes[0]?.id !== undefined);
+    const { segments, joined } = JSON.parse(readFileSync(join(dir, 'takes', '1', 'segments.json'), 'utf8')) as { segments: { duration: number; screen: { start: number } }[]; joined?: boolean };
+    expect(joined).toBe(true);
+    expect(segments).toHaveLength(2);
+    // the 2 s paused are between the pieces, not in the take
+    expect(segments[1]!.screen.start - (segments[0]!.screen.start + segments[0]!.duration)).toBeGreaterThan(1.8);
+    const screen = Number(spawnSync('ffprobe', ['-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', join(dir, 'takes', '1', 'screen.mp4')], { encoding: 'utf8' }).stdout.trim());
+    expect(screen).toBeCloseTo(segments[0]!.duration + segments[1]!.duration, 1);
+    expect(readdirSync(join(dir, 'takes', '1')).filter((name) => /\.\d+\.(mp4|m4a)$/.test(name))).toEqual([]);
+    const opened = await waitForPage(app, async (page) => page.url().includes('/editor.html') && (await page.title()) === `${basename(dir)} · Cuttle`);
+    await opened.waitForSelector('.app[data-phase="ready"]', { timeout: 30_000 });
+  }, 120_000);
+
+  it('restarts from the HUD on a held press only: the take is put aside, and Undo restart brings it back', async () => {
+    const before = new Set(readdirSync(join(root, 'projects')));
+    await recordThroughPicker(pillRecord, { stop: 'none' }, false);
+    let hud = await runningHud();
+    await wait(800);
+    const press = (page: Page, type: string) => page.evaluate((type) => document.querySelector('[data-testid=hud-restart]')!.dispatchEvent(new PointerEvent(type, { bubbles: true, button: 0, pointerId: 3 })), type);
+    // let go early: nothing happens
+    await press(hud, 'pointerdown');
+    await wait(250);
+    await press(hud, 'pointerup');
+    const dir = await newProject(before);
+    await wait(800);
+    expect(existsSync(join(dir, 'takes', '.discarded'))).toBe(false);
+    // held: the take goes aside and the recording starts again (no countdown in the check)
+    await press(hud, 'pointerdown');
+    await expect.poll(() => existsSync(join(dir, 'takes', '.discarded', '1')), { timeout: 15_000 }).toBe(true);
+    hud = await runningHud();
+    await wait(1000);
+    await click(hud, '[data-testid=hud-stop]');
+    await projectWhen(dir, (written) => written.sources.screen === 'takes/1/screen.mp4' && written.scenes[0]?.id !== undefined);
+    const opened = await waitForPage(app, async (page) => page.url().includes('/editor.html') && (await page.title()) === `${basename(dir)} · Cuttle`);
+    // the offer outlasts suggest's note about its cut
+    await opened.waitForSelector('[data-testid=undo-restart]', { timeout: 30_000 });
+    await expect.poll(() => opened.evaluate(() => (window as unknown as { __cuttleCheck: Check }).__cuttleCheck.doc().undo), { timeout: 15_000 }).toBe('Cut by suggest');
+    await click(opened, '[data-testid=undo-restart]');
+    // the take from before the restart is the project's again (the new one stays as take 1)
+    await projectWhen(dir, (written) => written.sources.screen === 'takes/2/screen.mp4' && written.scenes[0]?.id !== undefined);
+    expect(existsSync(join(dir, 'takes', '1', 'screen.mp4'))).toBe(true);
+    expect(existsSync(join(dir, 'takes', '.discarded', '1'))).toBe(false);
+  }, 120_000);
+
+  it('opens the settings from a second launch: changes are kept, motion reaches every window, an open project is not renamed', async () => {
+    await launchAgain(['--settings']);
+    // shown with the settings read (a click before would change nothing)
+    const settings = await waitForPage(app, async (page) => page.url().includes('/settings.html') && (await page.locator('[data-testid=countdown] [aria-checked=true]').count()) === 1);
+    const saved = () => JSON.parse(readFileSync(join(root, 'user-data', 'settings.json'), 'utf8')) as { countdown: number; motion: string; launchAtLogin: boolean };
+    await click(settings, '[data-testid=countdown] button:nth-child(3)');
+    await expect.poll(() => saved().countdown).toBe(5);
+    // less motion: the editor's transitions are off at once
+    await click(settings, '[data-testid=motion] button:nth-child(2)');
+    await expect.poll(() => editor.evaluate(() => document.documentElement.dataset.motion)).toBe('reduce');
+    expect(parseFloat(await editor.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--fast')))).toBe(0);
+    await click(settings, '[data-testid=motion] button:nth-child(1)');
+    await expect.poll(() => saved().motion).toBe('system');
+    // the login item (the check only notes what it would register)
+    await click(settings, '[data-testid=launch-at-login]');
+    await expect.poll(() => app.evaluate(() => (globalThis as { __loginItem?: boolean }).__loginItem)).toBe(true);
+    await click(settings, '[data-testid=launch-at-login]');
+    await expect.poll(() => saved().launchAtLogin).toBe(false);
+    // demo is open in its editor: its folder is not renamed
+    await settings.evaluate(() => {
+      const row = [...document.querySelectorAll('.recent li')].find((item) => item.querySelector('b')?.textContent === 'demo')!;
+      (row.querySelector('[data-testid=recent-rename]') as HTMLElement).click();
+    });
+    await settings.fill('[data-testid=rename-input]', 'demo renamed');
+    await settings.press('[data-testid=rename-input]', 'Enter');
+    await settings.waitForSelector('[data-testid=rename-problem]');
+    expect(await settings.locator('[data-testid=rename-problem]').textContent()).toContain('open in Cuttle');
+    expect(existsSync(project)).toBe(true);
+    await settings.press('[data-testid=rename-input]', 'Escape');
+    await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find((window) => window.webContents.getURL().includes('/settings.html'))?.close());
+  }, 60_000);
+
   it('had no unhandled rejection in the main process, and no error in the editor', async () => {
     expect(await app.evaluate(() => (globalThis as unknown as { __rejections: string[] }).__rejections)).toEqual([]);
     expect(pageErrors).toEqual([]);
@@ -823,5 +946,64 @@ describe.runIf(enabled)('the Cuttle app', () => {
     await exited;
     const made = readdirSync(projects).find((name) => !before.has(name))!;
     expect(JSON.parse(readFileSync(join(projects, made, 'cuttle.json'), 'utf8')).sources.screen).toBe('takes/1/screen.mp4');
+  }, 60_000);
+});
+
+describe.runIf(enabled)('the first run', () => {
+  let app: ElectronApplication;
+  let root: string;
+  const pathFile = () => join(root, 'path.txt');
+
+  beforeAll(async () => {
+    root = mkdtempSync(join(tmpdir(), 'cuttle-first-run-'));
+    // the PATH as the OS has it: ffmpeg is not on it yet
+    writeFileSync(pathFile(), join(root, 'nothing-here'));
+    app = await _electron.launch({
+      executablePath: electronPath(),
+      args: [MAIN, '--cuttle-check'],
+      env: {
+        ...process.env,
+        CUTTLE_HIDDEN: '1',
+        CUTTLE_CHECK: '1',
+        CUTTLE_USER_DATA: join(root, 'user-data'),
+        CUTTLE_RECORDER_BACKEND: 'test',
+        CUTTLE_CHECK_PATH_FILE: pathFile(),
+        // the command and the skill go into folders of the check's own, never the user's
+        CUTTLE_BIN_DIR: join(root, 'bin'),
+        CLAUDE_CONFIG_DIR: join(root, 'claude'),
+      },
+    });
+  }, 60_000);
+
+  afterAll(async () => {
+    await app?.close();
+    await rm(root, { recursive: true, force: true });
+  });
+
+  it('welcomes on the first start: finds ffmpeg once installed, installs the cuttle command and the skill, then shows the pill', async () => {
+    const page = await waitForPage(app, async (candidate) => candidate.url().includes('/settings.html'));
+    await page.waitForSelector('[data-testid=tool-ffmpeg][data-state=missing]');
+    // installed meanwhile (winget): Check again finds it, without a restart
+    const ffmpeg = spawnSync(process.platform === 'win32' ? 'where' : 'which', ['ffmpeg'], { encoding: 'utf8' }).stdout.split(/\r?\n/)[0]!;
+    writeFileSync(pathFile(), dirname(ffmpeg));
+    await click(page, '[data-testid=check-again]');
+    await page.waitForSelector('[data-testid=tool-ffmpeg][data-state=ok]');
+    await click(page, '[data-testid=install-tools]');
+    await page.waitForSelector('[data-testid=tool-command][data-state=ok]');
+    await page.waitForSelector('[data-testid=tool-skill][data-state=ok]');
+    if (process.platform === 'win32') expect(await app.evaluate(() => (globalThis as { __pathAdded?: string[] }).__pathAdded)).toEqual([join(root, 'bin')]);
+    // the command runs the app's copy of the CLI, with the app as Node
+    const version =
+      process.platform === 'win32'
+        ? spawnSync('cmd', ['/c', join(root, 'bin', 'cuttle.cmd'), '--version'], { encoding: 'utf8', windowsHide: true })
+        : spawnSync('sh', [join(root, 'bin', 'cuttle'), '--version'], { encoding: 'utf8' });
+    expect(version.stdout.trim()).toMatch(/^\d+\.\d+\.\d+$/);
+    const skill = readFileSync(join(root, 'claude', 'skills', 'cuttle', 'SKILL.md'), 'utf8');
+    expect(skill).toContain("open Cuttle's settings");
+    expect(skill).not.toContain('{{');
+    await click(page, '[data-testid=welcome-done]');
+    await waitForPage(app, async (candidate) => candidate.url().includes('/pill.html'));
+    await expect.poll(() => (JSON.parse(readFileSync(join(root, 'user-data', 'settings.json'), 'utf8')) as { welcomed?: boolean }).welcomed).toBe(true);
+    await expect.poll(() => app.windows().some((candidate) => candidate.url().includes('/settings.html'))).toBe(false);
   }, 60_000);
 });

@@ -165,9 +165,11 @@ idle (pill, tray) ──Ctrl+Shift+Alt+R──► picker ──Enter──► co
 - **The recorder host.** `record()` runs in a utility process (koffi and uiohook-napi work there,
   spike). If it dies, the main process kills the ffmpeg processes it started (their process ids are
   reported), so no capture outlives it.
-- **HUD placement.** Top centre of the work area (the taskbar excluded) of the recorded display, or on
-  another display when there is one; outside the target when it fits; draggable. Its transparent
-  margin passes clicks through.
+- **HUD placement.** On the recorded display, where the person looks: the top centre of its work
+  area (the taskbar excluded), else the bottom centre when the top is in the target, else the top
+  centre over the target (content protection keeps it out of the video); draggable. Its transparent
+  margin passes clicks through. (It once went to another display for a whole-display take, where
+  nobody saw it.)
 - **Dead zones.** The recorder takes rectangles whose input is not logged (the HUD's, updated when it
   is dragged) and logs nothing after a stop was requested, so no take shows the pointer travelling to
   the HUD, a click ripple on Stop, or `suggest` keeping a second for that click.

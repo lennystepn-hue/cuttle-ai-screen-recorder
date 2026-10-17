@@ -139,9 +139,10 @@ export function stopOptionsFor(choices: RecordChoices): StopOptions {
 const overlaps = (a: Rect, b: Rect) => a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height;
 
 /**
- * Where the HUD goes: outside what is recorded when it fits. The top centre of the recorded
- * display's work area, else its bottom centre, else the top centre of another display; the top
- * centre when the target covers them all (the HUD is never in the video anyway). DIP.
+ * Where the HUD goes: on the recorded display, where the person looks (on another display it went
+ * unseen). The top centre of its work area, else the bottom centre when the top is in what is
+ * recorded; the top centre when the target covers both (the HUD is never in the video: content
+ * protection keeps it out of the capture, see the P2 spike). DIP.
  */
 export function hudPosition(displays: readonly Pick<PickerDisplay, 'id' | 'workArea'>[], recorded: number, target: Rect, size: { width: number; height: number }): { x: number; y: number } {
   const at = (area: Rect, place: 'top' | 'bottom'): Rect => ({
@@ -150,7 +151,7 @@ export function hudPosition(displays: readonly Pick<PickerDisplay, 'id' | 'workA
     ...size,
   });
   const own = displays.find((display) => display.id === recorded) ?? displays[0]!;
-  const candidates = [at(own.workArea, 'top'), at(own.workArea, 'bottom'), ...displays.filter((display) => display !== own).map((display) => at(display.workArea, 'top'))];
+  const candidates = [at(own.workArea, 'top'), at(own.workArea, 'bottom')];
   const free = candidates.find((place) => !overlaps(place, target)) ?? candidates[0]!;
   return { x: free.x, y: free.y };
 }

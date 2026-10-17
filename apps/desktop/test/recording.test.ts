@@ -107,14 +107,16 @@ describe('from a pick to the recorder', () => {
     expect(stopOptionsFor({ stop: 'none' })).toEqual({});
   });
 
-  it('puts the HUD outside what is recorded: the top centre, else the bottom, else another display', () => {
+  it('puts the HUD on the recorded display, where the person looks: the top centre, else the bottom, outside what is recorded when it fits', () => {
     const size = { width: 360, height: 60 };
     const displays = [primary, second];
     expect(hudPosition(displays, 2, { x: 2300, y: 600, width: 400, height: 300 }, size)).toEqual({ x: 2048 + 780, y: 419 });
     // a window at the top of the display: the bottom
     expect(hudPosition(displays, 1, { x: 700, y: 0, width: 600, height: 400 }, size)).toEqual({ x: 844, y: 1104 - 72 });
-    // the whole display: another one
-    expect(hudPosition(displays, 1, primary.bounds, size)).toEqual({ x: 2048 + 780, y: 419 });
+    // the whole display, with another one beside it: still the top of the recorded one (on another
+    // display the HUD went unseen; it is never in the video anyway)
+    expect(hudPosition(displays, 1, primary.bounds, size)).toEqual({ x: 844, y: 12 });
+    expect(hudPosition(displays, 2, second.bounds, size)).toEqual({ x: 2048 + 780, y: 419 });
     // one display, all of it recorded: the top
     expect(hudPosition([primary], 1, primary.bounds, size)).toEqual({ x: 844, y: 12 });
   });

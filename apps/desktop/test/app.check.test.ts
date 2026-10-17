@@ -95,13 +95,28 @@ const click = (page: Page, selector: string) => page.evaluate((target) => (docum
 /**
  * Picks the option labelled `label` (`prefix`: starting with it) from a select (Select.tsx): a click
  * opens it, a click on the option picks it. A list closed again before the pick (a scroll still due
- * from a panel that changed just before, as in a small window) is opened again.
+ * from a panel that changed just before, as in a small window), or before it was seen at all, is
+ * opened again; one that never opens is reported with the select's state.
  */
 async function chooseIn(page: Page, trigger: string, label: string, prefix = false): Promise<void> {
   for (let attempt = 1; ; attempt++) {
     // a Playwright selector (it may use :has-text): the element's own click, as in a window never shown
     await page.locator(trigger).evaluate((element) => (element as HTMLElement).click());
-    await page.waitForSelector('.select-list [role=option]');
+    const shown = await page.waitForSelector('.select-list [role=option]', { timeout: 5000 }).then(
+      () => true,
+      () => false,
+    );
+    if (!shown) {
+      if (attempt < 5) continue;
+      const state = await page.locator(trigger).evaluate((element) => ({
+        disabled: (element as HTMLButtonElement).disabled,
+        expanded: element.getAttribute('aria-expanded'),
+        focused: document.hasFocus(),
+        lists: document.querySelectorAll('.select-list').length,
+        status: document.querySelector('[data-testid=project-status]')?.textContent ?? null,
+      }));
+      throw new Error(`the select ${trigger} did not open: ${JSON.stringify(state)}`);
+    }
     const result = await page.evaluate(
       ({ label, prefix }) => {
         const options = [...document.querySelectorAll('.select-list [role=option]')];

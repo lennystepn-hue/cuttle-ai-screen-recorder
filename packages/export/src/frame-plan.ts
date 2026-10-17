@@ -67,21 +67,25 @@ export function planStills(timeline: Timeline, fps: number, frames: readonly num
   return { fps, frames: sorted.length, scenes: planScenes(timeline, fps, sorted) };
 }
 
-/** The scenes visible on `frames` (ascending), with the source times they need. */
+/**
+ * The scenes visible on `frames` (ascending), with the source times they need. A clip with cuts
+ * in it is one plan: its pieces follow each other and only jump forward in source time, so one
+ * decoder reads them all.
+ */
 function planScenes(timeline: Timeline, fps: number, frames: readonly number[]): ScenePlan[] {
   const byIndex = new Map<number, ScenePlan>();
   for (const frame of frames) {
     for (const layer of timeline.frameAt(frame / fps).layers) {
-      let plan = byIndex.get(layer.index);
+      let plan = byIndex.get(layer.sceneIndex);
       if (!plan) {
-        plan = { index: layer.index, kind: layer.kind, firstFrame: frame, lastFrame: frame, sourceTimes: [] };
-        byIndex.set(layer.index, plan);
+        plan = { index: layer.sceneIndex, kind: layer.kind, firstFrame: frame, lastFrame: frame, sourceTimes: [] };
+        byIndex.set(layer.sceneIndex, plan);
       }
       plan.lastFrame = frame;
       if (layer.sourceTime === undefined) continue;
       const last = plan.sourceTimes.at(-1);
       if (last !== undefined && layer.sourceTime < last) {
-        throw new Error(`planFrames: scene ${layer.index} goes back in source time on frame ${frame}`);
+        throw new Error(`planFrames: scene ${layer.sceneIndex} goes back in source time on frame ${frame}`);
       }
       if (layer.sourceTime !== last) plan.sourceTimes.push(layer.sourceTime);
     }

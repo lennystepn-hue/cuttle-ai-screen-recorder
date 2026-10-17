@@ -77,7 +77,7 @@ async function check(): Promise<boolean> {
   const parsed = parseProjectJson(await readFile(join(projectDir, 'cuttle.json'), 'utf8'));
   if (!parsed.ok) throw new Error(JSON.stringify(parsed.issues));
   const fps = parsed.project.output.fps;
-  const expectedFrames = frameCount(totalDuration(sceneSpans(parsed.project.scenes)), fps);
+  const expectedFrames = frameCount(totalDuration(sceneSpans(parsed.project.scenes, parsed.project.cuts)), fps);
   const expectedSeconds = expectedFrames / fps;
 
   let failures = 0;

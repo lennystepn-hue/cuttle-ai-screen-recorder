@@ -136,3 +136,16 @@ describe('muxArgs', () => {
     expect(args).not.toContain('G');
   });
 });
+
+describe('planAudio over cuts', () => {
+  it('plays the pieces of a cut clip one after the other, each faded 10 ms at the cut, with no crossfade dip', () => {
+    const p = project({ scenes: [{ type: 'clip', from: 0, to: 6 }], cuts: [{ from: 2, to: 3 }] });
+    const segments = planAudio({ spans: sceneSpans(p.scenes, p.cuts), look: p.look, mic: true, seconds: 5 });
+    expect(segments.map((s) => [s.samples, s.mic?.from, s.mic?.to])).toEqual([
+      [96_000, 0, 96_000],
+      [144_000, 144_000, 288_000],
+    ]);
+    expect(segments[0]!.fadeOut).toBe(480);
+    expect(segments[1]!.fadeIn).toBe(480);
+  });
+});

@@ -244,7 +244,7 @@ export async function exportProject(opts: ExportOptions): Promise<ExportResult> 
 
     const audioStarted = performance.now();
     const seconds = page.frames / project.output.fps;
-    const segments = planAudio({ spans: sceneSpans(project.scenes), look: project.look, mic: sources.mic !== undefined, seconds });
+    const segments = planAudio({ spans: sceneSpans(project.scenes, project.cuts), look: project.look, mic: sources.mic !== undefined, seconds });
     const usesMic = segments.some((segment) => segment.mic !== undefined);
     const graph = audioFilterGraph(segments, sources.mic?.offset ?? 0);
     const graphFile = graph.length > INLINE_GRAPH_LIMIT ? join(work, 'audio.graph') : undefined;

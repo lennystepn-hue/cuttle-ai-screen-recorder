@@ -296,8 +296,8 @@ export class Player {
       ...(this.keyFrames && { keyFrames: this.keyFrames }),
       ...(this.media.webcam && { webcam: this.media.webcam }),
     };
-    const speedOf = (index: number) => {
-      const scene = this.timeline.spans[index]?.scene;
+    const speedOf = (sceneIndex: number) => {
+      const scene = this.timeline.spans.find((span) => span.sceneIndex === sceneIndex)?.scene;
       return scene?.type === 'clip' ? scene.speed : 1;
     };
     const open = (frame: number) => {

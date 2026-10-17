@@ -86,3 +86,31 @@ describe('crossfadeHalf', () => {
     expect(crossfadeHalf(spans[1]!, spans[2]!, { enabled: false, duration: 0.4 })).toBe(0);
   });
 });
+
+describe('cuts', () => {
+  const cut = (from: number, to: number, enabled = true) => ({ from, to, enabled });
+
+  it('takes source ranges out of the clips that cover them: pieces with their scene, a jump between them', () => {
+    const spans = sceneSpans([clip(0, 10), clip(10, 40, 2), { type: 'card', title: 'End', duration: 2 }], [cut(3, 4), cut(20, 30), cut(50, 60)]);
+    expect(spans.map((s) => [s.index, s.sceneIndex, s.start, s.end, s.cutBefore ?? false])).toEqual([
+      [0, 0, 0, 3, false],
+      [1, 0, 3, 9, true],
+      [2, 1, 9, 14, false],
+      [3, 1, 14, 19, true],
+      [4, 2, 19, 21, false],
+    ]);
+    expect(spans.map((s) => (s.scene.type === 'clip' ? [s.scene.from, s.scene.to] : s.scene.type))).toEqual([[0, 3], [4, 10], [10, 20], [30, 40], 'card']);
+  });
+
+  it('ignores cuts that are off, joins cuts that overlap, drops a piece shorter than 20 ms and a clip cut whole', () => {
+    expect(sceneSpans([clip(0, 10)], [cut(2, 3, false)]).map((s) => s.end)).toEqual([10]);
+    expect(sceneSpans([clip(0, 10)], [cut(2, 5), cut(4, 6)]).map((s) => s.scene.type === 'clip' && [s.scene.from, s.scene.to])).toEqual([[0, 2], [6, 10]]);
+    expect(sceneSpans([clip(0, 10)], [cut(0.01, 9)]).map((s) => s.scene.type === 'clip' && s.scene.from)).toEqual([9]);
+    expect(sceneSpans([clip(0, 10), clip(20, 30)], [cut(0, 10)]).map((s) => [s.sceneIndex, s.start])).toEqual([[1, 0]]);
+  });
+
+  it('has no crossfade at a cut', () => {
+    const spans = sceneSpans([clip(0, 10)], [cut(4, 5)]);
+    expect(crossfadeHalf(spans[0]!, spans[1]!, { enabled: true, duration: 0.3 })).toBe(0);
+  });
+});

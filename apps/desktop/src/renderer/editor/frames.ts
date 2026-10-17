@@ -169,7 +169,8 @@ export class PlaybackFrames {
         continue;
       }
       if (layer.kind !== 'clip' || layer.sourceTime === undefined) continue;
-      const scene = this.open.get(layer.index);
+      // decoders are opened per scene (`plan.index`), frames are handed over per layer
+      const scene = this.open.get(layer.sceneIndex);
       const time = scene?.screenTimes?.get(layer.sourceTime);
       if (!scene?.screen || time === undefined) return undefined;
       const screenFrame = await scene.screen.frameAt(time);

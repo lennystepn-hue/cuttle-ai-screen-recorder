@@ -4,8 +4,24 @@
 // does not parse, every field is off (editing waits).
 import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { EXPORT_FORMATS } from '@cuttle/export/formats';
-import { BACKGROUND_PRESETS, CLICK_EFFECTS, CURSOR_STYLES, EASES, FRAME_STYLES, MASK_STYLES, STILL_MOTIONS, TEXT_POSITIONS, TEXT_STYLES, WEBCAM_CORNERS, WEBCAM_SHAPES, type CuttleProject, type Rect } from '@cuttle/project';
-import { sceneSpans } from '@cuttle/timeline';
+import {
+  BACKGROUND_PRESETS,
+  CLICK_EFFECTS,
+  CURSOR_STYLES,
+  EASES,
+  FRAME_STYLES,
+  MASK_STYLES,
+  STILL_MOTIONS,
+  TEXT_POSITIONS,
+  TEXT_STYLES,
+  WEBCAM_CORNERS,
+  WEBCAM_SHAPES,
+  type AutoEdits,
+  type AutoKind,
+  type CuttleProject,
+  type Rect,
+} from '@cuttle/project';
+import { sceneSpans, type SceneSpan } from '@cuttle/timeline';
 import type { Command, ListName } from '../../shared/document';
 import { formatDuration, formatSource, formatSpeed, formatTime } from '../../shared/format';
 import {
@@ -22,15 +38,17 @@ import {
   WEBCAM_SHAPE_NAMES,
 } from '../../shared/names';
 import { outputTimesOf } from '../../shared/timeline-model';
-import { CardIcon, CopyIcon, FilmIcon, MaskIcon, PageIcon, TextIcon, TrashIcon, ZoomIcon } from '../icons';
-import { chooseImage, deleteSelection, duplicateSelection, LIST_OF, SPEEDS } from './actions';
+import { CardIcon, ChevronIcon, CopyIcon, CropIcon, FilmIcon, MaskIcon, PageIcon, SplitIcon, TextIcon, TrashIcon, ZoomIcon } from '../icons';
+import { Select as StyledSelect } from '../Select';
+import { chooseImage, cutShownAt, deleteSelection, duplicateSelection, LIST_OF, playheadPlace, reveal, SPEEDS } from './actions';
 import { edit, preview } from './doc';
-import { engineAssets, setTool, store, type Selection, type Tool } from './session';
+import { currentPlayer, engineAssets, select, setTool, store, type Selection, type Tool } from './session';
 import { isColoured, swatch, type SwatchKey } from './swatches';
 import { useStore } from './store';
 
 const TABS = [
   { id: 'selection', name: 'Selection' },
+  { id: 'auto', name: 'Auto' },
   { id: 'look', name: 'Look' },
 ] as const;
 
@@ -66,7 +84,7 @@ export function Inspector() {
       </div>
       <div className="panel-body" id="inspector-panel" role="tabpanel" aria-labelledby={`tab-${tab}`}>
         <fieldset className="panel-fields" disabled={broken}>
-          {tab === 'selection' ? <SelectionPanel /> : <LookPanel />}
+          {tab === 'selection' ? <SelectionPanel /> : tab === 'auto' ? <AutoPanel /> : <LookPanel />}
         </fieldset>
       </div>
     </aside>
@@ -182,13 +200,7 @@ function NumberInput({ value, onCommit, step = 0.1, min, max, digits = 2, testId
 
 function Select<T extends string>({ value, options, names, onChange, testId }: { value: T; options: readonly T[]; names: Record<T, string>; onChange: (value: T) => void; testId?: string }) {
   return (
-    <select value={value} onChange={(event) => onChange(event.target.value as T)} data-testid={testId} onKeyDown={(event) => event.stopPropagation()}>
-      {options.map((option) => (
-        <option key={option} value={option}>
-          {names[option]}
-        </option>
-      ))}
-    </select>
+    <StyledSelect value={value} options={options.map((option) => ({ value: option, label: names[option] }))} onChange={onChange} label={names[value] ?? value} testId={testId} />
   );
 }
 
@@ -205,19 +217,13 @@ const SMOOTHING: { value: number; name: string }[] = [
 function SmoothingSelect({ value }: { value: number }) {
   const known = SMOOTHING.some((step) => step.value === value);
   return (
-    <select
+    <StyledSelect
       value={String(value)}
-      onChange={(event) => look(['cursor', 'smoothing'], Number(event.target.value), 'Cursor movement')}
-      onKeyDown={(event) => event.stopPropagation()}
-      data-testid="cursor-smoothing"
-    >
-      {!known && <option value={String(value)}>{value} (from cuttle.json)</option>}
-      {SMOOTHING.map((step) => (
-        <option key={step.value} value={String(step.value)}>
-          {step.name}
-        </option>
-      ))}
-    </select>
+      options={[...(known ? [] : [{ value: String(value), label: `${value} (from cuttle.json)` }]), ...SMOOTHING.map((step) => ({ value: String(step.value), label: step.name }))]}
+      onChange={(chosen) => look(['cursor', 'smoothing'], Number(chosen), 'Cursor movement')}
+      label="Cursor movement"
+      testId="cursor-smoothing"
+    />
   );
 }
 
@@ -294,6 +300,210 @@ const CURSOR_TITLES: Partial<Record<(typeof CURSOR_STYLES)[number], string>> = {
   spotlight: 'Spotlight: a light around the pointer, the rest of the screen dimmed',
 };
 
+/** A cut: a stretch of the take the video jumps over, its place, its range, on or off. */
+function CutDetails({ project, id }: { project: CuttleProject; id: string }) {
+  const cut = project.cuts.find((item) => item.id === id)!;
+  const at = cutShownAt(sceneSpans(project.scenes, project.cuts), cut);
+  return (
+    <>
+      <Head icon={<SplitIcon />} color="var(--text)" name={cut.label ?? 'Cut'} copies={false} />
+      <AutoNote kind={cut.auto} />
+      <Row label="Label">
+        <TextInput value={cut.label ?? ''} placeholder="Cut" onCommit={(value) => set('cuts', id, { label: value.trim() || undefined }, 'Rename cut')} />
+      </Row>
+      <Row label="In the video">{at === undefined ? 'Nowhere: no clip plays this stretch' : `${cut.enabled ? 'jumps at' : 'would jump at'} ${formatTime(at)}`}</Row>
+      <div className="grid2">
+        <Row label="From (take s)">
+          <NumberInput value={cut.from} min={0} onCommit={(from) => set('cuts', id, { from, to: Math.max(cut.to, from + 0.05) }, 'Change cut')} testId="cut-from" />
+        </Row>
+        <Row label="To (take s)">
+          <NumberInput value={cut.to} min={0} onCommit={(to) => set('cuts', id, { to }, 'Change cut')} testId="cut-to" />
+        </Row>
+      </div>
+      <Row label="Takes out">{formatDuration(cut.to - cut.from)} of the take</Row>
+      <Row label="Cut" inline>
+        <em>{cut.enabled ? 'On: the video jumps over it' : 'Off: the video plays it'}</em>
+        <Toggle checked={cut.enabled} label="Cut this stretch" onChange={(on) => set('cuts', id, { enabled: on ? undefined : false }, on ? 'Cut on' : 'Cut off')} testId="cut-enabled" />
+      </Row>
+    </>
+  );
+}
+
+/** A clip's crop: the part of the screen it shows, in source pixels, on or off. */
+function CropDetails({ project, id }: { project: CuttleProject; id: string }) {
+  const clip = project.scenes.find((scene) => scene.id === id);
+  if (clip?.type !== 'clip' || !clip.crop) return <p className="hint">This clip has no crop any more.</p>;
+  const crop = clip.crop;
+  const setCrop = (fields: { rect?: Rect; enabled?: boolean }, label: string) => {
+    const rect = fields.rect ?? crop.rect;
+    const enabled = fields.enabled ?? crop.enabled;
+    // switching keeps it Cuttle's; a new area makes it the person's
+    const auto = fields.rect === undefined ? crop.auto : undefined;
+    set('scenes', id, { crop: { rect, ...(!enabled && { enabled: false }), ...(auto && { auto }) } }, label);
+  };
+  return (
+    <>
+      <Head icon={<CropIcon />} color="var(--text)" name={`Crop of ${clip.label ?? 'the clip'}`} copies={false} />
+      <AutoNote kind={crop.auto} />
+      <div className="field">
+        <span className="field-label">
+          Area, in source pixels
+          <button type="button" className="link" onClick={() => setTool('crop')}>
+            Draw on the video
+          </button>
+        </span>
+        <div className="grid4">
+          {(['x', 'y', 'w', 'h'] as const).map((name, i) => (
+            <label key={name} className="field-input">
+              <em>{name}</em>
+              <NumberInput value={crop.rect[i]!} digits={0} step={1} min={i < 2 ? 0 : 8} onCommit={(value) => setCrop({ rect: crop.rect.map((old, j) => (j === i ? value : old)) as Rect }, 'Change the crop')} />
+            </label>
+          ))}
+        </div>
+      </div>
+      <Row label="Crop" inline>
+        <em>{crop.enabled ? 'On: the clip shows this part' : 'Off: the whole screen shows'}</em>
+        <Toggle checked={crop.enabled} label="Crop the clip" onChange={(on) => setCrop({ enabled: on }, on ? 'Crop on' : 'Crop off')} testId="crop-enabled" />
+      </Row>
+    </>
+  );
+}
+
+// ---- what Cuttle did on its own ------------------------------------------------------------------
+
+interface AutoItem {
+  kind: Selection['kind'];
+  id: string;
+  label: string;
+  enabled: boolean;
+  /** Output seconds where the video shows it. */
+  at?: number;
+}
+
+interface AutoGroup {
+  id: string;
+  title: string;
+  icon: ReactNode;
+  kinds: AutoKind[];
+  /** The switch in `autoEdits`; none for one-off edits (the length fit). */
+  key?: keyof AutoEdits;
+}
+
+const AUTO_GROUPS: AutoGroup[] = [
+  { id: 'crop', title: 'Cropped to the content', icon: <CropIcon />, kinds: ['crop'], key: 'crop' },
+  { id: 'privacy', title: 'Private things masked', icon: <MaskIcon />, kinds: ['privacy', 'notification'], key: 'privacy' },
+  { id: 'retakes', title: 'Retakes cut', icon: <SplitIcon />, kinds: ['retake'], key: 'retakes' },
+  { id: 'fillers', title: 'Filler words cut', icon: <SplitIcon />, kinds: ['filler'], key: 'fillers' },
+  { id: 'pauses', title: 'Pauses shortened', icon: <SplitIcon />, kinds: ['pause'], key: 'pauses' },
+  { id: 'length', title: 'Cut to fit the length', icon: <SplitIcon />, kinds: ['length'] },
+  { id: 'typing', title: 'Zooms while typing', icon: <ZoomIcon />, kinds: ['typing'], key: 'typingZooms' },
+  { id: 'dialog', title: 'Zooms on dialogs', icon: <ZoomIcon />, kinds: ['dialog'], key: 'dialogZooms' },
+  { id: 'click', title: 'Zooms on clicks', icon: <ZoomIcon />, kinds: ['click'], key: 'clickZooms' },
+  { id: 'answer', title: 'Zoom on Claude’s answer', icon: <ZoomIcon />, kinds: ['answer'], key: 'answerZoom' },
+];
+
+/** The automatic items of a group, in the order the video shows them. */
+function autoItems(project: CuttleProject, spans: readonly SceneSpan[], group: AutoGroup): AutoItem[] {
+  const items: AutoItem[] = [];
+  const of = (kind?: AutoKind) => kind !== undefined && group.kinds.includes(kind);
+  for (const zoom of project.zooms) if (of(zoom.auto) && zoom.id) items.push({ kind: 'zoom', id: zoom.id, label: zoom.label ?? 'Zoom', enabled: zoom.enabled, at: outputTimesOf(spans, zoom.at)[0] });
+  for (const mask of project.masks) if (of(mask.auto) && mask.id) items.push({ kind: 'mask', id: mask.id, label: mask.label ?? 'Mask', enabled: mask.enabled, at: outputTimesOf(spans, mask.from)[0] });
+  for (const cut of project.cuts) if (of(cut.auto) && cut.id) items.push({ kind: 'cut', id: cut.id, label: cut.label ?? 'Cut', enabled: cut.enabled, at: cutShownAt(spans, cut) });
+  project.scenes.forEach((scene, index) => {
+    if (scene.type === 'clip' && scene.id && of(scene.crop?.auto)) {
+      items.push({ kind: 'crop', id: scene.id, label: `${scene.label ?? 'Clip'}: ${Math.round(scene.crop!.rect[2])} × ${Math.round(scene.crop!.rect[3])}`, enabled: scene.crop!.enabled, at: sceneStretch(spans, index)?.start });
+    }
+  });
+  return items.sort((a, b) => (a.at ?? Infinity) - (b.at ?? Infinity));
+}
+
+/** The command that switches an automatic item on or off. */
+function switchItem(project: CuttleProject, item: AutoItem, on: boolean): Command {
+  if (item.kind === 'crop') {
+    const clip = project.scenes.find((scene) => scene.id === item.id);
+    const crop = clip?.type === 'clip' ? clip.crop! : { rect: [0, 0, 8, 8] as Rect, enabled: true };
+    return { type: 'set', list: 'scenes', id: item.id, fields: { crop: { rect: crop.rect, ...(!on && { enabled: false }), auto: 'crop' } } };
+  }
+  return { type: 'set', list: LIST_OF[item.kind], id: item.id, fields: { enabled: on ? undefined : false } };
+}
+
+/** What Cuttle did on its own, kind by kind: a switch per kind and per item, and where each shows. */
+function AutoPanel() {
+  const project = useStore(store, (state) => state.doc?.project);
+  const [open, setOpen] = useState<string>();
+  if (!project) return null;
+  const spans = sceneSpans(project.scenes, project.cuts);
+  const groups = AUTO_GROUPS.map((group) => ({ group, items: autoItems(project, spans, group) })).filter(
+    ({ group, items }) => items.length > 0 || (group.key !== undefined && !project.autoEdits[group.key]),
+  );
+  if (groups.length === 0) {
+    return (
+      <div className="auto-empty" data-testid="auto-empty">
+        <p>
+          <b>Nothing automatic yet.</b>
+        </p>
+        <p className="hint">Cuttle’s cut of a take adds its zooms here. Each automatic edit shows here with its reason: switch any off, or a whole kind.</p>
+      </div>
+    );
+  }
+  const switchKind = (group: AutoGroup, items: AutoItem[], on: boolean) => {
+    const commands: Command[] = [
+      ...(group.key ? [{ type: 'auto-edits', kind: group.key, value: on } as Command] : []),
+      ...items.filter((item) => item.enabled !== on).map((item) => switchItem(project, item, on)),
+    ];
+    edit(commands, `${group.title}: ${on ? 'on' : 'off'}`);
+  };
+  return (
+    <div className="auto-panel" data-testid="auto-panel">
+      <p className="hint auto-intro">What Cuttle did on its own. Switch a kind off and it leaves the video and is not made again; change an item and it is yours.</p>
+      {groups.map(({ group, items }) => {
+        const on = items.filter((item) => item.enabled).length;
+        const kindOn = group.key ? project.autoEdits[group.key] : on > 0;
+        const expanded = open === group.id;
+        return (
+          <section key={group.id} className={`auto-group${kindOn ? '' : ' off'}`} data-testid={`auto-group-${group.id}`}>
+            <div className="auto-head">
+              <button type="button" className="auto-toggle" aria-expanded={expanded} onClick={() => setOpen(expanded ? undefined : group.id)}>
+                <span className="kind-icon">{group.icon}</span>
+                <span className="auto-text">
+                  <span className="auto-title">{group.title}</span>
+                  <span className="auto-count">{items.length === 0 ? 'Off: not made again' : on === items.length ? `${on} on` : on === 0 ? `${items.length} off` : `${on} of ${items.length} on`}</span>
+                </span>
+                <ChevronIcon className="auto-chevron" />
+              </button>
+              <Toggle checked={kindOn} label={`${group.title}: ${kindOn ? 'on' : 'off'}`} onChange={(value) => switchKind(group, items, value)} testId={`auto-switch-${group.id}`} />
+            </div>
+            {expanded && (
+              <ul className="auto-items">
+                {items.length === 0 && <li className="hint">Off: Cuttle does not make these when it edits again.</li>}
+                {items.map((item) => (
+                  <li key={`${item.kind}-${item.id}`} className={item.enabled ? '' : 'off'}>
+                    <button
+                      type="button"
+                      className="auto-item"
+                      onClick={() => {
+                        if (item.kind === 'crop') {
+                          select({ kind: 'crop', id: item.id });
+                          if (item.at !== undefined) void currentPlayer()?.seek(item.at);
+                        } else reveal(LIST_OF[item.kind], item.id);
+                      }}
+                      title="Show it in the video and select it"
+                    >
+                      <span className="auto-time">{item.at === undefined ? '–' : formatTime(item.at)}</span>
+                      <span className="auto-label">{item.label}</span>
+                    </button>
+                    <Toggle checked={item.enabled} label={`${item.label}: ${item.enabled ? 'on' : 'off'}`} onChange={(value) => edit([switchItem(project, item, value)], `${item.label}: ${value ? 'on' : 'off'}`)} />
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+        );
+      })}
+    </div>
+  );
+}
+
 function Toggle({ checked, onChange, label, testId, disabled }: { checked: boolean; onChange: (checked: boolean) => void; label: string; testId?: string; disabled?: boolean }) {
   return (
     <button type="button" role="switch" aria-checked={checked} className="toggle" onClick={() => onChange(!checked)} aria-label={label} data-testid={testId} disabled={disabled}>
@@ -302,7 +512,8 @@ function Toggle({ checked, onChange, label, testId, disabled }: { checked: boole
   );
 }
 
-function Head({ icon, color, name }: { icon: ReactNode; color: string; name: string }) {
+/** The selection's kind, name, and its Duplicate (unless it cannot be copied) and Delete. */
+function Head({ icon, color, name, copies = true }: { icon: ReactNode; color: string; name: string; copies?: boolean }) {
   return (
     <div className="kind-head">
       <span className="kind-icon" style={{ color, background: `color-mix(in srgb, ${color} 14%, transparent)` }}>
@@ -311,9 +522,11 @@ function Head({ icon, color, name }: { icon: ReactNode; color: string; name: str
       <span className="name" title={name}>
         {name}
       </span>
-      <button type="button" className="head-action" onClick={duplicateSelection} title="Duplicate (Ctrl+D)" aria-label="Duplicate" data-testid="duplicate">
-        <CopyIcon size={15} />
-      </button>
+      {copies && (
+        <button type="button" className="head-action" onClick={duplicateSelection} title="Duplicate (Ctrl+D)" aria-label="Duplicate" data-testid="duplicate">
+          <CopyIcon size={15} />
+        </button>
+      )}
       <button type="button" className="head-action" onClick={deleteSelection} title="Delete (Del)" aria-label="Delete" data-testid="delete">
         <TrashIcon size={15} />
       </button>
@@ -328,7 +541,7 @@ const set = (list: ListName, id: string, fields: Record<string, unknown>, label:
 
 /** Where an overlay shows in the video (the clicked stretch, else its first) and the speed there. */
 function stretchOf(project: CuttleProject, selection: Selection, from: number, to: number): { start: number; end: number; speed: number } | undefined {
-  const spans = sceneSpans(project.scenes);
+  const spans = sceneSpans(project.scenes, project.cuts);
   const speedAt = (t: number) => {
     const scene = spans.find((item) => t >= item.start - 1e-9 && t < item.end)?.scene;
     return scene?.type === 'clip' ? scene.speed : 1;
@@ -356,7 +569,39 @@ const HINTS: Record<Tool, ReactNode> = {
   zoom: <p className="hint">Zoom tool: drag on the screen over what the video should show close up. It starts at the playhead and lasts 3 s. Esc goes back.</p>,
   mask: <p className="hint">Mask tool: drag on the screen over what the video must not show (a password, an address). It lasts from the playhead to the end of the clip. Esc goes back.</p>,
   caption: <p className="hint">Caption tool: type the caption in the bar and press Enter; it shows at the playhead for 3 s. Esc goes back.</p>,
+  crop: <p className="hint">Crop tool: drag on the screen over the part the clip should show, leaving out tabs, bars or a taskbar. The window takes its shape. Esc goes back.</p>,
 };
+
+/** Why Cuttle made an automatic item, in a few words. */
+const AUTO_REASONS: Record<AutoKind, string> = {
+  crop: 'the content of the window',
+  privacy: 'private text on screen',
+  notification: 'a notification over the take',
+  retake: 'a retake',
+  filler: 'a filler word',
+  pause: 'a pause',
+  length: 'the length the video should have',
+  typing: 'typing',
+  dialog: 'a dialog',
+  click: 'clicks',
+  answer: "Claude's answer",
+};
+
+/** Says that Cuttle made the item, for what, and that a change makes it the person's. */
+function AutoNote({ kind }: { kind?: AutoKind }) {
+  if (!kind) return null;
+  return (
+    <p className="auto-note" data-testid="auto-note">
+      <b>Made by Cuttle</b> for {AUTO_REASONS[kind]}. Change it and it is yours: Cuttle leaves it alone when it edits again.
+    </p>
+  );
+}
+
+/** Where a scene shows in the video: from its first piece's start to its last piece's end. */
+function sceneStretch(spans: readonly SceneSpan[], index: number): { start: number; end: number } | undefined {
+  const pieces = spans.filter((span) => span.sceneIndex === index);
+  return pieces.length === 0 ? undefined : { start: pieces[0]!.start, end: pieces.at(-1)!.end };
+}
 
 function SelectionPanel() {
   const selection = useStore(store, (state) => state.selection);
@@ -372,9 +617,12 @@ function SelectionPanel() {
 
 function Details({ project, selection }: { project: CuttleProject; selection: Selection }) {
   const id = selection.id;
+  if (selection.kind === 'cut') return <CutDetails project={project} id={id} />;
+  if (selection.kind === 'crop') return <CropDetails project={project} id={id} />;
   if (selection.kind === 'scene') {
-    const scene = project.scenes.find((item) => item.id === id)!;
-    const stretch = sceneSpans(project.scenes).find((item) => item.scene === scene);
+    const sceneIndex = project.scenes.findIndex((item) => item.id === id);
+    const scene = project.scenes[sceneIndex]!;
+    const stretch = sceneStretch(sceneSpans(project.scenes, project.cuts), sceneIndex);
     const inVideo = stretch && <Row label="In the video">{span(stretch.start, stretch.end)}</Row>;
     if (scene.type === 'clip') {
       const name = [scene.speed !== 1 ? formatSpeed(scene.speed) : '', scene.label ?? (scene.speed === 1 ? 'Clip' : '')].filter(Boolean).join(' ');
@@ -409,6 +657,26 @@ function Details({ project, selection }: { project: CuttleProject; selection: Se
           </div>
           <Row label="Badge" note={scene.badge === undefined ? 'shows the speed when sped up' : undefined}>
             <TextInput value={scene.badge ?? ''} placeholder={scene.speed > 1 ? `${formatSpeed(scene.speed)} speed` : 'none'} onCommit={(value) => set('scenes', id, { badge: value === '' ? undefined : value }, 'Change badge')} />
+          </Row>
+          <Row label="Crop" plain note={scene.crop ? (scene.crop.auto ? 'Cuttle’s: the content of the window' : undefined) : 'the whole screen shows'}>
+            {scene.crop ? (
+              <button type="button" className="ghost small" onClick={() => select({ kind: 'crop', id })} data-testid="clip-crop">
+                {`${Math.round(scene.crop.rect[2])} × ${Math.round(scene.crop.rect[3])}${scene.crop.enabled ? '' : ' · off'}`}
+              </button>
+            ) : (
+              <button
+                type="button"
+                className="ghost small"
+                onClick={() => {
+                  // the crop tool works on the clip at the playhead: bring the playhead onto this one
+                  if (playheadPlace()?.index !== sceneIndex && stretch) void currentPlayer()?.seek(stretch.start);
+                  setTool('crop');
+                }}
+                data-testid="clip-crop"
+              >
+                Crop…
+              </button>
+            )}
           </Row>
         </>
       );
@@ -528,6 +796,7 @@ function Details({ project, selection }: { project: CuttleProject; selection: Se
     return (
       <>
         <Head icon={<ZoomIcon />} color="var(--zoom)" name={zoom.label ?? 'Zoom'} />
+        <AutoNote kind={zoom.auto} />
         <Row label="Label">
           <TextInput value={zoom.label ?? ''} placeholder="Zoom" onCommit={(value) => set('zooms', id, { label: value.trim() || undefined }, 'Rename zoom')} />
         </Row>
@@ -545,6 +814,7 @@ function Details({ project, selection }: { project: CuttleProject; selection: Se
     return (
       <>
         <Head icon={<MaskIcon />} color="var(--mask)" name={mask.label ?? 'Mask'} />
+        <AutoNote kind={mask.auto} />
         <Row label="Label">
           <TextInput value={mask.label ?? ''} placeholder="Mask" onCommit={(value) => set('masks', id, { label: value.trim() || undefined }, 'Rename mask')} />
         </Row>
@@ -631,21 +901,21 @@ function LookPanel() {
     <>
       <div className="section-title">Output</div>
       <Row label="Size" note={`${output.fps} fps`}>
-        <select
+        <StyledSelect
           value={size?.name ?? 'custom'}
-          data-testid="output-size"
-          onChange={(event) => {
-            const chosen = SIZES.find((item) => item.name === event.target.value);
+          options={[
+            ...(size ? [] : [{ value: 'custom', label: `${output.width} × ${output.height}` }]),
+            ...SIZES.map((item) => ({ value: item.name, label: item.name, note: `${item.width} × ${item.height}` })),
+          ]}
+          onChange={(name) => {
+            const chosen = SIZES.find((item) => item.name === name);
             if (chosen) edit([{ type: 'output', width: chosen.width, height: chosen.height }], `Output ${chosen.name}`);
           }}
+          label="Output size"
+          testId="output-size"
         >
-          {!size && <option value="custom">{`${output.width} × ${output.height}`}</option>}
-          {SIZES.map((item) => (
-            <option key={item.name} value={item.name}>
-              {`${item.name} · ${item.width} × ${item.height}`}
-            </option>
-          ))}
-        </select>
+          {size ? `${size.name} · ${size.width} × ${size.height}` : `${output.width} × ${output.height}`}
+        </StyledSelect>
       </Row>
 
       <div className="section-title">Background</div>

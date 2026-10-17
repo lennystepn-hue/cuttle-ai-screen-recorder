@@ -707,13 +707,9 @@ button.chip-status:hover {
   color: var(--muted);
   font-size: var(--size-s);
 }
-.sheet select {
-  background: var(--raised);
-  border: 0;
-  border-radius: 8px;
+.sheet .select-trigger {
   height: 28px;
-  padding: 0 8px;
-  box-shadow: inset 0 0 0 1px var(--line);
+  border-radius: 8px;
 }
 .progress {
   display: flex;
@@ -1631,8 +1627,7 @@ button.chip-status:hover {
   text-overflow: ellipsis;
 }
 .field input[type='text'],
-.field textarea,
-.field select {
+.field textarea {
   flex: 1;
   min-width: 0;
   width: 100%;
@@ -1655,13 +1650,11 @@ button.chip-status:hover {
   line-height: 1.4;
 }
 .field input:hover,
-.field textarea:hover,
-.field select:hover {
+.field textarea:hover {
   box-shadow: inset 0 0 0 1px var(--line-strong);
 }
 .field input:focus,
-.field textarea:focus,
-.field select:focus {
+.field textarea:focus {
   box-shadow: inset 0 0 0 1px var(--accent);
 }
 .field-input.narrow input {
@@ -2000,16 +1993,8 @@ button.chip-status:hover {
   background: var(--raised-active);
   color: var(--text);
 }
-.tl-bar .act.speed select {
-  height: 22px;
-  padding: 0 4px;
-  border: 0;
-  border-radius: 6px;
-  background: var(--raised);
-  box-shadow: inset 0 0 0 1px var(--line);
-}
-.tl-bar .act.speed select:focus-visible {
-  box-shadow: var(--focus);
+.tl-bar .act.speed .select-trigger {
+  min-width: 52px;
 }
 /* what can be dragged says so */
 .scene,
@@ -2091,4 +2076,208 @@ button.chip-status:hover {
 .cut-out-list button:hover,
 .cut-out-list button:focus-visible {
   background: var(--raised-active);
+}
+
+/* a cut: a notch over the video lane where the clip jumps; an off cut faint and dashed where it would cut */
+.cut-notch {
+  position: absolute;
+  top: 1px;
+  bottom: 1px;
+  width: 11px;
+  margin-left: -5.5px;
+  padding: 0;
+  background: none;
+  z-index: 3;
+}
+.cut-notch::before {
+  content: '';
+  position: absolute;
+  left: 4.5px;
+  top: 5px;
+  bottom: 4px;
+  width: 2px;
+  border-radius: 1px;
+  background: #fff;
+  box-shadow: 0 0 0 1px rgba(8, 8, 10, 0.75);
+  transition: background var(--fast);
+}
+.cut-notch::after {
+  content: '';
+  position: absolute;
+  left: 1.5px;
+  top: 0;
+  border: 4px solid transparent;
+  border-top: 6px solid #fff;
+  filter: drop-shadow(0 0 1px rgba(8, 8, 10, 0.9));
+  transition: border-color var(--fast);
+}
+.cut-notch:focus-visible {
+  box-shadow: none;
+}
+.cut-notch:hover::before,
+.cut-notch:focus-visible::before,
+.cut-notch.selected::before {
+  background: var(--accent);
+}
+.cut-notch:hover::after,
+.cut-notch:focus-visible::after,
+.cut-notch.selected::after {
+  border-top-color: var(--accent);
+}
+.cut-notch.selected::before {
+  left: 4px;
+  width: 3px;
+}
+.cut-notch.off::before {
+  background: repeating-linear-gradient(to bottom, rgba(255, 255, 255, 0.6) 0 4px, transparent 4px 7px);
+  box-shadow: none;
+}
+.cut-notch.off::after {
+  border-top-color: rgba(255, 255, 255, 0.6);
+}
+
+/* a clip's crop in the source view: white, what lies outside dimmed */
+.source-box.crop {
+  box-shadow:
+    0 0 0 1.5px #fff,
+    0 0 0 4px rgba(255, 255, 255, 0.14);
+}
+.source-box.selected.crop {
+  box-shadow:
+    0 0 0 2px #fff,
+    0 0 0 5px rgba(255, 255, 255, 0.18);
+}
+
+/* the Auto tab: what Cuttle did on its own, a row per kind with its switch, its items below */
+.auto-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.auto-intro {
+  margin: 0 0 4px;
+}
+.auto-group {
+  border-radius: 10px;
+  background: var(--raised);
+}
+.auto-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 10px 5px 5px;
+}
+.auto-toggle {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 2px;
+  border-radius: 8px;
+  text-align: left;
+  background: none;
+}
+.auto-group .kind-icon {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  background: var(--raised-active);
+  color: var(--text);
+}
+.auto-group.off .kind-icon,
+.auto-group.off .auto-title {
+  opacity: 0.55;
+}
+.auto-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  line-height: 1.3;
+}
+.auto-title {
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.auto-count {
+  color: var(--muted);
+  font-size: var(--size-s);
+  font-variant-numeric: tabular-nums;
+}
+.auto-chevron {
+  color: var(--faint);
+  flex: none;
+  transition: transform var(--fast);
+}
+.auto-toggle[aria-expanded='true'] .auto-chevron {
+  transform: rotate(180deg);
+}
+.auto-items {
+  list-style: none;
+  margin: 0;
+  padding: 0 10px 8px 43px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.auto-items li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.auto-items li.off .auto-label,
+.auto-items li.off .auto-time {
+  color: var(--faint);
+  text-decoration: line-through;
+}
+.auto-item {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  padding: 4px 6px;
+  border-radius: 6px;
+  background: none;
+  text-align: left;
+}
+.auto-item:hover {
+  background: var(--raised-hover);
+}
+.auto-time {
+  flex: none;
+  width: 44px;
+  color: var(--muted);
+  font-size: var(--size-s);
+  font-variant-numeric: tabular-nums;
+}
+.auto-label {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.auto-empty {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.auto-empty p {
+  margin: 0;
+}
+/* "Made by Cuttle for …" under an automatic item's name */
+.auto-note {
+  margin: -4px 0 0;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--raised);
+  color: var(--muted);
+  font-size: var(--size-s);
+  line-height: 1.5;
+}
+.auto-note b {
+  color: var(--text);
+  font-weight: 600;
 }

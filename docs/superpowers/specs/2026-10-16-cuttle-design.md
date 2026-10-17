@@ -254,22 +254,23 @@ Look rules (fixed in M2):
 | `cuttle init [dir]` | New project folder with a default `cuttle.json` |
 | `cuttle devices` | Monitors (index, size, position), windows, cameras, mics |
 | `cuttle record [--monitor N] [--region x,y,w,h] [--window "title"] [--webcam [name]] [--mic [name]] [--until-claude [cwd]] [--until-file p] [--until-idle s] [--max s] [--countdown s] [--draw-mouse]` | Record a take into the project (created when missing) and use it: `sources` point at the take, one clip scene covers it; scenes and overlays of the previous take are dropped. `--draw-mouse` also sets `look.cursor.enabled` to `false` (the pointer is in the video) |
-| `cuttle suggest [--claude [cwd]] [--no-zoom] [--dry-run]` | From markers, events and the screen, propose scenes (trim the quiet start and end, cut idle stretches, speed up waiting) and a zoom on Claude's answer, and write them to `cuttle.json`: clip scenes and zooms are replaced, still and card scenes stay at the end, masks and texts stay; `--claude` reads the transcript for a take without Claude markers |
+| `cuttle suggest [--claude [cwd]] [--no-zoom] [--dry-run]` | From markers, events and the screen, propose scenes (trim the quiet start and end, cut idle stretches, speed up waiting) and a zoom on Claude's answer, and write them to `cuttle.json`: clip scenes and zooms are replaced, still and card scenes keep their place before or after the clips, masks and texts stay; `--claude` reads the transcript for a take without Claude markers |
 | `cuttle preview [--at t…] [--sheet] [--format f] [-o dir]` | PNG stills of the output; without `--at` 12 evenly spaced stills and a contact sheet with timestamps, for checking. A run that fails or is cancelled writes nothing; in the default folder (`preview/`) stills of earlier runs are replaced |
 | `cuttle capture-page <url\|file> [--scroll] [--add] [--duration s] [--wait ms] [--width px] [--height px] [--name n]` | Capture a page (offscreen Chromium, scale 1, a session without stored cookies, permissions or downloads) into `stills/`; `--scroll` takes the whole page with the viewport's height kept (sections sized in `vh` stay their size); `--add` appends a still scene (browser frame, scrolling with `--scroll`) |
 | `cuttle render [--format 16:9\|1:1\|9:16] [-o file] [--encoder auto\|hardware\|software]` | Export (default `out/<format>.mp4` in the project, `out/export.mp4` without `--format`) |
-| `cuttle recover <take>` | Repair a take after a crash and use it (`<take>` relative to the project, e.g. `takes/2`): checks the tracks, drops a cut-off events line, rewrites a missing or broken markers.json or take.json (keeping readable start times). When the project already uses the take, its scenes and overlays stay |
+| `cuttle recover <take>` | Repair a take after a crash and use it (`<take>` relative to the project, e.g. `takes/2`): checks the tracks, drops a cut-off events line, rewrites a missing or broken markers.json or take.json (keeping readable start times). When the project already uses the take, its scenes and overlays stay (a clip is added only when it has no scenes) |
 
 Every command takes `-C <dir>` (the project folder, default the current one) and `--json`: exactly
 one JSON document on stdout (the result, or `{ "error": { "code", "message" } }`, usage errors
 included), everything else on stderr. Exit codes: 0 ok, 1 usage or validation error, 2 device or
-permission error, 3 render error, 130 cancelled. Ctrl+C stops a recording (the take is kept) and
-cancels a render, preview or capture (nothing is written); a second Ctrl+C quits at once. `render`,
+permission error, 3 render error, 130 cancelled (`--help` and `--version` answer as JSON too).
+Ctrl+C stops a recording (the take is kept) and cancels a render or preview (nothing is written)
+or a page capture (no scene is added); a second Ctrl+C quits at once. `render`,
 `preview` and `capture-page` run in Electron, started by the Node CLI; the answer and a cancel
 travel over Node's IPC channel (on Windows Electron has no console, so the console's Ctrl+C would
-not reach it). A command that rewrites a file the user may have edited (`cuttle.json`, or a take's
-events.jsonl, markers.json or take.json in `recover`) first keeps it as `<file>.bak`, moving older
-backups to `.bak.1` … `.bak.4`.
+not reach it). Before a command replaces scenes or overlays in `cuttle.json` (`record`, `suggest`,
+`recover`), or `recover` rewrites a take's events.jsonl, markers.json or take.json, it keeps the
+old file as `<file>.bak`, moving older backups to `.bak.1` … `.bak.4`.
 
 `suggest` works in seconds of the take. Activity is input (±0.3 s per event), a changing screen and
 Claude's turn (from its first prompt or tool call to the answer; never cut, because the screen

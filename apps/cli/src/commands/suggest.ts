@@ -22,7 +22,7 @@ type ClipScene = { type: 'clip'; from: number; to: number; speed?: number };
 
 export interface SuggestResult {
   project: string;
-  /** The suggested clips, then the project's still and card scenes, which are kept at the end. */
+  /** The suggested clips, with the project's still and card scenes before (those that were before the first clip) and after them. */
   scenes: (ClipScene | Record<string, unknown>)[];
   zooms: { at: number; duration: number; rect: Rect }[];
   notes: string[];
@@ -42,8 +42,8 @@ const ZOOM_SECONDS = 4;
 /**
  * `cuttle suggest`: scenes from the take (quiet start and end trimmed, idle stretches cut, waiting
  * sped up) and a zoom on Claude's answer, written to cuttle.json. The clip scenes and the zooms are
- * replaced; still and card scenes move to the end, masks and texts stay; the previous file is kept
- * as cuttle.json.bak.
+ * replaced; still and card scenes keep their place before or after the clips, masks and texts stay;
+ * the previous file is kept as cuttle.json.bak.
  */
 export async function suggestCommand(projectDir: string, args: SuggestArgs, output: Output): Promise<SuggestResult> {
   const file = await readProjectFile(projectDir);
@@ -80,10 +80,15 @@ export async function suggestCommand(projectDir: string, args: SuggestArgs, outp
   const suggestion = suggestClips({ duration: screenInfo.duration, events, markers, still: screenInfo.still });
   notes.push(...suggestion.notes);
   const clips: ClipScene[] = suggestion.clips.map(({ from: start, to, speed }) => ({ type: 'clip', from: start, to, ...(speed !== 1 && { speed }) }));
-  // A page capture or an end card stays: they do not depend on the take's times.
-  const kept = ((file.raw.scenes as Record<string, unknown>[] | undefined) ?? []).filter((scene) => scene.type !== 'clip');
-  if (kept.length > 0) notes.push(`kept ${kept.length} still or card scene(s) after the clips`);
-  const scenes = [...clips, ...kept];
+  // Page captures and cards stay where they were: before the first clip (a title card) or after it.
+  const previous = (file.raw.scenes as Record<string, unknown>[] | undefined) ?? [];
+  const firstClip = previous.findIndex((scene) => scene.type === 'clip');
+  const before = firstClip < 0 ? [] : previous.slice(0, firstClip).filter((scene) => scene.type !== 'clip');
+  const after = previous.slice(Math.max(0, firstClip)).filter((scene) => scene.type !== 'clip');
+  if (before.length + after.length > 0) {
+    notes.push(`kept ${before.length + after.length} still or card scene(s)${before.length > 0 ? `, ${before.length} before the clips` : ''}`);
+  }
+  const scenes = [...before, ...clips, ...after];
   const zooms: SuggestResult['zooms'] = [];
   const first = suggestion.clips[0];
   const last = suggestion.clips.at(-1);

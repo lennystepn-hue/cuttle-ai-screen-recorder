@@ -80,6 +80,9 @@ export async function recordCommand(projectDir: string, args: RecordArgs, output
     // The real pointer is in the video: the engine's cursor would be a second one.
     const look = (file.raw.look ?? {}) as Record<string, unknown>;
     file.raw.look = { ...look, cursor: { ...((look.cursor as Record<string, unknown> | undefined) ?? {}), enabled: false } };
+  } else if (!file.project.look.cursor.enabled) {
+    // Left from an earlier --draw-mouse take, this take would show no pointer at all.
+    output.warn('look.cursor.enabled is false (from an earlier --draw-mouse take?): this take has no pointer in the video, so set it to true to show one');
   }
   await writeProjectFile(file);
   const result: RecordResult = { project: file.path, take, ...(backup && { backup }) };

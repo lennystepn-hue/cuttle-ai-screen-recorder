@@ -85,19 +85,36 @@ export async function capturePage(options: CaptureOptions, signal: AbortSignal):
   }
 }
 
+/** Pause per viewport while a whole page is scrolled through, so content revealed on scroll appears. */
+const SCROLL_STEP_MS = 150;
+
+const sleep = (ms: number) => new Promise((done) => setTimeout(done, ms));
+
 /** Waits for the page, then takes the screenshot through the DevTools protocol. */
 async function screenshot(win: BrowserWindow, options: CaptureOptions): Promise<{ png: Buffer; height: number }> {
-  await new Promise((done) => setTimeout(done, options.waitMs));
+  await sleep(options.waitMs);
   const debug = win.webContents.debugger;
   debug.attach('1.3');
   await debug.sendCommand('Emulation.setDeviceMetricsOverride', { width: options.width, height: options.height, deviceScaleFactor: 1, mobile: false });
-  let height = options.height;
-  if (options.fullPage) {
+  const contentHeight = async () => {
     const metrics = (await debug.sendCommand('Page.getLayoutMetrics')) as { cssContentSize?: { height?: number } };
     const content = Math.ceil(Number(metrics.cssContentSize?.height));
-    height = Math.min(MAX_PAGE_HEIGHT, Math.max(options.height, Number.isFinite(content) ? content : options.height));
+    return Math.min(MAX_PAGE_HEIGHT, Math.max(options.height, Number.isFinite(content) ? content : options.height));
+  };
+  let height = options.height;
+  if (options.fullPage) {
+    // Scroll through the page once, a viewport at a time: lazy images and sections that appear on
+    // scroll (IntersectionObserver) load as for a reader. Then back to the top, and measure again.
+    const scrollTo = (y: number) => debug.sendCommand('Runtime.evaluate', { expression: `window.scrollTo(0, ${y})` });
+    for (let y = options.height; y < (await contentHeight()); y += options.height) {
+      await scrollTo(y);
+      await sleep(SCROLL_STEP_MS);
+    }
+    await scrollTo(0);
+    await sleep(SCROLL_STEP_MS);
+    height = await contentHeight();
   }
-  await new Promise((done) => setTimeout(done, 300)); // layout and paint at the final size
+  await sleep(300); // layout and paint at the final size
   const shot = (await debug.sendCommand('Page.captureScreenshot', {
     format: 'png',
     captureBeyondViewport: options.fullPage,

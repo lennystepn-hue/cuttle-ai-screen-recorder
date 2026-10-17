@@ -66,7 +66,13 @@ export async function runCli(argv: readonly string[], streams?: Streams): Promis
     .option('--json', 'machine-readable output: one JSON document on stdout')
     .showHelpAfterError()
     .exitOverride();
-  if (streams) program.configureOutput({ writeOut: streams.stdout, writeErr: streams.stderr });
+  // With --json, help and version text become the JSON document (see the end), so stdout holds one.
+  const json = wantsJson(argv);
+  let shown = '';
+  program.configureOutput({
+    writeOut: json ? (text) => void (shown += text) : (streams?.stdout ?? ((text) => void process.stdout.write(text))),
+    writeErr: streams?.stderr ?? ((text) => void process.stderr.write(text)),
+  });
 
   /** Wraps a command's action: output with the global options, errors mapped to exit codes. */
   const action =
@@ -181,9 +187,14 @@ export async function runCli(argv: readonly string[], streams?: Streams): Promis
     await program.parseAsync(argv, { from: 'user' });
   } catch (error) {
     if (!(error instanceof CommanderError)) throw error;
-    if (error.exitCode === 0) return EXIT.ok; // help or version
+    if (error.exitCode === 0) {
+      // --help or --version
+      if (json) createOutput(true, streams).result(error.code === 'commander.version' ? { version: VERSION } : { help: shown }, () => '');
+      return EXIT.ok;
+    }
     // A usage error: commander already explained it on stderr; with --json stdout still gets one document.
-    if (wantsJson(argv)) createOutput(true, streams).error(new CliError('usage', error.message.replace(/^error: /, '')));
+    const message = error.code === 'commander.help' ? 'no command given ("cuttle --help" lists them)' : error.message.replace(/^error: /, '');
+    if (json) createOutput(true, streams).error(new CliError('usage', message));
     return EXIT.usage;
   }
   return exitCode;

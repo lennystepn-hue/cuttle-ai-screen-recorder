@@ -4,7 +4,7 @@ import { rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { runCli } from '../src/main';
+import { VERSION, runCli } from '../src/main';
 
 const dirs: string[] = [];
 afterAll(() => Promise.all(dirs.map((dir) => rm(dir, { recursive: true, force: true }))));
@@ -59,11 +59,17 @@ describe('cuttle init and errors', () => {
     const dir = temp();
     expect((await cli('nonsense')).code).toBe(1);
     // commander's own usage errors (explained on stderr) still give one JSON document with --json
-    for (const argv of [['--json', 'nonsense'], ['--json', 'record', '--monitor', 'x'], ['recover', '--json']]) {
+    for (const argv of [['--json', 'nonsense'], ['--json', 'record', '--monitor', 'x'], ['recover', '--json'], ['--json']]) {
       const usage = await cli(...argv);
       expect(usage.code, argv.join(' ')).toBe(1);
       expect((usage.json as { error: { code: string } }).error.code, argv.join(' ')).toBe('usage');
     }
+    expect((await cli('--json')).json).toEqual({ error: { code: 'usage', message: 'no command given ("cuttle --help" lists them)' } });
+    // --version and --help answer in JSON too
+    expect((await cli('--json', '--version')).json).toEqual({ version: VERSION });
+    const help = await cli('--json', 'render', '--help');
+    expect(help.code).toBe(0);
+    expect((help.json as { help: string }).help).toMatch(/^Usage: cuttle render/);
     const missing = await cli('--json', '-C', dir, 'suggest');
     expect(missing.code).toBe(1);
     expect((missing.json as { error: { code: string } }).error.code).toBe('invalid-project');
@@ -271,12 +277,14 @@ describe('cuttle suggest and recover', () => {
     cpSync(fixture, dir, { recursive: true });
     const path = join(dir, 'cuttle.json');
     const original = readFileSync(path, 'utf8');
+    const title = { type: 'card', title: 'A demo', duration: 2 };
     const card = { type: 'card', title: 'The end', duration: 2 };
-    writeFileSync(path, JSON.stringify({ ...JSON.parse(original), scenes: [{ type: 'clip', from: 0, to: 5 }, card] }));
+    writeFileSync(path, JSON.stringify({ ...JSON.parse(original), scenes: [title, { type: 'clip', from: 0, to: 5 }, card] }));
     const edited = readFileSync(path, 'utf8');
     const first = await cli('--json', '-C', dir, 'suggest', '--no-zoom');
-    expect((first.json as { scenes: unknown[] }).scenes.at(-1)).toEqual(card);
-    expect((first.json as { notes: string[] }).notes).toContain('kept 1 still or card scene(s) after the clips');
+    const scenes = (first.json as { scenes: unknown[] }).scenes;
+    expect([scenes[0], scenes.at(-1)]).toEqual([title, card]); // a title card stays first, an end card last
+    expect((first.json as { notes: string[] }).notes).toContain('kept 2 still or card scene(s), 1 before the clips');
     const suggested = readFileSync(path, 'utf8');
     await cli('--json', '-C', dir, 'suggest', '--no-zoom'); // the same suggestion again
     // .bak holds the version before the last run; the one before it moved to .bak.1

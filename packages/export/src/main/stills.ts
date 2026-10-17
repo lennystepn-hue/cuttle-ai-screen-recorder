@@ -55,6 +55,8 @@ export function stillName(n: number, t: number): string {
 const SHEET_NAME = 'sheet.png';
 /** Names `stillName` gives; `clean` removes only these and the sheet. */
 const STILL_FILE = /^\d{2,}-\d+\.\d{2}s\.png$/;
+/** A run's work folder inside `outDir`, named after its process. */
+const WORK_FOLDER = /^\.cuttle-stills-(\d+)$/;
 
 /**
  * Renders single output frames of a project to PNGs with the export's engine and decoders (for
@@ -143,16 +145,46 @@ export async function renderStills(opts: StillsOptions): Promise<StillsResult> {
     cancel.dispose();
     if (window && !window.win.isDestroyed()) window.win.destroy();
     await host.close();
-    await rm(work, { recursive: true, force: true, maxRetries: 3 });
+    // A folder that cannot be removed now must not replace the result or the real error.
+    await rm(work, { recursive: true, force: true, maxRetries: 3 }).catch(() => {});
   }
 }
 
-/** Moves the finished PNGs from the work folder into `outDir`, after removing older stills there when `clean`. */
+/**
+ * Moves the finished PNGs from the work folder into `outDir`. With `clean`, older stills there go
+ * first, and so do work folders a killed run left behind (their process no longer exists).
+ */
 async function publish(work: string, outDir: string, names: string[], clean: boolean): Promise<void> {
   if (clean) {
     for (const name of await readdir(outDir)) {
-      if (STILL_FILE.test(name) || name === SHEET_NAME) await rm(join(outDir, name), { force: true });
+      const stale = WORK_FOLDER.exec(name);
+      if (STILL_FILE.test(name) || name === SHEET_NAME || (stale && !running(Number(stale[1])))) {
+        await rm(join(outDir, name), { recursive: true, force: true, maxRetries: 3 });
+      }
     }
   }
-  for (const name of names) await rename(join(work, name), join(outDir, name));
+  for (const name of names) await renameWhenFree(join(work, name), join(outDir, name));
+}
+
+/** Whether a process with this id runs (signal 0 only checks). */
+function running(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === 'EPERM'; // it exists, but belongs to someone else
+  }
+}
+
+/** A rename that waits a moment for a file another program holds (a virus scanner, a viewer). */
+async function renameWhenFree(from: string, to: string): Promise<void> {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await rename(from, to);
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (attempt >= 5 || (code !== 'EPERM' && code !== 'EBUSY' && code !== 'EACCES')) throw error;
+      await new Promise((done) => setTimeout(done, 100 * attempt));
+    }
+  }
 }

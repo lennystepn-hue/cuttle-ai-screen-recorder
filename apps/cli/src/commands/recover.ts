@@ -78,8 +78,10 @@ export async function recoverCommand(projectDir: string, takeDir: string, output
   const parsed = takeText === undefined ? undefined : parseTakeJson(takeText);
   if (!parsed?.ok) {
     const backup = takeText === undefined ? undefined : await backupFile(path(FILES.take));
-    // Start times that can still be read are kept: they sync webcam and mic and place Claude's markers.
-    const starts = readableStarts(takeText);
+    // Start times that can still be read are kept: they sync webcam and mic and place Claude's
+    // markers. Without the screen's, the others mean nothing (they are relative to it): all start at 0.
+    const readable = readableStarts(takeText);
+    const starts: typeof readable = readable.screen === undefined ? {} : readable;
     const screenStart = starts.screen ?? 0;
     const take: TakeFile = {
       version: TAKE_VERSION,
@@ -99,7 +101,9 @@ export async function recoverCommand(projectDir: string, takeDir: string, output
     );
   }
 
-  const keepEdit = file.project.scenes.length > 0 && samePath(resolve(file.dir, file.project.sources.screen), path(FILES.screen));
+  const { scenes, zooms, masks, texts } = file.project;
+  const sameTake = samePath(resolve(file.dir, file.project.sources.screen), path(FILES.screen));
+  const keepEdit = sameTake && scenes.length + zooms.length + masks.length + texts.length > 0;
   const backup = await useTake(
     file,
     {
@@ -110,7 +114,7 @@ export async function recoverCommand(projectDir: string, takeDir: string, output
       markers: source(FILES.markers),
       seconds,
     },
-    keepEdit,
+    sameTake,
   );
   await writeProjectFile(file);
   const result: RecoverResult = {

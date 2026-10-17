@@ -1,0 +1,66 @@
+body.transparent,
+body.transparent #root {
+  background: transparent;
+}
+.pill-wrap {
+  height: 100%;
+  display: grid;
+  place-items: center;
+}
+.pill {
+  height: 48px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px;
+  border-radius: 16px;
+  background: var(--overlay);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45), 0 0 0 1px rgba(255, 255, 255, 0.07);
+  backdrop-filter: blur(20px);
+  -webkit-app-region: drag;
+}
+.pill .mark {
+  width: 36px;
+  height: 36px;
+  border-radius: 11px;
+}
+.pill button {
+  -webkit-app-region: no-drag;
+  height: 36px;
+  padding: 0 12px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: var(--size-s);
+  white-space: nowrap;
+  transition: background var(--fast), color var(--fast);
+}
+.pill button:hover:not(:disabled) {
+  background: var(--raised);
+  color: var(--text);
+}
+.pill button.main {
+  color: var(--text);
+  background: var(--raised);
+}
+.pill button.main:hover:not(:disabled) {
+  background: var(--raised-hover);
+}
+.pill button.main i {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--recording);
+  display: block;
+}
+.pill kbd {
+  background: none;
+  padding: 0;
+}
+.pill .icon-only {
+  width: 32px;
+  padding: 0;
+  justify-content: center;
+}

@@ -20,6 +20,7 @@ design mockups in `docs/design/desktop/`.
 | `@cuttle/recorder` | Records a take on Windows: a monitor, region or window (ddagrab), webcam and mic (DirectShow), input events, markers; stops by hotkey, time, a file, an idle screen or the end of a Claude Code turn |
 | `@cuttle/core` | Project operations for the CLI and the app: `cuttle.json` as written (hash-checked writes, backups), takes, suggest, recover, frame, ffmpeg |
 | `apps/cli` | The `cuttle` command: init, devices, record, suggest, preview, frame, capture-page, render, recover; `--json` for Claude |
+| `apps/desktop` | The Cuttle app (Electron, React): the pill and tray, an editor per project (the export's engine in the output view, played with the mic as the clock; a timeline with thumbnails, waveform, markers and input activity; the export sheet) |
 | `skill/` | The Claude skill: `SKILL.md` (the workflow) and `project.md` (the `cuttle.json` reference), installed by `pnpm skill:install` |
 
 ## Development
@@ -39,6 +40,21 @@ pnpm cuttle <command>                    # the built CLI without installing it (
 Export and recording need ffmpeg on PATH (or its path in `CUTTLE_FFMPEG`); `export:check` and the
 recorder tests also need ffprobe. Recording works on Windows so far; the recorder's tests use its
 `test` backend (ffmpeg test sources, synthetic input), which runs everywhere.
+
+## The desktop app
+
+```bash
+pnpm app                                 # build and start the app (the pill near the top of the screen, an icon in the tray)
+pnpm app -- --open <project folder>      # … and open a project in the editor
+pnpm app:check                           # end to end with its windows hidden: open, play, scrub, select, compare with the export, play the proxy, export
+pnpm app:build                           # an unpacked app in apps/desktop/build/Cuttle-<platform>-<arch>/, checked that it starts
+```
+
+The editor shows exactly what the export renders: the same engine and timeline, compared pixel for
+pixel by `app:check`. It plays a 720p proxy of the take (made in the background into the project's
+`.cuttle/` folder, with the thumbnails and the mic's waveform); the export always uses the take.
+Editing arrives in a later milestone; in this version the timeline and inspector show the project.
+Recording from the app comes next; until then, record with `cuttle record`.
 
 ## The CLI
 

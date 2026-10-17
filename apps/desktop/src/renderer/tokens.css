@@ -1,0 +1,67 @@
+/* Cuttle desktop: design tokens (see docs/design/desktop/tokens.css and the spec's "Design system") */
+:root {
+  /* surfaces, darkest first */
+  --bg: #0c0c0f;
+  --stage: #08080a;
+  --panel: #131317;
+  --raised: #1b1b21;
+  --raised-hover: #22222a;
+  --raised-active: #2b2b33;
+  --overlay: rgba(19, 19, 23, 0.86);
+  --line: rgba(255, 255, 255, 0.06);
+  --line-strong: rgba(255, 255, 255, 0.12);
+
+  /* text */
+  --text: #ececf1;
+  --muted: #9a9aa5;
+  --faint: #74747e;
+
+  /* bars of the mic's waveform and the input activity: quiet, but visible on the panel */
+  --bars: #5c5c68;
+
+  /* one accent, used sparingly: the primary action, the playhead, the selection outline */
+  --accent: #d97757;
+  --accent-hover: #e2876a;
+  --accent-text: #1b0f0a;
+  --accent-soft: rgba(217, 119, 87, 0.14);
+
+  /* item kinds */
+  --zoom: #5aa2ff;
+  --mask: #a77bff;
+  --caption: #4fd1a1;
+  --still: #3cc6c9;
+  --card: #f2b34a;
+
+  /* states */
+  --recording: #ff4d4f;
+  --danger: #ff6b6b;
+  --ok: #4fd1a1;
+
+  --font: 'Inter', 'Segoe UI', system-ui, sans-serif;
+  --mono: 'Cascadia Mono', Consolas, monospace;
+  --size-xs: 11px;
+  --size-s: 12px;
+  --size-m: 13px;
+  --size-l: 15px;
+  --size-xl: 20px;
+
+  --radius-s: 6px;
+  --radius-m: 9px;
+  --radius-l: 14px;
+
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --fast: 120ms;
+  --normal: 200ms;
+  --slow: 320ms;
+
+  --shadow-float: 0 16px 48px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.06);
+  --focus: 0 0 0 2px var(--accent);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --fast: 0ms;
+    --normal: 0ms;
+    --slow: 0ms;
+  }
+}

@@ -25,15 +25,19 @@ describe('the IPC contract', () => {
     expect(REQUESTS['project:info'].safeParse({ any: 1 }).success).toBe(false);
     expect(REQUESTS['speech:download'].safeParse('small').success).toBe(true);
     expect(REQUESTS['speech:download'].safeParse('../../evil').success).toBe(false);
+    expect(REQUESTS['settings:set'].safeParse({ privacyRead: false, privacyWords: ['Lena Müller'] }).success).toBe(true);
+    expect(REQUESTS['settings:set'].safeParse({ privacyWords: ['x'.repeat(121)] }).success).toBe(false);
+    expect(REQUESTS['settings:set'].safeParse({ privacyWords: Array.from({ length: 51 }, (_, k) => `w${k}`) }).success).toBe(false);
   });
 
   it('names the speech models as @cuttle/core does (the windows cannot import it)', () => {
     expect(SPEECH_MODEL_NAMES).toEqual(MODEL_NAMES);
   });
 
-  it('takes a transcript linked to the take for the same take', () => {
+  it("takes a transcript or the screen's text linked to the take for the same take", () => {
     const take = { screen: 'takes/1/screen.mp4', mic: 'takes/1/mic.m4a' };
     expect(takeKey({ ...take, transcript: 'takes/1/transcript.json' })).toBe(takeKey(take));
+    expect(takeKey({ ...take, screenText: 'takes/1/screen-text.jsonl' })).toBe(takeKey(take));
     expect(takeKey({ ...take, mic: 'takes/2/mic.m4a' })).not.toBe(takeKey(take));
   });
 });

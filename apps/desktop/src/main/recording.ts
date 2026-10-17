@@ -17,6 +17,7 @@ import { APP_ORIGIN, serveApp, bundlePath } from './protocols';
 import { recorderHost, RecordingError } from './recorder-host';
 import { findFfmpeg } from './tools';
 import { loadSettings, updateSettings } from './settings';
+import { maskPrivacy } from './privacy';
 import { transcribeProject } from './speech';
 import { editorWindowOf, expectSuggest, guard, hidePill, reopenEditor, sendToEditor, setEditorStatus, showPill, webPreferences } from './windows';
 
@@ -881,8 +882,10 @@ async function cut(dir: string): Promise<void> {
     return;
   }
   await setEditorStatus(dir, undefined);
-  // then what was said: transcribed, its filler words and pauses cut (a step of its own)
+  // then what was said: transcribed, its filler words and pauses cut (a step of its own); then what
+  // the screen showed: its private things and the notifications masked (a step of its own, after it)
   await transcribeProject(dir);
+  await maskPrivacy(dir);
 }
 
 /** "Try again" in the editor after a failed cut. */

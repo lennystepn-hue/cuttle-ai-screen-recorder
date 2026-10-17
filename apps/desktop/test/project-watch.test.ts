@@ -44,4 +44,24 @@ describe('the project file watch', () => {
     await expect.poll(() => events.length, { timeout: 3000 }).toBe(1);
     expect(events[0]).toMatchObject({ hash: projectHash(bytes(version('Second'))), origin: 'outside' });
   }, 20_000);
+
+  it('reports a change already on disk with its own origin when asked to look before the next is set', async () => {
+    dir = mkdtempSync(join(tmpdir(), 'cuttle-watch-'));
+    writeFileSync(join(dir, 'cuttle.json'), bytes(version('Take')));
+    const events: ProjectFileEvent[] = [];
+    watch = new ProjectFileWatch(dir, (event) => events.push(event));
+    watch.start(projectHash(bytes(version('Take'))));
+    // the app's cut writes, and its privacy step follows within the watcher's pause
+    watch.origin = 'suggest';
+    writeFileSync(join(dir, 'cuttle.json'), bytes(version('Cut')));
+    await watch.settle();
+    watch.origin = 'privacy';
+    expect(events).toEqual([expect.objectContaining({ hash: projectHash(bytes(version('Cut'))), origin: 'suggest' })]);
+    // the watcher's own look comes later and finds nothing new; the privacy masks are the next change
+    await pause(400);
+    expect(events).toHaveLength(1);
+    writeFileSync(join(dir, 'cuttle.json'), bytes(version('Masked')));
+    await expect.poll(() => events.length, { timeout: 3000 }).toBe(2);
+    expect(events[1]).toMatchObject({ origin: 'privacy' });
+  });
 });

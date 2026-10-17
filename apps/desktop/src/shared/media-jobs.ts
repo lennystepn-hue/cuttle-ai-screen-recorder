@@ -47,7 +47,24 @@ export interface SpeechEditsJob {
   cleanMic?: string;
 }
 
-export type MediaJob = ProxyJob | ThumbnailsJob | PeaksJob | SuggestJob | TranscribeJob | SpeechEditsJob;
+/** Reads the screen's text inside a project's clips (`input`: its folder) into its take's screen-text.jsonl, not linked yet. */
+export interface ReadScreenJob {
+  job: 'read-screen';
+  input: string;
+  output: string;
+}
+
+/** Links `link` (the screen's text just read) and masks what the screen showed and the notifications, in one write. */
+export interface PrivacyEditsJob {
+  job: 'privacy-edits';
+  input: string;
+  output: string;
+  link?: string;
+  /** The settings' "Always mask", added to the project's words. */
+  words: string[];
+}
+
+export type MediaJob = ProxyJob | ThumbnailsJob | PeaksJob | SuggestJob | TranscribeJob | SpeechEditsJob | ReadScreenJob | PrivacyEditsJob;
 
 export interface ThumbnailsMeta {
   interval: number;
@@ -62,7 +79,7 @@ export type WorkerCancel = { id: number; cancel: true };
 export type WorkerReply =
   | { id: number; progress: number }
   | { id: number; done: true; meta?: ThumbnailsMeta }
-  | { id: number; error: string; cancelled?: boolean };
+  | { id: number; error: string; cancelled?: boolean; code?: string };
 
 /** Height of the proxy (the screen track is scaled down to it, never up). */
 export const PROXY_HEIGHT = 720;

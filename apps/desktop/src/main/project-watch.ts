@@ -23,7 +23,7 @@ export class ProjectFileWatch {
   private timer: ReturnType<typeof setTimeout> | undefined;
   /** The last version reported did not parse: the next that does is reported even when known (a fix back to it). */
   private broken = false;
-  /** Who the next outside change comes from: the app's own suggest while it cuts a take, or its speech edits. */
+  /** Who the next outside change comes from: the app's own suggest while it cuts a take, its speech edits or its privacy masks. */
   origin: ChangeOrigin = 'outside';
   /**
    * Looks and saves, one at a time: a look that read the file while a save replaced it would take
@@ -46,6 +46,15 @@ export class ProjectFileWatch {
     } catch {
       // a folder that cannot be watched: outside changes show on the next open
     }
+  }
+
+  /**
+   * Looks now, not after the pause: a change already on disk is reported with the origin set for
+   * it, before another is set (the app's privacy step can follow its cut within the pause).
+   */
+  settle(): Promise<void> {
+    clearTimeout(this.timer);
+    return this.serial(() => this.check());
   }
 
   /** A save is a write followed by a rename: look once things have settled. */

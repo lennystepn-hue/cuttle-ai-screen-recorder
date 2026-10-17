@@ -4,7 +4,7 @@ import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { app } from 'electron';
 import { z } from 'zod';
-import { MOTIONS, SPEECH_LANGUAGES, SPEECH_MODEL_NAMES, type Motion, type SettingsView } from '../shared/ipc';
+import { MOTIONS, PRIVACY_WORD_MAX, PRIVACY_WORDS_MAX, SPEECH_LANGUAGES, SPEECH_MODEL_NAMES, type Motion, type SettingsView } from '../shared/ipc';
 
 const RECENT_MAX = 10;
 
@@ -36,6 +36,14 @@ const SettingsSchema = z.object({
     })
     .catch({ model: 'small' as const, language: 'auto' as const })
     .default({ model: 'small' as const, language: 'auto' as const }),
+  /** The privacy step after a take's cut: read the screen's text (Windows' OCR) to mask what it showed, and the words always masked. */
+  privacy: z
+    .object({
+      read: z.boolean().catch(true).default(true),
+      words: z.array(z.string().trim().min(1).max(PRIVACY_WORD_MAX)).max(PRIVACY_WORDS_MAX).catch([]).default([]),
+    })
+    .catch({ read: true, words: [] })
+    .default({ read: true, words: [] }),
   /** The picker bar's choices, kept between recordings (the camera and mic are the defaults in the settings). */
   record: z
     .object({ camera: z.string().optional(), mic: z.string().optional(), stop: z.enum(['none', 'claude', 'idle']).default('none'), claudeFolder: z.string().optional() })
@@ -129,6 +137,7 @@ export async function settingsView(): Promise<SettingsView> {
     launchAtLogin: settings.launchAtLogin,
     motion: settings.motion,
     speech: { ...settings.speech },
+    privacy: { read: settings.privacy.read, words: [...settings.privacy.words] },
     recent: settings.recent,
     version: appVersion(),
   };

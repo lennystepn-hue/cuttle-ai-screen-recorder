@@ -14,8 +14,9 @@ export default defineConfig({
           environment: 'node',
           include: ['packages/*/test/**/*.test.ts', 'apps/*/test/**/*.test.ts', 'skill/test/**/*.test.ts'],
           exclude: ['packages/*/test/**/*.browser.test.ts'],
-          // No speech model unless a test asks for one: a take with a mic is never transcribed by chance.
-          env: { CUTTLE_MODELS_DIR: join(tmpdir(), 'cuttle-test-no-models') },
+          // No speech model unless a test asks for one: a take with a mic is never transcribed by
+          // chance; and no OCR, which reads the screen of every take (a test that reads asks for it).
+          env: { CUTTLE_MODELS_DIR: join(tmpdir(), 'cuttle-test-no-models'), CUTTLE_OCR: 'off' },
         },
       },
       {

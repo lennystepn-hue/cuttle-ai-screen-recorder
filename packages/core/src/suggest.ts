@@ -1,14 +1,17 @@
 import { readFile } from 'node:fs/promises';
-import { dirname, join, resolve } from 'node:path';
-import { newId, parseEventsJsonl, parseProject, parseTakeJson, usedIds, type InputEvent, type Marker, type Rect, type TranscriptFile } from '@cuttle/project';
+import { dirname, join, relative, resolve, sep } from 'node:path';
+import { newId, parseEventsJsonl, parseProject, parseTakeJson, usedIds, type InputEvent, type Marker, type Rect, type ScreenTextFrame, type TranscriptFile } from '@cuttle/project';
 import { clickZooms, sceneSpans, shownClicks } from '@cuttle/timeline';
 import { CoreError } from './errors';
 import { readProjectFile, writeProjectFile } from './project-file';
 import { areaStretches, bandCrop, cropPieces, type CropStretch } from './suggest/crop';
 import { dialogZooms } from './suggest/dialogs';
+import { readScreenText, withPrivacyMasks, type RawMask } from './privacy/apply';
+import { SCREEN_TEXT_FILE, framesToRead, readFrames, writeScreenText } from './privacy/read';
 import { analyseScreen, grabGray, grayFrames, screenBands } from './suggest/media';
 import { suggestClips } from './suggest/plan';
 import { changedRegion, zoomRect } from './suggest/region';
+import { union } from './suggest/spans';
 import { screenStretches, typingZooms, type ScreenChange } from './suggest/typing';
 import { takeClock, transcriptMarkers } from './suggest/transcript';
 import { readMarkers, speechActivity, withSpeechCuts, wordStretches } from './speech/apply';
@@ -32,6 +35,10 @@ export interface SuggestOptions {
   dialogZooms?: boolean;
   /** Crops each clip to the content (default true): the window's content area, else the picture's still edges. */
   crop?: boolean;
+  /** Masks what the screen showed that is private (default true): its text is read first where it was not yet. */
+  privacy?: boolean;
+  /** Words to mask wherever the screen shows them (a name, an address), kept in cuttle.json's `privacy.words`. */
+  maskWords?: string[];
   /**
    * The mic's speech (default true): it is kept and never sped up, and the transcript's filler words
    * and pauses are cut where the picture rests.
@@ -59,6 +66,8 @@ export interface SuggestResult {
   cuts?: RawCut[];
   /** Where the speech came from: the transcript, the mic's loudness, or none; and the cuts made for it. */
   speech: { from: 'transcript' | 'mic' | 'none'; fillers: number; pauses: number; retakes: number };
+  /** Whether the screen's text was there to mask from, and how many privacy masks were made. */
+  privacy: { read: boolean; masks: number };
   notes: string[];
   /** Where the markers came from. */
   markers: { from: 'take' | 'transcript' | 'none'; count: number };
@@ -240,12 +249,30 @@ export async function suggestProject(projectDir: string, args: SuggestOptions = 
     if (left > 0) notes.push(`${left} click${left === 1 ? '' : 's'} got no zoom: sped up, or near a cut or another zoom`);
   }
 
+  // The privacy masks: what the screen showed that is private, from its text (read inside the new
+  // clips where it was not yet) and the person's words.
+  const words = [...new Set([...file.project.privacy.words, ...(args.maskWords ?? []).map((word) => word.trim()).filter(Boolean)])];
+  let masks: RawMask[] | undefined;
+  let privacy = { read: false, masks: 0 };
+  if (args.privacy !== false && file.project.autoEdits.privacy) {
+    const text = await screenTextFor(file.dir, screen, sources.screenText, clips, screenInfo, args, notes);
+    if (text) {
+      const result = withPrivacyMasks(file.raw, file.project, text.frames, screenInfo, words, taken);
+      notes.push(...result.notes);
+      masks = result.masks;
+      privacy = { read: true, masks: result.made };
+      if (text.made) file.raw.sources = { ...(file.raw.sources as object), screenText: text.made };
+    }
+  }
+
   const allZooms = [...kept, ...zooms].sort((a, b) => a.at - b.at);
   let backup: string | undefined;
   if (!args.dryRun) {
     file.raw.scenes = scenes;
     file.raw.zooms = allZooms;
     if (cuts && (cuts.length > 0 || file.raw.cuts !== undefined)) file.raw.cuts = cuts;
+    if (masks) file.raw.masks = masks;
+    if (words.length > file.project.privacy.words.length) file.raw.privacy = { ...(file.raw.privacy as object), words };
     ({ backup } = await writeProjectFile(file, 'suggest', { backup: true }));
   }
   const result: SuggestResult = {
@@ -254,12 +281,58 @@ export async function suggestProject(projectDir: string, args: SuggestOptions = 
     zooms: allZooms,
     ...(cuts && { cuts }),
     speech: { from: speech.from, ...made },
+    privacy,
     notes,
     markers: { from, count: markers.length },
     written: !args.dryRun,
     ...(backup && { backup }),
   };
   return result;
+}
+
+/**
+ * The screen's text: what was read before (`sources.screenText`), else read now inside `clips`
+ * (not in a dry run) and written next to the screen track, which `made` names. Says why not where it
+ * cannot be read: the masks from text are then left as they are.
+ */
+async function screenTextFor(
+  dir: string,
+  screen: string,
+  linked: string | undefined,
+  clips: readonly { from: number; to: number }[],
+  size: { width: number; height: number },
+  args: SuggestOptions,
+  notes: string[],
+): Promise<{ frames: ScreenTextFrame[]; made?: string } | undefined> {
+  if (linked) {
+    const frames = await readScreenText(resolve(dir, linked));
+    if (frames) return { frames };
+    notes.push(`${linked} cannot be read: it is read again`);
+  }
+  if (args.dryRun) {
+    notes.push("the screen's text was not read (a dry run): no privacy masks from it");
+    return undefined;
+  }
+  try {
+    args.onStatus?.('reading the screen …');
+    const spans = union(clips.map(({ from: start, to }) => ({ from: start, to })));
+    const times = await framesToRead(screen, spans, size);
+    let shown = 0;
+    const { frames, language } = await readFrames(screen, times, size, {
+      onProgress: (fraction) => {
+        const percent = Math.floor(fraction * 10) * 10;
+        if (percent > shown) args.onStatus?.(`reading the screen … ${(shown = percent)} %`);
+      },
+    });
+    const path = join(dirname(screen), SCREEN_TEXT_FILE);
+    writeScreenText(path, frames);
+    notes.push(`read the screen's text in ${frames.length} frame${frames.length === 1 ? '' : 's'} (${language}), into ${relative(dir, path).split(sep).join('/')}`);
+    return { frames, made: relative(dir, path).split(sep).join('/') };
+  } catch (error) {
+    if (!(error instanceof CoreError) || error.code !== 'ocr-missing') throw error;
+    notes.push(`the screen's text was not read: ${error.message}; no privacy masks from it, so look for private things yourself`);
+    return undefined;
+  }
 }
 
 /**

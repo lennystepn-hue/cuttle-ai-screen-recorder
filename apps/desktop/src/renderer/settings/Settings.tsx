@@ -4,6 +4,7 @@ import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type 
 import type { Motion, RequestArgument, SettingsView, ToolsStatus } from '../../shared/ipc';
 import { bridge } from '../bridge';
 import { CheckIcon, CloseIcon, CopyIcon, FolderIcon, Mark, WarningIcon } from '../icons';
+import { Select } from '../Select';
 
 const WINGET = 'winget install Gyan.FFmpeg';
 
@@ -211,24 +212,19 @@ function Segmented<T extends string | number>({ value, options, onChange, label,
 function DeviceSelect({ kind, value, devices, onChange }: { kind: 'camera' | 'mic'; value: string | undefined; devices: string[] | undefined; onChange: (device: string | null) => void }) {
   const missing = value !== undefined && devices !== undefined && !devices.includes(value);
   return (
-    <select
+    <Select
       value={value ?? ''}
-      onChange={(event) => {
-        onChange(event.target.value === '' ? null : event.target.value);
-        event.target.blur();
-      }}
+      options={[
+        { value: '', label: devices === undefined ? 'Listing…' : 'None' },
+        ...(missing ? [{ value: value!, label: value!, note: 'not connected' }] : []),
+        ...(devices ?? []).map((device) => ({ value: device, label: device })),
+      ]}
+      onChange={(device) => onChange(device === '' ? null : device)}
       disabled={devices === undefined}
-      aria-label={kind === 'camera' ? 'Camera' : 'Microphone'}
-      data-testid={`${kind}-select`}
-    >
-      <option value="">{devices === undefined ? 'Listing…' : 'None'}</option>
-      {missing && <option value={value}>{value} (not connected)</option>}
-      {(devices ?? []).map((device) => (
-        <option key={device} value={device}>
-          {device}
-        </option>
-      ))}
-    </select>
+      label={kind === 'camera' ? 'Camera' : 'Microphone'}
+      className="device"
+      testId={`${kind}-select`}
+    />
   );
 }
 

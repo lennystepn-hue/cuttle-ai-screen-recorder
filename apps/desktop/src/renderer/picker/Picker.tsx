@@ -7,6 +7,7 @@ import type { PickedTarget, PickerSetup, Rect, RecordChoices } from '../../share
 import { barPlacement, bubblePlacement, bubbleSize, dragRect, labelPlacement, matchMediaDevice, windowsAt } from '../../shared/recording';
 import { bridge } from '../bridge';
 import { FolderIcon, MicIcon, WarningIcon } from '../icons';
+import { Select } from '../Select';
 
 type Mode = 'auto' | 'screen' | 'window' | 'region';
 type Shown = { kind: 'screen' | 'window' | 'region'; rect: Rect; title: string; pixels: { width: number; height: number }; window?: number; of?: [number, number] };
@@ -365,21 +366,15 @@ export function Picker() {
               </svg>
               <div className="name">
                 Stop on
-                <select
-                  className="stop"
+                <Select
                   value={choices.stop}
-                  onChange={(event) => {
-                    updateChoices({ stop: event.target.value as RecordChoices['stop'] });
-                    event.target.blur();
-                  }}
-                  aria-label="Stop on"
-                >
-                  {STOPS.map((stop) => (
-                    <option key={stop} value={stop}>
-                      {STOP_NAMES[stop]}
-                    </option>
-                  ))}
-                </select>
+                  options={STOPS.map((stop) => ({ value: stop, label: STOP_NAMES[stop] }))}
+                  onChange={(stop) => updateChoices({ stop })}
+                  label="Stop on"
+                  variant="bare"
+                  className="stop"
+                  testId="stop-on"
+                />
               </div>
               {choices.stop === 'claude' &&
                 (choices.claudeFolder ? (
@@ -444,23 +439,15 @@ function Device(props: {
         </span>
       </button>
       {names.length > 1 && (
-        <select
-          className="more"
+        <Select
           value={chosen ?? ''}
-          onChange={(event) => {
-            onChange(event.target.value || undefined);
-            event.target.blur();
-          }}
-          aria-label={`${label} device`}
-          style={{ width: 20 }}
-        >
-          <option value="">Off</option>
-          {names.map((name) => (
-            <option key={name} value={name}>
-              {name}
-            </option>
-          ))}
-        </select>
+          options={[{ value: '', label: 'Off' }, ...names.map((name) => ({ value: name, label: name }))]}
+          onChange={(name) => onChange(name || undefined)}
+          label={`${label} device`}
+          variant="icon"
+          className="more"
+          title={`Choose the ${label.toLowerCase()}`}
+        />
       )}
       {meter}
     </div>

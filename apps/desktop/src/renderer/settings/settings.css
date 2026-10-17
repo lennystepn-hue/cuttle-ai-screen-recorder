@@ -192,21 +192,12 @@
   transform: translateX(14px);
   background: var(--panel);
 }
-.settings select {
+/* the camera and mic (Select.tsx) */
+.settings .select-trigger.device {
   width: 230px;
   height: 30px;
-  padding: 0 8px;
-  font-size: var(--size-s);
-  border: 0;
   border-radius: 8px;
-  background: var(--raised);
-  box-shadow: inset 0 0 0 1px var(--line);
-}
-.settings select:hover:not(:disabled) {
-  box-shadow: inset 0 0 0 1px var(--line-strong);
-}
-.settings select:focus-visible {
-  box-shadow: var(--focus);
+  font-size: var(--size-s);
 }
 
 /* the tools: a mark, what it is, where it is */

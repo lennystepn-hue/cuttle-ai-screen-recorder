@@ -184,20 +184,11 @@ body.transparent #root {
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.opt select {
-  appearance: none;
-  background: transparent;
-  border: 0;
-  color: var(--muted);
+/* "Stop on": the choice in small text with a chevron (Select.tsx, `bare`) */
+.opt .select-trigger.stop {
   font-size: 10.5px;
   max-width: 150px;
-  padding: 0;
-  text-overflow: ellipsis;
-}
-/* "Stop on" says it is a menu */
-.opt select.stop {
-  padding-right: 14px;
-  background: transparent url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 16 16' fill='none' stroke='%239a9aa5' stroke-width='2'%3E%3Cpath d='m4 6 4 4 4-4'/%3E%3C/svg%3E") right center / 10px no-repeat;
+  gap: 3px;
 }
 .opt .folder {
   display: flex;
@@ -238,21 +229,13 @@ body.transparent #root {
   color: var(--text);
   background: var(--raised-hover);
 }
-/* the device menu is only its chevron: the chosen name shows beside the toggle */
-.opt select.more {
-  appearance: none;
-  border: 0;
-  padding: 0;
-  font-size: 0;
-  background: transparent url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 16 16' fill='none' stroke='%239a9aa5' stroke-width='1.8'%3E%3Cpath d='m4 6 4 4 4-4'/%3E%3C/svg%3E") center / 12px no-repeat;
+/* the device menu is only its chevron (Select.tsx, `icon`): the chosen name shows beside the toggle */
+.opt .select-trigger.more {
+  height: 24px;
+  color: var(--faint);
 }
-.opt select.more:hover {
-  background-color: var(--raised-hover);
-}
-.opt select.more option {
-  font-size: var(--size-m);
-  color: var(--text);
-  background: var(--panel);
+.opt .select-trigger.more:hover:not(:disabled) {
+  background: var(--raised-hover);
 }
 .meter {
   width: 34px;

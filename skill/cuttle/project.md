@@ -94,7 +94,7 @@ there are not two cursors.
 | `clip` | `from`, `to` (source seconds, `to` > `from`), `speed` (`1`, up to 64; above 1 a badge like "12× speed" shows), `badge` (custom badge text, `""` for none), `crop` (`{ "rect": [x, y, w, h], "enabled": true }`: the part of the screen the clip shows, e.g. a browser's page without its tabs; the window takes its shape and zooms stay inside it; `suggest` makes it, tagged `auto: "crop"`, and cuts a clip where the content area changes for good) |
 | `still` | `image` (a path, e.g. from `cuttle capture-page`), `duration` (output seconds), `motion` (`none`, `kenburns`, `scroll`: top to bottom of a tall image), `frame` (`none`, `mac-dark`, `mac-light`, `browser-light`) |
 | `card` | `title`, `subtitle` (optional), `duration` (output seconds): a title or end card on the background |
-| `motion` | `src` (an HTML page in the project, e.g. `motion/intro/index.html`), `duration` (output seconds), `params` (`{ "name": value }`: text, numbers, `true`/`false` or `null`, for the page), `network` (`false`; `true` lets the page load from https): a page drawn frame by frame over the whole output, over the background where it is clear (see "Motion pages") |
+| `motion` | `src` (an HTML page in the project, e.g. `motion/intro/index.html`), `duration` (output seconds), `params` (`{ "name": value }`: text, numbers, `true`/`false` or `null`, for the page), `network` (`false`; `true` lets the page load from https), `motionBlur` (`{ "samples": 8, "shutter": 0.5 }`: each frame the average of that many moments while a camera's shutter would be open, half a frame here; off without it): a page drawn frame by frame over the whole output, over the background where it is clear (see "Motion pages" and [motion.md](motion.md)) |
 
 `zooms`: `at` and `duration` (source seconds), `rect`, `ease` (`smooth`, `linear`) and `enabled`
 (`true`). The rect is widened to the screen's aspect and kept inside the screen. The zoom eases in
@@ -117,7 +117,7 @@ words masked wherever the screen shows them (`suggest --mask` adds to them).
 title bar; `bottom` keeps the title visible. Texts fade in and out over 0.25 output seconds.
 
 `overlays` are motion pages over the video: `src`, `at` and `duration` (source seconds, as a
-text's), `params`, `network` and `enabled` (`true`). A page covers the whole output with its
+text's), `params`, `network`, `motionBlur` and `enabled` (`true`). A page covers the whole output with its
 transparency (a lower third, a callout, a logo), over the clip, its zooms, masks, cursor and texts,
 and under the captions. Its clock runs in output seconds from where the video first shows its
 stretch, across cuts and speed-ups; a clip shown twice shows it twice.
@@ -153,7 +153,10 @@ it is yours and the next `suggest` keeps it (switching it on or off keeps the ta
 
 A motion scene or overlay is a web page in the project folder, usually `motion/<name>/index.html`
 with its own CSS, scripts, images and fonts next to it. Anything a browser draws works: HTML and
-CSS, SVG, a canvas, WebGL. Cuttle renders it frame by frame, the same in every render.
+CSS, SVG, a canvas, WebGL, Three.js and Lottie from the kit. Cuttle renders it frame by frame, the
+same in every render. [motion.md](motion.md) is the guide: the kit, the take as a page sees it
+(`cuttle.take`), and how to make it look designed. A project of motion scenes only needs no
+recording.
 
 - **Its clock is the video's.** `performance.now`, `Date`, `setTimeout`, `setInterval`,
   `requestAnimationFrame`, CSS animations and transitions and Web Animations all follow the frame

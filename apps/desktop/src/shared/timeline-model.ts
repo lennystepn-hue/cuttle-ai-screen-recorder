@@ -1,5 +1,5 @@
 // What the editor's timeline draws, in output seconds: pure, so it is tested without a window.
-import type { AutoKind, CuttleProject, InputEvent, Marker, MarkerKind } from '@cuttle/project';
+import { isFact, type AutoKind, type CuttleProject, type InputEvent, type Marker, type MarkerKind } from '@cuttle/project';
 import { occurrences, type SceneSpan } from '@cuttle/timeline';
 import { formatDuration } from './format';
 
@@ -290,7 +290,7 @@ export function activityColumns(events: readonly InputEvent[], spans: readonly S
   const width = (to - from) / columns;
   if (!(width > 0)) return counts;
   for (const event of events) {
-    if (event.type === 'shape' || event.type === 'caret') continue;
+    if (isFact(event)) continue;
     const weight = event.type === 'move' ? 0.25 : event.type === 'keys' ? event.count : 1;
     for (const t of outputTimesOf(spans, event.t)) {
       const column = Math.floor((t - from) / width);

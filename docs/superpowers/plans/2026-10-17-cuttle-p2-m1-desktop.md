@@ -6469,6 +6469,17 @@ editor during its export, closes and reshows the pill, and fails on any unhandle
 main process. Playback asserts frames per second of the clock instead of a count. Unit tests cover
 the lock, the pre-export checks, lane rows, pin names and the `%2F` cases.
 
-After the fixes: the desktop unit tests (28 passed, 12 skipped outside their modes), `tsc` for the app,
+A third review checked the fixes and found: a lock file that does not parse (a power cut during
+its write leaves it empty) still blocked the project; it is now stale like any lock from this
+computer. Dragging the playhead near an edge of the view scrolled the content under the pointer and
+ran away; the view now follows playback and seeks by key, not the pointer. Focus fell out of the
+export sheet when its view changed; it moves back in, Tab cycles inside from wherever it fell, and
+closing returns it to the Export button when the button that opened the sheet is gone. A click on
+the ruler no longer clears the selection, an empty file is no longer called missing, the peaks run
+before a proxy's long encode, and a window that fails to load is closed and its lock released. Two
+checks proved less than they said: the scene drag starts from 0 now, and the close-during-export
+check waits longer than a whole export before it looks into `out/`.
+
+After the fixes: the desktop unit tests (29 passed, 12 skipped outside their modes), `tsc` for the app,
 `pnpm app:check` (10 passed) and `pnpm app:build` (2 passed) pass. Nothing outside `apps/desktop` and
 the README changed.

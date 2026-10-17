@@ -21,10 +21,10 @@ import {
   WarningIcon,
   ZoomIcon,
 } from '../icons';
-import { captionCommand, captionPositionsAt, chooseTool, cycleSpeed, freeCaptionPosition, deleteSelection, duplicateSelection, overlayBlocked, reveal, split, type CaptionPosition } from './actions';
+import { captionCommand, captionPositionsAt, chooseTool, cycleSpeed, freeCaptionPosition, deleteSelection, duplicateSelection, overlayBlocked, reveal, showRawTake, split, type CaptionPosition } from './actions';
 import { CommandMenu, closeMenu, openMenu } from './CommandMenu';
 import { cancelGesture } from './gesture';
-import { dismissDraft, dismissToast, edit, preview, redo, retrySave, undo, useDraft } from './doc';
+import { dismissDraft, dismissRestart, dismissToast, edit, preview, redo, retrySave, undo, useDraft } from './doc';
 import { ExportSheet } from './ExportSheet';
 import { Inspector } from './Inspector';
 import { SourceView } from './SourceView';
@@ -138,7 +138,7 @@ function TitleBar() {
               <ChevronIcon size={13} />
             </button>
           </div>
-          <button className="primary" onClick={openExport} title="Export (Ctrl+E)">
+          <button className="primary" onClick={openExport} disabled={(store.get().doc?.project.scenes.length ?? 0) === 0} title={(store.get().doc?.project.scenes.length ?? 0) === 0 ? 'Nothing to export yet: the project has no scenes' : 'Export (Ctrl+E)'}>
             <ExportIcon size={14} />
             Export
           </button>
@@ -394,8 +394,12 @@ function Stage({ canvas }: { canvas: React.RefObject<HTMLCanvasElement | null> }
       <div className="viewport" ref={viewport}>
         <VideoFrame canvas={canvas} size={size} output={output} />
         <SourceView />
+        {project && project.scenes.length === 0 && !issues && <EmptyStage />}
       </div>
-      <DraftNote />
+      <div className="top-notes">
+        <DraftNote />
+        <RestartNote />
+      </div>
       <ToastNote />
       <Transport />
     </main>
@@ -596,6 +600,52 @@ function DraftNote() {
   );
 }
 
+/** A project without scenes (all deleted, or a cuttle.json written so): what to do, over the empty frame. */
+function EmptyStage() {
+  const cutting = useStore(store, (state) => state.status?.state === 'working');
+  return (
+    <div className="empty-stage" data-testid="empty-stage">
+      <div>
+        <h2>Nothing in the video yet</h2>
+        <p>The take is there, but no scene shows it. Let Cuttle cut it, or start from the whole take.</p>
+        <div className="empty-actions">
+          <button className="primary" onClick={() => void bridge.invoke('project:cut')} disabled={cutting}>
+            {cutting ? 'Cutting…' : 'Let Cuttle cut it'}
+          </button>
+          <button className="ghost" onClick={showRawTake}>
+            Show the whole take
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** After a restart: the take before it is put aside, and can be the take again. */
+function RestartNote() {
+  const discarded = useStore(store, (state) => state.doc?.restartNote);
+  if (!discarded) return null;
+  return (
+    <div className="draft-note restart" role="status" data-testid="restart-note">
+      <span>Restarted. The take before it is put aside.</span>
+      <button
+        className="toast-undo"
+        onClick={() => {
+          void bridge.invoke('project:undo-restart', discarded);
+          dismissRestart();
+        }}
+        title="Use the take from before the restart again (this one stays in the takes menu)"
+        data-testid="undo-restart"
+      >
+        Undo restart
+      </button>
+      <button className="toast-close" onClick={dismissRestart} aria-label="Keep this take" title={`Keep this take (the one before stays in ${discarded})`}>
+        <CloseIcon size={11} />
+      </button>
+    </div>
+  );
+}
+
 /** What just happened (an outside change, a cut by suggest, an edit that was not possible), with Undo where it applies. */
 function ToastNote() {
   const toast = useStore(store, (state) => state.doc?.toast);
@@ -637,7 +687,7 @@ function Transport() {
   const duration = currentPlayer()?.duration ?? 0;
   return (
     <div className="transport">
-      <button className="play" onClick={() => currentPlayer()?.toggle()} aria-label={playing ? 'Pause (Space)' : 'Play (Space)'} title={playing ? 'Pause (Space)' : 'Play (Space)'}>
+      <button className="play" onClick={() => currentPlayer()?.toggle()} disabled={duration <= 0} aria-label={playing ? 'Pause (Space)' : 'Play (Space)'} title={playing ? 'Pause (Space)' : 'Play (Space)'}>
         {playing ? <PauseIcon size={14} /> : <PlayIcon size={14} />}
       </button>
       <span className="time tabular" data-testid="time">
@@ -677,6 +727,11 @@ function useShortcuts(): void {
         return;
       }
       if (menuOpen || target?.closest('input, select, textarea, [contenteditable]:not([contenteditable="false"])')) return;
+      if (command && key === ',') {
+        event.preventDefault();
+        if (!event.repeat) void bridge.invoke('app:settings');
+        return;
+      }
       if (command && key === 'e') {
         event.preventDefault();
         if (!event.repeat) openExport();

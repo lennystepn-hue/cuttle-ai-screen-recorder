@@ -1,5 +1,6 @@
 // Everything the editor can do by name, with its keys: the command menu (Ctrl+K) lists these, and
 // the keyboard runs them. Keys are written as the menu shows them.
+import { bridge } from '../bridge';
 import { addCard, addMask, addPage, addZoom, cycleSpeed, deleteSelection, duplicateSelection, overlayBlocked, selectedOrCurrentClip, setSpeed, showRawTake, split } from './actions';
 import { redo, undo } from './doc';
 import { currentPlayer, openExport, select, setTool, store } from './session';
@@ -55,5 +56,6 @@ export function editorCommands(): EditorCommand[] {
     { id: 'deselect', name: 'Clear the selection', keys: 'Esc', group: 'View', run: () => select(undefined) },
     { id: 'look', name: 'Show the look (background, frame, cursor…)', group: 'View', run: () => store.set({ tab: 'look' }) },
     { id: 'export', name: 'Export…', keys: 'Ctrl+E', group: 'Project', run: openExport },
+    { id: 'settings', name: 'Settings…', keywords: 'preferences ffmpeg countdown camera microphone motion', keys: 'Ctrl+,', group: 'Project', run: () => void bridge.invoke('app:settings') },
   ];
 }

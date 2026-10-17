@@ -1228,12 +1228,62 @@ button.chip-status:hover {
 }
 
 /* a version a conflict set aside: offered back until answered */
-.draft-note {
+/* an empty lane says how to fill it; a missing track says so (never in the way of a click) */
+.lane-hint {
+  position: absolute;
+  transform: translateY(-50%);
+  color: var(--faint);
+  font-size: var(--size-xs);
+  white-space: nowrap;
+  pointer-events: none;
+}
+/* a project without scenes: what to do, over the empty frame */
+.empty-stage {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  text-align: center;
+  z-index: 2;
+}
+.empty-stage > div {
+  max-width: 420px;
+  padding: 0 24px;
+}
+.empty-stage h2 {
+  margin: 0 0 6px;
+  font-size: var(--size-l);
+  font-weight: 600;
+}
+.empty-stage p {
+  margin: 0;
+  color: var(--muted);
+}
+.empty-actions {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 18px;
+}
+
+/* the notes that wait for an answer ("Use mine", "Undo restart"), over the top of the video */
+.top-notes {
   position: absolute;
   top: 12px;
   left: 50%;
   transform: translateX(-50%);
+  width: max-content;
   max-width: min(720px, calc(100% - 48px));
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  z-index: 4;
+  pointer-events: none;
+}
+.draft-note {
+  pointer-events: auto;
+  max-width: 100%;
   min-height: 36px;
   padding: 4px 6px 4px 14px;
   border-radius: 10px;
@@ -1249,6 +1299,12 @@ button.chip-status:hover {
 }
 .draft-note > svg {
   color: var(--card);
+}
+/* a choice, not a warning */
+.draft-note.restart {
+  background: var(--overlay);
+  box-shadow: var(--shadow-float);
+  backdrop-filter: blur(16px);
 }
 .draft-note span {
   min-width: 0;

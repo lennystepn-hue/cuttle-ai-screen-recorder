@@ -12,7 +12,7 @@ export type CoreErrorCode =
   | 'download'
   /** ffmpeg has no `whisper` filter (before 8.0, or a build without it). */
   | 'ffmpeg-old'
-  /** The screen's text cannot be read here (not Windows, PowerShell refused, no OCR language). */
+  /** The screen's text cannot be read here (neither Windows nor macOS, PowerShell refused, no OCR language, no cuttle-capture). */
   | 'ocr-missing'
   | 'cancelled';
 

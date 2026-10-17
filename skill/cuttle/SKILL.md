@@ -151,8 +151,8 @@ stills in `preview/`; add `-o "<folder>"` to keep a set.
 Then refine `cuttle.json` ([project.md](project.md)) and preview again:
 
 - **Privacy first.** `suggest` masks each notification (a toast, the notification centre) while it
-  was open (`auto: "notification"`). On Windows it also reads the screen's text (Windows' own OCR,
-  on this computer) and masks what it finds: email addresses, keys and tokens, the value of a `…KEY=`,
+  was open (`auto: "notification"`). It also reads the screen's text (Windows' own OCR or macOS's
+  Vision, on this computer) and masks what it finds: email addresses, keys and tokens, the value of a `…KEY=`,
   `…TOKEN=` or `password:` line, IBANs, card and phone numbers (masks tagged `auto: "privacy"`,
   following text that scrolls). Pass the user's name and address once with
   `--mask "<word>"` (kept in cuttle.json). This is a help, not a guarantee: the OCR misses small

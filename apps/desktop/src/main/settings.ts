@@ -36,7 +36,7 @@ const SettingsSchema = z.object({
     })
     .catch({ model: 'small' as const, language: 'auto' as const })
     .default({ model: 'small' as const, language: 'auto' as const }),
-  /** The privacy step after a take's cut: read the screen's text (Windows' OCR) to mask what it showed, and the words always masked. */
+  /** The privacy step after a take's cut: read the screen's text (Windows' OCR, macOS's Vision) to mask what it showed, and the words always masked. */
   privacy: z
     .object({
       read: z.boolean().catch(true).default(true),

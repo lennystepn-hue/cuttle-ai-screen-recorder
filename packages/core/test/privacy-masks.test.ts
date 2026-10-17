@@ -37,6 +37,14 @@ describe('privacyMasks', () => {
     expect(privacyMasks([frame(1, email), frame(7), frame(7.5)], [], screen).map((mask) => [mask.from, mask.to])).toEqual([[0.5, 7]]);
   });
 
+  it('holds still text whose box the OCR drew a little larger in one frame (Vision): one place, grown to hold both', () => {
+    const still = line('lena@example.com', 100, 200);
+    // read 8 px higher and 10 px taller once, as Vision's boxes jitter around text that stays
+    const taller: ScreenTextLine = { ...still, words: still.words.map((word) => ({ ...word, rect: [word.rect[0], word.rect[1] - 8, word.rect[2], word.rect[3] + 10] })) };
+    const frames = [frame(1, still), frame(1.5, taller), frame(2, still), frame(2.5), frame(3), frame(4)];
+    expect(privacyMasks(frames, [], screen)).toEqual([{ from: 0.5, to: 2.5, rect: [94, 186, 172, 42], kind: 'email', label: 'Email address' }]);
+  });
+
   it('follows text that scrolls: where it was last seen before it moved, then each place it went', () => {
     const key = (y: number) => line('ghp_1234567890abcdefghijklmnop', 100, y);
     const frames = [frame(1, key(300)), frame(1.5, key(300)), frame(2, key(250)), frame(2.5, key(200)), frame(3), frame(3.5)];

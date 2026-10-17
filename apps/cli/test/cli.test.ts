@@ -728,7 +728,7 @@ const pngSize = (file: string) => {
   return [bytes.readUInt32BE(16), bytes.readUInt32BE(20)];
 };
 
-describe.runIf(process.platform === 'win32')('cuttle suggest reads the screen (Windows OCR)', () => {
+describe.runIf(process.platform === 'win32' || process.platform === 'darwin')('cuttle suggest reads the screen (the system OCR)', () => {
   it('masks what the screen shows that is private, follows text that scrolls, and keeps the words asked for', async () => {
     const off = process.env.CUTTLE_OCR;
     delete process.env.CUTTLE_OCR;
@@ -738,8 +738,9 @@ describe.runIf(process.platform === 'win32')('cuttle suggest reads the screen (W
       // a 1280×720 screen: an email address, a shell line with a token that scrolls up 30 px a
       // second, and a name (Windows OCR drops a line that is one long NAME_WITH_UNDERSCORES=value
       // word in a large font; with a word before it, it reads it)
-      // the drive's colon escaped for the option and again for the graph
-      const text = (value: string, x: number, y: string) => `drawtext=fontfile=C\\\\:/Windows/Fonts/consola.ttf:fontsize=28:fontcolor=white:x=${x}:y=${y}:text='${value}'`;
+      // a monospaced font of the system's (on Windows the drive's colon escaped for the option and again for the graph)
+      const font = process.platform === 'win32' ? 'C\\\\:/Windows/Fonts/consola.ttf' : '/System/Library/Fonts/Menlo.ttc';
+      const text = (value: string, x: number, y: string) => `drawtext=fontfile=${font}:fontsize=28:fontcolor=white:x=${x}:y=${y}:text='${value}'`;
       const graph = ['color=c=0x1e1e1e:s=1280x720:r=30:d=8', text('Signed in as lena.mueller@example.com', 80, '80'), text('export GITHUB_TOKEN=ghp_1234567890abcdefghijklmnop', 80, '420-t*30'), text('Thanks, Lena Müller', 80, '640')].join(',');
       const made = spawnSync('ffmpeg', ['-hide_banner', '-v', 'error', '-f', 'lavfi', '-i', graph, '-c:v', 'libx264', '-preset', 'ultrafast', '-g', '30', '-pix_fmt', 'yuv420p', '-y', join(dir, 'takes', '1', 'screen.mp4')]);
       expect(made.status, String(made.stderr)).toBe(0);

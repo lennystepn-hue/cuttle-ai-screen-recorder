@@ -8,8 +8,14 @@ export const MASK_RULES = {
   margin: 0.5,
   /** Room around the text (px). */
   pad: 6,
-  /** A secret moved when an edge of its rect moved more than this (px). */
+  /** A secret moved when an edge of its rect moved more than this (px)… */
   moved: 4,
+  /**
+   * …unless the rect still overlaps where it was this much (intersection over union): that is the
+   * OCR's box around still text drawn a little larger or smaller (Vision's do), and the mask grows
+   * to hold both. Text that scrolls has moved on further between two frames read.
+   */
+  jitter: 0.6,
   /**
    * It was gone when this many frames read in a row lacked it, over at least `gone` seconds: the
    * OCR misses a line now and then (a token that scrolls was read in one frame of four).
@@ -31,6 +37,13 @@ interface Sighting {
   t: number;
   rect: Rect;
 }
+
+/** The rect that holds both. */
+const union = (a: Rect, b: Rect): Rect => {
+  const left = Math.min(a[0], b[0]);
+  const top = Math.min(a[1], b[1]);
+  return [left, top, Math.max(a[0] + a[2], b[0] + b[2]) - left, Math.max(a[1] + a[3], b[1] + b[3]) - top];
+};
 
 const overlap = (a: Rect, b: Rect) => {
   const w = Math.min(a[0] + a[2], b[0] + b[2]) - Math.max(a[0], b[0]);
@@ -89,17 +102,26 @@ export function privacyMasks(frames: readonly ScreenTextFrame[], words: readonly
     .map((group): PrivacyMask => {
       const [first, ...rest] = group.sightings as [Sighting, ...Sighting[]];
       const from = round(Math.max(0, first.t - rules.margin));
-      const moves: ZoomMove[] = [];
+      const moves: { at: number; rect: Rect }[] = [];
+      // where the mask is now (its rect, or its last move's), unpadded: a jittering box grows it
+      let base = first.rect;
+      let shown = first.rect;
       let previous = first;
       for (const sighting of rest) {
-        if (moved(previous.rect, sighting.rect)) {
+        if (moved(previous.rect, sighting.rect) && overlap(previous.rect, sighting.rect) >= rules.jitter) {
+          shown = union(shown, sighting.rect);
+          if (moves.length > 0) moves.at(-1)!.rect = shown;
+          else base = shown;
+        } else if (moved(previous.rect, sighting.rect)) {
           // where it was last seen before it moved, then where it went: between the two it covers both
-          if (moves.at(-1)?.at !== previous.t && previous !== first) moves.push({ at: round(previous.t), rect: pad(previous.rect) });
-          moves.push({ at: round(sighting.t), rect: pad(sighting.rect) });
+          if (moves.at(-1)?.at !== previous.t && previous !== first) moves.push({ at: round(previous.t), rect: previous.rect });
+          moves.push({ at: round(sighting.t), rect: sighting.rect });
+          shown = sighting.rect;
         }
         previous = sighting;
       }
-      return { from, to: round(until(previous.t)), rect: pad(first.rect), ...(moves.length > 0 && { moves }), kind: group.kind, label: SECRET_LABELS[group.kind] };
+      const path: ZoomMove[] = moves.map((move) => ({ at: move.at, rect: pad(move.rect) }));
+      return { from, to: round(until(previous.t)), rect: pad(base), ...(path.length > 0 && { moves: path }), kind: group.kind, label: SECRET_LABELS[group.kind] };
     })
     .sort((a, b) => a.from - b.from);
   return joinCovering(masks);

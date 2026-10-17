@@ -79,7 +79,7 @@ there are not two cursors.
 
 | Type | Fields |
 |---|---|
-| `clip` | `from`, `to` (source seconds, `to` > `from`), `speed` (`1`, up to 64; above 1 a badge like "12× speed" shows), `badge` (custom badge text, `""` for none) |
+| `clip` | `from`, `to` (source seconds, `to` > `from`), `speed` (`1`, up to 64; above 1 a badge like "12× speed" shows), `badge` (custom badge text, `""` for none), `crop` (`{ "rect": [x, y, w, h], "enabled": true }`: the part of the screen the clip shows, e.g. a browser's page without its tabs; the window takes its shape and zooms stay inside it) |
 | `still` | `image` (a path, e.g. from `cuttle capture-page`), `duration` (output seconds), `motion` (`none`, `kenburns`, `scroll`: top to bottom of a tall image), `frame` (`none`, `mac-dark`, `mac-light`, `browser-light`) |
 | `card` | `title`, `subtitle` (optional), `duration` (output seconds): a title or end card on the background |
 
@@ -98,10 +98,23 @@ page).
 `position` (`top`, `center`, `bottom`) and `enabled` (`true`). A `top` text sits over the window's
 title bar; `bottom` keeps the title visible. Texts fade in and out over 0.25 output seconds.
 
-Every scene, zoom, mask and text may have an `id` (1 to 64 letters, digits, `-` or `_`, unique in
-the whole project) and a `label` (a name for people, shown in the Cuttle app). `suggest` sets both
-on what it makes (`s1`, `z1`; "Prompt", "Claude at work", "Waiting", "Answer"). Keep them when
-you edit an item; give a new item an id no other item uses (`s7`, `m2`) and a short label.
+`cuts` take a stretch out of whatever clip covers it, without splitting the clip: `from` and `to`
+(source seconds) and `enabled` (`true`). The video jumps there (no crossfade); zooms, masks and
+texts run on across it. Use them for a slip, a filler or a pause inside a clip.
+
+Every scene, zoom, mask, text and cut may have an `id` (1 to 64 letters, digits, `-` or `_`,
+unique in the whole project) and a `label` (a name for people, shown in the Cuttle app). `suggest`
+sets both on what it makes (`s1`, `z1`; "Prompt", "Claude at work", "Waiting", "Answer"). Keep
+them when you edit an item; give a new item an id no other item uses (`s7`, `m2`, `c3`) and a
+short label.
+
+**Automatic items.** Cuttle tags what it makes on its own with `auto` (on a zoom, mask, cut or a
+clip's `crop`): `answer` and `click` zooms from `suggest`, and later `crop`, `privacy`,
+`notification`, `retake`, `filler`, `pause`, `length`, `typing` and `dialog`. A rerun replaces
+only tagged items. **When you change a tagged item's time, place or size, remove its `auto`**: then
+it is yours and the next `suggest` keeps it (switching it on or off keeps the tag). `autoEdits`
+(`clickZooms`, `answerZoom`, `crop`, `privacy`, `retakes`, `fillers`, `pauses`, `typingZooms`,
+`dialogZooms`: all `true`) holds which kinds are made at all; one set to `false` is not made again.
 
 ## Finding source seconds and rects
 

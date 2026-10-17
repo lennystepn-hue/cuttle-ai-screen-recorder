@@ -249,6 +249,7 @@ export function pinGroupName(group: PinGroup): string {
   if (group.kind === 'prompt') return 'Prompt';
   if (group.kind === 'answer') return 'Answer';
   if (group.kind === 'manual') return first.label ?? 'Marker';
+  if (group.kind === 'retake') return 'Retake';
   if (group.pins.length === 1) return first.label ?? 'Tool';
   const tools = new Set(group.pins.map((pin) => pin.label ?? 'Tool'));
   return tools.size === 1 ? `${first.label ?? 'Tool'} ×${group.pins.length}` : `${group.pins.length} tool calls`;

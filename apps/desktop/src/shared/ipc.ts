@@ -96,6 +96,8 @@ export interface HudState {
   /** Seconds recorded before it (the take's time stands still while paused). */
   recorded?: number;
   markers: number;
+  /** How often the mistake key was pressed (its markers are not counted in `markers`). */
+  retakes?: number;
   /** A warning in a few words ("Mic is silent: muted?"), or "Stopping…". */
   message?: string;
   /** The whole warning, for the tooltip. */
@@ -222,6 +224,8 @@ export const REQUESTS = {
   // HUD
   'hud:stop': z.undefined(),
   'hud:marker': z.undefined(),
+  /** The mistake key: Cuttle cuts back to the pause before it. */
+  'hud:retake': z.undefined(),
   'hud:pause': z.undefined(),
   'hud:resume': z.undefined(),
   /** Puts the take aside and records again with the same settings (the HUD asks for a press held 600 ms). */
@@ -316,6 +320,7 @@ export interface Responses {
   'picker:retry': void;
   'hud:stop': void;
   'hud:marker': void;
+  'hud:retake': void;
   'hud:pause': void;
   'hud:resume': void;
   'hud:restart': void;

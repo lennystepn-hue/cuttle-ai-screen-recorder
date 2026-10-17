@@ -20,7 +20,7 @@ import { transcribeProject } from './speech';
 import { editorWindowOf, expectSuggest, guard, hidePill, reopenEditor, sendToEditor, setEditorStatus, showPill, webPreferences } from './windows';
 
 /** The HUD's window (the HUD and a margin for its shadow): never in the video, and a dead zone for the input log. */
-const HUD_SIZE = { width: 440, height: 64 };
+const HUD_SIZE = { width: 480, height: 64 };
 /** The recorder host answers a listing in this time, or the picker says it cannot record. */
 const LISTING_TIMEOUT_MS = 10_000;
 
@@ -517,6 +517,7 @@ async function record(target: PickedTarget, display: PickerDisplay, displays: Pi
           recorderHost.stop();
         },
         'hud:marker': () => recorderHost.marker(),
+        'hud:retake': () => recorderHost.retake(),
         'hud:pause': () => recorderHost.pause(),
         'hud:resume': () => recorderHost.resume(),
         'hud:restart': () => {
@@ -610,7 +611,9 @@ async function record(target: PickedTarget, display: PickerDisplay, displays: Pi
             showHud();
             return;
           case 'marker':
-            hudState.markers++;
+            // the mistake key's marker is a retake, not one of the person's markers
+            if (event.marker.kind === 'retake') hudState.retakes = (hudState.retakes ?? 0) + 1;
+            else hudState.markers++;
             showHud();
             return;
           case 'warning': {

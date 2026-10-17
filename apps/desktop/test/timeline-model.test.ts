@@ -118,6 +118,8 @@ describe('outputTimesOf and groupPins', () => {
     const [same] = groupPins([tool(1, 'Bash'), tool(1.1, 'Bash')], 1);
     const [mixed] = groupPins([tool(1, 'Read'), tool(1.1, 'Bash'), tool(1.2, 'Read')], 1);
     expect([pinGroupName(same!), pinGroupName(mixed!)]).toEqual(['Bash ×2', '3 tool calls']);
+    const [slip] = groupPins([{ t: 2, source: 2, kind: 'retake' }], 1);
+    expect(pinGroupName(slip!)).toBe('Retake');
     expect(pinGroupDetail(mixed!)).toBe('Read 2 · Bash 1');
   });
 

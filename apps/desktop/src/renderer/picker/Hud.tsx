@@ -1,4 +1,5 @@
-// The recording HUD: the time, a warning when there is one, restart, a marker, pause and Stop. It
+// The recording HUD: the time, a warning when there is one, restart, the mistake key, a marker,
+// pause and Stop. It
 // is never in the video (content protection), never takes the focus (the recorded window keeps it),
 // and its area is a dead zone for the input log. Its width is fixed, so Stop never moves under the
 // pointer. Restart asks for a press held 600 ms, so a stray click does not put a take aside.
@@ -30,6 +31,8 @@ export function Hud() {
           setFlash(true);
           setTimeout(() => setFlash(false), 900);
         }
+        // the mistake key: what Cuttle will do with it, for a moment
+        if ((next.retakes ?? 0) > (previous.retakes ?? 0)) showHint('Slip marked: do it again');
         return next;
       });
     });
@@ -64,6 +67,20 @@ export function Hud() {
         </span>
         <span className="sep" />
         <RestartButton disabled={!live} onShortPress={() => showHint('Hold to restart')} />
+        <button
+          className="retake"
+          onClick={() => void bridge.invoke('hud:retake')}
+          title="A slip? Press it, then say or do the bit again: Cuttle cuts back to the pause before (Ctrl+Shift+Alt+X)"
+          aria-label="Mark a slip: cut back to the pause before"
+          disabled={state.phase !== 'recording'}
+          data-testid="hud-retake"
+        >
+          <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" aria-hidden="true">
+            <circle cx="4.5" cy="4.5" r="2" />
+            <circle cx="4.5" cy="11.5" r="2" />
+            <path d="M6.2 5.6 13.5 12.5M6.2 10.4 13.5 3.5" />
+          </svg>
+        </button>
         <button
           className={`marker${flash ? ' flash' : ''}`}
           onClick={() => void bridge.invoke('hud:marker')}

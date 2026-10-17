@@ -1,9 +1,10 @@
-import type { CuttleProject, Mask, Rect } from '@cuttle/project';
+import type { CuttleProject, Ease, Mask, Rect } from '@cuttle/project';
 import { cursorAt, type CursorFrame, type CursorTrack } from './cursor';
 import { clamp } from './easing';
-import { activeMasks, activeTexts, badgeFor, type ActiveText } from './overlays';
-import { sceneSpans, sourceTimeAt, spanAt, totalDuration, type SceneSpan } from './time';
-import { zoomRectAt } from './zoom';
+import { occurrences, rampAmount, type Occurrence } from './occurrences';
+import { TEXT_FADE_SECONDS, activeMasks, activeTexts, badgeFor, type ActiveText } from './overlays';
+import { isContinuousCut, sceneSpans, sourceTimeAt, spanAt, totalDuration, type SceneSpan } from './time';
+import { ZOOM_RAMP_SECONDS, zoomRectAt } from './zoom';
 
 export interface SceneFrame {
   index: number;
@@ -47,7 +48,13 @@ export function createTimeline(project: CuttleProject, opts: TimelineOptions): T
   const transition = project.look.transition;
   const maxHalf = transition.enabled ? transition.duration / 2 : 0;
 
+  // Where each zoom and text shows in output time, per span: their ramps run in output seconds.
+  const zoomShown = new Map(project.zooms.map((zoom) => [zoom, occurrences(spans, zoom.at, zoom.at + zoom.duration)]));
+  const textShown = new Map(project.texts.map((text) => [text, occurrences(spans, text.at, text.at + text.duration)]));
+
+  /** Half the crossfade between two spans; a continuous cut has none. */
   function halfBetween(a: SceneSpan, b: SceneSpan): number {
+    if (isContinuousCut(a.scene, b.scene)) return 0;
     return Math.min(maxHalf, (a.end - a.start) / 2, (b.end - b.start) / 2);
   }
 
@@ -79,13 +86,19 @@ export function createTimeline(project: CuttleProject, opts: TimelineOptions): T
     const sourceTime = sourceTimeAt(scene, sourceLocal);
     let cursor = project.look.cursor.enabled && opts.cursor ? cursorAt(opts.cursor, sourceTime, scene.speed) : undefined;
     if (cursor && project.look.cursor.clickEffect === 'none') cursor = { ...cursor, clicks: [] };
+    // The output time this source frame belongs to (a held or frozen frame's, during a crossfade).
+    const shownAt = span.start + (sourceTime - scene.from) / scene.speed;
+    const amount = (shown: (Occurrence | undefined)[] | undefined, ramp: number, curve: Ease): number => {
+      const occurrence = shown?.[span.index];
+      return occurrence ? rampAmount(occurrence, shownAt, ramp, curve) : 1;
+    };
     return {
       ...base,
       kind: 'clip',
       sourceTime,
-      zoom: zoomRectAt(project.zooms, sourceTime, scene.speed, full),
+      zoom: zoomRectAt(project.zooms, sourceTime, (zoom) => amount(zoomShown.get(zoom), ZOOM_RAMP_SECONDS, zoom.ease), full),
       masks: activeMasks(project.masks, sourceTime),
-      texts: activeTexts(project.texts, sourceTime, scene.speed),
+      texts: activeTexts(project.texts, sourceTime, (text) => amount(textShown.get(text), TEXT_FADE_SECONDS, 'linear')),
       badge: badgeFor(scene),
       cursor,
     };

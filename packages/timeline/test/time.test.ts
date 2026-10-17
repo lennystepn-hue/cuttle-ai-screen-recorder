@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { ClipScene, Scene } from '@cuttle/project';
-import { sceneDuration, sceneSpans, sourceTimeAt, spanAt, totalDuration } from '../src/time';
+import { isContinuousCut, sceneDuration, sceneSpans, sourceTimeAt, spanAt, totalDuration } from '../src/time';
 
 const clip = (from: number, to: number, speed = 1): ClipScene => ({ type: 'clip', from, to, speed });
 const scenes: Scene[] = [clip(10, 20), clip(20, 140, 12), { type: 'card', title: 'End', duration: 2 }];
@@ -63,5 +63,15 @@ describe('sourceTimeAt', () => {
     // 0 + (0.7 / 0.3) * 0.3 rounds up to 0.7000000000000001 without the clamp.
     const slow = clip(0, 0.7, 0.3);
     expect(sourceTimeAt(slow, sceneDuration(slow))).toBe(0.7);
+  });
+});
+
+describe('isContinuousCut', () => {
+  it('is a cut between clips where the first ends where the second begins, within 1 ms', () => {
+    expect(isContinuousCut(clip(10, 20), clip(20, 140, 12))).toBe(true);
+    expect(isContinuousCut(clip(10, 20.0004), clip(20, 30))).toBe(true);
+    expect(isContinuousCut(clip(10, 20), clip(20.002, 30))).toBe(false);
+    expect(isContinuousCut(clip(10, 20), clip(0, 10))).toBe(false);
+    expect(isContinuousCut(clip(10, 20), { type: 'card', title: 'End', duration: 2 })).toBe(false);
   });
 });

@@ -46,7 +46,7 @@ recorder tests also need ffprobe. Recording works on Windows so far; the recorde
 ```bash
 pnpm app                                 # build and start the app (the pill near the top of the screen, an icon in the tray)
 pnpm app -- --open <project folder>      # … and open a project in the editor
-pnpm app:check                           # end to end with its windows hidden: open, play, scrub, select, compare with the export, play the proxy, export
+pnpm app:check                           # end to end with its windows hidden: open, play, scrub, select, compare with the export, play the proxy, export, record
 pnpm app:build                           # an unpacked app in apps/desktop/build/Cuttle-<platform>-<arch>/, checked that it starts
 ```
 
@@ -54,7 +54,14 @@ The editor shows exactly what the export renders: the same engine and timeline, 
 pixel by `app:check`. It plays a 720p proxy of the take (made in the background into the project's
 `.cuttle/` folder, with the thumbnails and the mic's waveform); the export always uses the take.
 Editing arrives in a later milestone; in this version the timeline and inspector show the project.
-Recording from the app comes next; until then, record with `cuttle record`.
+
+**Recording.** "New recording" on the pill, in the tray, or Ctrl+Shift+Alt+R shows a picker over every
+display: the window under the pointer lights up (the display where there is none), a drag draws a
+region, and the bar sets the camera, the mic and when to stop (your stop, Claude's answer, an idle
+screen). After the countdown only a small HUD remains, which never appears in the video;
+Ctrl+Shift+Alt+S stops and Ctrl+Shift+Alt+M sets a marker. The editor opens on the take at once
+while `suggest` cuts it in the background. "Record again" adds a take to the project; the earlier
+one stays restorable ("Back to take 1"). New projects go into `~/Cuttle/<date time>`.
 
 ## The CLI
 

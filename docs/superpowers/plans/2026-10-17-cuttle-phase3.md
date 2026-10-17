@@ -1926,3 +1926,111 @@ These need a person and a real screen.
 2. Play it: the cursor glides, and every click's ripple is exactly at the cursor's tip. In the Look tab, set Movement to "As recorded" and back: the editor follows at once.
 3. In the Look tab, pick frame and cursor styles from their pictures; the video shows what the picture showed.
 4. Drag a scene along the timeline: a ghost follows the pointer, and the scene lands at the insert mark.
+
+## Changes during execution
+
+The code blocks above are the original plan. Its tasks were replayed mechanically on a fresh clone,
+byte-identical to the prototype, and those commits were pushed. Two reviews followed:
+
+- The code review probed the smoothing and the click zooms in node, with long and adversarial
+  pointer logs.
+- The experience review photographed every new state in hidden windows, at three widths. It used
+  the fixture and a 46 s take with a hand-like pointer path and 14 clicks, and drew long exposures
+  of the cursor's path.
+
+They found the problems below, and all are fixed in the commit after the plan's (one is left for later, below). The repo is the
+source of truth.
+
+**The smoothed cursor**
+
+- **A fast flick was smeared and a teleport glided.** A jump was a fixed distance within one
+  sample. A hand's flick reaches that distance too, so it was cut into a jump. A program's
+  teleport a tenth of a second after a slow move was smoothed into a glide.
+  - A step is now a jump when it is at least 200 px long and four times faster than the steps on
+    either side (`isJump`). A flick speeds up and slows down; a jump comes out of nowhere.
+  - Between two anchors next to each other, the cursor holds still until the next sample, then is
+    there.
+- **A long stretch without a rest overflowed the stack** (`push(...stretch)`). The points are now
+  pushed one by one; a twenty-minute move is tested.
+- **The smoothing borrowed across hand-made cuts.** The frame before a cut drifted toward where the
+  hand was after it. `frame.ts` passes the clip edges that are not continuous. The path is pinned
+  there with a sample of the recorded path, so the two sides are smoothed apart.
+- **A click logged in the same millisecond as a move** was sorted after it, so the cursor missed
+  the click. Clicks now sort after the moves of their moment.
+- The smoothed paths were kept for every smoothing ever tried. Now the last four are kept.
+
+**Zooms on clicks**
+
+- **The spacing was in source order and source seconds.** After scenes were moved, valid zooms were
+  dropped, and at 2× the lead, the tail and the 5 s rule were twice as short as people see them.
+  - `ClipSpan` carries the clip's output start (from `sceneSpans`, cards and pages counted).
+  - Every time is in output seconds, scaled by the clip's speed.
+  - The zooms are spaced in the order the video plays them.
+- **The 5 s rule ignored the answer zoom.** The zooms already there now count, in output time.
+- **A click under the answer zoom took its neighbours' zoom with it.** It clustered with them, and
+  the whole cluster was dropped for overlapping. Clicks under a zoom there are now left out before
+  clustering, and a click zoom ends where the next of those starts.
+- **Merges chained into one long zoom over two spots.** Two zooms merge only while their clicks
+  still fit one cluster's box.
+- **Auto-zoom threw away hand-adjusted zooms.** It replaced every zoom labelled Click/Clicks: one
+  that suggest made and the person or Claude then moved went back. It also reused ids.
+  - It never changes or removes a zoom any more; it adds the click zooms that fit around the zooms
+    there.
+  - It is named "Zoom on clicks: add zooms where you clicked" in the command menu.
+- **The toasts said too little, or misled.** "None at normal speed" showed for clicks that were at
+  normal speed, and the toast wrapped over the time readout at 1100 px. They now say why in one
+  line:
+  - "Added 2 zooms on clicks."
+  - "No zoom fits the 2 clicks left: sped up, or near a cut or a zoom."
+  - "Every click is under a zoom already."
+  - "There are no clicks in the video to zoom on."
+  - A broken cuttle.json says so, instead of nothing.
+- The CLI: the note says "1 zoom on clicks" (no "zoom(s)") and how many clicks got none, and the
+  summary says "1 clip". `--no-zoom`'s help says it drops both kinds.
+
+**The Look tab**
+
+- **The swatches never drew if the Look tab opened while the project was still opening.** The
+  effect ran once, before the engine's assets were there. It now waits for the editor to be ready.
+- **The pictures are drawn one by one and shown as they come.** While one is drawn, its tile shows
+  a quiet sweep (none with reduced motion). A failure is logged, the tile stays flat, the name
+  still picks the style, and the next ask tries again. The offscreen canvas's context is freed
+  once none is waiting, drawn or not.
+- **The frame pictures could not be told apart.** The corner crop left out the browser's address
+  field, and "None" looked like "Mac, dark".
+  - A frame is now drawn as a narrow window in a square output, and the picture is the band
+    across its whole title bar: bar colour, traffic lights, address field, or no bar.
+  - The four frames sit in two wider columns.
+  - "None" is named "No title bar".
+- **The cursor pictures:**
+  - System looked like White arrow. It now shows its arrow, hand and text beam side by side, and
+    its title says it changes shape like the real pointer.
+  - Spotlight was zoomed in so far that its dimming never showed. It is now drawn from further
+    away, over code.
+  - The art is about 60 % of the picture's height.
+  - The dot, ring and spotlight are drawn in the cursor's colour, and again when it settles on
+    another (the size stays the field's).
+- **The names sat over the pictures at 10 px.** They are now under them, at 11 px, muted, and in
+  full colour when selected.
+- **No focus ring and no hover on any swatch.** The swatch's shadow overrode `:focus-visible`.
+  Focus now shows as the usual ring with a gap, around the selection's ring when the swatch is
+  selected. A hover brightens the outline, on the background swatches too.
+- **Movement:** three steps instead of four (0.3, 0.5 and 0.8 looked the same): As recorded,
+  Smooth (default), Very smooth (1). The field's note says "the pointer glides; clicks stay exact"
+  instead of a tooltip.
+
+**The scene ghost**
+
+- **Its label ran into the clip's under it, and two identical orange boxes stood for one scene.**
+  - The block being moved is dimmed and dashed where it was.
+  - The ghost is opaque, lifted, and outlined in neutral white, with its name at the top in the
+    scenes' dark chip. The insert mark keeps the accent.
+  - The ghost's position comes from the pointer's place on the timeline, so it does not drift
+    while the timeline scrolls.
+- **At the timeline's ends the ghost slid under the lane names or grew a scrollbar.** It stays
+  between the ends, and the insert mark stays whole at either end.
+- Not done: scrolling the timeline when a dragged scene nears its edge. The timeline fits the
+  whole video by default; dragging far on a zoomed-in timeline needs a zoom-out first. Every drag
+  in the editor works this way, so it is one change for all of them, later.
+
+**Results:** `pnpm test` 515 passed, 44 skipped (62 files); `pnpm typecheck` clean; `pnpm app:check` 35/35 with every new state photographed and looked at (the frames, both rows of cursors, the ghost); `pnpm app:build` 4/4.

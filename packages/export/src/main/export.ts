@@ -8,7 +8,7 @@ import { app } from 'electron';
 import { INLINE_GRAPH_LIMIT, audioFilterGraph, muxArgs, planAudio } from '../audio';
 import { ExportError } from '../errors';
 import { withFormat, type ExportFormat } from '../formats';
-import { CHANNELS, type EncoderPreference, type ExportJob, type PageResult, type PageSuccess } from '../job';
+import { CHANNELS, type EncoderPreference, type ExportJob, type PageResult, type PageStillsSuccess, type PageSuccess } from '../job';
 import { checkFfmpeg, runFfmpeg } from './ffmpeg';
 import { FileHost } from './files';
 import { loadSources, samePath } from './sources';
@@ -55,14 +55,14 @@ const STALE_HOURS = 24;
 /** Prefix of an export's work folder in the system's temp folder. */
 const WORK_PREFIX = 'cuttle-export-';
 
-function defaultPageDir(): string {
+export function defaultPageDir(): string {
   return fileURLToPath(new URL('./export-page/', import.meta.url));
 }
 
-const cancelledError = (): ExportError => new ExportError('cancelled', 'the export was cancelled');
+export const cancelledError = (): ExportError => new ExportError('cancelled', 'the export was cancelled');
 
 /** A promise that rejects with `cancelled` when `signal` aborts; `dispose` removes the listener. */
-function whenCancelled(signal: AbortSignal | undefined): { promise: Promise<never>; dispose(): void } {
+export function whenCancelled(signal: AbortSignal | undefined): { promise: Promise<never>; dispose(): void } {
   if (!signal) return { promise: new Promise<never>(() => {}), dispose() {} };
   let onAbort = (): void => {};
   const promise = new Promise<never>((_, reject) => {
@@ -79,7 +79,7 @@ function whenCancelled(signal: AbortSignal | undefined): { promise: Promise<neve
  * error). Rendered frames and file reads and writes count: a long decode before a scene's first frame
  * keeps reading. A tick far later than its second means the computer slept, which is no stall.
  */
-function watchdog(): { progress(done: number): void; alive(): void; stalled: Promise<never>; stop(): void } {
+export function watchdog(): { progress(done: number): void; alive(): void; stalled: Promise<never>; stop(): void } {
   let last = performance.now();
   let tick = last;
   let frame = 0;
@@ -107,7 +107,7 @@ function watchdog(): { progress(done: number): void; alive(): void; stalled: Pro
   };
 }
 
-async function runPage(window: ExportWindow, ...failures: Promise<never>[]): Promise<PageSuccess> {
+export async function runPage<T extends PageSuccess | PageStillsSuccess>(window: ExportWindow, ...failures: Promise<never>[]): Promise<T> {
   let result: PageResult;
   try {
     result = await Promise.race([
@@ -120,7 +120,7 @@ async function runPage(window: ExportWindow, ...failures: Promise<never>[]): Pro
     throw new ExportError('render', error instanceof Error ? error.message : String(error), { cause: error });
   }
   if (!result.ok) throw new ExportError(result.code, result.message);
-  return result;
+  return result as T;
 }
 
 /** Refuses an output path that is one of the files the export reads: the rename would replace it. */
@@ -191,6 +191,7 @@ export async function exportProject(opts: ExportOptions): Promise<ExportResult> 
   await sweepStale(out);
   const project = withFormat(sources.project, opts.format);
   const job: ExportJob = {
+    kind: 'video',
     project,
     screen: sources.screen,
     webcam: sources.webcam,
@@ -236,7 +237,7 @@ export async function exportProject(opts: ExportOptions): Promise<ExportResult> 
       opts.onProgress?.(done, total);
     });
 
-    const page = await runPage(window, guard.stalled, cancel.promise);
+    const page = await runPage<PageSuccess>(window, guard.stalled, cancel.promise);
     guard.stop();
     // The window stays open until the end: closing an app's last window quits it by default.
     await host.close(); // flushes the video-only MP4 before ffmpeg reads it

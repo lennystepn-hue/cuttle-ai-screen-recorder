@@ -1,7 +1,7 @@
 import { parseProject, type CuttleProjectInput } from '@cuttle/project';
 import { createTimeline } from '@cuttle/timeline';
 import { describe, expect, it } from 'vitest';
-import { frameCount, planFrames } from '../src/frame-plan';
+import { frameCount, planFrames, planStills } from '../src/frame-plan';
 
 function plan(input: Omit<CuttleProjectInput, 'version' | 'sources'>, fps = 30) {
   const parsed = parseProject({ version: 1, sources: { screen: 's.mp4' }, ...input, output: { fps } });
@@ -54,5 +54,30 @@ describe('planFrames', () => {
 
   it('refuses a project without scenes', () => {
     expect(() => plan({ scenes: [] })).toThrow(/no scenes/);
+  });
+});
+
+describe('planStills', () => {
+  function stills(frames: number[]) {
+    const parsed = parseProject({
+      version: 1,
+      sources: { screen: 's.mp4' },
+      scenes: [
+        { type: 'clip', from: 0, to: 2 },
+        { type: 'clip', from: 10, to: 18, speed: 4 },
+      ],
+    });
+    if (!parsed.ok) throw new Error(JSON.stringify(parsed.issues));
+    return planStills(createTimeline(parsed.project, { screenSize: { width: 1920, height: 1080 } }), 30, frames);
+  }
+
+  it('plans only the frames asked for, so each scene decodes just their source times', () => {
+    const result = stills([90, 10, 10, 60]);
+    expect(result.frames).toBe(3); // three distinct frames
+    expect(result.scenes.map(({ index, firstFrame, lastFrame, sourceTimes }) => ({ index, firstFrame, lastFrame, sourceTimes }))).toEqual([
+      // Frame 60 is the middle of the crossfade: the first clip holds its last frame (59/30 s).
+      { index: 0, firstFrame: 10, lastFrame: 60, sourceTimes: [10 / 30, 59 / 30] },
+      { index: 1, firstFrame: 60, lastFrame: 90, sourceTimes: [10, 14] },
+    ]);
   });
 });

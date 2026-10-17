@@ -9,4 +9,5 @@ contextBridge.exposeInMainWorld('cuttleHost', {
   readFile: (path) => ipcRenderer.invoke('cuttle-export:read-file', path),
   write: (data, position) => ipcRenderer.invoke('cuttle-export:write', data, position),
   progress: (done, total) => ipcRenderer.send('cuttle-export:progress', done, total),
+  writeStill: (name, data) => ipcRenderer.invoke('cuttle-export:write-still', name, data),
 });

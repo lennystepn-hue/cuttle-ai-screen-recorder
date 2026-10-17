@@ -1,7 +1,7 @@
-import { createRenderer, loadEngineAssets } from '@cuttle/engine';
-import { createCursorTrack, createTimeline } from '@cuttle/timeline';
-import { planFrames } from '../frame-plan';
-import type { ExportJob, PageResult, PageSuccess } from '../job';
+import { FONT_FAMILY, createRenderer, loadEngineAssets, type Renderer } from '@cuttle/engine';
+import { createCursorTrack, createTimeline, type Timeline } from '@cuttle/timeline';
+import { frameCount, planFrames, planStills, type FramePlan } from '../frame-plan';
+import type { ExportJob, PageJob, PageResult, PageStillsSuccess, PageSuccess, StillsJob } from '../job';
 import { host, PageError } from './host';
 import { loadImage } from './images';
 import { openVideo, type VideoFile } from './media';
@@ -30,7 +30,7 @@ function probeMaxTextureSize(): number {
   return size;
 }
 
-function checkClipRanges(job: ExportJob, screen: VideoFile): void {
+function checkClipRanges(job: PageJob, screen: VideoFile): void {
   job.project.scenes.forEach((scene, index) => {
     if (scene.type === 'clip' && scene.to > screen.end + END_TOLERANCE_SECONDS) {
       throw new PageError(
@@ -41,10 +41,22 @@ function checkClipRanges(job: ExportJob, screen: VideoFile): void {
   });
 }
 
-async function exportVideo(job: ExportJob): Promise<PageSuccess> {
-  const started = performance.now();
+/** What a video and a stills job share: the timeline, the renderer on its canvas and the scene sources. */
+interface Rendering {
+  timeline: Timeline;
+  plan: FramePlan;
+  renderer: Renderer;
+  canvas: OffscreenCanvas;
+  gl: WebGL2RenderingContext;
+  sources: SceneSources;
+}
+
+/**
+ * Opens the job's media, builds the timeline and the plan (`makePlan`), creates the renderer and the
+ * scene sources, runs `body` and frees everything afterwards.
+ */
+async function withRendering<T>(job: PageJob, makePlan: (timeline: Timeline) => FramePlan, lookahead: number, body: (rendering: Rendering) => Promise<T>): Promise<T> {
   const { project } = job;
-  const fps = project.output.fps;
   const [assets, screen, webcam] = await Promise.all([
     loadEngineAssets(),
     openVideo(job.screen, 'the screen recording'),
@@ -53,25 +65,40 @@ async function exportVideo(job: ExportJob): Promise<PageSuccess> {
   const canvas = new OffscreenCanvas(1, 1);
   let background: ImageBitmap | undefined;
   let sources: SceneSources | undefined;
-  let renderer: ReturnType<typeof createRenderer> | undefined;
+  let renderer: Renderer | undefined;
   try {
     checkClipRanges(job, screen);
     const timeline = createTimeline(project, {
       screenSize: screen.size,
       cursor: job.events ? createCursorTrack(job.events) : undefined,
     });
-    const plan = planFrames(timeline, fps);
+    const plan = makePlan(timeline);
     if (job.backgroundImage) background = await loadImage(job.backgroundImage, probeMaxTextureSize(), 'the background image');
     renderer = createRenderer(canvas, project, { assets, screenSize: screen.size, backgroundImage: background });
     const gl = canvas.getContext('webgl2')!;
     const maxTextureSize = gl.getParameter(gl.MAX_TEXTURE_SIZE) as number;
-    const output = await createVideoOutput(canvas, project.output, job.encoder);
     sources = new SceneSources(
       plan,
       { screen, webcam: webcam && job.webcam ? { ...webcam, offset: job.webcam.offset } : undefined, stills: job.stills, maxTextureSize },
-      Math.round(LOOKAHEAD_SECONDS * fps),
+      lookahead,
     );
+    return await body({ timeline, plan, renderer, canvas, gl, sources });
+  } finally {
+    await sources?.close();
+    renderer?.dispose();
+    // Free the context now instead of waiting for GC (browsers keep only ~16 live WebGL contexts).
+    (canvas.getContext('webgl2') as WebGL2RenderingContext | null)?.getExtension('WEBGL_lose_context')?.loseContext();
+    background?.close();
+    screen.input.dispose();
+    webcam?.input.dispose();
+  }
+}
 
+async function exportVideo(job: ExportJob): Promise<PageSuccess> {
+  const started = performance.now();
+  const fps = job.project.output.fps;
+  return withRendering(job, (timeline) => planFrames(timeline, fps), Math.round(LOOKAHEAD_SECONDS * fps), async ({ timeline, plan, renderer, canvas, gl, sources }) => {
+    const output = await createVideoOutput(canvas, job.project.output, job.encoder);
     const timings = { decodeMs: 0, renderMs: 0, encodeMs: 0, finalizeMs: 0, totalMs: 0 };
     try {
       for (let frame = 0; frame < plan.frames; frame++) {
@@ -109,21 +136,81 @@ async function exportVideo(job: ExportJob): Promise<PageSuccess> {
       gpu: gpuName(gl),
       timings,
     };
-  } finally {
-    await sources?.close();
-    renderer?.dispose();
-    // Free the context now instead of waiting for GC (browsers keep only ~16 live WebGL contexts).
-    (canvas.getContext('webgl2') as WebGL2RenderingContext | null)?.getExtension('WEBGL_lose_context')?.loseContext();
-    background?.close();
-    screen.input.dispose();
-    webcam?.input.dispose();
-  }
+  });
 }
 
-/** Runs the export the main process prepared; never throws, failures come back as `{ ok: false }`. */
+/** Contact sheet: each still this wide, its time below it. */
+const SHEET_CELL_WIDTH = 480;
+const SHEET_LABEL_HEIGHT = 34;
+const SHEET_GAP = 12;
+
+async function png(canvas: OffscreenCanvas): Promise<Uint8Array> {
+  return new Uint8Array(await (await canvas.convertToBlob({ type: 'image/png' })).arrayBuffer());
+}
+
+async function renderStills(job: StillsJob): Promise<PageStillsSuccess> {
+  const started = performance.now();
+  const { fps, width, height } = job.project.output;
+  /** The output frame of each of `job.times`, set when the plan is made. */
+  let byTime: number[] = [];
+  return withRendering(
+    job,
+    (timeline) => {
+      // The output frame on screen at each time; times past the end show the last frame.
+      const last = frameCount(timeline.duration, fps) - 1;
+      const frames = job.times.map((t) => Math.min(last, Math.max(0, Math.floor(t * fps + 1e-6))));
+      const plan = planStills(timeline, fps, frames);
+      byTime = frames;
+      return plan;
+    },
+    0,
+    async ({ timeline, renderer, canvas, gl, sources }) => {
+      const columns = job.sheet ? Math.max(1, Math.min(job.sheet.columns, job.times.length)) : 0;
+      const cellHeight = Math.round((SHEET_CELL_WIDTH * height) / width);
+      const sheet = job.sheet
+        ? new OffscreenCanvas(
+            SHEET_GAP + columns * (SHEET_CELL_WIDTH + SHEET_GAP),
+            SHEET_GAP + Math.ceil(job.times.length / columns) * (cellHeight + SHEET_LABEL_HEIGHT + SHEET_GAP),
+          )
+        : undefined;
+      const context = sheet?.getContext('2d');
+      if (context) {
+        context.fillStyle = '#16161a';
+        context.fillRect(0, 0, sheet!.width, sheet!.height);
+        context.font = `500 20px "${FONT_FAMILY}", sans-serif`;
+        context.textBaseline = 'middle';
+      }
+      const unique = [...new Set(byTime)].sort((a, b) => a - b);
+      for (const [done, frame] of unique.entries()) {
+        const state = timeline.frameAt(frame / fps);
+        renderer.render(state, await sources.sourcesFor(frame, state));
+        if (gl.isContextLost()) throw new Error('the WebGL context was lost while rendering stills');
+        const image = await png(canvas);
+        for (const [n, frameOfTime] of byTime.entries()) {
+          if (frameOfTime !== frame) continue;
+          await host().writeStill(`still-${n}`, image);
+          if (context) {
+            const x = SHEET_GAP + (n % columns) * (SHEET_CELL_WIDTH + SHEET_GAP);
+            const y = SHEET_GAP + Math.floor(n / columns) * (cellHeight + SHEET_LABEL_HEIGHT + SHEET_GAP);
+            context.drawImage(canvas, x, y, SHEET_CELL_WIDTH, cellHeight);
+            context.fillStyle = '#e8e8ea';
+            context.fillText(`${job.times[n]!.toFixed(2)} s`, x, y + cellHeight + SHEET_LABEL_HEIGHT / 2);
+          }
+        }
+        await sources.release(frame);
+        host().progress(done + 1, unique.length);
+      }
+      if (sheet) await host().writeStill('sheet', await png(sheet));
+      return { ok: true, stills: job.times.length, width, height, gpu: gpuName(gl), totalMs: Math.round(performance.now() - started) };
+    },
+  );
+}
+
+/** Runs the job the main process prepared; never throws, failures come back as `{ ok: false }`. */
 export async function run(): Promise<PageResult> {
   try {
-    return await exportVideo(await host().job());
+    const job = await host().job();
+    return job.kind === 'stills' ? await renderStills(job) : await exportVideo(job);
   } catch (error) {
     // Unexpected errors keep their stack on stderr. The main process forwards page errors as text, so
     // spell them out (a DOMException would print as "[object DOMException]"); a V8 stack starts with

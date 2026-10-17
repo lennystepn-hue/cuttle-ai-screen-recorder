@@ -692,6 +692,52 @@ describe.runIf(enabled)('the Cuttle app', () => {
     await editor.waitForFunction(() => document.querySelectorAll('[data-testid=cut-notch]').length === 0);
   }, 45_000);
 
+  it('shows a zoom that follows typing: its moves on the timeline, its path in the source view; a drag takes the path along, Hold still ends it', async () => {
+    const original = readFileSync(projectFile(), 'utf8');
+    type Following = { id: string; rect: number[]; moves?: { at: number; rect: number[] }[]; auto?: string };
+    const following = (file: Written) => file.zooms.find((zoom) => zoom.id === 'z8') as unknown as Following;
+    // suggest's typing zoom in the first clip: from the left, to the middle at 1.2 s, down to the right at 2 s
+    const outside = onDisk() as unknown as { zooms: unknown[] };
+    outside.zooms.push({ id: 'z8', label: 'Typing', at: 0.3, duration: 2.5, rect: [100, 100, 576, 360], moves: [{ at: 1.2, rect: [400, 100, 576, 360] }, { at: 2, rect: [600, 300, 576, 360] }], auto: 'typing' });
+    writeFileSync(projectFile(), `${JSON.stringify(outside, null, 2)}\n`);
+    await editor.waitForSelector('.item.zoom[data-id=z8] .move-mark');
+    expect(await editor.locator('.item.zoom[data-id=z8] .move-mark').count()).toBe(2);
+    // selected (from the Auto tab, which goes to its start), the source view shows its path, and it
+    // where it is at the playhead
+    await click(editor, '#tab-auto');
+    await click(editor, '[data-testid=auto-group-typing] .auto-toggle');
+    await click(editor, '[data-testid=auto-group-typing] .auto-item');
+    await editor.waitForSelector('[data-testid=zoom-path]');
+    expect(await editor.locator('[data-testid=zoom-path] rect').count()).toBe(3);
+    const left = async () => {
+      const [box, view] = await Promise.all([editor.locator('.source-box.zoom.selected').boundingBox(), editor.locator('[data-testid=source-view]').boundingBox()]);
+      return (box!.x - view!.x) / view!.width;
+    };
+    const start = await left();
+    // at 1.6 s it has moved on from x 100 to x 400 (of 1280)
+    await seek(1.6);
+    await expect.poll(left).toBeGreaterThan(start + 0.1);
+    await click(editor, '#tab-selection');
+    await editor.waitForSelector('[data-testid=zoom-hold]');
+    await shot('32-typing-zoom');
+    // a drag at the playhead takes the whole path along: the person's zoom now
+    await drag('.source-box.selected', [40, 0]);
+    await savedWhen((file) => following(file).rect[0]! > 100);
+    const dragged = following(onDisk());
+    const by = dragged.rect[0]! - 100;
+    expect(dragged.moves!.map((move) => move.rect[0]! - by)).toEqual([400, 600]);
+    expect(dragged.auto).toBeUndefined();
+    await click(editor, '[data-testid=zoom-hold]');
+    await savedWhen((file) => following(file).moves === undefined);
+    await editor.waitForSelector('[data-testid=zoom-path]', { state: 'detached' });
+    expect((await doc()).undo).toBe('Hold the zoom still');
+    await editor.keyboard.press('Escape');
+    await undoAll();
+    // back to the file as it was (Claude reverting)
+    writeFileSync(projectFile(), original);
+    await editor.waitForFunction(() => document.querySelectorAll('.item.zoom[data-id=z8]').length === 0);
+  }, 45_000);
+
   it('crops a clip in the source view: the window takes the crop’s shape; the crop is switched off in the inspector', async () => {
     const original = readFileSync(projectFile(), 'utf8');
     await press('.scene[data-id=s1]');

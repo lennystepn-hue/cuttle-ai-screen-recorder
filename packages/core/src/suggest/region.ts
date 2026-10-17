@@ -10,8 +10,11 @@ const MIN_SHARE = 0.002;
 /** The box spans the changed pixels from this quantile to its complement, so stray pixels do not stretch it. */
 const QUANTILE = 0.02;
 
-/** The box (in the grey pictures' pixels) around what changed between `before` and `after`. */
-export function changedRegion(before: Gray, after: Gray): { x: number; y: number; width: number; height: number } | undefined {
+/**
+ * The box (in the grey pictures' pixels) around what changed between `before` and `after`; none
+ * when fewer than `minPixels` changed (by default a share of the picture: a caret, a clock).
+ */
+export function changedRegion(before: Gray, after: Gray, minPixels = MIN_SHARE * before.width * before.height): { x: number; y: number; width: number; height: number } | undefined {
   if (before.width !== after.width || before.height !== after.height) return undefined;
   const xs: number[] = [];
   const ys: number[] = [];
@@ -24,7 +27,7 @@ export function changedRegion(before: Gray, after: Gray): { x: number; y: number
       }
     }
   }
-  if (xs.length < MIN_SHARE * before.width * before.height) return undefined;
+  if (xs.length === 0 || xs.length < minPixels) return undefined;
   const bounds = (values: number[]) => {
     values.sort((a, b) => a - b);
     const low = values[Math.floor(QUANTILE * (values.length - 1))]!;

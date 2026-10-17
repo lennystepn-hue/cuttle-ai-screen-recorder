@@ -103,6 +103,13 @@ describe('EventsWriter', () => {
     ]);
   });
 
+  it('writes the caret as a rect in the screen track', () => {
+    const { events, read } = writer();
+    events.setStart(1000, []);
+    events.push({ type: 'caret', time: 1001.5, x: 900, y: 450, width: 2, height: 19 });
+    expect(read()).toEqual([{ t: 1.5, type: 'caret', rect: [800, 400, 2, 19] }]);
+  });
+
   it('ignores input after close (the hook can deliver one more event)', () => {
     const { events, read } = writer();
     events.setStart(1000, []);

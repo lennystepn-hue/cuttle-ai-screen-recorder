@@ -25,6 +25,11 @@ describe('parseEventsJsonl', () => {
     expect(result.issues.map((issue) => issue.path)).toEqual(['line 2', 'line 3.t']);
   });
 
+  it('reads where text is typed: the caret', () => {
+    expect(parseEventsJsonl('{"t":1.5,"type":"caret","rect":[812,440,2,19]}\n').events).toEqual([{ t: 1.5, type: 'caret', rect: [812, 440, 2, 19] }]);
+    expect(parseEventsJsonl('{"t":1.5,"type":"caret","x":812,"y":440}\n').issues.map((issue) => issue.path)).toEqual(['line 1.rect', 'line 1']);
+  });
+
   it('accepts Windows line endings and a last line without a newline', () => {
     const text = '{"t":0,"type":"keys","count":1}\r\n{"t":1,"type":"shape","shape":"text"}';
     expect(parseEventsJsonl(text).events).toEqual([

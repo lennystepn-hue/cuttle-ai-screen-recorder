@@ -508,6 +508,8 @@ export function Timeline() {
                         >
                           {blockWidth >= 14 && <i className="edge start" data-edge="start" />}
                           {blockWidth >= LABEL_MIN_PX && <span style={{ marginLeft: inset }}>{block.title}</span>}
+                          {/* a zoom that follows: where it moves on */}
+                          {block.marks?.map((mark) => <i key={mark} className="move-mark" style={{ left: (mark - block.start) * pps }} />)}
                           {blockWidth >= 14 && <i className="edge end" data-edge="end" />}
                         </button>
                       );

@@ -59,6 +59,12 @@ describe('timelineModel', () => {
     expect(model.lanes.caption.blocks.map((block) => block.title)).toEqual(['One prompt']);
   });
 
+  it('marks where a zoom that follows moves on, in output seconds', () => {
+    const typed = project({ scenes: [{ type: 'clip', from: 0, to: 4 }, { type: 'clip', from: 4, to: 12, speed: 2 }], zooms: [{ at: 1, duration: 9, rect: [0, 0, 100, 100], moves: [{ at: 3, rect: [50, 0, 100, 100] }, { at: 8, rect: [90, 0, 100, 100] }] }] });
+    const [block] = timelineModel(typed, sceneSpans(typed.scenes), []).lanes.zoom.blocks;
+    expect(block?.marks).toEqual([3, 6]);
+  });
+
   it('lists what is worth a second look before an export', () => {
     expect(exportChecks(demo, spans)).toEqual(['1 mask is off: what it covers shows in the video.', '1 mask is cut out: no clip shows it.']);
     const quick = project({

@@ -62,6 +62,30 @@ export async function startInput(platform: Platform, onInput: InputSink, onHotke
 
 /** How often the pointer shape is read (Windows has no event for it). */
 const SHAPE_POLL_MS = 1000 / 30;
+/** The caret is read every this many shape reads (5 a second)… */
+const CARET_EVERY = 6;
+/** …while keys were typed in the last this many seconds. */
+const CARET_AFTER_KEYS = 1;
+
+type Caret = { x: number; y: number; width: number; height: number };
+
+/**
+ * Where text is typed, while it is: called on every shape read, it reads the caret every
+ * `CARET_EVERY`th time while a key came in the last `CARET_AFTER_KEYS` seconds, and passes it on
+ * when it moved.
+ */
+export function caretWatch(read: () => Caret | undefined, onInput: InputSink): (time: number, typedAt: number) => void {
+  let reads = 0;
+  let last = '';
+  return (time, typedAt) => {
+    if (++reads % CARET_EVERY !== 0 || time - typedAt > CARET_AFTER_KEYS) return;
+    const caret = read();
+    const key = caret ? `${caret.x},${caret.y},${caret.width},${caret.height}` : '';
+    if (!caret || key === last) return;
+    last = key;
+    onInput({ type: 'caret', time, ...caret });
+  };
+}
 /** uiohook is one hook per process: it runs while at least one input source uses it. */
 let hookUsers = 0;
 
@@ -86,7 +110,11 @@ async function startWindowsInput(onInput: InputSink, onHotkey: HotkeySink): Prom
     const scroll = wheelInput(event, WheelDirection.VERTICAL, now());
     if (scroll) onInput(scroll);
   };
-  const onKeyDown = (event: KeyEvent) => keys.down(event);
+  let typedAt = -Infinity;
+  const onKeyDown = (event: KeyEvent) => {
+    typedAt = now();
+    keys.down(event);
+  };
   const onKeyUp = (event: KeyEvent) => keys.up(event);
   const detach = () => {
     uIOhook.off('mousemove', onMove);
@@ -109,11 +137,14 @@ async function startWindowsInput(onInput: InputSink, onHotkey: HotkeySink): Prom
   hookUsers++;
 
   let stopped = false;
+  const caret = caretWatch(() => win.caret(), onInput);
   const poll = setInterval(() => {
     const current = win.cursorShape();
-    if (current === shape) return;
-    shape = current;
-    onInput({ type: 'shape', time: now(), shape });
+    if (current !== shape) {
+      shape = current;
+      onInput({ type: 'shape', time: now(), shape });
+    }
+    caret(now(), typedAt);
   }, SHAPE_POLL_MS);
 
   return {

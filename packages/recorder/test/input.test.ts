@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { keyHandler, wheelInput } from '../src/input';
+import { caretWatch, keyHandler, wheelInput } from '../src/input';
 import type { HotkeyAction, RawInput } from '../src/types';
 
 // Key codes as uiohook reports them: Ctrl 29, Shift 42, Alt 56, S 31, M 50, A 30.
@@ -43,6 +43,32 @@ describe('keyHandler', () => {
     handler.up({ keycode: M, ...all });
     handler.down({ keycode: M, ...all });
     expect(hotkeys).toEqual(['marker', 'marker']);
+  });
+});
+
+describe('caretWatch', () => {
+  it('reads the caret 5 times a second while keys come, and passes it on when it moved', () => {
+    const seen: RawInput[] = [];
+    let at = { x: 10, y: 20, width: 2, height: 18 };
+    let reads = 0;
+    const tick = caretWatch(() => (reads++, at), (input) => seen.push(input));
+    // 30 reads a second: every 6th looks at the caret, while the last key is under a second old
+    for (let i = 1; i <= 12; i++) tick(100 + i / 30, 100);
+    expect(reads).toBe(2);
+    expect(seen).toEqual([{ type: 'caret', time: 100 + 6 / 30, x: 10, y: 20, width: 2, height: 18 }]);
+    at = { ...at, x: 30 };
+    for (let i = 13; i <= 18; i++) tick(100 + i / 30, 100);
+    expect(seen.at(-1)).toMatchObject({ x: 30 });
+    // no key for over a second: no reads
+    for (let i = 19; i <= 60; i++) tick(101.5 + i / 30, 100);
+    expect(reads).toBe(3);
+  });
+
+  it('passes nothing where the app keeps no caret', () => {
+    const seen: RawInput[] = [];
+    const tick = caretWatch(() => undefined, (input) => seen.push(input));
+    for (let i = 1; i <= 30; i++) tick(100 + i / 30, 100);
+    expect(seen).toEqual([]);
   });
 });
 

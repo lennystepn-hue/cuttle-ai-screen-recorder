@@ -122,7 +122,7 @@ export function createTimeline(project: CuttleProject, opts: TimelineOptions): T
       ...base,
       kind: 'clip',
       sourceTime,
-      zoom: zoomRectAt(project.zooms, sourceTime, (zoom) => amount(zoomShown.get(zoom), ZOOM_RAMP_SECONDS, zoom.ease), screen),
+      zoom: zoomRectAt(project.zooms, sourceTime, (zoom) => amount(zoomShown.get(zoom), ZOOM_RAMP_SECONDS, zoom.ease), screen, scene.speed),
       aspect: screen[2] / screen[3],
       masks: activeMasks(project.masks, sourceTime),
       texts: activeTexts(project.texts, sourceTime, (text) => amount(textShown.get(text), TEXT_FADE_SECONDS, 'linear')),

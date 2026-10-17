@@ -60,6 +60,8 @@ export interface OverlayBlock {
   title: string;
   /** The row inside its lane: blocks that overlap in time go to separate rows. */
   row: number;
+  /** Where a zoom that follows moves on, in output seconds. */
+  marks?: number[];
 }
 
 /** Rows a lane grows to; blocks beyond overlap in the last one. */
@@ -123,6 +125,7 @@ function lane<T extends { enabled: boolean; label?: string; id?: string }>(
   spans: readonly SceneSpan[],
   range: (item: T) => [number, number],
   title: (item: T) => string,
+  marks?: (item: T) => number[],
 ): OverlayLane {
   const blocks: OverlayBlock[] = [];
   const cutOutItems: OverlayLane['cutOutItems'] = [];
@@ -142,6 +145,7 @@ function lane<T extends { enabled: boolean; label?: string; id?: string }>(
         enabled: item.enabled,
         title: item.label ?? title(item),
         row: 0,
+        ...(marks && { marks: marks(item).flatMap((t) => outputTimesOf(spans, t)).filter((t) => t >= occurrence.start && t < occurrence.end) }),
       });
     }
   });
@@ -226,7 +230,7 @@ export function timelineModel(project: CuttleProject, spans: readonly SceneSpan[
     scenes: groups.map((group) => sceneBlock(group, project)),
     cuts: cutNotches(project, spans),
     lanes: {
-      zoom: lane('zoom', project.zooms, spans, (zoom) => [zoom.at, zoom.at + zoom.duration], () => 'Zoom'),
+      zoom: lane('zoom', project.zooms, spans, (zoom) => [zoom.at, zoom.at + zoom.duration], () => 'Zoom', (zoom) => (zoom.moves ?? []).map((move) => move.at)),
       mask: lane('mask', project.masks, spans, (mask) => [mask.from, mask.to], () => 'Mask'),
       caption: lane('caption', project.texts, spans, (text) => [text.at, text.at + text.duration], (text) => text.text),
     },
@@ -286,7 +290,7 @@ export function activityColumns(events: readonly InputEvent[], spans: readonly S
   const width = (to - from) / columns;
   if (!(width > 0)) return counts;
   for (const event of events) {
-    if (event.type === 'shape') continue;
+    if (event.type === 'shape' || event.type === 'caret') continue;
     const weight = event.type === 'move' ? 0.25 : event.type === 'keys' ? event.count : 1;
     for (const t of outputTimesOf(spans, event.t)) {
       const column = Math.floor((t - from) / width);

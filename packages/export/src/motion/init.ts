@@ -38,17 +38,36 @@ export function motionSeed(name: string): number {
   return hash;
 }
 
-/** What a motion item's page is told: `duration` is how long this showing of it lasts (output seconds). */
-export function motionInit(project: CuttleProject, item: MotionScene | MotionOverlay, name: string, duration: number): MotionInit {
+/** What a page has besides its item: the take, the kit's fonts, and the params its page declares with their defaults. */
+export interface MotionContext {
+  take: MotionInit['take'];
+  fonts: MotionInit['fonts'];
+  defaults: Record<string, unknown>;
+}
+
+/**
+ * What a motion item's page is told for one showing of it: `start` is the output second where it starts
+ * and `duration` how long it lasts. The item's params win over the page's defaults.
+ */
+export function motionInit(
+  project: CuttleProject,
+  item: MotionScene | MotionOverlay,
+  name: string,
+  showing: { start: number; duration: number },
+  context: MotionContext,
+): MotionInit {
   const { width, height, fps } = project.output;
   return {
-    duration,
+    duration: showing.duration,
+    start: showing.start,
     fps,
     width,
     height,
     format: formatName(project.output),
-    params: { ...item.params },
+    params: { ...context.defaults, ...item.params },
     theme: motionTheme(project),
     seed: motionSeed(item.id ?? name),
+    fonts: context.fonts,
+    take: context.take,
   };
 }

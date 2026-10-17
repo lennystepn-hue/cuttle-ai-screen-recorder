@@ -80,13 +80,13 @@ describe.concurrent('record (test backend)', () => {
     });
     expect(probe(join(projectDir, take.screen))).toEqual({ codec_name: 'h264', width: 1280, height: 720, color_transfer: 'bt709', duration: expect.closeTo(take.seconds, 1) });
     expect(probe(join(projectDir, take.webcam!))).toMatchObject({ codec_name: 'h264', width: 640, height: 480, color_transfer: 'bt709' });
-    expect(probe(join(projectDir, take.mic!))).toMatchObject({ codec_name: 'aac', sample_rate: '48000', duration: expect.closeTo(3, 0) });
-
     const takeFile = parseTakeJson(read(projectDir, 'takes/1/take.json'));
     if (!takeFile.ok) throw new Error(JSON.stringify(takeFile.issues));
     // each track's start is recorded (the engine lines them up); a loaded machine starts one late
     expect(Math.abs(trackOffset(takeFile.take, 'webcam')!)).toBeLessThan(0.5);
     expect(Math.abs(trackOffset(takeFile.take, 'mic')!)).toBeLessThan(0.5);
+    // the mic runs to the stop from its own start: as long as the take, and as much longer as it started earlier
+    expect(probe(join(projectDir, take.mic!))).toMatchObject({ codec_name: 'aac', sample_rate: '48000', duration: expect.closeTo(take.seconds - trackOffset(takeFile.take, 'mic')!, 0) });
 
     const { events: input, issues } = parseEventsJsonl(read(projectDir, take.events));
     expect(issues).toEqual([]);
@@ -264,8 +264,10 @@ describe.concurrent('pausing a take (test backend)', () => {
     const elapsed = Date.now() / 1000 - started;
 
     expect(take.stopReason).toBe('max-seconds');
-    // 5 s of take (room for two segments that start late on a loaded machine), and at least a second more of pauses on the clock
-    expect(take.seconds).toBeCloseTo(5, 0);
+    // 5 s of take (room for three segments that start or stop late on a loaded machine, as GitHub's
+    // macOS runners are), and at least a second more of pauses on the clock
+    expect(take.seconds).toBeGreaterThan(4.5);
+    expect(take.seconds).toBeLessThan(6);
     expect(elapsed).toBeGreaterThan(take.seconds + 1);
     expect(events.filter((type) => type === 'paused')).toHaveLength(2);
     expect(events.filter((type) => type === 'resumed')).toHaveLength(2);

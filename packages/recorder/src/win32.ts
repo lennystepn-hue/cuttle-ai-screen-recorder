@@ -1,6 +1,7 @@
-// Windows APIs through koffi: monitors in ddagrab order, windows, pointer position and shape, the caret.
-import type { CursorShape } from '@cuttle/project';
-import type { Monitor, WindowInfo } from './types';
+// Windows APIs through koffi: monitors in ddagrab order, windows, pointer position and shape, the
+// caret, the content area of a window, and the dialogs and menus over the desktop.
+import type { CursorShape, WindowKind } from '@cuttle/project';
+import type { Bounds, Monitor, WindowInfo } from './types';
 
 export interface Win32 {
   /** Outputs of the default adapter, in the order of ffmpeg ddagrab's `output_idx`. */
@@ -17,6 +18,29 @@ export interface Win32 {
    * each way; undefined where the app keeps none (many draw their own).
    */
   caret(thread?: number): { x: number; y: number; width: number; height: number } | undefined;
+  /** The foreground window: its id and its frame (without the invisible resize border). */
+  foreground(): { id: number; bounds: Bounds } | undefined;
+  /**
+   * A window's content area: its largest render widget (Chromium browsers and Electron apps draw the
+   * page in one), visible unless `hidden` counts too; undefined without one.
+   */
+  contentArea(id: number, hidden?: boolean): Bounds | undefined;
+  /** The dialogs and menus on the desktop now (not this process's own). */
+  popups(): { id: number; kind: WindowKind; bounds: Bounds }[];
+}
+
+/** Chromium and Electron draw a page in a child window of this class: its rect is the page's. */
+export const RENDER_WIDGET = 'Chrome_RenderWidgetHostHWND';
+
+/**
+ * What a top-level window is, by its class: `#32770` a dialog, `#32768` a menu, and a Chromium popup
+ * that has an owner a dialog when it is at least 320 × 200, else a menu (a dropdown, a tooltip).
+ */
+export function windowKind(className: string, owned: boolean, bounds: Bounds): WindowKind | undefined {
+  if (className === '#32770') return 'dialog';
+  if (className === '#32768') return 'menu';
+  if (className === 'Chrome_WidgetWin_1' && owned) return bounds.width >= 320 && bounds.height >= 200 ? 'dialog' : 'menu';
+  return undefined;
 }
 
 let loaded: Promise<Win32> | undefined;
@@ -97,6 +121,7 @@ async function create(): Promise<Win32> {
     Monitor: 'void *',
   });
   const WNDENUMPROC = koffi.proto('__stdcall', typeName('WNDENUMPROC'), 'int', ['void *', 'intptr_t']);
+  const GW_OWNER = 4;
 
   const SetProcessDpiAwarenessContext = user32.func('__stdcall', 'SetProcessDpiAwarenessContext', 'int', ['intptr_t']);
   // Physical pixels whatever the process's DPI awareness (GetCursorPos would be logical in a process
@@ -105,6 +130,10 @@ async function create(): Promise<Win32> {
   const GetCursorInfo = user32.func('__stdcall', 'GetCursorInfo', 'int', [koffi.inout(koffi.pointer(CURSORINFO))]);
   const GetGUIThreadInfo = user32.func('__stdcall', 'GetGUIThreadInfo', 'int', ['uint32', koffi.inout(koffi.pointer(GUITHREADINFO))]);
   const ClientToScreen = user32.func('__stdcall', 'ClientToScreen', 'int', ['void *', koffi.inout(koffi.pointer(POINT))]);
+  const GetForegroundWindow = user32.func('__stdcall', 'GetForegroundWindow', 'void *', []);
+  const EnumChildWindows = user32.func('__stdcall', 'EnumChildWindows', 'int', ['intptr_t', koffi.pointer(WNDENUMPROC), 'intptr_t']);
+  const GetWindowRect = user32.func('__stdcall', 'GetWindowRect', 'int', ['void *', koffi.out(koffi.pointer(RECT))]);
+  const GetWindow = user32.func('__stdcall', 'GetWindow', 'void *', ['void *', 'uint32']);
   const LoadCursorW = user32.func('__stdcall', 'LoadCursorW', 'void *', ['void *', 'uintptr_t']);
   const EnumWindows = user32.func('__stdcall', 'EnumWindows', 'int', [koffi.pointer(WNDENUMPROC), 'intptr_t']);
   const IsWindowVisible = user32.func('__stdcall', 'IsWindowVisible', 'int', ['void *']);
@@ -232,6 +261,20 @@ async function create(): Promise<Win32> {
   const point = { x: 0, y: 0 };
   const info = { cbSize: koffi.sizeof(CURSORINFO), flags: 0, hCursor: null as unknown, ptScreenPos: { x: 0, y: 0 } };
   const rect = () => ({ left: 0, top: 0, right: 0, bottom: 0 });
+  /** A window id (32 bits, unsigned) as the handle Windows takes. */
+  const handleOf = (id: number) => (id >= 2 ** 31 ? id - 2 ** 32 : id);
+  const idOf = (hwnd: unknown) => Number(BigInt.asUintN(32, koffi.address(hwnd)));
+  const className = (hwnd: unknown) => {
+    const buffer = Buffer.alloc(512);
+    return buffer.toString('utf16le', 0, GetClassNameW(hwnd, buffer, 256) * 2);
+  };
+  /** A window's frame without the invisible resize border. */
+  const frame = (hwnd: unknown): Bounds | undefined => {
+    const bounds = Buffer.alloc(16);
+    if (DwmGetWindowAttribute(hwnd, DWMWA_EXTENDED_FRAME_BOUNDS, bounds, 16) < 0) return undefined;
+    const [left, top, right, bottom] = [0, 4, 8, 12].map((offset) => bounds.readInt32LE(offset)) as [number, number, number, number];
+    return { x: left, y: top, width: right - left, height: bottom - top };
+  };
   return {
     monitors: () => outputs().map(({ monitor }) => monitor),
     windows,
@@ -246,6 +289,49 @@ async function create(): Promise<Win32> {
     cursorShape() {
       if (!GetCursorInfo(info) || info.hCursor === null) return 'arrow';
       return cursorShapes.get(koffi.address(info.hCursor)) ?? 'arrow';
+    },
+    foreground() {
+      const hwnd = GetForegroundWindow();
+      const bounds = hwnd ? frame(hwnd) : undefined;
+      return hwnd && bounds ? { id: idOf(hwnd), bounds } : undefined;
+    },
+    contentArea(id, hidden = false) {
+      let best: Bounds | undefined;
+      const visit = koffi.register((hwnd: unknown) => {
+        if ((!hidden && !IsWindowVisible(hwnd)) || className(hwnd) !== RENDER_WIDGET) return 1;
+        const box = rect();
+        if (!GetWindowRect(hwnd, box)) return 1;
+        const area = { x: box.left, y: box.top, width: box.right - box.left, height: box.bottom - box.top };
+        if (area.width > 50 && area.height > 50 && area.width * area.height > (best ? best.width * best.height : 0)) best = area;
+        return 1;
+      }, koffi.pointer(WNDENUMPROC));
+      try {
+        EnumChildWindows(handleOf(id), visit, 0);
+      } finally {
+        koffi.unregister(visit);
+      }
+      return best;
+    },
+    popups() {
+      const found: { id: number; kind: WindowKind; bounds: Bounds }[] = [];
+      const cloaked = Buffer.alloc(4);
+      const visit = koffi.register((hwnd: unknown) => {
+        if (!IsWindowVisible(hwnd) || IsIconic(hwnd)) return 1;
+        const pid = [0];
+        GetWindowThreadProcessId(hwnd, pid);
+        if (pid[0] === process.pid) return 1;
+        if (DwmGetWindowAttribute(hwnd, DWMWA_CLOAKED, cloaked, 4) >= 0 && cloaked.readUInt32LE(0) !== 0) return 1;
+        const bounds = frame(hwnd);
+        const kind = bounds && windowKind(className(hwnd), GetWindow(hwnd, GW_OWNER) !== null, bounds);
+        if (bounds && kind && bounds.width >= 2 && bounds.height >= 2) found.push({ id: idOf(hwnd), kind, bounds });
+        return 1;
+      }, koffi.pointer(WNDENUMPROC));
+      try {
+        EnumWindows(visit, 0);
+      } finally {
+        koffi.unregister(visit);
+      }
+      return found;
     },
     caret(thread = 0) {
       const gui = { cbSize: koffi.sizeof(GUITHREADINFO), flags: 0, hwndActive: null, hwndFocus: null, hwndCapture: null, hwndMenuOwner: null, hwndMoveSize: null, hwndCaret: null as unknown, rcCaret: rect() };

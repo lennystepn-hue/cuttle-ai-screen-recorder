@@ -69,6 +69,45 @@ const CARET_AFTER_KEYS = 1;
 
 type Caret = { x: number; y: number; width: number; height: number };
 
+/** The window and its popups are looked at every this many shape reads (about 4 times a second)… */
+const WINDOWS_EVERY = 8;
+/** …and the content area every this many (once a second), or at once when the window moved. */
+const AREA_EVERY = 30;
+/** A content area that moved less than this (px) has not moved. */
+const AREA_SLACK = 2;
+
+type Watched = Pick<import('./win32').Win32, 'foreground' | 'contentArea' | 'popups'>;
+
+/**
+ * The window shown and what opens over it: called on every shape read, it passes on the foreground
+ * window's content area when it changes (`area`, null for none), and each dialog or menu that opens
+ * or closes (`window`).
+ */
+export function windowWatch(win: Watched, onInput: InputSink): (time: number) => void {
+  let reads = -1;
+  let shown: { id: number; bounds: Caret } | undefined;
+  let area: Caret | null | undefined;
+  let open = new Map<number, ReturnType<Watched['popups']>[number]>();
+  const same = (a: Caret | null | undefined, b: Caret | null) =>
+    a === b || (!!a && !!b && Math.abs(a.x - b.x) <= AREA_SLACK && Math.abs(a.y - b.y) <= AREA_SLACK && Math.abs(a.width - b.width) <= AREA_SLACK && Math.abs(a.height - b.height) <= AREA_SLACK);
+  return (time) => {
+    reads++;
+    if (reads % WINDOWS_EVERY !== 0) return;
+    const now = new Map(win.popups().map((popup) => [popup.id, popup]));
+    for (const [id, popup] of now) if (!open.has(id)) onInput({ type: 'window', time, id, kind: popup.kind, rect: popup.bounds, open: true });
+    for (const [id, popup] of open) if (!now.has(id)) onInput({ type: 'window', time, id, kind: popup.kind, rect: popup.bounds, open: false });
+    open = now;
+    const front = win.foreground();
+    const moved = front?.id !== shown?.id || !same(front?.bounds, shown?.bounds ?? null);
+    shown = front;
+    if (!moved && reads % AREA_EVERY !== 0) return;
+    const next = (front && win.contentArea(front.id)) ?? null;
+    if (area !== undefined && same(area, next)) return;
+    area = next;
+    onInput({ type: 'area', time, rect: next });
+  };
+}
+
 /**
  * Where text is typed, while it is: called on every shape read, it reads the caret every
  * `CARET_EVERY`th time while a key came in the last `CARET_AFTER_KEYS` seconds, and passes it on
@@ -138,6 +177,7 @@ async function startWindowsInput(onInput: InputSink, onHotkey: HotkeySink): Prom
 
   let stopped = false;
   const caret = caretWatch(() => win.caret(), onInput);
+  const windows = windowWatch(win, onInput);
   const poll = setInterval(() => {
     const current = win.cursorShape();
     if (current !== shape) {
@@ -145,6 +185,7 @@ async function startWindowsInput(onInput: InputSink, onHotkey: HotkeySink): Prom
       onInput({ type: 'shape', time: now(), shape });
     }
     caret(now(), typedAt);
+    windows(now());
   }, SHAPE_POLL_MS);
 
   return {

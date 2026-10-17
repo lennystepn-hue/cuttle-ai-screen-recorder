@@ -31,7 +31,7 @@ const CARDS = parse({
 const NO_SOURCES: FrameSources = { screens: new Map(), webcams: new Map(), stills: new Map() };
 
 function layer(index: number, opacity: number, kind: SceneFrame['kind'] = 'card'): SceneFrame {
-  return { index, kind, local: 0, progress: 0, opacity, masks: [], texts: [] };
+  return { index, sceneIndex: index, kind, local: 0, progress: 0, opacity, masks: [], texts: [] };
 }
 
 function render(project: CuttleProject, state: RenderState, sources = NO_SOURCES) {

@@ -274,3 +274,35 @@ describe('random edit sequences', () => {
     expect(applied).toBeGreaterThan(1500);
   });
 });
+
+describe('automatic items in the document', () => {
+  const tagged: Raw = {
+    ...base,
+    zooms: [{ id: 'z1', at: 4, duration: 2, rect: [0, 0, 640, 360], auto: 'click' }],
+    cuts: [{ id: 'c1', label: 'Filler: ähm', from: 1, to: 1.4, auto: 'filler' }],
+  };
+
+  it('keeps the tag when an item is only switched off or on, and drops it on any other hand edit', () => {
+    const off = applyCommand(tagged, { type: 'set', list: 'zooms', id: 'z1', fields: { enabled: false } }, limits);
+    expect((off.zooms as Raw[])[0]).toMatchObject({ enabled: false, auto: 'click' });
+    const moved = applyCommand(tagged, { type: 'shift', list: 'zooms', id: 'z1', by: 0.5 }, limits);
+    expect((moved.zooms as Raw[])[0]!.auto).toBeUndefined();
+    const resized = applyCommand(tagged, { type: 'set', list: 'zooms', id: 'z1', fields: { rect: [0, 0, 320, 180] } }, limits);
+    expect((resized.zooms as Raw[])[0]!.auto).toBeUndefined();
+    const longer = applyCommand(tagged, { type: 'set', list: 'cuts', id: 'c1', fields: { to: 1.6 } }, limits);
+    expect((longer.cuts as Raw[])[0]).toMatchObject({ to: 1.6 });
+    expect((longer.cuts as Raw[])[0]!.auto).toBeUndefined();
+    const copy = applyCommand(tagged, { type: 'duplicate', list: 'zooms', id: 'z1', shift: 1 }, limits);
+    expect((copy.zooms as Raw[]).map((zoom) => zoom.auto)).toEqual(['click', undefined]);
+  });
+
+  it('gives cuts ids, switches kinds of automatic edits, and says what changed', () => {
+    const named = ensureIds({ ...base, cuts: [{ from: 1, to: 2 }] });
+    expect((named.cuts as { id: string }[])[0]!.id).toBe('c1');
+    const switched = applyCommand(tagged, { type: 'auto-edits', kind: 'fillers', value: false }, limits);
+    expect(switched.autoEdits).toEqual({ fillers: false });
+    expect(describeChange(project(tagged), project(switched))).toBe('the automatic edits changed');
+    const cut = applyCommand(tagged, { type: 'add', list: 'cuts', item: { from: 5, to: 6 } }, limits);
+    expect(describeChange(project(tagged), project(cut))).toBe('1 cut added');
+  });
+});

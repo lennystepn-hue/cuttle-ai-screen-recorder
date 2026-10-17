@@ -379,6 +379,17 @@ describe.runIf(enabled)('the Cuttle app', () => {
       },
       { selector, by, from: options.from ?? [0.5, 0.5], hold: options.hold ?? false },
     );
+  /** Picks the option labelled `label` from a select (Select.tsx): a click opens it, a click on the option picks it. */
+  const choose = async (trigger: string, label: string) => {
+    // a Playwright selector (it may use :has-text): the element's own click, as in a window never shown
+    await editor.locator(trigger).evaluate((element) => (element as HTMLElement).click());
+    await editor.waitForSelector('.select-list [role=option]');
+    await editor.evaluate((label) => {
+      const option = [...document.querySelectorAll('.select-list [role=option]')].find((item) => item.querySelector('.option-label')?.textContent === label);
+      if (!option) throw new Error(`no option "${label}"`);
+      (option as HTMLElement).click();
+    }, label);
+  };
   const release = (by: [number, number]) =>
     editor.evaluate((by) => {
       const at = (window as unknown as { __held: { x: number; y: number } }).__held;
@@ -420,7 +431,7 @@ describe.runIf(enabled)('the Cuttle app', () => {
 
     // the 8× clip at 2×, from the timeline bar
     await press('.scene[data-id=s2]');
-    await editor.selectOption('#speed-select', '2');
+    await choose('[data-testid=speed]', '2×');
     await savedWhen((file) => file.scenes.find((scene) => scene.id === 's2')!.speed === 2);
 
     await undoAll();
@@ -457,7 +468,7 @@ describe.runIf(enabled)('the Cuttle app', () => {
     await savedWhen((file) => file.masks.length === 2);
     const mask = onDisk().masks.find((item) => item.id !== 'm1')!;
     expect(mask.rect[2]! / mask.rect[3]!).toBeGreaterThan(3);
-    await editor.selectOption('.inspector label.field:has-text("Style") select', 'blur');
+    await choose('.inspector label.field:has-text("Style") .select-trigger', 'Blur');
     await savedWhen((file) => file.masks.find((item) => item.id === mask.id)!.style === 'blur');
     await shot('08-mask');
     // the look: a background swatch
@@ -525,7 +536,7 @@ describe.runIf(enabled)('the Cuttle app', () => {
     await shot('14b-look-cursors');
     await click(editor, '[data-testid=frame-mac-light]');
     await savedWhen((file) => (file as unknown as { look: { frame: { style?: string } } }).look.frame.style === 'mac-light');
-    await editor.selectOption('[data-testid=cursor-smoothing]', '1');
+    await choose('[data-testid=cursor-smoothing]', 'Very smooth');
     await savedWhen((file) => (file as unknown as { look: { cursor?: { smoothing?: number } } }).look.cursor?.smoothing === 1);
     await click(editor, '#tab-selection');
     await undoAll();
@@ -547,6 +558,98 @@ describe.runIf(enabled)('the Cuttle app', () => {
     await editor.keyboard.press('Enter');
     await expect.poll(() => doc().then((state) => state.toast?.text ?? ''), { timeout: 5000 }).toContain('No zoom fits the click left');
     expect((await editor.evaluate(() => document.querySelector('.app')?.getAttribute('data-tool'))) ?? 'select').toBe('select');
+  }, 30_000);
+
+  it("uses Cuttle's own menus, none of the system's: the keys open, move, pick and close them", async () => {
+    expect(await editor.evaluate(() => document.querySelectorAll('select').length)).toBe(0);
+    await click(editor, '#tab-look');
+    await editor.focus('[data-testid=output-size]');
+    await editor.keyboard.press('ArrowDown');
+    await editor.waitForSelector('[data-testid=output-size-list]');
+    await shot('16-select-open');
+    // Esc closes it and keeps the focus on it (the editor does not back out of anything)
+    await editor.keyboard.press('Escape');
+    expect(await editor.locator('.select-list').count()).toBe(0);
+    expect(await editor.evaluate(() => document.activeElement?.getAttribute('data-testid'))).toBe('output-size');
+    // Enter opens it, End goes to the last size (9:16), Enter picks it
+    await editor.keyboard.press('Enter');
+    await editor.keyboard.press('End');
+    await editor.keyboard.press('Enter');
+    await savedWhen((file) => (file as unknown as { output: { width: number; height: number } }).output.height === 1920);
+    await undoAll();
+    await click(editor, '#tab-selection');
+  }, 30_000);
+
+  it('shows a cut as a notch the video jumps over, and what Cuttle did on its own in the Auto tab: a switch per kind and per item', async () => {
+    const original = readFileSync(projectFile(), 'utf8');
+    const before = (await editor.evaluate(() => (window as unknown as Hooked).__cuttleCheck.state())).duration as number;
+    // Claude (or Cuttle's cut) writes an automatic cut and an automatic click zoom
+    const outside = onDisk() as unknown as Written & { cuts: unknown[] };
+    outside.cuts = [{ id: 'c1', label: 'Filler: ähm', from: 1.2, to: 1.7, auto: 'filler' }];
+    outside.zooms.push({ id: 'z7', label: 'Clicks', at: 9.4, duration: 1.8, rect: [100, 100, 640, 400], auto: 'click' } as Written['zooms'][number]);
+    writeFileSync(projectFile(), `${JSON.stringify(outside, null, 2)}\n`);
+    await editor.waitForSelector('[data-testid=cut-notch]');
+    await expect.poll(async () => (await editor.evaluate(() => (window as unknown as Hooked).__cuttleCheck.state())).duration as number).toBeCloseTo(before - 0.5, 3);
+    // the notch selects the cut; the inspector says Cuttle made it and why
+    await click(editor, '[data-testid=cut-notch]');
+    await editor.waitForSelector('[data-testid=auto-note]');
+    expect(await editor.locator('.inspector .kind-head .name').textContent()).toBe('Filler: ähm');
+    await shot('17-cut');
+    await click(editor, '[data-testid=cut-enabled]');
+    await savedWhen((file) => (file as unknown as { cuts: { enabled?: boolean }[] }).cuts[0]!.enabled === false);
+    await editor.waitForSelector('[data-testid=cut-notch].off');
+    // the Auto tab: a row per kind; the click zooms switched off as a kind, then one back on
+    await click(editor, '#tab-auto');
+    await editor.waitForSelector('[data-testid=auto-group-click]');
+    expect(await editor.locator('[data-testid=auto-group-fillers] .auto-count').textContent()).toBe('1 off');
+    await click(editor, '[data-testid=auto-switch-click]');
+    await savedWhen((file) => {
+      const written = file as unknown as { autoEdits?: { clickZooms?: boolean }; zooms: { id: string; enabled?: boolean }[] };
+      return written.autoEdits?.clickZooms === false && written.zooms.find((zoom) => zoom.id === 'z7')!.enabled === false;
+    });
+    expect((await doc()).undo).toBe('Zooms on clicks: off');
+    await click(editor, '[data-testid=auto-group-click] .auto-toggle');
+    await editor.waitForSelector('[data-testid=auto-group-click] .auto-items li.off');
+    await shot('18-auto-tab');
+    await click(editor, '[data-testid=auto-group-click] .auto-items li .toggle');
+    await savedWhen((file) => (file as unknown as { zooms: { id: string; enabled?: boolean }[] }).zooms.find((zoom) => zoom.id === 'z7')!.enabled !== false);
+    // a hand edit makes the zoom the person's: its tag goes
+    await click(editor, '[data-testid=auto-group-click] .auto-item');
+    await editor.waitForSelector('[data-testid=auto-note]');
+    await drag('.item.zoom[data-id=z7]', [30, 0]);
+    await savedWhen((file) => (file as unknown as { zooms: { id: string; auto?: string }[] }).zooms.find((zoom) => zoom.id === 'z7')!.auto === undefined);
+    await click(editor, '#tab-selection');
+    await editor.keyboard.press('Escape');
+    await undoAll();
+    // back to the file as it was (Claude reverting)
+    writeFileSync(projectFile(), original);
+    await editor.waitForFunction(() => document.querySelectorAll('[data-testid=cut-notch]').length === 0);
+  }, 45_000);
+
+  it('crops a clip in the source view: the window takes the crop’s shape; the crop is switched off in the inspector', async () => {
+    const original = readFileSync(projectFile(), 'utf8');
+    await press('.scene[data-id=s1]');
+    await click(editor, '[data-testid=clip-crop]');
+    await editor.waitForSelector('[data-testid=source-view]');
+    expect(await editor.evaluate(() => document.querySelector('.app')?.getAttribute('data-tool'))).toBe('crop');
+    await drag('[data-testid=source-view]', [300, 120], { from: [0.25, 0.25] });
+    await savedWhen((file) => Boolean((file.scenes[0] as { crop?: { rect: number[] } }).crop));
+    const crop = (onDisk().scenes[0] as unknown as { crop: { rect: number[] } }).crop.rect;
+    // free in its shape (a crop is not held to the screen's)
+    expect(crop[2]! / crop[3]!).toBeGreaterThan(2);
+    await editor.waitForSelector('.source-box.crop.selected');
+    await shot('19-crop-source');
+    await editor.keyboard.press('Escape');
+    await seek(1);
+    await shot('19-crop-video');
+    await press('.scene[data-id=s1]');
+    await click(editor, '[data-testid=clip-crop]');
+    await editor.waitForSelector('[data-testid=crop-enabled]');
+    await click(editor, '[data-testid=crop-enabled]');
+    await savedWhen((file) => (file.scenes[0] as { crop?: { enabled?: boolean } }).crop?.enabled === false);
+    await editor.keyboard.press('Escape');
+    await undoAll();
+    expect(readFileSync(projectFile(), 'utf8')).toBe(original);
   }, 30_000);
 
   it('keeps a drag going over a version written outside the app meanwhile: both are in the file, each undone on its own', async () => {
@@ -778,6 +881,8 @@ describe.runIf(enabled)('the Cuttle app', () => {
       await bridge.invoke('picker:hover');
     }, choices);
     await page.waitForSelector('[data-testid=picker-record]:not([disabled])', { state: 'attached' });
+    // Cuttle's own menus here too (Stop on, the devices): none of the system's
+    expect(await page.evaluate(() => document.querySelectorAll('select').length)).toBe(0);
     // the pickers close as the recording begins
     await click(page, '[data-testid=picker-record]').catch(() => {});
     if (!stop) return;
@@ -943,6 +1048,7 @@ describe.runIf(enabled)('the Cuttle app', () => {
     await launchAgain(['--settings']);
     // shown with the settings read (a click before would change nothing)
     const settings = await waitForPage(app, async (page) => page.url().includes('/settings.html') && (await page.locator('[data-testid=countdown] [aria-checked=true]').count()) === 1);
+    expect(await settings.evaluate(() => document.querySelectorAll('select').length)).toBe(0);
     const saved = () => JSON.parse(readFileSync(join(root, 'user-data', 'settings.json'), 'utf8')) as { countdown: number; motion: string; launchAtLogin: boolean };
     await click(settings, '[data-testid=countdown] button:nth-child(3)');
     await expect.poll(() => saved().countdown).toBe(5);

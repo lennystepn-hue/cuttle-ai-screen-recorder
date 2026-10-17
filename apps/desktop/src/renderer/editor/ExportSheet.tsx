@@ -9,6 +9,7 @@ import { sceneSpans } from '@cuttle/timeline';
 import { exportChecks } from '../../shared/timeline-model';
 import { bridge } from '../bridge';
 import { CheckIcon, CloseIcon, FolderIcon } from '../icons';
+import { Select } from '../Select';
 import { cancelExport, closeExport, startExport, store } from './session';
 import { useStore } from './store';
 import { FORMATS, ownFormat, targetName } from './targets';
@@ -93,7 +94,7 @@ export function ExportSheet() {
     return () => window.removeEventListener('keydown', onKey);
   }, [open]);
 
-  const checks = useMemo(() => (project ? exportChecks(project, sceneSpans(project.scenes)) : []), [project]);
+  const checks = useMemo(() => (project ? exportChecks(project, sceneSpans(project.scenes, project.cuts)) : []), [project]);
 
   if (!open) return null;
 
@@ -136,13 +137,14 @@ export function ExportSheet() {
             </div>
             <div className="row">
               Encoder
-              <select value={encoder} onChange={(event) => setEncoder(event.target.value as keyof typeof ENCODERS)}>
-                {Object.entries(ENCODERS).map(([value, name]) => (
-                  <option key={value} value={value}>
-                    {name}
-                  </option>
-                ))}
-              </select>
+              <Select
+                value={encoder}
+                options={(Object.entries(ENCODERS) as [keyof typeof ENCODERS, string][]).map(([value, name]) => ({ value, label: name }))}
+                onChange={setEncoder}
+                label="Encoder"
+                variant="compact"
+                testId="encoder"
+              />
             </div>
             {files.length > 0 && (
               <div className="note" data-testid="export-note">

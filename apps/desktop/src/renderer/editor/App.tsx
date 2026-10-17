@@ -20,6 +20,7 @@ import {
   UndoIcon,
   WarningIcon,
   ZoomIcon,
+  CropIcon,
 } from '../icons';
 import { captionCommand, captionPositionsAt, chooseTool, cycleSpeed, freeCaptionPosition, deleteSelection, duplicateSelection, overlayBlocked, reveal, showRawTake, split, type CaptionPosition } from './actions';
 import { CommandMenu, closeMenu, openMenu } from './CommandMenu';
@@ -303,6 +304,7 @@ const TOOLS: { tool: Tool; Icon: ComponentType<{ size?: number }>; name: string;
   { tool: 'zoom', Icon: ZoomIcon, name: 'Zoom', keys: 'Z', hint: 'drag over what the video should show close up' },
   { tool: 'mask', Icon: MaskIcon, name: 'Mask', keys: 'M', hint: 'drag over what the video should hide (a password, an address…)' },
   { tool: 'caption', Icon: TextIcon, name: 'Caption', keys: 'T', hint: 'type a caption on the video at the playhead' },
+  { tool: 'crop', Icon: CropIcon, name: 'Crop', keys: 'C', hint: 'drag over the part of the screen the clip shows (tabs, a taskbar left out)' },
 ];
 
 /** The tools, beside the video: they decide what a drag or click on the video does. */
@@ -783,6 +785,7 @@ function useShortcuts(): void {
         z: () => (event.shiftKey ? store.set({ pxPerSecond: 0 }) : chooseTool('zoom')),
         m: () => chooseTool('mask'),
         t: () => chooseTool('caption'),
+        c: () => chooseTool('crop'),
         '?': openMenu,
       };
       const action = keys[key];
@@ -798,16 +801,14 @@ function useShortcuts(): void {
 
 /**
  * A click leaves the keys to the editor: a button pressed with the mouse takes no focus (Space and
- * the arrows go on playing and stepping; a field the person typed in is left, which saves it), and a
- * menu chosen with the mouse lets go of the focus once chosen (its arrows would change it). Keyboard
- * focus (Tab) is kept as it is.
+ * the arrows go on playing and stepping; a field the person typed in is left, which saves it). A
+ * select (Select.tsx) lets go of the focus itself once chosen with the mouse. Keyboard focus (Tab)
+ * is kept as it is.
  */
 function useMouseFocus(): void {
   useEffect(() => {
-    let menuByMouse = false;
     const down = (event: MouseEvent) => {
       const target = event.target instanceof Element ? event.target : undefined;
-      menuByMouse = Boolean(target?.closest('select'));
       if (event.button !== 0 || !target?.closest('button')) return;
       event.preventDefault();
       // the caption bar and the menu keep their field's focus
@@ -815,19 +816,8 @@ function useMouseFocus(): void {
       const active = document.activeElement;
       if (active instanceof HTMLElement && active !== document.body) active.blur();
     };
-    const change = (event: Event) => {
-      if (menuByMouse && event.target instanceof HTMLSelectElement) event.target.blur();
-      menuByMouse = false;
-    };
-    const key = () => (menuByMouse = false);
     window.addEventListener('mousedown', down, true);
-    window.addEventListener('change', change, true);
-    window.addEventListener('keydown', key, true);
-    return () => {
-      window.removeEventListener('mousedown', down, true);
-      window.removeEventListener('change', change, true);
-      window.removeEventListener('keydown', key, true);
-    };
+    return () => window.removeEventListener('mousedown', down, true);
   }, []);
 }
 
@@ -837,7 +827,7 @@ function backOut(): void {
   if (cancelGesture()) return;
   const { tool, selection } = store.get();
   closeMenu();
-  const inSource = tool === 'zoom' || tool === 'mask' || selection?.kind === 'zoom' || selection?.kind === 'mask';
+  const inSource = tool === 'zoom' || tool === 'mask' || tool === 'crop' || selection?.kind === 'zoom' || selection?.kind === 'mask' || selection?.kind === 'crop';
   if (tool !== 'select') setTool('select');
   if (inSource || tool === 'select') select(undefined);
 }

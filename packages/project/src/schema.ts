@@ -16,6 +16,11 @@ export const WEBCAM_SHAPES = ['circle', 'rounded'] as const;
 export const WEBCAM_CORNERS = ['top-left', 'top-right', 'bottom-left', 'bottom-right'] as const;
 export const CLICK_EFFECTS = ['ripple', 'none'] as const;
 export const MOUSE_BUTTONS = ['left', 'right', 'middle'] as const;
+/**
+ * What made an automatic item (`auto` on cuts, zooms, masks and a clip's crop). Editing an item by
+ * hand drops its tag; a rerun replaces only tagged items of the kinds it makes.
+ */
+export const AUTO_KINDS = ['crop', 'privacy', 'notification', 'retake', 'filler', 'pause', 'length', 'typing', 'dialog', 'click', 'answer'] as const;
 
 // z.number() already rejects Infinity and NaN in zod 4.
 const seconds = z.number().nonnegative();
@@ -116,6 +121,8 @@ const named = {
   label: z.string().max(200).optional(),
 };
 
+const autoKind = z.enum(AUTO_KINDS).optional();
+
 const ClipSceneSchema = z
   .strictObject({
     type: z.literal('clip'),
@@ -124,6 +131,8 @@ const ClipSceneSchema = z
     to: seconds,
     speed: z.number().positive().max(64).default(1),
     badge: z.string().optional(),
+    /** The part of the screen the clip shows (source px); zooms fit inside it, the window takes its shape. */
+    crop: z.strictObject({ rect: RectSchema, enabled: z.boolean().default(true), auto: z.literal('crop').optional() }).optional(),
   })
   .refine((clip) => clip.to > clip.from, { message: '"to" must be greater than "from"', path: ['to'] });
 
@@ -153,6 +162,7 @@ const ZoomSchema = z.strictObject({
   rect: RectSchema,
   ease: z.enum(EASES).default('smooth'),
   enabled: z.boolean().default(true),
+  auto: autoKind,
 });
 
 const MaskSchema = z
@@ -163,8 +173,33 @@ const MaskSchema = z
     rect: RectSchema,
     style: z.enum(MASK_STYLES).default('fill'),
     enabled: z.boolean().default(true),
+    auto: autoKind,
   })
   .refine((mask) => mask.to > mask.from, { message: '"to" must be greater than "from"', path: ['to'] });
+
+/** A source range taken out of every clip that covers it: a jump cut, no crossfade. */
+const CutSchema = z
+  .strictObject({
+    ...named,
+    from: seconds,
+    to: seconds,
+    enabled: z.boolean().default(true),
+    auto: autoKind,
+  })
+  .refine((cut) => cut.to > cut.from, { message: '"to" must be greater than "from"', path: ['to'] });
+
+/** The kinds of automatic edits the person keeps; one switched off is not made again on a rerun. */
+const AutoEditsSchema = z.strictObject({
+  crop: z.boolean().default(true),
+  privacy: z.boolean().default(true),
+  retakes: z.boolean().default(true),
+  fillers: z.boolean().default(true),
+  pauses: z.boolean().default(true),
+  typingZooms: z.boolean().default(true),
+  dialogZooms: z.boolean().default(true),
+  clickZooms: z.boolean().default(true),
+  answerZoom: z.boolean().default(true),
+});
 
 const TextSchema = z.strictObject({
   ...named,
@@ -186,11 +221,13 @@ export const ProjectSchema = z
     zooms: z.array(ZoomSchema).default([]),
     masks: z.array(MaskSchema).default([]),
     texts: z.array(TextSchema).default([]),
+    cuts: z.array(CutSchema).default([]),
+    autoEdits: AutoEditsSchema.prefault({}),
   })
   // Runs once everything else is valid (see the note above BackgroundSchema).
   .superRefine((project, ctx) => {
     const seen = new Map<string, string>();
-    for (const list of ['scenes', 'zooms', 'masks', 'texts'] as const) {
+    for (const list of ['scenes', 'zooms', 'masks', 'texts', 'cuts'] as const) {
       project[list].forEach((item: { id?: string }, index) => {
         if (item.id === undefined) return;
         const first = seen.get(item.id);
@@ -235,3 +272,6 @@ export type CardScene = Extract<Scene, { type: 'card' }>;
 export type Zoom = CuttleProject['zooms'][number];
 export type Mask = CuttleProject['masks'][number];
 export type TextOverlay = CuttleProject['texts'][number];
+export type Cut = CuttleProject['cuts'][number];
+export type AutoKind = (typeof AUTO_KINDS)[number];
+export type AutoEdits = CuttleProject['autoEdits'];

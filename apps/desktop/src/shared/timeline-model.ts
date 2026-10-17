@@ -1,11 +1,12 @@
 // What the editor's timeline draws, in output seconds: pure, so it is tested without a window.
-import type { CuttleProject, InputEvent, Marker, MarkerKind } from '@cuttle/project';
+import type { AutoKind, CuttleProject, InputEvent, Marker, MarkerKind } from '@cuttle/project';
 import { occurrences, type SceneSpan } from '@cuttle/timeline';
 import { formatDuration } from './format';
 
 export type OverlayKind = 'zoom' | 'mask' | 'caption';
 
 export interface SceneBlock {
+  /** The scene's index in the project's `scenes`. */
   index: number;
   /** The scene's id (`#<index>` for one without). */
   id: string;
@@ -18,6 +19,30 @@ export interface SceneBlock {
   /** Speed and lengths of a clip (`12× · 145 s → 12 s`), the motion of a still. */
   detail: string;
   speed?: number;
+  /**
+   * A clip's pieces, where cuts take parts out: each one's output start and end and the source
+   * second it starts at. One piece without cuts.
+   */
+  pieces?: ClipPiece[];
+}
+
+export interface ClipPiece {
+  start: number;
+  end: number;
+  from: number;
+}
+
+/** Where cuts show on the video lane: a notch at the output second a clip jumps (or would, for cuts that are off). */
+export interface CutNotch {
+  t: number;
+  /** The cuts there, by id. */
+  ids: string[];
+  /** Whether they take the stretch out (off: the video plays it). */
+  enabled: boolean;
+  /** Their kind, when they are automatic and share one. */
+  auto?: AutoKind;
+  /** The first one's label, or what it is. */
+  title: string;
 }
 
 export interface OverlayBlock {
@@ -61,20 +86,29 @@ export interface MarkerPin {
 export interface TimelineModel {
   duration: number;
   scenes: SceneBlock[];
+  cuts: CutNotch[];
   lanes: Record<OverlayKind, OverlayLane>;
   markers: MarkerPin[];
 }
 
 const baseName = (path: string) => path.split(/[\\/]/).at(-1) ?? path;
 
-function sceneBlock(span: SceneSpan): SceneBlock {
-  const { scene, index, start, end } = span;
+/** One block per scene: a clip's pieces (the spans with its `sceneIndex`) make one block. */
+function sceneBlock(pieces: readonly SceneSpan[], project: CuttleProject): SceneBlock {
+  const first = pieces[0]!;
+  const index = first.sceneIndex;
+  const start = first.start;
+  const end = pieces.at(-1)!.end;
+  const scene = project.scenes[index] ?? first.scene;
   const id = scene.id ?? `#${index}`;
   if (scene.type === 'clip') {
     const source = scene.to - scene.from;
-    const detail = scene.speed === 1 ? formatDuration(source) : `${formatDuration(source)} → ${formatDuration(end - start)}`;
+    const shown = end - start;
+    // the source it plays, and how long the video shows it when sped up or cut
+    const detail = Math.abs(shown - source) < 1e-6 ? formatDuration(source) : `${formatDuration(source)} → ${formatDuration(shown)}`;
+    const own = pieces.map((piece) => ({ start: piece.start, end: piece.end, from: piece.scene.type === 'clip' ? piece.scene.from : scene.from }));
     // The speed shows once, in front of the title (`12× Claude at work`): an unlabelled sped-up clip has no title.
-    return { index, id, kind: 'clip', start, end, title: scene.label ?? (scene.speed === 1 ? 'Clip' : ''), detail, speed: scene.speed };
+    return { index, id, kind: 'clip', start, end, title: scene.label ?? (scene.speed === 1 ? 'Clip' : ''), detail, speed: scene.speed, pieces: own };
   }
   if (scene.type === 'still') {
     const motion = scene.motion === 'none' ? '' : ` · ${scene.motion === 'kenburns' ? 'Ken Burns' : 'scroll'}`;
@@ -123,6 +157,51 @@ function lane<T extends { enabled: boolean; label?: string; id?: string }>(
   return { blocks, cutOut: cutOutItems.length, cutOutItems, rows: Math.max(1, ends.length) };
 }
 
+/** The source second a clip block shows at output second `t` (past its last piece: on at its speed). */
+export function blockSourceAt(block: SceneBlock, t: number): number {
+  const pieces = block.pieces ?? [];
+  const speed = block.speed ?? 1;
+  const piece = pieces.find((candidate) => t < candidate.end) ?? pieces.at(-1);
+  return piece ? piece.from + (t - piece.start) * speed : 0;
+}
+
+/** The notches of the cuts: on, where a clip's piece starts after them or a clip lost its start or end; off, where they would cut. */
+function cutNotches(project: CuttleProject, spans: readonly SceneSpan[]): CutNotch[] {
+  const notches: CutNotch[] = [];
+  const add = (t: number, cuts: CuttleProject['cuts']) => {
+    if (cuts.length === 0) return;
+    const there = notches.find((notch) => Math.abs(notch.t - t) < 1e-6 && notch.enabled === cuts[0]!.enabled);
+    const ids = cuts.map((cut) => cut.id ?? `#${project.cuts.indexOf(cut)}`);
+    if (there) {
+      there.ids.push(...ids.filter((id) => !there.ids.includes(id)));
+      return;
+    }
+    const kinds = new Set(cuts.map((cut) => cut.auto));
+    const auto = kinds.size === 1 ? cuts[0]!.auto : undefined;
+    notches.push({ t, ids, enabled: cuts[0]!.enabled, ...(auto !== undefined && { auto }), title: cuts[0]!.label ?? 'Cut' });
+  };
+  const on = project.cuts.filter((cut) => cut.enabled);
+  const touching = (from: number, to: number) => on.filter((cut) => cut.from < to + 1e-6 && cut.to > from - 1e-6);
+  spans.forEach((span, i) => {
+    const scene = span.scene;
+    if (scene.type !== 'clip') return;
+    const original = project.scenes[span.sceneIndex];
+    const previous = spans[i - 1];
+    if (span.cutBefore && previous?.scene.type === 'clip') add(span.start, touching(previous.scene.to, scene.from));
+    // the clip's own start or end taken out
+    if (!span.cutBefore && original?.type === 'clip' && scene.from > original.from + 1e-6) add(span.start, touching(original.from, scene.from));
+    const next = spans[i + 1];
+    const lastPiece = !(next?.cutBefore && next.sceneIndex === span.sceneIndex);
+    if (lastPiece && original?.type === 'clip' && scene.to < original.to - 1e-6) add(span.end, touching(scene.to, original.to));
+  });
+  for (const cut of project.cuts) {
+    if (cut.enabled) continue;
+    const t = outputTimesOf(spans, cut.from)[0];
+    if (t !== undefined) add(t, [cut]);
+  }
+  return notches.sort((a, b) => a.t - b.t);
+}
+
 /** The output seconds at which the clips show source second `t` (none when it is cut out). */
 export function outputTimesOf(spans: readonly SceneSpan[], t: number): number[] {
   const times: number[] = [];
@@ -135,9 +214,17 @@ export function outputTimesOf(spans: readonly SceneSpan[], t: number): number[] 
 }
 
 export function timelineModel(project: CuttleProject, spans: readonly SceneSpan[], markers: readonly Marker[] = []): TimelineModel {
+  // a clip with cuts in it is several spans in a row with one sceneIndex: one block
+  const groups: SceneSpan[][] = [];
+  for (const span of spans) {
+    const last = groups.at(-1);
+    if (last && last[0]!.sceneIndex === span.sceneIndex) last.push(span);
+    else groups.push([span]);
+  }
   return {
     duration: spans.at(-1)?.end ?? 0,
-    scenes: spans.map(sceneBlock),
+    scenes: groups.map((group) => sceneBlock(group, project)),
+    cuts: cutNotches(project, spans),
     lanes: {
       zoom: lane('zoom', project.zooms, spans, (zoom) => [zoom.at, zoom.at + zoom.duration], () => 'Zoom'),
       mask: lane('mask', project.masks, spans, (mask) => [mask.from, mask.to], () => 'Mask'),

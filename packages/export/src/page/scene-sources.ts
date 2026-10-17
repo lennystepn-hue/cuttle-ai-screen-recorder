@@ -84,14 +84,15 @@ export class SceneSources {
     webcams.clear();
     stills.clear();
     for (const layer of state.layers) {
-      const scene = this.open.get(layer.index);
-      if (!scene) throw new Error(`scene ${layer.index} shows on frame ${frame}, outside its planned frames`);
+      // decoders are opened per scene (`plan.index`), frames are handed over per layer
+      const scene = this.open.get(layer.sceneIndex);
+      if (!scene) throw new Error(`scene ${layer.sceneIndex} shows on frame ${frame}, outside its planned frames`);
       if (layer.sourceTime !== undefined && scene.screen) {
         const screenFrame = await scene.screen.frameAt(this.screenTime(layer.sourceTime));
         if (!screenFrame) {
           throw new PageError(
             'invalid-media',
-            `the screen recording has no frame at ${layer.sourceTime.toFixed(3)} s (scenes[${layer.index}]); the file may be cut off, end the scene earlier`,
+            `the screen recording has no frame at ${layer.sourceTime.toFixed(3)} s (scenes[${layer.sceneIndex}]); the file may be cut off, end the scene earlier`,
           );
         }
         screens.set(layer.index, screenFrame);

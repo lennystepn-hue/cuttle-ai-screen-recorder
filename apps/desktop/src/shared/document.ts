@@ -2,7 +2,7 @@
 // the edits on it as commands on items by id, applied by pure functions. A result is clamped to
 // valid values and checked with `parseProject`; a command whose item is gone throws, so a replay
 // on a newer version of the file can drop it with a note.
-import { newId, parseProject, usedIds, type CuttleProject, type IdList } from '@cuttle/project';
+import { newId, parseProject, usedIds, type AutoEdits, type CuttleProject, type IdList } from '@cuttle/project';
 
 export type Raw = Record<string, unknown>;
 export type ListName = IdList;
@@ -37,6 +37,8 @@ export type Command =
   /** Sets `look.<path…>` (`undefined` removes it). */
   | { type: 'look'; path: string[]; value: unknown }
   | { type: 'output'; width: number; height: number }
+  /** Switches a kind of automatic edit on or off (`autoEdits`). */
+  | { type: 'auto-edits'; kind: keyof AutoEdits; value: boolean }
   /** Replaces every scene (Show raw take). */
   | { type: 'scenes'; scenes: Item[] };
 
@@ -64,9 +66,9 @@ function find(raw: Raw, list: ListName, id: string): { item: Item; index: number
 const round = (value: number) => Math.round(value * 1e6) / 1e6;
 const clampNumber = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max);
 
-/** Gives every scene and overlay without an id one (`s3`, `z1` …); returns the same object when all have one. */
+/** Gives every scene, overlay and cut without an id one (`s3`, `z1` …); returns the same object when all have one. */
 export function ensureIds(raw: Raw): Raw {
-  const lists = (['scenes', 'zooms', 'masks', 'texts'] as const).filter((list) => items(raw, list).some((item) => typeof item.id !== 'string'));
+  const lists = (['scenes', 'zooms', 'masks', 'texts', 'cuts'] as const).filter((list) => items(raw, list).some((item) => typeof item.id !== 'string'));
   if (lists.length === 0) return raw;
   const next = structuredClone(raw);
   const taken = usedIds(next);
@@ -80,6 +82,15 @@ function setFields(item: Item, fields: Item): void {
     if (value === undefined) delete item[key];
     else item[key] = value;
   }
+}
+
+/**
+ * Hand edits win: an automatic item (`auto`) changed by hand in anything but being on or off is
+ * the person's now, and a rerun of the automatic edits leaves it alone.
+ */
+function claim(item: Item, fields?: Item): void {
+  if (fields && (Object.keys(fields).every((key) => key === 'enabled' || key === 'auto' || key === 'id') || 'auto' in fields)) return;
+  delete item.auto;
 }
 
 /** Keeps a rectangle `[x, y, w, h]` inside the screen (its corner moved in, its size cut), at least 8 px each way. */
@@ -109,10 +120,13 @@ function clampItem(list: ListName, item: Item, limits: EditLimits): void {
       const to = clampNumber(Number(item.to), from + frame * speed, end);
       item.from = round(from);
       item.to = round(to);
+      // a crop stays inside the screen, at least 8 px each way
+      const crop = item.crop as { rect?: number[] } | undefined;
+      if (crop && Array.isArray(crop.rect)) crop.rect = clampRect(crop.rect, limits.screen);
     } else item.duration = round(Math.max(frame, Number(item.duration)));
     return;
   }
-  if (list === 'masks') {
+  if (list === 'masks' || list === 'cuts') {
     item.from = round(Math.max(0, Number(item.from)));
     item.to = round(Math.max(Number(item.from) + frame, Number(item.to)));
   } else {
@@ -193,11 +207,13 @@ export function applyCommand(raw: Raw, command: Command, limits: EditLimits = {}
         item.from = Number(item.from) + by;
         item.to = Number(item.to) + by;
       } else item.at = Math.max(0, Number(item.at) + command.by);
+      claim(item);
       touched.push([command.list, item]);
       break;
     }
     case 'set': {
       const { item } = find(next, command.list, command.id);
+      claim(item, command.fields);
       setFields(item, command.fields);
       touched.push([command.list, item]);
       break;
@@ -220,6 +236,8 @@ export function applyCommand(raw: Raw, command: Command, limits: EditLimits = {}
       const { item, index } = find(next, command.list, command.id);
       const taken = usedIds(next);
       const copy: Item = { ...structuredClone(item), id: command.newId && !taken.has(command.newId) ? command.newId : newId(command.list, taken) };
+      // a copy is the person's, never one the automatic edits may replace
+      claim(copy);
       if (command.shift) {
         if (command.list === 'masks') {
           copy.from = Number(copy.from) + command.shift;
@@ -247,6 +265,11 @@ export function applyCommand(raw: Raw, command: Command, limits: EditLimits = {}
       const output = (next.output && typeof next.output === 'object' ? next.output : (next.output = {})) as Item;
       output.width = command.width;
       output.height = command.height;
+      break;
+    }
+    case 'auto-edits': {
+      const autoEdits = (next.autoEdits && typeof next.autoEdits === 'object' ? next.autoEdits : (next.autoEdits = {})) as Item;
+      autoEdits[command.kind] = command.value;
       break;
     }
     case 'scenes': {
@@ -315,7 +338,7 @@ export function replayCommands(raw: Raw, commands: readonly Command[], limits: E
   return { raw: current, dropped };
 }
 
-const NOUNS: Record<ListName, [string, string]> = { scenes: ['scene', 'scenes'], zooms: ['zoom', 'zooms'], masks: ['mask', 'masks'], texts: ['caption', 'captions'] };
+const NOUNS: Record<ListName, [string, string]> = { scenes: ['scene', 'scenes'], zooms: ['zoom', 'zooms'], masks: ['mask', 'masks'], texts: ['caption', 'captions'], cuts: ['cut', 'cuts'] };
 const noun = (list: ListName, count: number) => `${count} ${NOUNS[list][count === 1 ? 0 : 1]}`;
 
 /**
@@ -326,9 +349,9 @@ export function describeChange(before: CuttleProject, after: CuttleProject): str
   return changeParts(before, after).join(' · ') || 'no visible change';
 }
 
-/** The first item added or changed between two versions (scenes, then zooms, masks, captions), to show it. */
+/** The first item added or changed between two versions (scenes, then zooms, masks, captions, cuts), to show it. */
 export function firstChanged(before: CuttleProject, after: CuttleProject): { list: ListName; id: string } | undefined {
-  for (const list of ['scenes', 'zooms', 'masks', 'texts'] as const) {
+  for (const list of ['scenes', 'zooms', 'masks', 'texts', 'cuts'] as const) {
     const old = new Map(before[list].map((item) => [item.id, JSON.stringify(item)]));
     const found = after[list].find((item) => item.id !== undefined && old.get(item.id) !== JSON.stringify(item));
     if (found?.id) return { list, id: found.id };
@@ -338,7 +361,7 @@ export function firstChanged(before: CuttleProject, after: CuttleProject): { lis
 
 function changeParts(before: CuttleProject, after: CuttleProject): string[] {
   const parts: string[] = [];
-  for (const list of ['scenes', 'zooms', 'masks', 'texts'] as const) {
+  for (const list of ['scenes', 'zooms', 'masks', 'texts', 'cuts'] as const) {
     const key = (item: { id?: string }, index: number) => item.id ?? `#${index}`;
     const old = new Map(before[list].map((item, index) => [key(item, index), JSON.stringify(item)]));
     const now = new Map(after[list].map((item, index) => [key(item, index), JSON.stringify(item)]));
@@ -350,6 +373,7 @@ function changeParts(before: CuttleProject, after: CuttleProject): string[] {
     if (changed) parts.push(`${noun(list, changed)} changed`);
   }
   if (JSON.stringify(before.look) !== JSON.stringify(after.look)) parts.push('the look changed');
+  if (JSON.stringify(before.autoEdits) !== JSON.stringify(after.autoEdits)) parts.push('the automatic edits changed');
   if (JSON.stringify(before.output) !== JSON.stringify(after.output)) parts.push('the output size changed');
   if (JSON.stringify(before.sources) !== JSON.stringify(after.sources)) parts.push('another take');
   return parts;

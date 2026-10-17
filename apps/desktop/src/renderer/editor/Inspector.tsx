@@ -25,7 +25,8 @@ import { outputTimesOf } from '../../shared/timeline-model';
 import { CardIcon, CopyIcon, FilmIcon, MaskIcon, PageIcon, TextIcon, TrashIcon, ZoomIcon } from '../icons';
 import { chooseImage, deleteSelection, duplicateSelection, LIST_OF, SPEEDS } from './actions';
 import { edit, preview } from './doc';
-import { setTool, store, type Selection, type Tool } from './session';
+import { engineAssets, setTool, store, type Selection, type Tool } from './session';
+import { isColoured, swatch, type SwatchKey } from './swatches';
 import { useStore } from './store';
 
 const TABS = [
@@ -190,6 +191,108 @@ function Select<T extends string>({ value, options, names, onChange, testId }: {
     </select>
   );
 }
+
+/**
+ * How smooth the cursor's path is: the steps the menu offers (ones far enough apart to see), and a
+ * value set in cuttle.json kept as it is.
+ */
+const SMOOTHING: { value: number; name: string }[] = [
+  { value: 0, name: 'As recorded' },
+  { value: 0.5, name: 'Smooth (default)' },
+  { value: 1, name: 'Very smooth' },
+];
+
+function SmoothingSelect({ value }: { value: number }) {
+  const known = SMOOTHING.some((step) => step.value === value);
+  return (
+    <select
+      value={String(value)}
+      onChange={(event) => look(['cursor', 'smoothing'], Number(event.target.value), 'Cursor movement')}
+      onKeyDown={(event) => event.stopPropagation()}
+      data-testid="cursor-smoothing"
+    >
+      {!known && <option value={String(value)}>{value} (from cuttle.json)</option>}
+      {SMOOTHING.map((step) => (
+        <option key={step.value} value={String(step.value)}>
+          {step.name}
+        </option>
+      ))}
+    </select>
+  );
+}
+
+/**
+ * A style's picture, drawn by the engine (see swatches.ts): undefined while it is drawn, false when
+ * it could not be. The engine's assets come with the project, so it is drawn once that is open; a
+ * coloured one is drawn again when the colour settles, the old picture showing meanwhile.
+ */
+function useSwatch(key: SwatchKey, color: string): string | false | undefined {
+  const ready = useStore(store, (state) => state.phase === 'ready');
+  const [picture, setPicture] = useState<string | false>();
+  const tint = isColoured(key) ? color : '';
+  useEffect(() => {
+    if (!ready || !engineAssets) return;
+    const assets = engineAssets;
+    let live = true;
+    const timer = setTimeout(
+      () =>
+        swatch(assets, key, tint).then(
+          (url) => live && setPicture(url),
+          () => live && setPicture(false),
+        ),
+      picture ? 150 : 0,
+    );
+    return () => {
+      live = false;
+      clearTimeout(timer);
+    };
+  }, [ready, key, tint]);
+  return picture;
+}
+
+function PictureSwatch({ swatchKey, name, title, pressed, color, onPick }: { swatchKey: SwatchKey; name: string; title?: string; pressed: boolean; color: string; onPick: () => void }) {
+  const picture = useSwatch(swatchKey, color);
+  return (
+    <button type="button" className="picture-swatch" aria-pressed={pressed} title={title ?? name} onClick={onPick} data-testid={swatchKey.replace(':', '-')}>
+      <span className="picture">{picture ? <img src={picture} alt="" draggable={false} /> : <i className={`swatch-wait${picture === false ? ' failed' : ''}`} aria-hidden />}</span>
+      <span className="name">{name}</span>
+    </button>
+  );
+}
+
+/** The engine's own pictures of the cursor or frame styles, to pick one by sight; the name under each. */
+function PictureSwatches<T extends string>({
+  label,
+  kind,
+  options,
+  names,
+  titles,
+  value,
+  color,
+  onPick,
+}: {
+  label: string;
+  kind: 'cursor' | 'frame';
+  options: readonly T[];
+  names: Record<T, string>;
+  titles?: Partial<Record<T, string>>;
+  value: T;
+  color: string;
+  onPick: (value: T) => void;
+}) {
+  return (
+    <div className={`swatches picture-swatches ${kind}s`} role="group" aria-label={label}>
+      {options.map((option) => (
+        <PictureSwatch key={option} swatchKey={`${kind}:${option}` as SwatchKey} name={names[option]} title={titles?.[option]} pressed={value === option} color={color} onPick={() => onPick(option)} />
+      ))}
+    </div>
+  );
+}
+
+const CURSOR_TITLES: Partial<Record<(typeof CURSOR_STYLES)[number], string>> = {
+  system: 'System: changes shape like the real pointer (arrow, hand, text beam…)',
+  spotlight: 'Spotlight: a light around the pointer, the rest of the screen dimmed',
+};
 
 function Toggle({ checked, onChange, label, testId, disabled }: { checked: boolean; onChange: (checked: boolean) => void; label: string; testId?: string; disabled?: boolean }) {
   return (
@@ -585,9 +688,15 @@ function LookPanel() {
       </Row>
       {current.frame.enabled && (
         <>
-          <Row label="Style">
-            <Select value={current.frame.style} options={FRAME_STYLES} names={FRAME_NAMES} onChange={(style) => look(['frame', 'style'], style, 'Frame style')} testId="frame-style" />
-          </Row>
+          <PictureSwatches
+            label="Frame style"
+            kind="frame"
+            options={FRAME_STYLES}
+            names={FRAME_NAMES}
+            value={current.frame.style}
+            color={current.cursor.color}
+            onPick={(style) => look(['frame', 'style'], style, `Frame: ${FRAME_NAMES[style]}`)}
+          />
           <Row label="Title">
             <TextInput value={current.frame.title} placeholder="none" onCommit={(title) => look(['frame', 'title'], title, 'Frame title')} />
           </Row>
@@ -608,9 +717,16 @@ function LookPanel() {
       </Row>
       {current.cursor.enabled && (
         <>
-          <Row label="Style">
-            <Select value={current.cursor.style} options={CURSOR_STYLES} names={CURSOR_NAMES} onChange={(style) => look(['cursor', 'style'], style, 'Cursor style')} />
-          </Row>
+          <PictureSwatches
+            label="Cursor style"
+            kind="cursor"
+            options={CURSOR_STYLES}
+            names={CURSOR_NAMES}
+            titles={CURSOR_TITLES}
+            value={current.cursor.style}
+            color={current.cursor.color}
+            onPick={(style) => look(['cursor', 'style'], style, `Cursor: ${CURSOR_NAMES[style]}`)}
+          />
           <div className="grid2">
             <Row label="Size">
               <NumberInput value={current.cursor.size} min={0.5} max={4} step={0.25} onCommit={(value) => look(['cursor', 'size'], value, 'Cursor size')} />
@@ -621,6 +737,9 @@ function LookPanel() {
           </div>
           <Row label="Clicks">
             <Select value={current.cursor.clickEffect} options={CLICK_EFFECTS} names={CLICK_NAMES} onChange={(effect) => look(['cursor', 'clickEffect'], effect, 'Click effect')} />
+          </Row>
+          <Row label="Movement" note="the pointer glides; clicks stay exact">
+            <SmoothingSelect value={current.cursor.smoothing} />
           </Row>
         </>
       )}

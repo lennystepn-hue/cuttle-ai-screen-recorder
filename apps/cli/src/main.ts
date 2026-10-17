@@ -133,11 +133,12 @@ export async function runCli(argv: readonly string[], streams?: Streams): Promis
 
   program
     .command('suggest')
-    .description('propose scenes (quiet start and end trimmed, idle cut, waiting sped up) and a zoom on the answer')
+    .description('propose scenes (quiet start and end trimmed, idle cut, waiting sped up), a zoom on the answer and zooms on clicks')
     .option('--claude [cwd]', "read Claude Code's transcript for a take without Claude markers (default: here)")
-    .option('--no-zoom', 'no zoom on the answer')
+    .option('--no-zoom', 'no zooms (neither on the answer nor on clicks)')
+    .option('--no-click-zooms', 'no zooms on clicks (the answer zoom stays)')
     .option('--dry-run', 'print the suggestion, leave cuttle.json as it is')
-    .action(action((output, project, options: { claude?: string | true; zoom: boolean; dryRun?: boolean }) => suggestCommand(project, options, output)));
+    .action(action((output, project, options: { claude?: string | true; zoom: boolean; clickZooms: boolean; dryRun?: boolean }) => suggestCommand(project, options, output)));
 
   program
     .command('preview')

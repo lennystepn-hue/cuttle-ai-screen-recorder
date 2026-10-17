@@ -94,7 +94,7 @@ and mic, starting at sign-in, motion, and the recent projects (open, rename, sho
 cuttle init demo && cd demo
 cuttle devices                       # monitors, windows, cameras, microphones
 cuttle record --mic --until-claude   # stops when Claude Code in this folder ends its turn (or Ctrl+C)
-cuttle suggest                       # scenes: quiet start and end trimmed, idle cut, waiting sped up, a zoom on the answer
+cuttle suggest                       # scenes: quiet start and end trimmed, idle cut, waiting sped up, zooms on the answer and on clicks
 cuttle preview                       # 12 stills and a contact sheet in preview/
 cuttle frame 42.5 --grid             # a source frame with a numbered pixel grid, for masks and zooms
 cuttle capture-page https://example.com --scroll --add

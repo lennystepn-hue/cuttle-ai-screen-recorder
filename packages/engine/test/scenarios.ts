@@ -189,11 +189,12 @@ export const SCENARIOS: Scenario[] = [
   },
   // Crossfade between two clips of one recording, halfway: the outgoing clip holds its last frame
   // with its mask and cursor, the incoming clip starts at a later source time without the mask,
-  // its cursor further right and down (900, 600).
+  // its cursor further right and down (900, 600). The cursor as recorded (smoothing would hold it
+  // still through the 2 s without a move).
   {
     name: 'crossfade-clips',
     project: project(
-      { frame: { title: TITLE } },
+      { frame: { title: TITLE }, cursor: { smoothing: 0 } },
       {
         scenes: [
           { type: 'clip', from: 0, to: 2 },

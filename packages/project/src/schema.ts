@@ -76,6 +76,8 @@ const CursorSchema = z.strictObject({
   size: z.number().positive().max(4).default(1),
   color: hexColor.default('#D97757'),
   clickEffect: z.enum(CLICK_EFFECTS).default('ripple'),
+  /** How smooth the drawn path is: 0 as recorded, 1 very smooth (clicks stay exact). */
+  smoothing: z.number().min(0).max(1).default(0.5),
 });
 
 const WebcamSchema = z.strictObject({

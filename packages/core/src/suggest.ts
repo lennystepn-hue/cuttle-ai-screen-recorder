@@ -1,6 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
-import { newId, parseEventsJsonl, parseMarkersJson, parseTakeJson, usedIds, type InputEvent, type Marker, type Rect } from '@cuttle/project';
+import { newId, parseEventsJsonl, parseMarkersJson, parseProject, parseTakeJson, usedIds, type InputEvent, type Marker, type Rect } from '@cuttle/project';
+import { clickZooms, sceneSpans, shownClicks } from '@cuttle/timeline';
 import { CoreError } from './errors';
 import { readProjectFile, writeProjectFile } from './project-file';
 import { analyseScreen, grabGray } from './suggest/media';
@@ -13,8 +14,10 @@ export interface SuggestOptions {
   claude?: string | true;
   /** Print the suggestion without writing cuttle.json. */
   dryRun?: boolean;
-  /** Zoom on Claude's final answer (default true). */
+  /** Zooms at all: on Claude's final answer and on the clicks (default true). */
   zoom?: boolean;
+  /** Zooms that follow the clicks (default true; `zoom: false` turns them off too). */
+  clickZooms?: boolean;
   /** Status for people while it runs. */
   onStatus?: (text: string) => void;
 }
@@ -120,6 +123,21 @@ export async function suggestProject(projectDir: string, args: SuggestOptions = 
     } else {
       notes.push(region ? 'no zoom: most of the screen changed with the answer (add one by hand)' : 'no zoom: nothing changed around the answer');
     }
+  }
+  if (args.zoom !== false && args.clickZooms !== false && events.length > 0) {
+    // where each clip starts in the output, with the cards and pages around the clips counted
+    const parsed = parseProject({ ...file.raw, scenes, zooms: [] });
+    const spans = parsed.ok ? sceneSpans(parsed.project.scenes) : [];
+    const shown = spans.flatMap((span) => (span.scene.type === 'clip' ? [{ from: span.scene.from, to: span.scene.to, speed: span.scene.speed, start: span.start }] : []));
+    const followed = clickZooms(events, shown, screenInfo, zooms);
+    // the clicks the answer zoom does not show, less those the click zooms follow
+    const left = shownClicks(events, shown, zooms) - followed.reduce((sum, zoom) => sum + zoom.clicks, 0);
+    for (const zoom of followed) {
+      zooms.push({ id: newId('zooms', taken), label: zoom.clicks === 1 ? 'Click' : 'Clicks', at: zoom.at, duration: zoom.duration, rect: zoom.rect });
+    }
+    zooms.sort((a, b) => a.at - b.at);
+    if (followed.length > 0) notes.push(`${followed.length} zoom${followed.length === 1 ? '' : 's'} on clicks`);
+    if (left > 0) notes.push(`${left} click${left === 1 ? '' : 's'} got no zoom: sped up, or near a cut or another zoom`);
   }
 
   let backup: string | undefined;

@@ -27,7 +27,7 @@ describe('ProjectSchema', () => {
     expect(p.output).toEqual({ width: 1920, height: 1080, fps: 30 });
     expect(p.look.background).toEqual({ preset: 'sunset-sky' });
     expect(p.look.frame).toEqual({ enabled: true, style: 'mac-dark', title: '', radius: 14, shadow: true });
-    expect(p.look.cursor).toEqual({ enabled: true, style: 'system', size: 1, color: '#D97757', clickEffect: 'ripple' });
+    expect(p.look.cursor).toEqual({ enabled: true, style: 'system', size: 1, color: '#D97757', clickEffect: 'ripple', smoothing: 0.5 });
     expect(p.look.webcam).toEqual({ enabled: false, shape: 'circle', corner: 'bottom-left', size: 0.18 });
     expect(p.look.audio).toEqual({ enabled: true, muteSpedUp: true });
     expect(p.look.transition).toEqual({ enabled: true, duration: 0.3 });
@@ -151,7 +151,7 @@ describe('ProjectSchema', () => {
 
   it('fills the remaining defaults of a partial block', () => {
     const p = ProjectSchema.parse({ ...minimal, look: { cursor: { style: 'dot' } } });
-    expect(p.look.cursor).toEqual({ enabled: true, style: 'dot', size: 1, color: '#D97757', clickEffect: 'ripple' });
+    expect(p.look.cursor).toEqual({ enabled: true, style: 'dot', size: 1, color: '#D97757', clickEffect: 'ripple', smoothing: 0.5 });
   });
 
   it('rejects non-finite numbers', () => {

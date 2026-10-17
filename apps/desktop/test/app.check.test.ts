@@ -513,6 +513,42 @@ describe.runIf(enabled)('the Cuttle app', () => {
     await undoAll();
   }, 30_000);
 
+  it('draws the cursor and frame styles with the engine, and sets them and the cursor’s movement in the Look tab', async () => {
+    const original = readFileSync(projectFile(), 'utf8');
+    await click(editor, '#tab-look');
+    // the swatches are the engine's own pictures
+    await editor.waitForSelector('[data-testid=frame-mac-light] img', { timeout: 20_000 });
+    await editor.waitForSelector('[data-testid=cursor-ring] img', { timeout: 20_000 });
+    await shot('14-look-swatches');
+    await editor.waitForSelector('[data-testid=cursor-spotlight] img', { timeout: 20_000 });
+    await editor.locator('[data-testid=cursor-spotlight]').scrollIntoViewIfNeeded();
+    await shot('14b-look-cursors');
+    await click(editor, '[data-testid=frame-mac-light]');
+    await savedWhen((file) => (file as unknown as { look: { frame: { style?: string } } }).look.frame.style === 'mac-light');
+    await editor.selectOption('[data-testid=cursor-smoothing]', '1');
+    await savedWhen((file) => (file as unknown as { look: { cursor?: { smoothing?: number } } }).look.cursor?.smoothing === 1);
+    await click(editor, '#tab-selection');
+    await undoAll();
+    expect(readFileSync(projectFile(), 'utf8')).toBe(original);
+  }, 30_000);
+
+  it('shows a ghost of a scene being moved, and zooms on clicks from the menu when there are any', async () => {
+    await drag('.scene[data-id="s3"]', [-600, 0], { hold: true });
+    expect(await editor.locator('.scene-ghost').count()).toBe(1);
+    await shot('15-scene-ghost');
+    await release([0, 0]);
+    expect(await editor.locator('.scene-ghost').count()).toBe(0);
+    await savedWhen((file) => file.scenes[0]?.id === 's3');
+    await undoAll();
+    // the fixture's clicks are too close to cuts or to the answer zoom for a zoom of their own
+    await editor.keyboard.press('Control+K');
+    await editor.keyboard.type('zoom on clicks');
+    await editor.waitForFunction(() => document.querySelector('.command-menu [aria-selected=true]')?.textContent?.includes('Zoom on clicks'));
+    await editor.keyboard.press('Enter');
+    await expect.poll(() => doc().then((state) => state.toast?.text ?? ''), { timeout: 5000 }).toContain('No zoom fits the click left');
+    expect((await editor.evaluate(() => document.querySelector('.app')?.getAttribute('data-tool'))) ?? 'select').toBe('select');
+  }, 30_000);
+
   it('keeps a drag going over a version written outside the app meanwhile: both are in the file, each undone on its own', async () => {
     await press('.item.zoom');
     await drag('.item.zoom', [40, 0], { hold: true });

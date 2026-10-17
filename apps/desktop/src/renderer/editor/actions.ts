@@ -1,7 +1,7 @@
 // The editor's actions on the document (the timeline bar, the keys, the command menu and the tools
 // call these): each is one step to undo. Where the playhead stands decides where things go.
 import type { ClipScene, CuttleProject, Scene } from '@cuttle/project';
-import { sceneSpans, TEXT_FADE_SECONDS, type SceneSpan } from '@cuttle/timeline';
+import { clickZooms, sceneSpans, shownClicks, TEXT_FADE_SECONDS, type SceneSpan } from '@cuttle/timeline';
 import type { Command, ListName } from '../../shared/document';
 import { outputTimesOf } from '../../shared/timeline-model';
 import { bridge } from '../bridge';
@@ -128,6 +128,30 @@ export function addZoom(rect?: number[]): void {
   const duration = Math.min(NEW_OVERLAY_SECONDS * clip.speed, clip.to - place.source!);
   addAndSelect({ type: 'add', list: 'zooms', item: { at: place.source!, duration, rect: rect ?? [screen.width / 4, screen.height / 4, screen.width / 2, screen.height / 2] } }, 'zoom', 'Add zoom');
   setTool('zoom');
+}
+
+/**
+ * Zooms that follow the take's clicks (as `suggest` makes them), added where none is yet: one step
+ * to undo. The zooms there, made by suggest or by hand, stay as they are; the new ones keep clear
+ * of them and of their starts.
+ */
+export function autoZoomClicks(): void {
+  const { doc, media } = store.get();
+  const project = documentProject();
+  if (!doc || !media || !project) return;
+  if (doc.issues) return toast('cuttle.json has a mistake; fix it first (Claude or a text editor), then edit here again.', { tone: 'warning' });
+  if (media.events.length === 0) return toast('This take has no clicks or keys recorded: there are no clicks to zoom on.', { tone: 'warning' });
+  const clips = sceneSpans(project.scenes).flatMap((span) => (span.scene.type === 'clip' ? [{ from: span.scene.from, to: span.scene.to, speed: span.scene.speed, start: span.start }] : []));
+  const zooms = clickZooms(media.events, clips, screenSize(), project.zooms);
+  if (zooms.length === 0) {
+    // why, in one line (it stays on one line at the narrowest window)
+    if (shownClicks(media.events, clips) === 0) return toast('There are no clicks in the video to zoom on.');
+    const free = shownClicks(media.events, clips, project.zooms);
+    if (free === 0) return toast('Every click is under a zoom already.');
+    return toast(`No zoom fits ${free === 1 ? 'the click' : `the ${free} clicks`} left: sped up, or near a cut or a zoom.`);
+  }
+  const commands = zooms.map((zoom) => ({ type: 'add', list: 'zooms', item: { label: zoom.clicks === 1 ? 'Click' : 'Clicks', at: zoom.at, duration: zoom.duration, rect: zoom.rect } }) as Command);
+  if (edit(commands, 'Zoom on clicks')) toast(`Added ${zooms.length} zoom${zooms.length === 1 ? '' : 's'} on clicks.`, { undo: true });
 }
 
 /** A mask from the playhead to the clip's end; then the source view to place it. */

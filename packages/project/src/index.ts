@@ -1,6 +1,7 @@
 export {
   AUTO_KINDS,
   BACKGROUND_PRESETS,
+  CAPTION_STYLES,
   CLICK_EFFECTS,
   CURRENT_VERSION,
   CURSOR_SHAPES,
@@ -21,6 +22,9 @@ export {
   type AutoEdits,
   type AutoKind,
   type BackgroundPreset,
+  type CaptionFix,
+  type Captions,
+  type CaptionStyle,
   type CardScene,
   type ClipScene,
   type CursorShape,
@@ -56,6 +60,7 @@ export {
   type TranscriptWord,
 } from './transcript';
 export { ID_PREFIXES, newId, usedIds, type IdList } from './ids';
+export { SHORT_SPELLINGS, fillerLexicon, likelyFiller, normWord } from './words';
 export { parseEventsJsonl } from './events';
 export { SEGMENTS_VERSION, SegmentsFileSchema, parseSegmentsJson, segmentOffsets, takeTime, type Segment, type SegmentsFile, type SegmentsFileParseResult } from './segments';
 export { TAKE_VERSION, TakeFileSchema, parseTakeJson, trackOffset, type TakeFile, type TakeFileParseResult, type TakeFileTrack } from './take';

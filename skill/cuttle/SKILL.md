@@ -173,6 +173,11 @@ Then refine `cuttle.json` ([project.md](project.md)) and preview again:
   - Masks apply to clips only: look at a captured page yourself before you add it.
 - **Story.** Trim what does not help. Keep the prompt readable (1.5 s or more) and the answer on
   screen for 2–3 s. A speed-up shows a "12× speed" badge.
+- **Length.** For a length the user names (X: under 60 s), fit it last, after your zooms and
+  texts: `cuttle -C "<project>" --json fit 45`. It cuts where the video rests (`auto: "length"`),
+  never speech, clicks, typing, a zoom or a text, and says the shortest it can make when the
+  length is out of reach. A new fit replaces the last; `fit --off` takes it out.
+  (`suggest --length 45` fits in the same run, before any hand edits.)
 - **Focus.** Add or fix `zooms` on what matters: 2–4 s on the answer or a result, with the rect
   read off a `frame --grid`. Over a sped-up clip, durations are source seconds: 3 s at 12× is a
   quarter second on screen (see project.md).

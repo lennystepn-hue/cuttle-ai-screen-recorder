@@ -15,7 +15,7 @@ import { cutTake } from './media-service';
 import { APP_ORIGIN, serveApp, bundlePath } from './protocols';
 import { recorderHost, RecordingError } from './recorder-host';
 import { loadSettings, updateSettings } from './settings';
-import { editorWindowOf, guard, hidePill, reopenEditor, setEditorStatus, showPill, webPreferences } from './windows';
+import { editorWindowOf, expectSuggest, guard, hidePill, reopenEditor, setEditorStatus, showPill, webPreferences } from './windows';
 
 /** The HUD's window (the HUD and a margin for its shadow): never in the video, and a dead zone for the input log. */
 const HUD_SIZE = { width: 380, height: 64 };
@@ -673,7 +673,10 @@ export async function cutIfPending(dir: string): Promise<void> {
   await recut(dir);
 }
 
-/** Opens the editor on the take at once, and reloads it once `suggest` has cut it in the background. */
+/**
+ * Opens the editor on the take at once while `suggest` cuts it in the background; the editor gets
+ * the cut as a change of the file, one step to undo ("Cut by suggest").
+ */
 async function cutAndShow(dir: string): Promise<void> {
   finishing.add(keyOf(dir));
   try {
@@ -684,18 +687,21 @@ async function cutAndShow(dir: string): Promise<void> {
   }
 }
 
-/** Cuts the project's take with `suggest`; the editor says so, and says when it could not (with Try again). */
+/**
+ * Cuts the project's take with `suggest`; the editor says so, gets the cut as a change of the file
+ * (one step to undo, "Cut by suggest"), and says when it could not (with Try again).
+ */
 async function cut(dir: string): Promise<void> {
   await setEditorStatus(dir, { text: 'Cutting the take…', state: 'working' });
+  await expectSuggest(dir, true);
   try {
     await cutTake(dir);
   } catch (error) {
+    await expectSuggest(dir, false);
     await setEditorStatus(dir, { text: `The take could not be cut: ${(error as Error).message.split('\n')[0]}`, state: 'failed' });
     return;
   }
   await setEditorStatus(dir, undefined);
-  // Only an editor still open takes the cut: one closed meanwhile is not opened again.
-  if (await editorWindowOf(dir)) await reopenEditor(dir, { reload: true });
 }
 
 /** "Try again" in the editor after a failed cut. */

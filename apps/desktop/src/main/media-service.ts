@@ -153,6 +153,11 @@ export class ProjectMedia {
     private readonly onChange: (state: MediaState) => void,
   ) {}
 
+  /** The sources the media are made from. */
+  get sources(): CuttleProject['sources'] {
+    return this.project.sources;
+  }
+
   current(): MediaState {
     return structuredClone(this.state);
   }

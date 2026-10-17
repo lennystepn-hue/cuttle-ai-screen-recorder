@@ -1,24 +1,27 @@
 import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { copyFile, readdir, readFile, realpath, stat } from 'node:fs/promises';
+import { copyFile, readdir, readFile, realpath, stat, writeFile } from 'node:fs/promises';
 import { basename, dirname, join, resolve } from 'node:path';
 import { app, BrowserWindow, dialog, Menu, screen, session, shell, type Session, type WebContents } from 'electron';
-import { PROJECT_FILE, writeProjectFile, type ProjectFile } from '@cuttle/core';
+import { PROJECT_FILE, backupFile, writeProjectFile, type ProjectFile } from '@cuttle/core';
+import { parseProject } from '@cuttle/project';
 import { plainIssue } from '../shared/format';
-import type { ExportEnd, ProjectStatus } from '../shared/ipc';
+import type { ExportEnd, ProjectFileEvent, ProjectStatus } from '../shared/ipc';
 import { isInside } from '../shared/media-path';
-import { CHECK, HIDDEN } from './check';
+import { CHECK, CHECK_IMAGE, HIDDEN } from './check';
 import { ExportRun, exportPath } from './export-service';
 import { bindRequests, send } from './ipc';
 import { ProjectMedia } from './media-service';
 import { LockedError, lockProject, openProjectFile, projectInfo } from './project';
+import { importImage, ProjectFileWatch } from './project-watch';
 import { APP_ORIGIN, assetPath, bundlePath, serveApp, serveMedia } from './protocols';
 import { cutIfPending, recut, startPicking } from './recording';
 import { addRecent, loadSettings, updateSettings } from './settings';
 
-
 const BACKGROUND = '#0c0c0f';
 const TITLE_BAR_HEIGHT = 44;
+/** The person's version that a save conflict could not carry over (the editor offers it back). */
+const DRAFT_FILE = 'cuttle.json.draft';
 
 /** No permissions (camera, mic, notifications …), no downloads. */
 export function lockDown(ses: Session): void {
@@ -50,6 +53,8 @@ interface Editor {
   /** Its webContents, kept: a closed window's `webContents` getter throws. */
   contents: WebContents;
   media: ProjectMedia;
+  /** cuttle.json on disk: the editor's saves and the changes others make. */
+  watch: ProjectFileWatch;
   release: () => Promise<void>;
   run?: ExportRun;
   /** What the main process is doing to the project, shown in the title bar. */
@@ -90,6 +95,8 @@ export async function openEditor(projectDir: string, options: { force?: boolean 
 async function createEditor(dir: string, key: string, force: boolean): Promise<BrowserWindow> {
   const file = await openProjectFile(dir);
   const release = await lockProject(dir, { force });
+  // The file as found is kept once, before the editor changes anything (`.bak`, rotated as the CLI does).
+  await backupFile(join(dir, PROJECT_FILE)).catch(() => undefined);
   try {
     const window = await editorWindow(dir, key, file, release);
     void cutIfPending(dir);
@@ -127,9 +134,24 @@ async function editorWindow(dir: string, key: string, file: ProjectFile, release
   });
   const contents = window.webContents;
   guard(contents);
-  const media = new ProjectMedia(dir, file.project, (state) => send(contents, 'media:state', state));
-  const editor: Editor = { window, contents, media, release };
+  const editor: Editor = { window, contents, media: newMedia(file.project), release, watch: new ProjectFileWatch(dir, (event) => onFileChange(event)) };
   editors.set(key, editor);
+  function newMedia(project: ProjectFile['project']): ProjectMedia {
+    return new ProjectMedia(dir, project, (state) => send(contents, 'media:state', state));
+  }
+  // Another take (Back to take, a recording from the CLI): the proxy, thumbnails and peaks are made for it.
+  function onFileChange(event: ProjectFileEvent): void {
+    if ('raw' in event) {
+      const parsed = parseProject(event.raw);
+      if (parsed.ok && JSON.stringify(parsed.project.sources) !== JSON.stringify(editor.media.sources)) {
+        editor.media.dispose();
+        editor.media = newMedia(parsed.project);
+        void editor.media.start();
+      }
+    }
+    send(contents, 'project:file', event);
+  }
+  const media = { current: () => editor.media.current(), start: () => editor.media.start() };
 
   bindRequests(contents, 'editor', {
     // Read again on every request: the file may have changed since the window opened.
@@ -163,12 +185,28 @@ async function editorWindow(dir: string, key: string, file: ProjectFile, release
     'project:record': () => void startPicking(dir),
     'project:takes': () => takesMenu(dir, window),
     'project:cut': () => void recut(dir),
+    'project:save': ({ raw, base }) => editor.watch.save(raw, base),
+    'project:draft': ({ raw }) => writeFile(join(dir, DRAFT_FILE), `${JSON.stringify(raw, null, 2)}\n`),
+    'project:import-image': async ({ purpose }) => {
+      const chosen =
+        CHECK_IMAGE ??
+        (
+          await dialog.showOpenDialog(window, {
+            title: purpose === 'still' ? 'An image for the page' : 'A background image',
+            properties: ['openFile'],
+            filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'webp'] }],
+          })
+        ).filePaths[0];
+      return chosen ? { path: await importImage(dir, chosen) } : undefined;
+    },
   });
+  editor.watch.start(file.hash);
   contents.on('did-finish-load', () => send(contents, 'project:status', editor.status ?? {}));
 
   window.on('closed', () => {
     if (editors.get(key) === editor) editors.delete(key);
-    media.dispose();
+    editor.watch.close();
+    editor.media.dispose();
     editor.run?.cancel();
     void release();
     // Closing the last editor returns to the pill (not while an editor is reopened on a new take).
@@ -193,6 +231,12 @@ async function editorWindow(dir: string, key: string, file: ProjectFile, release
 async function editorOf(dir: string): Promise<Editor | undefined> {
   const real = await realpath(resolve(dir)).catch(() => resolve(dir));
   return editors.get(keyOf(real));
+}
+
+/** The next outside change of the project comes from the app's own suggest ("Cut by suggest"). */
+export async function expectSuggest(dir: string, expecting: boolean): Promise<void> {
+  const editor = await editorOf(dir);
+  if (editor) editor.watch.origin = expecting ? 'suggest' : 'outside';
 }
 
 /** The window of a project's open editor, if there is one. */

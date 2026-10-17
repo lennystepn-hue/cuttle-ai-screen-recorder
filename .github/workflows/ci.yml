@@ -40,9 +40,12 @@ jobs:
         if: runner.os == 'Windows'
         run: choco install ffmpeg -y --no-progress
 
+      # ffmpeg-full: Homebrew's ffmpeg has no drawtext, which the OCR checks draw their screens' text with
       - name: ffmpeg (macOS)
         if: runner.os == 'macOS'
-        run: brew install ffmpeg
+        run: |
+          brew install ffmpeg-full
+          echo "$(brew --prefix ffmpeg-full)/bin" >> "$GITHUB_PATH"
 
       # also downloads Electron and, on macOS, builds the screen capture helper with Xcode's Swift
       - run: pnpm install --frozen-lockfile
@@ -77,9 +80,12 @@ jobs:
         if: runner.os == 'Windows'
         run: choco install ffmpeg -y --no-progress
 
+      # ffmpeg-full: Homebrew's ffmpeg has no drawtext, which the OCR checks draw their screens' text with
       - name: ffmpeg (macOS)
         if: runner.os == 'macOS'
-        run: brew install ffmpeg
+        run: |
+          brew install ffmpeg-full
+          echo "$(brew --prefix ffmpeg-full)/bin" >> "$GITHUB_PATH"
 
       - run: pnpm install --frozen-lockfile
 

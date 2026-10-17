@@ -42,8 +42,9 @@ command, Cuttle (or "Electron" when it runs from this repository) for the app. A
 System Settings > Privacy & Security: *Screen & System Audio Recording* (needed; quit and reopen
 the app afterwards), *Microphone* and *Camera* (when a take uses them), *Input Monitoring*
 (the clicks, scrolls, key counts and hotkeys; without it a take has no input log and warns), and
-*Accessibility* (where text is typed, for zooms that follow typing; without it they follow what
-the screen changes).
+*Accessibility* (where text is typed, for zooms that follow typing; where a notification banner
+is and a browser's page; without it zooms follow what the screen changes, a notification is
+masked on the whole right side of the screen and the crop comes from the picture).
 
 ## Development
 
@@ -58,6 +59,10 @@ pnpm recorder:real                       # record 3 s of the primary monitor and
 pnpm cli:check                           # build the CLI; preview, capture-page and render through it in Electron
 pnpm cuttle <command>                    # the built CLI without installing it (runs in the repo root)
 ```
+
+The checks of reading the screen draw their text with ffmpeg's `drawtext`: on macOS they need
+`brew install ffmpeg-full` (keg-only: put `$(brew --prefix ffmpeg-full)/bin` first on PATH), as
+Homebrew's `ffmpeg` has no `drawtext`.
 
 Export and recording need ffmpeg on PATH (or its path in `CUTTLE_FFMPEG`); `export:check` and the
 recorder tests also need ffprobe. Recording works on Windows and macOS; the recorder's tests use its

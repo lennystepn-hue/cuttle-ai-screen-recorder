@@ -12,6 +12,8 @@ export type CoreErrorCode =
   | 'download'
   /** ffmpeg has no `whisper` filter (before 8.0, or a build without it). */
   | 'ffmpeg-old'
+  /** The screen's text cannot be read here (not Windows, PowerShell refused, no OCR language). */
+  | 'ocr-missing'
   | 'cancelled';
 
 /** A failure of a project operation (reading a project, running ffmpeg, a take that cannot be used). */

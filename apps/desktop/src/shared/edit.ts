@@ -39,13 +39,13 @@ export function dragRange(range: readonly [number, number], edge: 'start' | 'end
 }
 
 /**
- * A zoom's path (its rect and its moves' rects) moved and scaled the way the rect shown at the
- * playhead went from `from` to `to`: what the person drags is where the zoom is then, and the rest of
+ * A zoom's or mask's path (its rect and its moves' rects) moved and scaled the way the rect shown at
+ * the playhead went from `from` to `to`: what the person drags is where it is then, and the rest of
  * the path follows.
  */
 export function movePath(path: { rect: Rect; moves?: readonly { at: number; rect: Rect }[] }, from: Rect, to: Rect): { rect: Rect; moves?: { at: number; rect: Rect }[] } {
-  const scale = to[2] / from[2];
-  const map = (rect: Rect): Rect => [Math.round(to[0] + (rect[0] - from[0]) * scale), Math.round(to[1] + (rect[1] - from[1]) * scale), Math.round(rect[2] * scale), Math.round(rect[3] * scale)];
+  const [sx, sy] = [to[2] / from[2], to[3] / from[3]];
+  const map = (rect: Rect): Rect => [Math.round(to[0] + (rect[0] - from[0]) * sx), Math.round(to[1] + (rect[1] - from[1]) * sy), Math.round(rect[2] * sx), Math.round(rect[3] * sy)];
   return { rect: map(path.rect), ...(path.moves && { moves: path.moves.map((move) => ({ at: move.at, rect: map(move.rect) })) }) };
 }
 

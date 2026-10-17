@@ -346,6 +346,18 @@ describe('a zoom that follows, in the document', () => {
     expect(project(applyCommand(following, { type: 'set', list: 'zooms', id: 'z1', fields: { at: 0.5 } }, limits)).zooms[0]!.moves).toHaveLength(2);
   });
 
+  it('keeps a mask\'s path with its time too: a drag or a shift takes it along, an edge leaves it in the take', () => {
+    const scrolling: Raw = {
+      ...following,
+      masks: [{ id: 'm1', from: 2, to: 8, rect: [10, 400, 300, 30], moves: [{ at: 4, rect: [10, 300, 300, 30] }, { at: 6, rect: [10, 200, 300, 30] }], auto: 'privacy' }],
+    };
+    const mask = (raw: Raw) => (raw.masks as Raw[])[0]!;
+    expect(mask(applyCommand(scrolling, { type: 'set', list: 'masks', id: 'm1', fields: { from: 3, to: 9 } }, limits))).toMatchObject({ from: 3, moves: [{ at: 5 }, { at: 7 }] });
+    expect(mask(applyCommand(scrolling, { type: 'shift', list: 'masks', id: 'm1', by: 1 }, limits)).moves).toMatchObject([{ at: 5 }, { at: 7 }]);
+    expect(mask(applyCommand(scrolling, { type: 'set', list: 'masks', id: 'm1', fields: { from: 5 } }, limits))).toMatchObject({ from: 5, rect: [10, 300, 300, 30], moves: [{ at: 6 }] });
+    expect(mask(applyCommand(scrolling, { type: 'set', list: 'masks', id: 'm1', fields: { moves: undefined } }, limits))).not.toHaveProperty('moves');
+  });
+
   it('moves and scales the whole path the way the box at the playhead was dragged', () => {
     const path = { rect: [0, 200, 640, 400] as [number, number, number, number], moves: [{ at: 5, rect: [300, 200, 640, 400] as [number, number, number, number] }] };
     // the box at the playhead (on the move) went 100 px right and 50 px down

@@ -26,6 +26,7 @@ const EXIT_CODES: Record<string, number> = {
   'model-missing': EXIT.usage,
   download: EXIT.device,
   'ffmpeg-old': EXIT.device,
+  'ocr-missing': EXIT.device,
 };
 
 /** A failure the CLI reports with a code and an exit code. */

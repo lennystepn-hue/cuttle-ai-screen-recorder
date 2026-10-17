@@ -116,6 +116,17 @@ describe('ProjectSchema', () => {
     expect(pathsOf({ ...minimal, zooms: [{ at: 0, duration: 1, rect: [0, 0, 0, 10] }] })).toContain('zooms.0.rect.2');
   });
 
+  it('takes a mask that follows, and the privacy guard\'s words', () => {
+    const mask = { from: 2, to: 6, rect: [10, 10, 300, 40] };
+    const moves = [{ at: 3, rect: [10, 60, 300, 40] }];
+    expect(ProjectSchema.parse({ ...minimal, masks: [{ ...mask, moves }] }).masks[0]!.moves).toEqual(moves);
+    expect(pathsOf({ ...minimal, masks: [{ ...mask, moves: [{ at: 6, rect: [0, 0, 9, 9] }] }] })).toEqual(['masks.0.moves.0.at']);
+    expect(pathsOf({ ...minimal, masks: [{ ...mask, to: 2 }] })).toEqual(['masks.0.to']);
+    expect(ProjectSchema.parse(minimal).privacy).toEqual({ words: [] });
+    expect(ProjectSchema.parse({ ...minimal, privacy: { words: [' Lena Müller '] } }).privacy.words).toEqual(['Lena Müller']);
+    expect(pathsOf({ ...minimal, privacy: { words: [''] } })).toEqual(['privacy.words.0']);
+  });
+
   it('takes a zoom that follows: its moves come in time order, inside the zoom', () => {
     const zoom = { at: 2, duration: 4, rect: [0, 0, 800, 450] };
     const moves = [{ at: 3, rect: [100, 0, 800, 450] }, { at: 4.5, rect: [100, 200, 800, 450] }];

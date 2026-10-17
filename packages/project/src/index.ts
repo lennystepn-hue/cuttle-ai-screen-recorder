@@ -66,6 +66,7 @@ export {
 export { ID_PREFIXES, newId, usedIds, type IdList } from './ids';
 export { SHORT_SPELLINGS, fillerLexicon, likelyFiller, normWord } from './words';
 export { parseEventsJsonl } from './events';
+export { ScreenTextFrameSchema, parseScreenTextJsonl, type ScreenTextFrame, type ScreenTextLine, type ScreenTextWord } from './screen-text';
 export { SEGMENTS_VERSION, SegmentsFileSchema, parseSegmentsJson, segmentOffsets, takeTime, type Segment, type SegmentsFile, type SegmentsFileParseResult } from './segments';
 export { TAKE_VERSION, TakeFileSchema, parseTakeJson, trackOffset, type TakeFile, type TakeFileParseResult, type TakeFileTrack } from './take';
 export {

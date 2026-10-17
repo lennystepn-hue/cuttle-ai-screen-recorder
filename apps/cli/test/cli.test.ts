@@ -368,7 +368,12 @@ describe('cuttle suggest and recover', () => {
           "sped up 9.4 s without input 3× (5.1–14.5 s)",
           "no crop: no still edges around what changes",
           "zoom on Claude's answer at 15.5 s (145, 422, 448, 236)",
+          "the screen's text was not read: reading the screen is switched off (CUTTLE_OCR=off); no privacy masks from it, so look for private things yourself",
         ],
+        "privacy": {
+          "masks": 0,
+          "read": false,
+        },
         "project": "<project>/cuttle.json",
         "scenes": [
           {
@@ -721,6 +726,55 @@ const pngSize = (file: string) => {
   const bytes = readFileSync(file);
   return [bytes.readUInt32BE(16), bytes.readUInt32BE(20)];
 };
+
+describe.runIf(process.platform === 'win32')('cuttle suggest reads the screen (Windows OCR)', () => {
+  it('masks what the screen shows that is private, follows text that scrolls, and keeps the words asked for', async () => {
+    const off = process.env.CUTTLE_OCR;
+    delete process.env.CUTTLE_OCR;
+    try {
+      const dir = temp();
+      mkdirSync(join(dir, 'takes', '1'), { recursive: true });
+      // a 1280×720 screen: an email address, a shell line with a token that scrolls up 30 px a
+      // second, and a name (Windows OCR drops a line that is one long NAME_WITH_UNDERSCORES=value
+      // word in a large font; with a word before it, it reads it)
+      // the drive's colon escaped for the option and again for the graph
+      const text = (value: string, x: number, y: string) => `drawtext=fontfile=C\\\\:/Windows/Fonts/consola.ttf:fontsize=28:fontcolor=white:x=${x}:y=${y}:text='${value}'`;
+      const graph = ['color=c=0x1e1e1e:s=1280x720:r=30:d=8', text('Signed in as lena.mueller@example.com', 80, '80'), text('export GITHUB_TOKEN=ghp_1234567890abcdefghijklmnop', 80, '420-t*30'), text('Thanks, Lena Müller', 80, '640')].join(',');
+      const made = spawnSync('ffmpeg', ['-hide_banner', '-v', 'error', '-f', 'lavfi', '-i', graph, '-c:v', 'libx264', '-preset', 'ultrafast', '-g', '30', '-pix_fmt', 'yuv420p', '-y', join(dir, 'takes', '1', 'screen.mp4')]);
+      expect(made.status, String(made.stderr)).toBe(0);
+      const moves = Array.from({ length: 16 }, (_, k) => ({ t: 0.5 * k, type: 'move', x: 600 + 10 * k, y: 300 }));
+      writeFileSync(join(dir, 'takes', '1', 'events.jsonl'), moves.map((event) => `${JSON.stringify(event)}\n`).join(''));
+      writeFileSync(join(dir, 'takes', '1', 'take.json'), JSON.stringify({ version: 1, tracks: { screen: { file: 'screen.mp4', start: 1000 } } }));
+      writeFileSync(join(dir, 'cuttle.json'), JSON.stringify({ version: 1, sources: { screen: 'takes/1/screen.mp4', events: 'takes/1/events.jsonl' } }));
+      type Rect = [number, number, number, number];
+      type Mask = { label: string; from: number; to: number; rect: Rect; moves?: { at: number; rect: Rect }[]; auto?: string; style?: string };
+      const first = (await cli('--json', '-C', dir, 'suggest', '--no-crop', '--mask', 'Lena Müller')).json as { privacy: { read: boolean; masks: number }; notes: string[] };
+      expect(first.privacy).toEqual({ read: true, masks: 3 });
+      expect(first.notes.some((note) => /^read the screen's text in \d+ frames \(.+\), into takes\/1\/screen-text\.jsonl$/.test(note))).toBe(true);
+      const file = JSON.parse(readFileSync(join(dir, 'cuttle.json'), 'utf8')) as { masks: Mask[]; sources: { screenText?: string }; privacy?: { words: string[] } };
+      expect(file.sources.screenText).toBe('takes/1/screen-text.jsonl');
+      expect(file.privacy).toEqual({ words: ['Lena Müller'] });
+      const byLabel = (label: string) => file.masks.find((mask) => mask.label === label)!;
+      expect(file.masks.every((mask) => mask.auto === 'privacy' && mask.style === 'fill')).toBe(true);
+      // the email holds still near the top; the name at the bottom
+      expect(byLabel('Email address').rect[1]).toBeLessThan(120);
+      expect(byLabel('Email address').moves).toBeUndefined();
+      expect(byLabel('Always masked').rect[1]).toBeGreaterThan(600);
+      // the token follows its line up the screen
+      const key = byLabel('Key');
+      // the OCR read the scrolling line in one frame of four: a move at each of those
+      expect(key.moves!.length).toBeGreaterThanOrEqual(3);
+      expect(key.moves!.at(-1)!.rect[1]).toBeLessThan(key.rect[1] - 100);
+      // a rerun takes the screen's text read before, and the words from cuttle.json
+      const again = (await cli('--json', '-C', dir, 'suggest', '--no-crop')).json as { privacy: { masks: number }; notes: string[] };
+      expect(again.privacy.masks).toBe(3);
+      expect(again.notes.some((note) => note.startsWith("read the screen's text"))).toBe(false);
+      expect((await cli('--json', '-C', dir, 'suggest', '--no-crop', '--no-privacy', '--dry-run')).json).toMatchObject({ privacy: { read: false, masks: 0 } });
+    } finally {
+      if (off !== undefined) process.env.CUTTLE_OCR = off;
+    }
+  }, 120_000);
+});
 
 describe('cuttle frame', () => {
   it('writes a source frame at full size, with a numbered grid on request', async () => {

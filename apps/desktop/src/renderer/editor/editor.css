@@ -1136,6 +1136,16 @@ button.chip-status:hover {
 .zoom-path circle {
   fill: var(--zoom);
 }
+.zoom-path.mask rect,
+.zoom-path.mask polyline {
+  stroke: var(--mask);
+}
+.zoom-path.mask circle {
+  fill: var(--mask);
+}
+.item.mask .move-mark {
+  background: var(--mask);
+}
 .source-box.drawing {
   pointer-events: none;
 }

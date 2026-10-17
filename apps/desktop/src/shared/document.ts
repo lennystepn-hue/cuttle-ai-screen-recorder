@@ -115,15 +115,18 @@ export function clampRect(rect: readonly number[], screen: { width: number; heig
 
 type Move = { at: number; rect: number[] };
 
+/** An item's source range: a mask's `from` and `to`, a zoom's `at` and `at + duration`. */
+const rangeOf = (item: Item): [number, number] => (item.from !== undefined ? [Number(item.from), Number(item.to)] : [Number(item.at), Number(item.at) + Number(item.duration)]);
+
 /**
- * Keeps a zoom's moves with its time. Moved as a whole, they go with it (`by`); at a new speed of
- * its clip, they stretch with it from its start (`scale`); with an edge moved, they stay where they
- * are in the take. Moves no longer inside the zoom go, and when its start passed some, it starts
- * where the last of them went.
+ * Keeps a zoom's or mask's moves with its time. Moved as a whole, they go with it (`by`); at a new
+ * speed of its clip, they stretch with it from its start (`scale`); with an edge moved, they stay
+ * where they are in the take. Moves no longer inside it go, and when its start passed some, it
+ * starts where the last of them went.
  */
 function keepPath(item: Item, change: { by?: number; scale?: number } = {}): void {
   if (!Array.isArray(item.moves)) return;
-  const at = Number(item.at);
+  const [at, end] = rangeOf(item);
   let moves = item.moves as Move[];
   if (change.by) moves = moves.map((move) => ({ ...move, at: move.at + change.by! }));
   if (change.scale) moves = moves.map((move) => ({ ...move, at: at + (move.at - at) * change.scale! }));
@@ -132,7 +135,7 @@ function keepPath(item: Item, change: { by?: number; scale?: number } = {}): voi
   const kept: Move[] = [];
   for (const move of moves) {
     const time = round(move.at);
-    if (time > (kept.at(-1)?.at ?? at) && time < at + Number(item.duration)) kept.push({ ...move, at: time });
+    if (time > (kept.at(-1)?.at ?? at) && time < end) kept.push({ ...move, at: time });
   }
   if (kept.length > 0) item.moves = kept;
   else delete item.moves;
@@ -164,7 +167,7 @@ function clampItem(list: ListName, item: Item, limits: EditLimits): void {
     item.duration = round(Math.max(frame, Number(item.duration)));
   }
   if (Array.isArray(item.rect)) item.rect = clampRect(item.rect as number[], limits.screen);
-  if (list === 'zooms' && Array.isArray(item.moves)) {
+  if ((list === 'zooms' || list === 'masks') && Array.isArray(item.moves)) {
     item.moves = (item.moves as Move[]).map((move) => ({ at: Number(move.at), rect: clampRect(move.rect, limits.screen) }));
     keepPath(item);
   }
@@ -241,6 +244,7 @@ export function applyCommand(raw: Raw, command: Command, limits: EditLimits = {}
         const by = Math.max(command.by, -Number(item.from));
         item.from = Number(item.from) + by;
         item.to = Number(item.to) + by;
+        keepPath(item, { by });
       } else {
         const at = Number(item.at);
         item.at = Math.max(0, at + command.by);
@@ -252,11 +256,14 @@ export function applyCommand(raw: Raw, command: Command, limits: EditLimits = {}
     }
     case 'set': {
       const { item } = find(next, command.list, command.id);
-      const before = { at: Number(item.at), duration: Number(item.duration) };
+      const before = rangeOf(item);
       claim(item, command.fields);
       setFields(item, command.fields);
-      // a zoom's path goes with it when it moves as a whole, and stays in the take when an edge moves
-      if (command.list === 'zooms' && !('moves' in command.fields)) keepPath(item, Number(item.duration) === before.duration ? { by: Number(item.at) - before.at } : {});
+      // a path goes with its zoom or mask when it moves as a whole, and stays in the take when an edge moves
+      if ((command.list === 'zooms' || command.list === 'masks') && !('moves' in command.fields)) {
+        const after = rangeOf(item);
+        keepPath(item, after[1] - after[0] === before[1] - before[0] ? { by: after[0] - before[0] } : {});
+      }
       touched.push([command.list, item]);
       break;
     }
@@ -284,6 +291,7 @@ export function applyCommand(raw: Raw, command: Command, limits: EditLimits = {}
         if (command.list === 'masks') {
           copy.from = Number(copy.from) + command.shift;
           copy.to = Number(copy.to) + command.shift;
+          keepPath(copy, { by: command.shift });
         } else if (command.list !== 'scenes') {
           copy.at = Number(copy.at) + command.shift;
           if (command.list === 'zooms') keepPath(copy, { by: command.shift });

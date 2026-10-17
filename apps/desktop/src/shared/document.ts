@@ -113,6 +113,31 @@ export function clampRect(rect: readonly number[], screen: { width: number; heig
   return [round(x), round(y), round(w), round(h)];
 }
 
+type Move = { at: number; rect: number[] };
+
+/**
+ * Keeps a zoom's moves with its time. Moved as a whole, they go with it (`by`); at a new speed of
+ * its clip, they stretch with it from its start (`scale`); with an edge moved, they stay where they
+ * are in the take. Moves no longer inside the zoom go, and when its start passed some, it starts
+ * where the last of them went.
+ */
+function keepPath(item: Item, change: { by?: number; scale?: number } = {}): void {
+  if (!Array.isArray(item.moves)) return;
+  const at = Number(item.at);
+  let moves = item.moves as Move[];
+  if (change.by) moves = moves.map((move) => ({ ...move, at: move.at + change.by! }));
+  if (change.scale) moves = moves.map((move) => ({ ...move, at: at + (move.at - at) * change.scale! }));
+  const passed = moves.filter((move) => move.at <= at);
+  if (passed.length > 0) item.rect = passed.at(-1)!.rect;
+  const kept: Move[] = [];
+  for (const move of moves) {
+    const time = round(move.at);
+    if (time > (kept.at(-1)?.at ?? at) && time < at + Number(item.duration)) kept.push({ ...move, at: time });
+  }
+  if (kept.length > 0) item.moves = kept;
+  else delete item.moves;
+}
+
 /** Clamps the item's times and area after an edit. */
 function clampItem(list: ListName, item: Item, limits: EditLimits): void {
   const frame = 1 / (limits.fps ?? 30);
@@ -139,6 +164,10 @@ function clampItem(list: ListName, item: Item, limits: EditLimits): void {
     item.duration = round(Math.max(frame, Number(item.duration)));
   }
   if (Array.isArray(item.rect)) item.rect = clampRect(item.rect as number[], limits.screen);
+  if (list === 'zooms' && Array.isArray(item.moves)) {
+    item.moves = (item.moves as Move[]).map((move) => ({ at: Number(move.at), rect: clampRect(move.rect, limits.screen) }));
+    keepPath(item);
+  }
 }
 
 /** Applies one command to `raw` (left as it was) and returns the new version, checked. */
@@ -200,6 +229,7 @@ export function applyCommand(raw: Raw, command: Command, limits: EditLimits = {}
           const duration = Number(overlay.duration);
           if (at < from || at + duration > to) continue;
           overlay.duration = round(Math.min((duration / before) * speed, to - at));
+          if (name === 'zooms') keepPath(overlay, { scale: Number(overlay.duration) / duration });
           touched.push([name, overlay]);
         }
       }
@@ -211,15 +241,22 @@ export function applyCommand(raw: Raw, command: Command, limits: EditLimits = {}
         const by = Math.max(command.by, -Number(item.from));
         item.from = Number(item.from) + by;
         item.to = Number(item.to) + by;
-      } else item.at = Math.max(0, Number(item.at) + command.by);
+      } else {
+        const at = Number(item.at);
+        item.at = Math.max(0, at + command.by);
+        if (command.list === 'zooms') keepPath(item, { by: Number(item.at) - at });
+      }
       claim(item);
       touched.push([command.list, item]);
       break;
     }
     case 'set': {
       const { item } = find(next, command.list, command.id);
+      const before = { at: Number(item.at), duration: Number(item.duration) };
       claim(item, command.fields);
       setFields(item, command.fields);
+      // a zoom's path goes with it when it moves as a whole, and stays in the take when an edge moves
+      if (command.list === 'zooms' && !('moves' in command.fields)) keepPath(item, Number(item.duration) === before.duration ? { by: Number(item.at) - before.at } : {});
       touched.push([command.list, item]);
       break;
     }
@@ -247,7 +284,10 @@ export function applyCommand(raw: Raw, command: Command, limits: EditLimits = {}
         if (command.list === 'masks') {
           copy.from = Number(copy.from) + command.shift;
           copy.to = Number(copy.to) + command.shift;
-        } else if (command.list !== 'scenes') copy.at = Number(copy.at) + command.shift;
+        } else if (command.list !== 'scenes') {
+          copy.at = Number(copy.at) + command.shift;
+          if (command.list === 'zooms') keepPath(copy, { by: command.shift });
+        }
       }
       list(command.list).splice(index + 1, 0, copy);
       touched.push([command.list, copy]);

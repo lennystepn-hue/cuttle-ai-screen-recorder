@@ -589,6 +589,17 @@ button.chip-status:hover {
   background-image: repeating-linear-gradient(135deg, transparent 0 5px, rgba(255, 255, 255, 0.05) 5px 10px);
   opacity: 0.6;
 }
+/* a zoom that follows: a diamond where it moves on */
+.item .move-mark {
+  position: absolute;
+  top: 50%;
+  width: 6px;
+  height: 6px;
+  margin: -3px 0 0 -3px;
+  transform: rotate(45deg);
+  background: var(--zoom);
+  pointer-events: none;
+}
 .tl-canvas {
   position: absolute;
   left: 0;
@@ -1100,6 +1111,30 @@ button.chip-status:hover {
 /* a selected item the playhead is not on: drawn faint */
 .source-box.elsewhere {
   opacity: 0.55;
+}
+/* a selected zoom that follows: where it goes, faint */
+.zoom-path {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+.zoom-path rect {
+  fill: none;
+  stroke: var(--zoom);
+  stroke-width: 1;
+  stroke-dasharray: 4 4;
+  opacity: 0.5;
+}
+.zoom-path polyline {
+  fill: none;
+  stroke: var(--zoom);
+  stroke-width: 1.5;
+  opacity: 0.8;
+}
+.zoom-path circle {
+  fill: var(--zoom);
 }
 .source-box.drawing {
   pointer-events: none;

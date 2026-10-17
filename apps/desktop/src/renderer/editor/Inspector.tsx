@@ -771,10 +771,10 @@ function Details({ project, selection }: { project: CuttleProject; selection: Se
     );
   };
 
-  const area = (list: 'zooms' | 'masks', rect: Rect, label: string) => (
+  const area = (list: 'zooms' | 'masks', rect: Rect, label: string, title = 'Area, in source pixels') => (
     <div className="field">
       <span className="field-label">
-        Area, in source pixels
+        {title}
         <button type="button" className="link" onClick={() => setTool(list === 'zooms' ? 'zoom' : 'mask')}>
           Draw on the video
         </button>
@@ -807,7 +807,14 @@ function Details({ project, selection }: { project: CuttleProject; selection: Se
           <TextInput value={zoom.label ?? ''} placeholder="Zoom" onCommit={(value) => set('zooms', id, { label: value.trim() || undefined }, 'Rename zoom')} />
         </Row>
         {timing('zooms', zoom.at, zoom.at + zoom.duration)}
-        {area('zooms', zoom.rect, 'zoom')}
+        {area('zooms', zoom.rect, 'zoom', zoom.moves?.length ? 'Start, in source pixels' : undefined)}
+        {zoom.moves && zoom.moves.length > 0 && (
+          <Row label="Follows" note={`${zoom.moves.length} move${zoom.moves.length === 1 ? '' : 's'}`} plain>
+            <button type="button" className="ghost small" onClick={() => set('zooms', id, { moves: undefined }, 'Hold the zoom still')} data-testid="zoom-hold">
+              Hold still
+            </button>
+          </Row>
+        )}
         <Row label="Easing">
           <Select value={zoom.ease} options={EASES} names={EASE_NAMES} onChange={(ease) => set('zooms', id, { ease }, 'Change easing')} />
         </Row>

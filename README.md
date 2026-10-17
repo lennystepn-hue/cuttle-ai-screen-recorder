@@ -46,14 +46,24 @@ recorder tests also need ffprobe. Recording works on Windows so far; the recorde
 ```bash
 pnpm app                                 # build and start the app (the pill near the top of the screen, an icon in the tray)
 pnpm app -- --open <project folder>      # … and open a project in the editor
-pnpm app:check                           # end to end with its windows hidden: open, play, scrub, select, compare with the export, play the proxy, export, record
+pnpm app:check                           # end to end with its windows hidden: open, play, scrub, compare with the export, play the proxy, export, edit, record
 pnpm app:build                           # an unpacked app in apps/desktop/build/Cuttle-<platform>-<arch>/, checked that it starts
 ```
 
 The editor shows exactly what the export renders: the same engine and timeline, compared pixel for
 pixel by `app:check`. It plays a 720p proxy of the take (made in the background into the project's
 `.cuttle/` folder, with the thumbnails and the mic's waveform); the export always uses the take.
-Editing arrives in a later milestone; in this version the timeline and inspector show the project.
+
+**Editing.** Every edit is written to `cuttle.json` as its gesture ends, so Claude and the CLI see it
+at once, and one gesture is one step to undo (Ctrl+Z, Ctrl+Shift+Z). On the timeline: S splits the
+clip at the playhead, edges trim, a dragged scene moves, R or the bar sets a clip's speed, overlays
+move and stretch (Alt copies, Ctrl skips snapping). The tools beside the video: V selects (a click
+on a caption picks it), Z and M draw a zoom or a mask on the screen itself (the source view, Esc
+for the video), T types a caption on the video. The inspector edits the selection and the look;
+Ctrl+K lists every command and its keys. A change written while the project is open (by Claude,
+the CLI or `suggest`) shows in a note with Undo; a gesture under way is carried over onto it, and
+what cannot be is kept in `cuttle.json.draft` with "Use mine". `cuttle record` refuses a project
+that is open in the app ("Record again" records it there).
 
 **Recording.** "New recording" on the pill, in the tray, or Ctrl+Shift+Alt+R shows a picker over every
 display: the window under the pointer lights up (the display where there is none), a drag draws a

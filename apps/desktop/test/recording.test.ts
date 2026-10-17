@@ -156,6 +156,13 @@ describe('the picker’s layout', () => {
     expect(labelPlacement({ x: 0, y: 10, width: 400, height: 300 }, area, { width: 200 })).toEqual({ x: 16, y: 18, above: false });
   });
 
+  it('starts inside a whole display below the macOS menu bar, so the hint above the bar stays clear of it', () => {
+    const mac = { x: 0, y: 30, width: 1440, height: 808 };
+    const display = { x: 0, y: 0, width: 1440, height: 900 };
+    expect(barPlacement(display, mac, { width: 780, height: 52 }, false)).toEqual({ x: 330, y: 82, where: 'inside' });
+    expect(labelPlacement(display, mac, { width: 430 })).toEqual({ x: 16, y: 38, above: false });
+  });
+
   it('sizes the camera bubble to the target', () => {
     expect([bubbleSize({ x: 0, y: 0, width: 200, height: 90 }), bubbleSize({ x: 0, y: 0, width: 640, height: 360 }), bubbleSize({ x: 0, y: 0, width: 2048, height: 1104 })]).toEqual([48, 65, 120]);
   });

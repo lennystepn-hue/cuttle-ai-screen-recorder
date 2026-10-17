@@ -31,6 +31,7 @@ design mockups in `docs/design/desktop/`.
 | Node 22 or newer | `winget install OpenJS.NodeJS.LTS` | `brew install node`, or the installer from nodejs.org |
 | pnpm 11 | `corepack enable` (or `npm install -g pnpm@11`) | the same |
 | ffmpeg and ffprobe | `winget install Gyan.FFmpeg` | `brew install ffmpeg` |
+| Transcription (whisper) | in Gyan's ffmpeg (its `whisper` filter) | `brew install whisper-cpp` (no macOS ffmpeg has the filter; Cuttle runs `whisper-cli` instead) |
 | Permissions | none | the first recording asks for them (see below) |
 
 `pnpm install` also downloads Electron's binary for the platform. Native modules come prebuilt:

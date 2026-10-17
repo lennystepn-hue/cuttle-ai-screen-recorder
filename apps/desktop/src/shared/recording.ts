@@ -215,14 +215,16 @@ export function barPlacement(target: Rect, area: Rect, bar: { width: number; hei
   if (below + bar.height <= area.y + area.height - 8) return { x, y: below, where: 'below' };
   const above = target.y - (labelAbove ? 36 : 0) - gap - bar.height;
   if (above >= area.y + 8) return { x, y: above, where: 'above' };
-  return { x, y: Math.min(Math.max(target.y + (labelAbove ? 16 : 52), area.y + 8), area.y + area.height - 8 - bar.height), where: 'inside' };
+  // inside: from the target's top in the work area (a whole display's top is under macOS's menu bar)
+  const top = Math.max(target.y, area.y);
+  return { x, y: Math.min(Math.max(top + (labelAbove ? 16 : 52), area.y + 8), area.y + area.height - 8 - bar.height), where: 'inside' };
 }
 
 /** Where the target's label goes: above the target when there is room, else inside its top; never off the display. */
 export function labelPlacement(target: Rect, area: Rect, label: { width: number }): { x: number; y: number; above: boolean } {
   const above = target.y - 36 >= area.y;
   const x = Math.min(Math.max(target.x, area.x + 16), Math.max(area.x + 16, area.x + area.width - 16 - label.width));
-  return { x, y: above ? target.y - 36 : target.y + 8, above };
+  return { x, y: above ? target.y - 36 : Math.max(target.y, area.y) + 8, above };
 }
 
 /** The camera bubble's size for a target: 18 % of its shorter side, 48 to 120 DIP. */

@@ -199,8 +199,9 @@ wants. Tell the user the file's path and length. Do not upload it anywhere.
 - `suggest` found no Claude markers: pass `--claude "<demo folder>"`.
 - `model-missing` (or the note "the mic was not transcribed"): no speech model is downloaded; ask
   the user before `cuttle models download small`.
-- `ffmpeg-old`: this ffmpeg cannot transcribe (before 8.0). Ask the user to run
-  `winget upgrade Gyan.FFmpeg` (macOS: `brew upgrade ffmpeg`).
+- `ffmpeg-old`: nothing here can transcribe: ffmpeg has no whisper filter (before 8.0, or built
+  without whisper, as every macOS ffmpeg is) and whisper.cpp's `whisper-cli` is not installed. Ask
+  the user to run `winget upgrade Gyan.FFmpeg` (macOS: `brew install whisper-cpp`).
 - `frame` says no frame starts at that second: the take ends there; take an earlier second.
 - A render fails with `render`: try `--encoder software`.
 - `conflict`: `cuttle.json` was saved by someone else (the user, or the Cuttle app) while the

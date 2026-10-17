@@ -28,6 +28,9 @@ Cuttle runs on **Windows and macOS**. A change made on one has to keep working o
 - **Files**: Windows refuses to replace a read-only or open file; POSIX renames over it. Windows
   compares paths ignoring case. macOS's temporary folder is behind a link (`/var` is
   `/private/var`): tests compare real paths.
+- **Whisper**: Windows transcribes with ffmpeg's `whisper` filter (Gyan's builds have it); no macOS
+  ffmpeg does, so `speech/whisper.ts` runs whisper.cpp's `whisper-cli` with the filter's settings
+  there (`whisperEngine()`). A change to how whisper runs changes both.
 - **Words for people** name both ways: `winget install Gyan.FFmpeg` and `brew install ffmpeg`,
   Windows' Settings and macOS's System Settings (Privacy & Security for the screen, camera,
   microphone and Input Monitoring).

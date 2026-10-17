@@ -283,7 +283,7 @@ function SpeechSettings({ view, change }: { view: SettingsView | undefined; chan
                   : `The ${fetched?.label} model is downloading (${percent} % of ${megabytes(download.total)}): one download at a time.`
                 : model.installed
                   ? status?.whisper === false
-                    ? 'Downloaded, but this ffmpeg cannot transcribe: it needs version 8 or later (winget upgrade Gyan.FFmpeg, or on macOS brew upgrade ffmpeg).'
+                    ? 'Downloaded, but Cuttle cannot transcribe yet: it needs ffmpeg with whisper (winget upgrade Gyan.FFmpeg) or, on a Mac, whisper.cpp (brew install whisper-cpp).'
                     : `Downloaded: ${model.note}.`
                   : `${model.note[0]!.toUpperCase()}${model.note.slice(1)}. ${megabytes(model.bytes)} to download, once.`
           }

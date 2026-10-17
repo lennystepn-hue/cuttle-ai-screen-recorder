@@ -13,7 +13,7 @@ import { readMarkers, speechActivity, withSpeechCuts, wordStretches } from './sp
 import type { RawCut } from './speech/edits';
 import { chooseModel } from './speech/models';
 import { readTranscript, transcribeTake } from './speech/transcribe';
-import { hasWhisper } from './speech/whisper';
+import { hasWhisper, NO_WHISPER } from './speech/whisper';
 
 export interface SuggestOptions {
   /** The folder Claude Code ran in (true: the current folder), for a take without Claude markers. */
@@ -254,7 +254,7 @@ async function transcribeFirst(projectDir: string, args: SuggestOptions, notes: 
     return;
   }
   if (!(await hasWhisper())) {
-    notes.push('the mic was not transcribed: this ffmpeg has no whisper filter (update it: winget upgrade Gyan.FFmpeg, or on macOS brew upgrade ffmpeg)');
+    notes.push(`the mic was not transcribed: ${NO_WHISPER}`);
     return;
   }
   try {

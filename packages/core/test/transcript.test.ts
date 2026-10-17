@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
 import { claudeTranscriptDir } from '@cuttle/recorder';
-import { transcriptMarkers } from '../src/suggest/transcript';
+import { takeClock, transcriptMarkers } from '../src/suggest/transcript';
 
 const config = mkdtempSync(join(tmpdir(), 'cuttle-transcript-'));
 afterAll(() => rm(config, { recursive: true, force: true }));
@@ -37,7 +37,7 @@ describe('transcriptMarkers', () => {
       ].join(''),
     );
     writeFileSync(join(dir, 'other.jsonl'), answer(5, 'o1'));
-    expect(await transcriptMarkers(cwd, 1000, 60)).toEqual([
+    expect(await transcriptMarkers(cwd, (wall) => wall - 1000, 60)).toEqual([
       { t: 2, kind: 'prompt' },
       { t: 4, kind: 'tool', label: 'Bash' },
       { t: 9, kind: 'answer' },
@@ -46,6 +46,29 @@ describe('transcriptMarkers', () => {
 
   it('finds nothing in a folder without transcripts', async () => {
     vi.stubEnv('CLAUDE_CONFIG_DIR', config);
-    expect(await transcriptMarkers(join(config, 'nowhere'), 1000, 60)).toEqual([]);
+    expect(await transcriptMarkers(join(config, 'nowhere'), (wall) => wall - 1000, 60)).toEqual([]);
+  });
+
+  it("follows a paused take's clock: a prompt during the pause lands where it paused", async () => {
+    vi.stubEnv('CLAUDE_CONFIG_DIR', config);
+    const cwd = join(config, 'paused');
+    const dir = claudeTranscriptDir(cwd);
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, 'paused.jsonl'), [prompt(3), prompt(10), tool(22, 't1', 'Bash'), answer(23, 'a1')].join(''));
+    const take = join(config, 'take');
+    mkdirSync(take, { recursive: true });
+    writeFileSync(join(take, 'take.json'), JSON.stringify({ version: 1, tracks: { screen: { file: 'screen.mp4', start: 1000 } } }));
+    // recorded 1000–1005, paused until 1020, then recording on
+    writeFileSync(
+      join(take, 'segments.json'),
+      JSON.stringify({ version: 1, joined: true, segments: [{ screen: { file: 'screen.1.mp4', start: 1000 }, duration: 5 }, { screen: { file: 'screen.2.mp4', start: 1020 }, duration: 5 }] }),
+    );
+    const clock = (await takeClock(take))!;
+    expect(await transcriptMarkers(cwd, clock, 10)).toEqual([
+      { t: 3, kind: 'prompt' },
+      { t: 5, kind: 'prompt' },
+      { t: 7, kind: 'tool', label: 'Bash' },
+      { t: 8, kind: 'answer' },
+    ]);
   });
 });

@@ -366,6 +366,7 @@ describe('cuttle suggest and recover', () => {
           "trimmed the quiet start (0.0–1.8 s)",
           "trimmed the quiet end (18.5–20.0 s)",
           "sped up 9.4 s without input 3× (5.1–14.5 s)",
+          "no crop: no still edges around what changes",
           "zoom on Claude's answer at 15.5 s (145, 422, 448, 236)",
         ],
         "project": "<project>/cuttle.json",
@@ -522,6 +523,45 @@ describe('cuttle suggest and recover', () => {
     expect(fromCaret.notes.some((note) => note.endsWith('following the text (the caret)'))).toBe(true);
     const none = (await cli('--json', '-C', dir, 'suggest', '--dry-run', '--no-typing-zooms')).json as Result;
     expect(none.zooms.filter((zoom) => zoom.auto === 'typing')).toEqual([]);
+  }, 60_000);
+
+  it('crops each clip to the content: from the window\'s content area, cut where it changes, else from the picture', async () => {
+    const dir = temp();
+    mkdirSync(join(dir, 'takes', '1'), { recursive: true });
+    // a 1280×720 "browser": still bars at the top (100 px) and on the left (80 px), and a page that
+    // changes everywhere (a game of life); a keyframe a second, as Cuttle's recorder writes one every 2
+    const graph = 'color=c=0x30343c:s=1280x720:r=30:d=12,drawbox=x=0:y=0:w=1280:h=100:color=0x4a4f5a:t=fill,drawbox=x=0:y=0:w=80:h=720:color=0x262a30:t=fill[bg];life=s=1200x620:r=30:mold=10:ratio=0.5:death_color=0x101010:life_color=0xe0e0e0[page];[bg][page]overlay=x=80:y=100';
+    const made = spawnSync('ffmpeg', ['-hide_banner', '-v', 'error', '-f', 'lavfi', '-i', graph, '-t', '12', '-c:v', 'libx264', '-preset', 'ultrafast', '-g', '30', '-pix_fmt', 'yuv420p', '-y', join(dir, 'takes', '1', 'screen.mp4')]);
+    expect(made.status, String(made.stderr)).toBe(0);
+    const keys = Array.from({ length: 20 }, (_, k) => ({ t: 1 + 0.5 * k, type: 'keys', count: 1 }));
+    const write = (events: unknown[]) => writeFileSync(join(dir, 'takes', '1', 'events.jsonl'), events.map((event) => `${JSON.stringify(event)}\n`).join(''));
+    write(keys);
+    writeFileSync(join(dir, 'takes', '1', 'take.json'), JSON.stringify({ version: 1, tracks: { screen: { file: 'screen.mp4', start: 1000 } } }));
+    writeFileSync(join(dir, 'cuttle.json'), JSON.stringify({ version: 1, sources: { screen: 'takes/1/screen.mp4', events: 'takes/1/events.jsonl' } }));
+    type Result = { scenes: { from: number; to: number; crop?: { rect: number[]; auto?: string; enabled?: boolean } }[]; zooms: { auto?: string; label?: string; at: number; rect: number[] }[]; notes: string[] };
+    const suggest = async (...flags: string[]) => (await cli('--json', '-C', dir, 'suggest', '--dry-run', '--no-typing-zooms', ...flags)).json as Result;
+    // without the recorder's content area: the still edges of the picture are left out
+    const picture = await suggest();
+    expect(picture.scenes).toHaveLength(1);
+    const [x, y, width, height] = picture.scenes[0]!.crop!.rect;
+    expect([Math.abs(x! - 80) <= 4, Math.abs(y! - 100) <= 4, Math.abs(x! + width! - 1280) <= 4, Math.abs(y! + height! - 720) <= 4]).toEqual([true, true, true, true]);
+    expect(picture.scenes[0]!.crop!.auto).toBe('crop');
+    expect(picture.notes.some((note) => note.startsWith('cropped to ') && note.includes("the screen's edges that hardly change"))).toBe(true);
+    // with it: the area the recorder saw, and the clip cut where another window (without one) came to the front at 7 s
+    write([{ t: 0.2, type: 'area', rect: [80, 100, 1200, 620] }, { t: 7, type: 'area', rect: null }, ...keys].sort((a, b) => a.t - b.t));
+    const area = await suggest();
+    expect(area.scenes.map((scene) => [scene.from, scene.to, scene.crop?.rect])).toEqual([
+      [area.scenes[0]!.from, 7, [80, 100, 1200, 620]],
+      [7, area.scenes[1]!.to, undefined],
+    ]);
+    expect(area.notes).toContain("cropped to the window's content area (1 stretch, from the recorder)");
+    expect((await suggest('--no-crop')).scenes.every((scene) => scene.crop === undefined)).toBe(true);
+    // a dialog open from 3 to 5 s gets a zoom on it
+    write([{ t: 3, type: 'window', id: 77, kind: 'dialog', rect: [440, 260, 400, 200], open: true }, { t: 5, type: 'window', id: 77, kind: 'dialog', rect: [440, 260, 400, 200], open: false }, ...keys].sort((a, b) => a.t - b.t));
+    const dialog = await suggest();
+    expect(dialog.zooms).toEqual([expect.objectContaining({ label: 'Dialog', auto: 'dialog', at: 2.7, duration: 2.6 })]);
+    expect(dialog.notes).toContain('1 zoom on a dialog');
+    expect((await suggest('--no-dialog-zooms')).zooms).toEqual([]);
   }, 60_000);
 
   it('leaves cuttle.json alone with --dry-run', async () => {

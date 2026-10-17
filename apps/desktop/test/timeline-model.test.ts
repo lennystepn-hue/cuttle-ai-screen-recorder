@@ -53,6 +53,7 @@ describe('timelineModel', () => {
       [4.25, 4.75, true],
     ]);
     expect(model.lanes.mask.cutOut).toBe(1);
+    expect(model.lanes.mask.cutOutItems).toHaveLength(1);
     const [zoom] = model.lanes.zoom.blocks;
     expect([zoom?.start, zoom?.end, zoom?.title]).toEqual([expect.closeTo(4.55, 9), expect.closeTo(7.05, 9), 'Answer']);
     expect(model.lanes.caption.blocks.map((block) => block.title)).toEqual(['One prompt']);

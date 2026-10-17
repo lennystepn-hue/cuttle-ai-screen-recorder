@@ -100,13 +100,22 @@ export function cursorSizePx(screen: Size, size: number, zoom: Rect, content: Re
 /** Space between the webcam bubble and the output edge, in units. */
 export const WEBCAM_MARGIN = 40;
 
-/** The webcam bubble's square in output px; `size` is its diameter as a share of the output's short side. */
-export function webcamRect(output: Size, corner: Look['webcam']['corner'], size: number): Rect {
+/**
+ * The webcam bubble's square in output px; `size` is its diameter as a share of the output's short
+ * side. A `position` puts its centre there (shares of the output), kept inside the output; else it
+ * sits in its `corner`, a margin from the edges.
+ */
+export function webcamRect(output: Size, webcam: Pick<Look['webcam'], 'corner' | 'size' | 'position'>): Rect {
   const unit = unitFor(output);
-  const diameter = Math.round(size * Math.min(output.width, output.height));
+  const diameter = Math.round(webcam.size * Math.min(output.width, output.height));
+  if (webcam.position) {
+    const x = Math.round(Math.min(Math.max(webcam.position.x * output.width - diameter / 2, 0), output.width - diameter));
+    const y = Math.round(Math.min(Math.max(webcam.position.y * output.height - diameter / 2, 0), output.height - diameter));
+    return [x, y, diameter, diameter];
+  }
   const margin = Math.round(WEBCAM_MARGIN * unit);
-  const x = corner.endsWith('left') ? margin : output.width - margin - diameter;
-  const y = corner.startsWith('top') ? margin : output.height - margin - diameter;
+  const x = webcam.corner.endsWith('left') ? margin : output.width - margin - diameter;
+  const y = webcam.corner.startsWith('top') ? margin : output.height - margin - diameter;
   return [x, y, diameter, diameter];
 }
 

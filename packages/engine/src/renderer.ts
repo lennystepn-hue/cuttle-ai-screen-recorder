@@ -111,7 +111,7 @@ export function createRenderer(canvas: HTMLCanvasElement | OffscreenCanvas, proj
   // Texts and the badge keep clear of the webcam bubble. Taken from the look and the project's
   // sources, not from whether a webcam frame arrived, so they do not jump when the webcam track ends.
   const webcamArea =
-    look.webcam.enabled && project.sources.webcam ? webcamRect(output, look.webcam.corner, look.webcam.size) : undefined;
+    look.webcam.enabled && project.sources.webcam ? webcamRect(output, look.webcam) : undefined;
   const full: Rect = [0, 0, screenSize.width, screenSize.height];
   const screenAspect = screenSize.width / screenSize.height;
 

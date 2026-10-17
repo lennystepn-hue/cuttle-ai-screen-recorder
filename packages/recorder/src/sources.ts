@@ -22,7 +22,7 @@ export const TEST_DEVICES: Devices = {
     { index: 0, name: 'Test Monitor', bounds: { x: 0, y: 0, width: 1280, height: 720 }, scale: 1, primary: true },
     { index: 1, name: 'Still Test Monitor', bounds: { x: 1280, y: 0, width: 640, height: 360 }, scale: 1, primary: false },
   ],
-  windows: [{ title: 'Test Window', bounds: { x: 100, y: 60, width: 640, height: 360 }, monitor: 0 }],
+  windows: [{ id: 1001, pid: 4242, className: 'TestWindow', title: 'Test Window', bounds: { x: 100, y: 60, width: 640, height: 360 }, monitor: 0 }],
   cameras: ['Test Camera', 'Failing Test Camera'],
   mics: ['Test Microphone', 'Silent Test Microphone'],
 };
@@ -69,7 +69,7 @@ export function resolveArea(source: CaptureSource, devices: Devices): ScreenArea
       return { monitor, crop: fullOrCrop(monitor, crop) };
     }
     case 'window': {
-      const window = findWindow(source.title, devices);
+      const window = 'id' in source ? windowById(source.id, devices) : findWindow(source.title, devices);
       const monitor = monitorAt(window.monitor);
       const { bounds } = monitor;
       // The part of the window on the monitor that holds most of it, in that monitor's pixels.
@@ -87,6 +87,12 @@ export function resolveArea(source: CaptureSource, devices: Devices): ScreenArea
 function fullOrCrop(monitor: Monitor, crop: Bounds): Bounds | undefined {
   const full = crop.x === 0 && crop.y === 0 && crop.width === monitor.bounds.width && crop.height === monitor.bounds.height;
   return full ? undefined : crop;
+}
+
+function windowById(id: number, devices: Devices) {
+  const window = devices.windows.find((candidate) => candidate.id === id);
+  if (!window) throw new RecorderError('device-not-found', `the window ${id} is gone (closed, minimized or on another desktop)`);
+  return window;
 }
 
 /** The one window with exactly this title, otherwise the one whose title contains it (ignoring case). */

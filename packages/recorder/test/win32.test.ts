@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { CURSOR_SHAPES } from '@cuttle/project';
-import { loadWin32 } from '../src/win32';
+import { SHELL_CLASSES, loadWin32 } from '../src/win32';
 
 describe.runIf(process.platform === 'win32')('win32', () => {
   it('loads once per module and reads the pointer', async () => {
@@ -25,6 +25,9 @@ describe.runIf(process.platform === 'win32')('win32', () => {
     const monitors = win.monitors();
     for (const window of win.windows()) {
       expect(window.title).not.toBe('');
+      expect(Number.isSafeInteger(window.id) && window.id > 0).toBe(true);
+      expect(Number.isInteger(window.pid)).toBe(true);
+      expect(SHELL_CLASSES.has(window.className)).toBe(false);
       expect(window.bounds.width).toBeGreaterThanOrEqual(2);
       expect(monitors.some((monitor) => monitor.index === window.monitor)).toBe(true);
     }

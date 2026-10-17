@@ -9,7 +9,7 @@ import { EventsWriter } from './events';
 import { spawnCapture, type CaptureProcess } from './ffmpeg';
 import { startInput, type InputSource } from './input';
 import { areaGeometry, checkDevice, micInput, micLatency, platformFor, resolveArea, screenInput, webcamInput, type Platform, type ScreenArea } from './sources';
-import type { RecordOptions, Recording, RecorderEvent, StopOptions, StopReason, Take } from './types';
+import type { Bounds, RawInput, RecordOptions, Recording, RecorderEvent, StopOptions, StopReason, Take } from './types';
 
 const DEFAULT_COUNTDOWN_SECONDS = 3;
 /** Seconds kept after Claude's final answer, so the video shows it. */
@@ -28,6 +28,7 @@ const message = (error: unknown) => (error instanceof Error ? error.message : St
 export function record(options: RecordOptions): Recording {
   const control = new Control();
   const since = now(); // Claude prompts count from here, during the device listing and the countdown too
+  control.deadZones = [...(options.deadZones ?? [])];
   const done = run(options, control, since);
   done.catch(() => {}); // the caller sees a failure through `done` or `stop()`
   return {
@@ -36,6 +37,7 @@ export function record(options: RecordOptions): Recording {
       return done;
     },
     marker: (label) => control.marker(label),
+    setDeadZones: (zones) => (control.deadZones = [...zones]),
     done,
   };
 }
@@ -44,6 +46,8 @@ export function record(options: RecordOptions): Recording {
 class Control {
   reason: StopReason | undefined;
   onMarker: ((label?: string) => void) | undefined;
+  /** Pointer input inside these is not logged. */
+  deadZones: Bounds[] = [];
   private waiters: ((reason: StopReason) => void)[] = [];
 
   /** The first request wins. */
@@ -102,6 +106,12 @@ function claudeTrigger(cwd: string, since: number) {
 type ClaudeTrigger = ReturnType<typeof claudeTrigger>;
 
 const cancelled = (what: string) => new RecorderError('cancelled', `the recording was stopped before ${what}`);
+
+/** Whether a pointer event lies in one of the dead zones (keys and shapes have no position). */
+export function inDeadZone(input: RawInput, zones: readonly Bounds[]): boolean {
+  if (input.type === 'key' || input.type === 'shape') return false;
+  return zones.some((zone) => input.x >= zone.x && input.x < zone.x + zone.width && input.y >= zone.y && input.y < zone.y + zone.height);
+}
 
 async function run(options: RecordOptions, control: Control, since: number): Promise<Take> {
   try {
@@ -220,6 +230,9 @@ async function recordTake({ options, control, platform, area, projectDir, dir, r
     input = await startInput(
       platform,
       (raw) => {
+        // Nothing after a stop was asked for, nothing over the app's own controls: no take shows the
+        // pointer travelling to Stop or its click.
+        if (control.reason !== undefined || inDeadZone(raw, control.deadZones)) return;
         lastInput = raw.time;
         writer.push(raw);
       },
@@ -231,6 +244,7 @@ async function recordTake({ options, control, platform, area, projectDir, dir, r
     if (webcam) captures.push(webcam);
     const mic = options.mic === undefined ? undefined : spawnCapture('mic', micArgs(micInput(platform, options.mic), path(FILES.mic)));
     if (mic) captures.push(mic);
+    reporter.emit({ type: 'processes', pids: captures.map((capture) => capture.pid).filter((pid): pid is number => pid !== undefined) });
 
     // A freeze that starts at 0 means the screen has not changed yet: untilIdleSeconds waits for one
     // after a change, and for the input to rest as long (someone pointing at a still chart is not idle).

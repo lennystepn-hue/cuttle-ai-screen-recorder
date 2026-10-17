@@ -29,6 +29,8 @@ const INPUT_START = /Duration: [^,]+, start: (\d+(?:\.\d+)?)/;
 const PROGRESS_TIME = /time=(\d+):(\d\d):(\d\d(?:\.\d+)?)/;
 
 export interface CaptureProcess {
+  /** ffmpeg's process id (undefined when it could not be started). */
+  readonly pid: number | undefined;
   /** Wall-clock seconds (Unix epoch) of the first captured frame or sample. */
   readonly started: Promise<number>;
   /** Resolves when ffmpeg exits after `stop()`; rejects when it fails or exits on its own. */
@@ -104,6 +106,7 @@ export function spawnCapture(name: string, args: readonly string[]): CaptureProc
   exited.catch(() => {}); // surfaced through `started`, `stop()` or the caller's own await
 
   return {
+    pid: child.pid,
     started,
     exited,
     onLine: (listener) => void listeners.push(listener),

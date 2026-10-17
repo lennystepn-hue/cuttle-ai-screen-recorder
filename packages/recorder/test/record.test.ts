@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 import { parseEventsJsonl, parseMarkersJson, parseTakeJson, trackOffset } from '@cuttle/project';
 import { CLAUDE_TAIL_SECONDS, claudeTranscriptDir, record, type RecordOptions, type RecorderEvent } from '../src/index';
+import { inDeadZone } from '../src/record';
 
 const dirs: string[] = [];
 afterAll(() => Promise.all(dirs.map((dir) => rm(dir, { recursive: true, force: true }))));
@@ -88,7 +89,10 @@ describe.concurrent('record (test backend)', () => {
     // Marker times count from the screen's first frame, which starts late on a loaded machine.
     const markedSecond = markedAt - takeFile.take.tracks.screen.start;
     expect(markersOf(projectDir, take.markers)).toEqual([{ t: expect.closeTo(markedSecond, 1), kind: 'manual', label: 'one second' }]);
-    expect(events.map((event) => event.type)).toEqual(['recording', 'marker', 'stopping']);
+    expect(events.map((event) => event.type)).toEqual(['processes', 'recording', 'marker', 'stopping']);
+    // screen, webcam and mic: the app kills these when its recorder host dies
+    const processes = events[0]!;
+    expect(processes.type === 'processes' && processes.pids.length === 3 && processes.pids.every(Number.isInteger)).toBe(true);
   }, SLOW);
 
   it('stops once untilFile exists', async () => {
@@ -174,10 +178,21 @@ describe.concurrent('record (test backend)', () => {
     expect(probe(join(projectDir, 'takes/1/screen.mp4')).duration).toBeGreaterThan(0.8);
   }, SLOW);
 
+  it("logs no pointer input inside a dead zone (the app's HUD), but keys", async () => {
+    const projectDir = project();
+    // The synthetic pointer circles (640, 360) with a radius of 200: the zone takes its upper half.
+    const take = await record({ ...test, projectDir, stop: { maxSeconds: 2 }, deadZones: [{ x: 0, y: 0, width: 1280, height: 360 }] }).done;
+    const { events } = parseEventsJsonl(read(projectDir, take.events));
+    const pointer = events.slice(2).filter((event) => event.type === 'move' || event.type === 'click' || event.type === 'scroll');
+    expect(pointer.length).toBeGreaterThan(10);
+    expect(pointer.every((event) => 'y' in event && event.y >= 360)).toBe(true);
+    expect(events.some((event) => event.type === 'keys')).toBe(true);
+  }, SLOW);
+
   it('captures a region and a window, with input relative to them, in numbered takes', async () => {
     const projectDir = project();
     const region = await record({ ...test, projectDir, source: { kind: 'region', rect: [100, 50, 401, 301], monitor: 0 }, stop: { maxSeconds: 1 } }).done;
-    const window = await record({ ...test, projectDir, source: { kind: 'window', title: 'test window' }, stop: { maxSeconds: 1 } }).done;
+    const window = await record({ ...test, projectDir, source: { kind: 'window', id: 1001 }, stop: { maxSeconds: 1 } }).done;
     expect([region.dir, region.screenSize]).toEqual(['takes/1', { width: 400, height: 300 }]);
     expect([window.dir, window.screenSize]).toEqual(['takes/2', { width: 640, height: 360 }]);
     expect(probe(join(projectDir, window.screen))).toMatchObject({ width: 640, height: 360 });
@@ -272,4 +287,17 @@ describe('record until a Claude Code turn ends (test backend)', () => {
       expect(markersOf(projectDir, take.markers).map((marker) => marker.kind)).toEqual(['answer']);
     });
   }, SLOW);
+});
+
+describe('inDeadZone', () => {
+  const zones = [{ x: 100, y: 100, width: 200, height: 50 }];
+  it('takes pointer input inside a zone (left and top edges in, right and bottom out), never keys or shapes', () => {
+    expect(inDeadZone({ type: 'move', time: 0, x: 100, y: 100 }, zones)).toBe(true);
+    expect(inDeadZone({ type: 'click', time: 0, x: 299, y: 149, button: 'left' }, zones)).toBe(true);
+    expect(inDeadZone({ type: 'scroll', time: 0, x: 300, y: 120, dx: 0, dy: 1 }, zones)).toBe(false);
+    expect(inDeadZone({ type: 'move', time: 0, x: 150, y: 150 }, zones)).toBe(false);
+    expect(inDeadZone({ type: 'key', time: 0 }, zones)).toBe(false);
+    expect(inDeadZone({ type: 'shape', time: 0, shape: 'text' }, zones)).toBe(false);
+    expect(inDeadZone({ type: 'move', time: 0, x: 150, y: 120 }, [])).toBe(false);
+  });
 });

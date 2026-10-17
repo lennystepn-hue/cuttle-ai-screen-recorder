@@ -221,3 +221,53 @@ async function readRange(path: string, from: number, to: number): Promise<Buffer
     await file.close();
   }
 }
+
+/** A folder Claude Code ran in, and when its newest transcript last changed (wall-clock seconds). */
+export interface ClaudeFolder {
+  cwd: string;
+  active: number;
+}
+
+/** How much of a transcript's end is read to find the folder it ran in. */
+const CWD_TAIL_BYTES = 256 * 1024;
+
+/**
+ * The folders Claude Code ran in, the most recently active first (at most `limit`), from the `cwd`
+ * of the newest transcript in each project folder. Folders that no longer exist are left out.
+ */
+export async function recentClaudeFolders(limit = 5, configDir = process.env.CLAUDE_CONFIG_DIR || join(homedir(), '.claude')): Promise<ClaudeFolder[]> {
+  const projects = join(configDir, 'projects');
+  const newest: { path: string; mtime: number }[] = [];
+  for (const name of await readdir(projects).catch(() => [] as string[])) {
+    let best: { path: string; mtime: number } | undefined;
+    for (const file of await readdir(join(projects, name)).catch(() => [] as string[])) {
+      if (!file.endsWith('.jsonl')) continue;
+      const info = await stat(join(projects, name, file)).catch(() => undefined);
+      if (info?.isFile() && (!best || info.mtimeMs > best.mtime)) best = { path: join(projects, name, file), mtime: info.mtimeMs };
+    }
+    if (best) newest.push(best);
+  }
+  newest.sort((a, b) => b.mtime - a.mtime);
+  const folders: ClaudeFolder[] = [];
+  for (const transcript of newest) {
+    if (folders.length >= limit) break;
+    const size = (await stat(transcript.path)).size;
+    const text = (await readRange(transcript.path, Math.max(0, size - CWD_TAIL_BYTES), size)).toString('utf8');
+    const cwd = text
+      .split('\n')
+      .reverse()
+      .map((line) => {
+        try {
+          const value = (JSON.parse(line) as { cwd?: unknown }).cwd;
+          return typeof value === 'string' ? value : undefined;
+        } catch {
+          return undefined;
+        }
+      })
+      .find((value) => value !== undefined);
+    if (cwd === undefined || folders.some((folder) => folder.cwd === cwd)) continue;
+    if (!(await stat(cwd).then((info) => info.isDirectory(), () => false))) continue;
+    folders.push({ cwd, active: transcript.mtime / 1000 });
+  }
+  return folders;
+}

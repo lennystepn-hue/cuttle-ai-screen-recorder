@@ -6377,3 +6377,98 @@ Expected: no output.
 - [ ] **Step 4: By hand (the user)**
 
 Start the app (`pnpm app`), see the pill near the top of the primary screen and the tray icon, open a recorded project with "Open", play it (sound and picture together), scrub, switch the preview to 9:16, and export. This needs a person; the checks above never show a window.
+
+## Changes during execution
+
+The code blocks above are the original plan. Its tasks were replayed mechanically on two fresh clones
+(the second byte-identical to the prototype) and those commits were pushed. Two reviews followed: one
+of the code, which also probed the running app with its own hidden-window scripts, and one of the
+experience, which drove the built app (hidden) with the 12 s fixture and a 3-minute take with 36
+markers and looked at 54 screenshots. They found the problems below; all are fixed in the commits
+after the plan's. The repo is the source of truth.
+
+**Main process**
+
+- **`app://` read any file on the disk.** An encoded slash (`x%2F..%2F..`) passed the segment check,
+  and `serveApp` compared the joined path by name, so a page could fetch `C:\Windows\win.ini`.
+  Decoded segments now refuse `/` as well as `\`, `:` and NUL, and the app protocol compares the
+  resolved path. Tests cover `%2F` and `%5C` where every path exists.
+- **One project, two editors.** Opening a project twice at once made two windows whose ffmpeg jobs
+  wrote the same `.part` file and corrupted the cached proxy; the first window's close then removed
+  the second's lock. Opens in flight are kept by the folder's real path (junction and case aliases are
+  one project), each job writes its own part file, a job cancelled before ffmpeg started never starts
+  it, `media.json` is written one write at a time, and the media worker runs one job at a time for all
+  windows. Each project keeps one session, so reopening it adds no partition.
+- **The pill never came back** after Alt+F4: a second `protocol.handle` on its session threw. Handlers
+  are registered once per session, and closing the pill hides it. Its position is kept per display
+  and clamped to the visible area.
+- **Closing an editor during an export** read `webContents` from a destroyed window and threw; the
+  window's contents are kept from the start.
+- **A stale lock blocked a project for good** (a reused pid after a crash; a synced folder compared
+  another computer's pid). The lock records the computer: one from this computer is stale and taken
+  over (only one Cuttle runs per user), one from another computer asks, with "Open anyway".
+- **Check hooks need a switch.** `CUTTLE_HIDDEN` and `CUTTLE_CHECK` act only with `--cuttle-check` on
+  the command line, so a stray variable cannot hide a real app. The default session (the export's
+  hidden window) grants nothing, a second launch resolves `--open` against its own folder, a
+  minimised editor is restored, and the open-error dialog says what is wrong in plain lines
+  ("It is not valid JSON at line 1, column 43.") with "Show the folder".
+
+**Player**
+
+- **The picture ran ahead of the sound** by the output latency (60–80 ms here, 150–250 ms over
+  Bluetooth): the clock is now the context time being heard (`getOutputTimestamp`), not `currentTime`.
+- **Playback could stick in "playing"** when opening the decoders threw (a project with no scenes):
+  a run sets everything up inside its `try`, and a video of length 0 does not play.
+- **Decode errors were silent** while scrubbing, and a sample leaked when `toVideoFrame` threw. The
+  newest scrub request gets the error, which the stage shows; samples are closed in `finally`. The
+  AudioContext is suspended on pause, and its gain nodes are disconnected.
+- **The whole timeline re-rendered 30 times a second.** The playhead is its own component, and the
+  timeline subscribes to plain fields, so the peaks are fetched once instead of on every proxy
+  progress event.
+- **Thumbnails were offset** by the take's first timestamp; they are indexed from it.
+
+**Editor**
+
+- Selection and keyboard focus are drawn over the thumbnails, so a selected clip shows its outline.
+- Overlays that overlap in time go to separate rows of their lane (up to three; the lane grows).
+  Labels stay in view when a block starts left of it, narrow blocks show none, and the speed shows
+  once (`8× Claude at work`, detail `5 s → 0.6 s`).
+- Pressing a block and dragging scrubs; a click selects; a press on the empty timeline moves the
+  playhead, and a click there clears the selection, as Esc does. The view follows the playhead after
+  any seek. The wheel scrolls along the timeline, Shift+wheel up and down, Ctrl+wheel zooms around
+  the pointer. The timeline takes a third of a small window, and its lanes scroll when taller.
+- Tool-call clusters are named after their tool when it is one (`Bash ×2`), else counted (`34 tool
+  calls`), with counts per tool in the tooltip.
+- The inspector says it is view only and shows values as text: output times as `m:ss.t`, source
+  times as `src 54.4 s` (`src 2:32.4` past a minute), the clicked occurrence of an overlay, and names
+  instead of ids (`Mac, dark`, `System pointer`).
+- The export sheet starts with the project's own size (the CLI's `export.mp4`), names the files it
+  writes and the earlier exports they replace, lists what is worth a second look (masks that are off,
+  overlays cut out, captions under a second, sound at another speed), shows the elapsed time, and
+  traps focus. It can be closed while exporting: a title-bar chip shows the progress and reopens it.
+- A project that cannot be opened keeps the title bar, with "Show the folder" and "Try again".
+  Messages are sentences ("takes/1/screen.mp4 is missing from the project folder."), and a source
+  outside the project folder says so. A missing still or background image becomes a placeholder and
+  a warning instead of a failure. Background media that failed show as a chip with a retry, which
+  says when ffmpeg is missing.
+- Contrast: `--faint` is #74747e, the waveform and input bars #5c5c68, hints use `--muted`. The brand
+  mark's styles moved to the base sheet (the pill showed a dark glyph on dark glass), and the
+  scrollbar is visible.
+- Smaller things: the spinner shows only after 400 ms; the proxy chip says "Making a smooth-playback
+  copy"; the stage warning can be dismissed; lengths are cut off at tenths as times are; Space and
+  Enter press a focused button outside the timeline; only the arrows repeat while held; the inspector
+  tabs take the arrow keys; the pill's disabled record button says how to record for now.
+
+Left for later: J/K/L as a shuttle and a list of the keys (P2-M3, with editing); finding ffmpeg
+outside PATH (P2-M4's first run).
+
+**Tests.** The fixture has a webcam that starts 0.4 s after the screen and an 8× clip. `app:check`
+also plays and scrubs the proxy (its frame compared with the take's, key frames only above 6×),
+selects and clears, checks what the export sheet says, opens a project twice at once, closes an
+editor during its export, closes and reshows the pill, and fails on any unhandled rejection in the
+main process. Playback asserts frames per second of the clock instead of a count. Unit tests cover
+the lock, the pre-export checks, lane rows, pin names and the `%2F` cases.
+
+After the fixes: the desktop unit tests (28 passed, 12 skipped outside their modes), `tsc` for the app,
+`pnpm app:check` (10 passed) and `pnpm app:build` (2 passed) pass. Nothing outside `apps/desktop` and
+the README changed.

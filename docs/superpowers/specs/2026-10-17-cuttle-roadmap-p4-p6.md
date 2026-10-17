@@ -22,8 +22,8 @@ do not build.
 1. **Automatic, but accountable.** Every automatic edit is an item in `cuttle.json` with its kind
    and a reason ("Email address", "Filler: ähm", "Retake"). The person can see each one, switch it
    off, or switch off a whole kind. A rerun never changes what a person or Claude edited by hand.
-2. **Local and free.** Speech recognition is the Whisper in ffmpeg. Text recognition and UI
-   Automation are built into Windows. The engine runs on the GPU. Nothing goes over the network,
+2. **Local and free.** Speech recognition is the Whisper in ffmpeg. Text recognition is built
+   into Windows. The engine runs on the GPU. Nothing goes over the network,
    except downloads the person starts, such as a speech model. Paid services only behind a
    setting that is off by default, and none is planned.
 3. **Light while recording.** The recorder logs only cheap facts while it records. Heavy work
@@ -55,11 +55,11 @@ Cuttle understands a take and edits it:
 
 | Milestone | Content | Done when |
 |---|---|---|
-| P4-M0 | Spike: Whisper speed, word timing and GPU on this machine; the UI Automation and OCR helper; notification and dialog windows; TTS speech fixtures | The spike doc answers each question with numbers |
+| P4-M0 | Spike (done, `docs/superpowers/spikes/2026-10-17-p4-spike.md`): Whisper speed, quality and word timing with an alignment of its own; the content area from Win32 child windows and from the picture; OCR speed and quality; TTS speech fixtures | The spike doc answers each question with numbers |
 | P4-M1 | Foundation: `cuts` and `auto` in the project format, timeline and engine; the Auto tab; styled Select and Menu components replacing every native `<select>` | Unit tests and app:check pass; screenshots reviewed; no native select left |
 | P4-M2 | Speech: the model download, transcription after the stop, `transcript.json`, captions (3 styles), the Transcript tab (seek, fix text, delete words to cut), filler and pause cuts, mic cleanup, SRT/VTT | A TTS fixture transcribes and gets captions in the export; app:check covers the Transcript tab |
 | P4-M3 | The mistake key: hotkey, HUD button and spoken "nochmal" cut back to the last pause | Unit tests on synthetic takes; app:check with the test backend |
-| P4-M4 | Live facts: the helper logs the content area, the focused field, and dialog and notification windows during a take; auto-crop, typing zooms, dialog zooms | A recording with the test backend and a scripted window gets a crop and zooms |
+| P4-M4 | Live facts: the recorder logs the content area (Win32 child windows), the caret where there is one, and dialog and notification windows; auto-crop (with the picture as fallback), typing zooms from what the screen changes, dialog zooms | Unit tests on logged fixtures; the 12:12 take gets its crop from the picture |
 | P4-M5 | Privacy guard: OCR after the stop; patterns for emails, keys, tokens, IBANs, cards and phone numbers; masks that follow scrolling text; notification masks; a "Do not disturb" hint in the picker | Fixture frames with planted secrets come out masked; nothing else is |
 | P4-M6 | Target length: "Fit to 30 s" cuts the least important stretches, never speech | Unit tests on importance and fitting; the editor's control in app:check |
 

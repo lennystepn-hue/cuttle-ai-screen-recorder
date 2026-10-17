@@ -40,17 +40,31 @@ a window switch. Phase 4 does each of those by itself.
      rejected: a separate auto file, which would be a second source of truth.
 3. **Speech is the Whisper in ffmpeg** (the `whisper` filter, ffmpeg 8+; this machine has 9.0).
    The models are whisper.cpp ggml files, downloaded once when the person asks.
+   - One run over the take: `queue=30`, `max_len=1`, `use_gpu=1`. The filter's lines are read
+     with a pattern, because its JSON is not escaped.
+   - The word times are then aligned to the audio's speech stretches (`silencedetect`, dynamic
+     programming). This cut the median start error from about 500 ms to 35 to 76 ms in the spike
+     (`docs/superpowers/spikes/2026-10-17-p4-spike.md`).
    - Rejected: a bundled whisper.cpp binary (another native binary per platform); Windows speech
-     recognition (much worse); cloud APIs (cost and privacy).
-4. **UI Automation and OCR run in a helper process.** It is Windows PowerShell 5.1 with C#
-   compiled at start (`Add-Type`): managed UI Automation and `Windows.Media.Ocr`, with JSON lines
-   over stdio. Every Windows 10 and 11 machine has it, and it needs no build tools.
-   - Rejected: COM through koffi (UI Automation's vtables by hand); a compiled exe (a toolchain in
-     the build).
-   - The spike measures its speed. If it is too slow, the fallback is the .NET Framework's
-     `csc.exe`, which is on every Windows, compiling a small exe at first run.
-5. **Windows on screen come from the recorder.** Dialogs, menus and notifications are found by
-   the recorder's own window enumeration (koffi, already there), not by UI Automation.
+     recognition (much worse); cloud APIs (cost and privacy); one whisper run per speech chunk
+     (it reloads the model each time: `turbo` fell to a third of real time).
+4. **The content area comes from Win32, not UI Automation.** Every Chromium browser and Electron
+   app draws its page in a `Chrome_RenderWidgetHostHWND` child window, and that rect is the page
+   area: Opera's matched the area read off a take by hand.
+   - The recorder reads it through koffi, in under 5 ms.
+   - Takes without it (other apps, the CLI's older takes) fall back to the picture: edge bands
+     that never change while the middle does. In the spike they were within 4 px of the child
+     window.
+   - Rejected: UI Automation. Opera, Electron apps and Windows Terminal expose no document to it;
+     Chromium builds its tree only for assistive technology.
+5. **OCR runs in a helper process, after the stop.** It is Windows PowerShell 5.1 with
+   `Windows.Media.Ocr` (on every Windows 10 and 11; no build tools), with JSON lines over stdio.
+   It starts in about 0.3 s and reads a frame at twice its size in 0.1 to 0.2 s. Nothing runs
+   beside the capture.
+6. **Windows on screen come from the recorder.** Dialogs, menus and notifications are found by
+   the recorder's own window enumeration (koffi, already there).
+7. **Typing zooms follow what the screen changes during a burst of keys.** That works in every
+   app. The system caret (`GetGUIThreadInfo`) refines it where the app keeps one.
 
 ## What the person sees
 
@@ -87,8 +101,10 @@ a window switch. Phase 4 does each of those by itself.
 7. **Export** gains captions: burned in (the default when they are on), also as `.srt` and
    `.vtt`, or off.
 8. **Settings** gain Speech:
-   - Off, or one of three models: Fast (`base`, 142 MB), Good (`small`, 466 MB), Best
-     (`large-v3-turbo-q5_0`, 574 MB). The spike sets the default and checks the sizes.
+   - Off, or one of three models:
+     - Fast (`base`, 148 MB): good for English, weak for German;
+     - Good (`small`, 488 MB): the default, about 5× real time;
+     - Best (`large-v3-turbo-q5_0`, 574 MB): about 2.6× real time.
    - The language: Auto, Deutsch, English.
    - A download with progress, cancel and a checksum.
    - "Always mask": words such as the person's name or address, masked wherever they show.
@@ -185,11 +201,12 @@ All times are source seconds and all rects are source pixels, as before.
 - `takes/<n>/mic.clean.m4a`, when audio cleanup is on: speech denoising (`arnndn`) and loudness
   (`loudnorm`, −16 LUFS). The preview and the export both use it, so they sound the same.
 - New lines in `events.jsonl`, logged while recording:
-  - `{ "type": "area", "t", "rect": [x, y, w, h] | null }`: the content area of the window shown
-    (a browser's page, an editor's text, a terminal's grid), from UI Automation. Logged on a
-    change of foreground, position or size, and checked every second.
-  - `{ "type": "caret", "t", "rect" }`: the caret, or else the focused text field, while keys are
-    typed (at most 5 a second).
+  - `{ "type": "area", "t", "rect": [x, y, w, h] | null }`: the content area of the window shown.
+    That is its largest visible `Chrome_RenderWidgetHostHWND` child (Chromium browsers, Electron
+    apps) or Firefox's content window; `null` when it has none. Logged on a change of foreground,
+    position or size, and checked every second.
+  - `{ "type": "caret", "t", "rect" }`: the system caret (`GetGUIThreadInfo`), while keys are
+    typed (at most 5 a second), only where the app keeps one.
   - `{ "type": "window", "t", "id", "kind": "dialog" | "menu" | "notification", "rect", "open" }`:
     a dialog, menu or notification opens or closes over the captured area, from the recorder's
     window enumeration (every 250 ms).
@@ -202,13 +219,13 @@ them for buttons, links and menu items only).
 
 | Piece | What it does | Depends on |
 |---|---|---|
-| `packages/sense` (new) | The Windows helper: UI Automation (content area, caret or focus) and OCR on PNG files. JSON lines over stdio; started by the recorder host at the start of a take and by the analysis for OCR. A crash is logged, and the take goes on without those events. | PowerShell 5.1 |
-| `packages/analysis` (new) | `transcribe` (ffmpeg whisper, JSON, word segments), the OCR pass (frames where the screen changed, at most 2 a second), audio cleanup, and the detectors. Each detector is a pure function from events, transcript and screen text to tagged items, tested on fixtures. | ffmpeg, sense |
+| `packages/sense` (new) | The OCR helper: Windows PowerShell 5.1 and `Windows.Media.Ocr`, reading PNG files at twice their size. JSON lines over stdio; started by the analysis after the stop. | PowerShell 5.1 |
+| `packages/analysis` (new) | `transcribe` (one ffmpeg whisper run, lines read by pattern, words aligned to speech stretches), the OCR pass (frames where the screen changed, at most 2 a second), the picture-only crop bands, audio cleanup, and the detectors. Each detector is a pure function from events, transcript and screen text to tagged items, tested on fixtures. | ffmpeg, sense |
 | `packages/core` | `suggest` becomes the director. It runs the analysis when it can, merges the detectors' items by the tag rules, splits clips at crop changes, and keeps the phase 3 spacing for zooms in output time (priority: answer, dialog, typing, click). `--length` fits the length. | analysis, timeline |
 | `packages/project` | The schema above, the `retake` marker and the new event types. | |
 | `packages/timeline` | Cuts in `sceneSpans` and `frameAt`; the crop as the screen; the moves of masks and zooms; caption layout and timing (lines, the karaoke word); the importance curve for length fitting. | |
 | `packages/engine` | The crop in the content pass, the caption pass (sprites, three styles), and masks that move. | |
-| `packages/recorder` | Runs the sense helper for the take, logs window events through koffi, and takes the `retake` hotkey. | sense |
+| `packages/recorder` | Logs `area`, `caret` and `window` events through koffi (Win32 child windows, `GetGUIThreadInfo`, the window enumeration it has), and takes the `retake` hotkey. | |
 | `apps/desktop` | The model manager (download, checksum, progress), the Auto and Transcript tabs, captions in Look, the length control, the HUD's mistake button, the picker's notification hint, export captions, and the `Select` and `Menu` components replacing every native `<select>` (8 today). | |
 | `apps/cli` | `cuttle analyze`, `cuttle transcript [--srt \| --vtt \| --text]`, `cuttle models [list \| download <name>]`, `suggest --length <s>` and `--no-<kind>` switches. | |
 | `skill/` | Auto items and the rule for their tags, cuts, caption fixes, and privacy review: auto masks help, but Claude still looks. | |
@@ -219,40 +236,47 @@ All take source seconds, give tagged items, and are pure.
 
 - **Crop.**
   - From `area` events: each stretch where the area stays within 8 px for ≥ 2 s gets that crop.
+  - Without `area` events, from the picture: the edge bands whose rows or columns change less
+    than 5 % as much as the middle, over the clip at 2 frames a second.
   - No crop when the area covers ≥ 95 % of the screen or less than 30 % of it.
-  - The spike decides whether an image fallback is worth it for takes without `area` events:
-    bands at the edges that never change while the middle does.
 - **Retakes.** A `retake` marker, or a spoken cue: "nochmal", "noch mal", "noch einmal", "again",
   "one more time" or "let me redo".
   - The cue counts only when the next 4 s repeat ≥ 40 % of the 8 words before it.
   - The cut runs from the last pause before it (a speech gap ≥ 0.7 s with input at rest ≥ 0.5 s,
     at most 20 s back; else 5 s back) to 0.15 s after the cue.
   - It never crosses a scene boundary.
-- **Fillers.** Words in a lexicon:
-  - German: äh, ähm, öh, öhm, ehm, hm, hmm;
-  - English: uh, um, uhm, er, erm, hmm.
+- **Fillers.** Three signs, because whisper writes some fillers, misspells others and drops
+  some (the spike):
+  - words in a lexicon:
+    - German: äh, ähm, öh, öhm, ehm, hm, hmm;
+    - English: uh, um, uhm, er, erm, hmm;
+  - whisper's short spellings of them: a word of one or two letters such as "e", "eh", "m" or
+    "hm", alone between pauses;
+  - a speech stretch under 0.8 s that the alignment left without words.
 
   Each is cut with 50 ms on both sides, and only where the picture rests: no input and almost no
   screen change from 0.2 s before to 0.2 s after.
-
-  Whisper tends to leave fillers out. The spike measures this. If it does, a sounding gap between
-  words (energy, but no word, ≥ 0.25 s) counts as a filler too.
 - **Pauses.** A gap of ≥ 1.0 s between words where the picture rests is cut down to 0.4 s. Where
   the picture moves (waiting for a load), `suggest`'s speed-ups decide, as today.
 - **Typing zooms.**
-  - A key burst (gaps < 1.5 s, ≥ 1.5 s long) with `caret` events gets a zoom on the caret's line
-    at ≥ 45 % of the screen's width.
-  - The zoom moves with the caret when it leaves the middle 60 % (`moves`).
+  - A key burst (gaps < 1.5 s, ≥ 1.5 s long) gets a zoom on where the screen changes during it
+    (`suggest`'s changed region, per second of the burst), at ≥ 45 % of the screen's width.
+  - Where `caret` events exist, the zoom centres on the caret's line instead.
+  - The zoom moves (`moves`) when the changes leave its middle 60 %.
 - **Dialog zooms.** A dialog open ≥ 1 s gets a zoom on it, padded, from 0.3 s before it opens to
   0.3 s after it closes.
 - **Privacy.**
-  - On the OCR text:
+  - On the OCR text, read at twice the frame's size, with `O→0` and `I/l/|→1` normalised inside
+    digit runs before checksums, and key prefixes matched case-insensitively allowing one wrong
+    letter:
     - email addresses and URLs with tokens (`token=`, `access_token=`, `key=`);
     - keys: `sk-`, `sk-ant-`, `ghp_`, `gho_`, `github_pat_`, `glpat-`, `xox[abp]-`,
       `AKIA[0-9A-Z]{16}`, `AIza…`, JWTs (`eyJ…`), and `-----BEGIN … PRIVATE KEY-----`;
     - IBANs (mod 97), card numbers (13 to 19 digits, Luhn), phone numbers (+ and ≥ 9 digits, or
       a national format);
-    - the person's "Always mask" words.
+    - the person's "Always mask" words;
+    - the value of any `NAME=value` line whose name contains KEY, TOKEN, SECRET, PASSWORD or
+      SESSION, even when the value itself matches nothing.
   - A mask runs from 0.5 s before the first sight to 0.5 s after the last, padded 6 px, with
     `moves` where the text moved, in the style `fill`.
   - Every `notification` window is masked while it is open, plus 0.3 s.
@@ -271,9 +295,10 @@ All take source seconds, give tagged items, and are pure.
   to Settings.
 - **An ffmpeg without `whisper`.** The same, with "Update ffmpeg: `winget upgrade Gyan.FFmpeg`".
 - **No mic track.** No speech features, and nothing to say about it beyond the take's facts.
-- **The helper does not start** (policy, or not Windows). No `area` and `caret` events: no crop
-  (unless the image fallback), no typing zooms, no OCR, so no privacy masks. The Auto tab says
-  plainly that the screen was not read.
+- **The OCR helper does not start** (policy, or not Windows). No privacy masks from text; the
+  notification masks still come. The Auto tab says plainly that the screen's text was not read.
+- **No `area` events** (not Windows, an app without a render widget). The crop falls back to the
+  picture's bands, or there is none.
 - **A step fails or times out** (transcription after 4× the take's length, OCR after 2×). It is
   noted in the Auto tab; the other steps still run, and "Try again" reruns that step.
 - **Analysis meets an edit in progress.** Its result is merged like any outside change: one step,
@@ -296,8 +321,11 @@ All take source seconds, give tagged items, and are pure.
   German and English, with a filler, "nochmal" and a repeat. They are muxed into a generated test
   take. The test runs where a model is present and is skipped elsewhere. For local runs the
   `base` model is downloaded once, with the user's OK.
-- **The helper:** an integration test against an Electron window placed off every display (shown
-  but never visible), if the spike shows UI Automation sees it. Else a by-hand check.
+- **The OCR helper:** an integration test on fixture frames rendered offscreen (`cuttle
+  capture-page`) with planted fake secrets in small and large text: each is masked, and the clean
+  lines get nothing. It runs on Windows and is skipped elsewhere.
+- **The content area:** the child-window lookup is tested on Cuttle's own offscreen editor window
+  (an Electron render widget).
 - **App checks** (hidden windows, the `test` recorder backend):
   - the Auto tab with fixture results (switches, Show);
   - the Transcript tab (seek, fix, cut, restore);
@@ -316,11 +344,11 @@ All take source seconds, give tagged items, and are pure.
 
 | Milestone | Content | Done when |
 |---|---|---|
-| P4-M0 | Spike: Whisper speed per model on this machine (CPU and GPU), word timing, fillers kept or dropped; the helper's start-up time, UI Automation `area` and caret in Opera, Chrome, Edge, VS Code and Windows Terminal; OCR speed and quality on a 2560×1440 frame; windows of notifications, menus and dialogs; TTS fixtures | `docs/superpowers/spikes/<date>-p4-spike.md` answers each with numbers, and the spec is updated where it was wrong |
+| P4-M0 | Spike (done): Whisper speed, quality and word timing per model, with the alignment; the content area (UI Automation, Win32 child windows, picture bands); OCR speed and quality; TTS fixtures | `docs/superpowers/spikes/2026-10-17-p4-spike.md`; this spec updated |
 | P4-M1 | `cuts`, `auto`, `autoEdits` and crop in the format, timeline and engine; the tag rules in `suggest`; the Auto tab (with phase 3's click and answer zooms as its first items); `Select` and `Menu` replacing all 8 native selects | Unit tests, goldens and app:check pass; no `<select>` is left in the renderer |
 | P4-M2 | Speech: models, transcription after the stop, `transcript.json`, captions (format, timeline, engine, Look), the Transcript tab, fillers, pauses, audio cleanup, SRT and VTT, `cuttle transcript` and `cuttle models` | The TTS fixture comes out with captions and without its filler; app:check covers the tab |
 | P4-M3 | The mistake key: hotkey, HUD button, spoken cue, the retake detector | Unit tests; app:check presses the HUD button with the test backend |
-| P4-M4 | The helper while recording: `area`, `caret` and `window` events; crop, typing zooms and dialog zooms | Unit tests on logged fixtures; a scripted off-screen window recorded with the test backend gets them |
+| P4-M4 | Live facts: `area`, `caret` and `window` events through koffi; the crop (with the picture fallback), typing zooms and dialog zooms. By hand: notification, menu and dialog classes | Unit tests on logged fixtures; the area lookup on Cuttle's own offscreen window; the 12:12 take gets its crop from the picture |
 | P4-M5 | Privacy: the OCR pass, patterns, masks that move, notification masks, "Always mask", the picker's hint | Planted secrets on fixture frames are masked, clean frames get nothing; app:check shows the Privacy row |
 | P4-M6 | Length: importance, the fitter, `suggest --length`, the editor's control | Unit tests; app:check fits the fixture to 5 s |
 

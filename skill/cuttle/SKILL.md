@@ -58,9 +58,11 @@ cuttle -C "<project>" record --monitor 0 --until-file "<project>/stop" --until-c
 ```
 
 - `--until-file "<project>/stop"`: the take ends when the file appears. **This is how you stop
-  it**: create the file (`touch "<project>/stop"`) when the user is done or something goes wrong.
-  Never stop the background task by killing it: a killed take is cut off, and `cuttle.json` still
-  points at the previous take. After a stop by file, `record` removes the file again.
+  it**: create the file (`touch "<project>/stop"`) when the user is done or something goes wrong,
+  but only while the task still runs (a file left after another trigger ended the take blocks the
+  next one). Never stop the background task by killing it: a killed take is cut off, and
+  `cuttle.json` still points at the previous take. After a stop by file, `record` removes the file
+  again.
 - `--until-claude "<folder>"`: also ends the take 2 s after the first Claude Code session in that
   folder that prompts after the start finishes its turn; its prompt, tool calls and answer become
   markers. If that folder is the one you run in, tell the user not to write to you until the
@@ -70,15 +72,16 @@ cuttle -C "<project>" record --monitor 0 --until-file "<project>/stop" --until-c
   marker with Ctrl+Shift+Alt+M. Other sources: `--window "<part of the title>"`,
   `--region x,y,w,h` (pixels of `--monitor`). `--countdown 3` is the default.
 
-The Bash tool's result names the background task's output file. Wait until the recording runs,
-then tell the user to start (for an agent demo: to send the prompt in their Claude Code session):
+The Bash tool's result names the background task's output file. Wait until the recording runs
+(at most 40 s: the countdown plus up to 20 s for the tracks to start):
 
 ```bash
-until grep -q "recording takes/" "<output file>"; do sleep 1; done
+for i in $(seq 40); do grep -qE "recording takes/|^error:" "<output file>" && break; sleep 1; done; cat "<output file>"
 ```
 
-Allow about 40 s (the countdown plus up to 20 s for the tracks to start); if the task ends first,
-it failed: read the error in its output. Do not rely on the user's "done" for timing: `suggest`
+If it shows `recording takes/<n>`, tell the user to start (for an agent demo: to send the prompt
+in their Claude Code session). If it shows `error:`, or nothing after 40 s, the recording did not
+start: read the error. Do not rely on the user's "done" for timing: `suggest`
 trims the quiet start and end anyway. When the take ends, the output shows
 `recorded takes/<n>: 42.0 s …` and `cuttle.json` uses the take as one clip over the whole take. If
 the task ended without that line (killed, crashed), run
@@ -115,8 +118,10 @@ Then refine `cuttle.json` ([project.md](project.md)) and preview again:
   - Find when it appears and when it goes: run `frame` at earlier and later source seconds
     (halving the step), then pad 0.5 s on each side for the mask's `from` and `to`. Text that
     scrolls moves: give each position its own mask, or cut the stretch out.
-  - Use `fill` for secrets. Check every mask with `preview --at` at its start, middle and end
-    (output second = scene start + (source second − `from`) ÷ `speed`).
+  - Use `fill` for secrets. Check every mask with `preview --at` 0.1 s inside each end and in the
+    middle (output second = scene start + (source second − `from`) ÷ `speed`); each still's
+    `source` must lie inside the mask's `[from, to)`, since a still shows the whole frame its time
+    falls in.
   - Masks apply to clips only: look at a captured page yourself before you add it.
 - **Story.** Trim what does not help. Keep the prompt readable (1.5 s or more) and the answer on
   screen for 2–3 s. A speed-up shows a "12× speed" badge.

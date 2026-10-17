@@ -1664,6 +1664,15 @@ problems below. The repo is the source of truth.
   - Capture pages before adding the end card.
   - Each `preview` run replaces `preview/` (use `-o` to keep a set).
   - Errors name fields from 0 (`scenes[1].to`).
+  - From the re-check, three more:
+    - The wait loop also stops on `error:` and after 40 s, then prints the output. It used to spin
+      until the Bash tool's timeout when `record` failed before it started (tried with
+      `--monitor 7`: it now ends after 2 s with the error).
+    - A mask is checked 0.1 s inside each end: a still shows the whole frame its time falls in,
+      which can begin just before `from`.
+    - The stop file is created only while the task runs: a file left after another trigger ended
+      the take would block the next one.
+- **`frame -o <a folder>`** (code re-check) is a usage error instead of an internal one.
 - **project.md (skill review):**
   - Durations over sped-up clips: a 3 s caption over 12× needs `"duration": 36`.
   - The zoom's ramp is in output seconds.

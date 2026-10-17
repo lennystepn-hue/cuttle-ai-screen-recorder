@@ -213,7 +213,7 @@ export async function suggestProject(projectDir: string, args: SuggestOptions = 
     // the clicks the zooms there do not show, less those the click zooms follow
     const left = shownClicks(events, shown, there) - followed.reduce((sum, zoom) => sum + zoom.clicks, 0);
     for (const zoom of followed) {
-      add({ id: newId('zooms', taken), label: zoom.clicks === 1 ? 'Click' : 'Clicks', at: zoom.at, duration: zoom.duration, rect: zoom.rect, auto: 'click' });
+      add({ id: newId('zooms', taken), label: zoom.clicks === 1 ? 'Click' : 'Clicks', at: zoom.at, duration: zoom.duration, rect: zoom.rect, ...(zoom.moves && { moves: zoom.moves }), auto: 'click' });
     }
     if (followed.length > 0) notes.push(`${followed.length} zoom${followed.length === 1 ? '' : 's'} on clicks`);
     if (left > 0) notes.push(`${left} click${left === 1 ? '' : 's'} got no zoom: sped up, or near a cut or another zoom`);

@@ -13,7 +13,7 @@ export async function init(dir: string, output: Output): Promise<InitResult> {
   const target = resolve(dir);
   if (projectExists(target)) throw new CliError('usage', `${target} already has a ${PROJECT_FILE}`);
   await mkdir(target, { recursive: true });
-  const file = await writeProjectFile(newProjectFile(target), 'init');
+  const { file } = await writeProjectFile(newProjectFile(target), 'init');
   const result = { project: file.path };
   output.result(result, () => `created ${file.path}\nnext: cuttle record (in that folder)`);
   return result;

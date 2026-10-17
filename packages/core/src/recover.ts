@@ -103,7 +103,7 @@ export async function recoverTake(projectDir: string, takeDir: string): Promise<
   const { scenes, zooms, masks, texts } = file.project;
   const sameTake = samePath(resolve(file.dir, file.project.sources.screen), path(FILES.screen));
   const keepEdit = sameTake && scenes.length + zooms.length + masks.length + texts.length > 0;
-  const backup = await useTake(
+  const hadEdit = useTake(
     file,
     {
       screen: source(FILES.screen),
@@ -115,7 +115,7 @@ export async function recoverTake(projectDir: string, takeDir: string): Promise<
     },
     sameTake,
   );
-  await writeProjectFile(file, 'recover');
+  const { backup } = await writeProjectFile(file, 'recover', { backup: hadEdit });
   const result: RecoverResult = {
     project: file.path,
     take: rel.split(sep).join('/'),

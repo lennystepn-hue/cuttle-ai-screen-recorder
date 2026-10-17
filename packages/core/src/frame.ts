@@ -70,7 +70,7 @@ export async function grabFrame(projectDir: string, at: number, args: FrameOptio
   if (at >= duration) throw new CoreError('usage', `the screen track is ${duration.toFixed(2)} s long; ${at} s is past its end`);
   const out = args.out ? resolve(args.out) : join(file.dir, 'frames', `${at.toFixed(2)}s${args.grid ? '-grid' : ''}.png`);
   await mkdir(dirname(out), { recursive: true });
-  if (existsSync(out) && statSync(out).isDirectory()) throw new CoreError('usage', `the frame needs a file name, not the folder ${out}`);
+  if (existsSync(out) && statSync(out).isDirectory()) throw new CoreError('usage', `the frame's file (-o) needs a file name, not the folder ${out}`);
   // An older file there must not pass for the new frame when ffmpeg writes none.
   await rm(out, { force: true });
   // -update 1: one picture, so a `%d` in the path is not read as a frame-number pattern.

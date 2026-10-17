@@ -3,7 +3,7 @@
 // frame, and run ffmpeg.
 export { CoreError, type CoreErrorCode } from './errors';
 export { ffmpegPath, runFfmpeg } from './ffmpeg';
-export { BACKUPS, PROJECT_FILE, backupFile, newProjectFile, projectExists, readProjectFile, writeProjectFile, type ProjectFile } from './project-file';
+export { BACKUPS, PROJECT_FILE, backupFile, newProjectFile, projectExists, projectHash, readProjectFile, writeProjectFile, type ProjectFile, type WriteOptions, type WriteResult } from './project-file';
 export { samePath, useTake, type TakeFiles } from './use-take';
 export { suggestProject, type SuggestOptions, type SuggestResult } from './suggest';
 export { recoverTake, type RecoverResult } from './recover';

@@ -57,35 +57,69 @@ export function projectExists(projectDir: string): boolean {
   return existsSync(join(resolve(projectDir), PROJECT_FILE));
 }
 
+export interface WriteOptions {
+  /** Keep the file on disk as a backup first (`backupFile`), once the check has passed. */
+  backup?: boolean;
+}
+
+export interface WriteResult {
+  /** The project as written: its `project` and `hash` describe what is on disk now. */
+  file: ProjectFile;
+  /** The backup made first (`options.backup`). */
+  backup?: string;
+}
+
+/** Writes in this process wait for each other, per file: check, backup and rename are one step. */
+const writing = new Map<string, Promise<unknown>>();
+let temps = 0;
+
+/** The SHA-256 of a file's bytes as `ProjectFile.hash` holds it, so a watcher can tell its own write. */
+export const projectHash = (bytes: Buffer | string): string => hashOf(bytes);
+
 /**
  * Checks `file.raw` again and writes it as 2-space JSON (temp file and rename, so a crash never
  * leaves half a file), creating the project folder when it is new. Refuses with `conflict` when the
  * file on disk is no longer the one `file` was read from or last written as (or appeared, for a new
  * project), so it never overwrites what another program saved meanwhile; `operation` names what
- * ran, for the message. Updates `file`'s project and hash and returns it.
+ * ran, for the message. The check runs again before each retry of the rename. Writes from one
+ * process run one at a time per file; between processes a window of milliseconds remains. Returns
+ * the written file (a new object; `file` is left as it was) and the backup.
  */
-export async function writeProjectFile(file: ProjectFile, operation: string): Promise<ProjectFile> {
+export async function writeProjectFile(file: ProjectFile, operation: string, options: WriteOptions = {}): Promise<WriteResult> {
   const project = parse(file.raw);
   const text = `${JSON.stringify(file.raw, null, 2)}\n`;
-  await mkdir(file.dir, { recursive: true });
-  const onDisk = await readFile(file.path).catch((error: NodeJS.ErrnoException) => {
-    if (error.code === 'ENOENT') return undefined;
-    throw new CoreError('invalid-project', `cannot read ${file.path}: ${error.message}`, { cause: error });
+  const key = process.platform === 'win32' ? file.path.toLowerCase() : file.path;
+  const previous = writing.get(key) ?? Promise.resolve();
+  const run = previous.catch(() => {}).then(async (): Promise<WriteResult> => {
+    await mkdir(file.dir, { recursive: true });
+    const unchanged = async () => {
+      const onDisk = await readFile(file.path).catch((error: NodeJS.ErrnoException) => {
+        if (error.code === 'ENOENT') return undefined;
+        throw new CoreError('invalid-project', `cannot read ${file.path}: ${error.message}`, { cause: error });
+      });
+      if ((onDisk && hashOf(onDisk)) !== file.hash) {
+        throw new CoreError('conflict', `${file.path} changed while ${operation} ran, so it was left as it is; run ${operation} again`, { path: file.path });
+      }
+    };
+    await unchanged();
+    const backup = options.backup && existsSync(file.path) ? await backupFile(file.path) : undefined;
+    const temp = `${file.path}.${process.pid}-${++temps}.tmp`;
+    await writeFile(temp, text);
+    try {
+      await renameWhenFree(temp, file.path, unchanged);
+    } catch (error) {
+      await rm(temp, { force: true });
+      if (error instanceof CoreError) throw error;
+      throw new CoreError('invalid-project', `cannot write ${file.path}: ${(error as Error).message}`, { cause: error });
+    }
+    return { file: { ...file, project, hash: hashOf(text) }, ...(backup && { backup }) };
   });
-  if ((onDisk && hashOf(onDisk)) !== file.hash) {
-    throw new CoreError('conflict', `${file.path} changed while ${operation} ran; nothing was written, run it again`);
-  }
-  const temp = `${file.path}.${process.pid}.tmp`;
-  await writeFile(temp, text);
+  writing.set(key, run);
   try {
-    await renameWhenFree(temp, file.path);
-  } catch (error) {
-    await rm(temp, { force: true });
-    throw new CoreError('invalid-project', `cannot write ${file.path}: ${(error as Error).message}`, { cause: error });
+    return await run;
+  } finally {
+    if (writing.get(key) === run) writing.delete(key);
   }
-  file.project = project;
-  file.hash = hashOf(text);
-  return file;
 }
 
 /** Backups kept per file: `<file>.bak` is the newest, then `<file>.bak.1` … `<file>.bak.4`. */
@@ -110,8 +144,11 @@ export async function backupFile(path: string): Promise<string> {
   return bak;
 }
 
-/** A rename that waits a moment for a file another program holds (OneDrive, a virus scanner, an editor). */
-async function renameWhenFree(from: string, to: string): Promise<void> {
+/**
+ * A rename that waits a moment for a file another program holds (OneDrive, a virus scanner, an
+ * editor); `beforeRetry` runs before each new attempt (and may throw to give up).
+ */
+async function renameWhenFree(from: string, to: string, beforeRetry?: () => Promise<void>): Promise<void> {
   for (let attempt = 1; ; attempt++) {
     try {
       return await rename(from, to);
@@ -119,6 +156,7 @@ async function renameWhenFree(from: string, to: string): Promise<void> {
       const code = (error as NodeJS.ErrnoException).code;
       if (attempt >= 5 || (code !== 'EPERM' && code !== 'EBUSY' && code !== 'EACCES')) throw error;
       await new Promise((done) => setTimeout(done, 100 * attempt));
+      await beforeRetry?.();
     }
   }
 }

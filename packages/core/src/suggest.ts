@@ -2,7 +2,7 @@ import { readFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { newId, parseEventsJsonl, parseMarkersJson, parseTakeJson, usedIds, type InputEvent, type Marker, type Rect } from '@cuttle/project';
 import { CoreError } from './errors';
-import { backupFile, readProjectFile, writeProjectFile } from './project-file';
+import { readProjectFile, writeProjectFile } from './project-file';
 import { analyseScreen, grabGray } from './suggest/media';
 import { suggestClips } from './suggest/plan';
 import { changedRegion, zoomRect } from './suggest/region';
@@ -86,7 +86,9 @@ export async function suggestProject(projectDir: string, args: SuggestOptions = 
   const firstClip = previous.findIndex((scene) => scene.type === 'clip');
   const before = firstClip < 0 ? [] : previous.slice(0, firstClip).filter((scene) => scene.type !== 'clip');
   const after = previous.slice(Math.max(0, firstClip)).filter((scene) => scene.type !== 'clip');
-  const taken = usedIds({ scenes: [...before, ...after], masks: file.raw.masks, texts: file.raw.texts });
+  // Every id of the file as read, also those of the clips and zoom being replaced: an id that an
+  // editor or an undo step still holds must never name a different item.
+  const taken = usedIds(file.raw);
   const clips: ClipScene[] = suggestion.clips.map(({ from: start, to, speed, label }) => ({
     type: 'clip',
     id: newId('scenes', taken),
@@ -121,10 +123,9 @@ export async function suggestProject(projectDir: string, args: SuggestOptions = 
 
   let backup: string | undefined;
   if (!args.dryRun) {
-    backup = await backupFile(file.path);
     file.raw.scenes = scenes;
     file.raw.zooms = zooms;
-    await writeProjectFile(file, 'suggest');
+    ({ backup } = await writeProjectFile(file, 'suggest', { backup: true }));
   }
   const result: SuggestResult = {
     project: file.path,
@@ -153,6 +154,6 @@ async function readMarkers(path: string): Promise<Marker[]> {
 async function screenStart(takeDir: string): Promise<number> {
   const path = join(takeDir, 'take.json');
   const parsed = parseTakeJson(await readFile(path, 'utf8').catch(() => ''));
-  if (!parsed.ok) throw new CoreError('usage', `Claude's markers from the transcript need the take's start time from ${path}, which is missing or invalid`);
+  if (!parsed.ok) throw new CoreError('usage', `Claude's markers from the transcript (--claude) need the take's start time from ${path}, which is missing or invalid`);
   return parsed.take.tracks.screen.start;
 }

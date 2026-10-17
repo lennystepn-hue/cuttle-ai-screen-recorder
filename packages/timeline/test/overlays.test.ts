@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { ClipScene, Mask, TextOverlay } from '@cuttle/project';
-import { activeMasks, activeTexts, badgeFor } from '../src/overlays';
+import { activeMasks, activeTexts, badgeFor, maskRectAt } from '../src/overlays';
 
 const mask = (from: number, to: number, enabled = true): Mask => ({
   from, to, rect: [0, 0, 50, 50], style: 'fill', enabled,
@@ -15,6 +15,16 @@ describe('activeMasks', () => {
     expect(activeMasks(masks, 0)).toEqual([masks[0]]);
     expect(activeMasks(masks, 5.5)).toEqual([masks[0]]);
     expect(activeMasks(masks, 15)).toEqual([]);
+  });
+
+  it('follows text that scrolls: between two places it covers both, after the last it holds it', () => {
+    // seen at y 100 until 4 s, at y 60 at 4.5 s, and at y 20 from 6 s on
+    const scrolling: Mask = { ...mask(1, 10), rect: [10, 100, 200, 20], moves: [{ at: 4, rect: [10, 100, 200, 20] }, { at: 4.5, rect: [10, 60, 200, 20] }, { at: 6, rect: [10, 20, 200, 20] }] };
+    expect(maskRectAt(scrolling, 2)).toEqual([10, 100, 200, 20]);
+    expect(maskRectAt(scrolling, 4.2)).toEqual([10, 60, 200, 60]);
+    expect(maskRectAt(scrolling, 5)).toEqual([10, 20, 200, 60]);
+    expect(maskRectAt(scrolling, 8)).toEqual([10, 20, 200, 20]);
+    expect(activeMasks([scrolling], 4.2)[0]!.rect).toEqual([10, 60, 200, 60]);
   });
 });
 

@@ -98,6 +98,12 @@ export type RecorderEvent =
   | { type: 'recording'; dir: string }
   | { type: 'marker'; marker: Marker }
   | { type: 'warning'; message: string }
+  /** Every track has stopped: nothing is captured or logged until a resume. */
+  | { type: 'paused' }
+  /** The tracks are starting again (a camera can take a second or two). */
+  | { type: 'resuming' }
+  /** Every track records again. */
+  | { type: 'resumed' }
   | { type: 'stopping'; reason: StopReason };
 
 /** A finished take. Paths are relative to the project folder, with forward slashes. */
@@ -118,8 +124,15 @@ export interface Take {
 export interface Recording {
   /** Stops every track and resolves with the take (same promise as `done`). */
   stop(): Promise<Take>;
-  /** Adds a manual marker at the current time. */
+  /** Adds a manual marker at the current time (while paused: where the take paused). */
   marker(label?: string): void;
+  /**
+   * Pauses the take: every track stops (each file is complete) and nothing is captured or logged
+   * until `resume()`. The take's time stands still meanwhile; the stop joins the pieces. Events:
+   * `paused`, then `resuming` and `resumed`. The newest of `pause` and `resume` wins.
+   */
+  pause(): void;
+  resume(): void;
   /** Replaces the dead zones (`RecordOptions.deadZones`), e.g. after the HUD was dragged. */
   setDeadZones(zones: Bounds[]): void;
   /** Resolves when the recording has stopped for any reason; rejects with a `RecorderError`. */
@@ -134,4 +147,4 @@ export type RawInput =
   | { type: 'shape'; time: number; shape: CursorShape }
   | { type: 'key'; time: number };
 
-export type HotkeyAction = 'stop' | 'marker';
+export type HotkeyAction = 'stop' | 'marker' | 'pause';

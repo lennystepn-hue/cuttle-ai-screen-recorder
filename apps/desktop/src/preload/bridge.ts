@@ -2,7 +2,22 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import { STREAM_EVENTS, WINDOW_CHANNELS, type WindowKind } from '../shared/channels';
 
+/**
+ * How motion is set, as `data-motion` on the page's root: `reduce` turns animation off, `full`
+ * keeps it when the OS asks for less, `system` follows the OS (the CSS's media query).
+ */
+function followMotion(): void {
+  const apply = (motion: unknown) => {
+    if (typeof motion === 'string' && document.documentElement) document.documentElement.dataset.motion = motion;
+  };
+  const initial = process.argv.find((arg) => arg.startsWith('--cuttle-motion='))?.slice('--cuttle-motion='.length);
+  if (document.documentElement) apply(initial);
+  else document.addEventListener('DOMContentLoaded', () => apply(initial), { once: true });
+  ipcRenderer.on('app:motion', (_event, motion: unknown) => apply(motion));
+}
+
 export function exposeBridge(kind: WindowKind): void {
+  followMotion();
   const requests: readonly string[] = WINDOW_CHANNELS[kind].requests;
   const events: readonly string[] = WINDOW_CHANNELS[kind].events;
   // An event that says a state (the HUD's, a status, the media) is kept, so a listener that

@@ -16,7 +16,7 @@ export default defineConfig({
     target: 'node22',
     rollupOptions: {
       input: {
-        index: fileURLToPath(new URL('./src/main/index.ts', import.meta.url)),
+        index: fileURLToPath(new URL('./src/main/entry.ts', import.meta.url)),
         'media-worker': fileURLToPath(new URL('./src/workers/media.ts', import.meta.url)),
         'recorder-host': fileURLToPath(new URL('./src/workers/recorder.ts', import.meta.url)),
       },

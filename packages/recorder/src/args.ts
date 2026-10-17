@@ -14,7 +14,7 @@ const VIDEO_CHAIN =
   'scale=out_color_matrix=bt709:out_range=tv,format=yuv420p,setparams=color_primaries=bt709:color_trc=bt709:colorspace=bt709:range=tv';
 
 /** H.264 at high quality; a key frame every 2 s, so a fragment (one GOP) loses at most 2 s in a crash. */
-const VIDEO_CODEC = [
+export const VIDEO_CODEC = [
   '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '18',
   '-force_key_frames', 'expr:gte(t,n_forced*2)',
   '-colorspace', 'bt709', '-color_primaries', 'bt709', '-color_trc', 'bt709', '-color_range', 'tv',

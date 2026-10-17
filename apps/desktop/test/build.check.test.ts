@@ -1,4 +1,5 @@
-import { mkdirSync, mkdtempSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { existsSync, mkdirSync, mkdtempSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -56,6 +57,18 @@ describe.runIf(enabled)('the unpacked Cuttle app', () => {
       { timeout: 60_000 },
     );
   }, 90_000);
+
+  it('runs its own copy of the CLI as the cuttle command would: the app as Node, and as Electron for a still', () => {
+    const entry = join(EXE, '..', 'resources', 'app.asar.unpacked', 'cli', 'cuttle.mjs');
+    const env = { ...process.env, ELECTRON_RUN_AS_NODE: '1', CUTTLE_ELECTRON: EXE };
+    const version = spawnSync(EXE, [entry, '--version'], { env, encoding: 'utf8', windowsHide: true, timeout: 30_000 });
+    expect(version.stdout.trim()).toMatch(/^\d+\.\d+\.\d+$/);
+    const still = spawnSync(EXE, [entry, '-C', join(root, 'demo'), 'preview', '--at', '1', '-o', join(root, 'stills'), '--json'], { env, encoding: 'utf8', windowsHide: true, timeout: 90_000 });
+    expect(still.status, still.stderr).toBe(0);
+    const { stills } = JSON.parse(still.stdout) as { stills: { file: string }[] };
+    expect(stills).toHaveLength(1);
+    expect(existsSync(stills[0]!.file)).toBe(true);
+  }, 120_000);
 
   it("lists this machine's displays and windows in the recorder host (koffi loads)", async () => {
     const pill = app.windows().find((page) => page.url().includes('/pill.html'))!;

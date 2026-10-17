@@ -56,7 +56,8 @@ writeFileSync(marker, `${JSON.stringify({ repo, files }, null, 2)}\n`);
 const repoPath = repo.replace(/\\/g, '/');
 for (const name of files) {
   // A function, so `$&` or `$'` in the path stays as it is.
-  writeFileSync(join(target, name), readFileSync(join(source, name), 'utf8').replaceAll('{{REPO}}', () => repoPath));
+  const text = readFileSync(join(source, name), 'utf8').replaceAll('{{INSTALL_CLI}}', () => `ask the user to run \`pnpm cli:install\` in the cuttle repository (\`${repoPath}\`)`);
+  writeFileSync(join(target, name), text.replaceAll('{{REPO}}', () => repoPath));
 }
 console.log(`installed the cuttle skill in ${target} (${files.join(', ')})`);
 console.log('Claude Code uses it when you ask for a demo or type /cuttle (a session that was already running may need /reload-skills); it needs the cuttle command: pnpm cli:install');

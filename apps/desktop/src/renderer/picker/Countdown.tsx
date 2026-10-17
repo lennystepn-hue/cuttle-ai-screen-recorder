@@ -4,9 +4,18 @@ import { bridge } from '../bridge';
 
 export function Countdown() {
   const [seconds, setSeconds] = useState<number>();
-  useEffect(() => bridge.on('countdown:tick', ({ seconds: left }) => setSeconds(left)), []);
+  const [restart, setRestart] = useState(false);
+  useEffect(
+    () =>
+      bridge.on('countdown:tick', ({ seconds: left, restart: again }) => {
+        setSeconds(left);
+        setRestart(again === true);
+      }),
+    [],
+  );
   return (
     <div className="countdown" aria-live="assertive">
+      {restart && <em>Restarting · the last take is kept</em>}
       {seconds !== undefined && <b key={seconds}>{seconds}</b>}
       <small>Esc to cancel</small>
     </div>

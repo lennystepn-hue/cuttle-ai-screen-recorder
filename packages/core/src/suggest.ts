@@ -6,7 +6,7 @@ import { readProjectFile, writeProjectFile } from './project-file';
 import { analyseScreen, grabGray } from './suggest/media';
 import { suggestClips } from './suggest/plan';
 import { changedRegion, zoomRect } from './suggest/region';
-import { transcriptMarkers } from './suggest/transcript';
+import { takeClock, transcriptMarkers } from './suggest/transcript';
 
 export interface SuggestOptions {
   /** The folder Claude Code ran in (true: the current folder), for a take without Claude markers. */
@@ -65,14 +65,15 @@ export async function suggestProject(projectDir: string, args: SuggestOptions = 
   let from: SuggestResult['markers']['from'] = markers.length > 0 ? 'take' : 'none';
   if (args.claude !== undefined && !markers.some((marker) => marker.kind !== 'manual')) {
     const cwd = args.claude === true ? process.cwd() : resolve(args.claude);
-    const start = await screenStart(dirname(screen));
-    const found = await transcriptMarkers(cwd, start, screenInfo.duration);
+    await screenStart(dirname(screen)); // refuses a take without take.json
+    const clock = await takeClock(dirname(screen));
+    const found = clock ? await transcriptMarkers(cwd, clock, screenInfo.duration) : [];
     if (found.length > 0) {
       markers = [...markers, ...found].sort((a, b) => a.t - b.t);
       from = 'transcript';
     } else {
       notes.push(
-        start === 0
+        clock === undefined
           ? "no Claude markers: take.json has no start time (it was rebuilt by recover), so the transcript cannot be matched"
           : `no Claude markers: no Claude Code session in ${cwd} prompted, called a tool or answered during the take`,
       );

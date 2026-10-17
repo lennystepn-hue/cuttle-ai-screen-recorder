@@ -86,9 +86,11 @@ export interface PickerSetup {
 
 /** What the HUD shows. */
 export interface HudState {
-  phase: 'countdown' | 'recording' | 'stopping';
-  /** When the take started (epoch milliseconds). */
+  phase: 'countdown' | 'recording' | 'paused' | 'resuming' | 'stopping';
+  /** When the running stretch started (epoch milliseconds); none while paused. */
   startedAt?: number;
+  /** Seconds recorded before it (the take's time stands still while paused). */
+  recorded?: number;
   markers: number;
   /** A warning in a few words ("Mic is silent: muted?"), or "Stopping…". */
   message?: string;
@@ -103,6 +105,43 @@ export interface ProjectStatus {
   text?: string;
   /** `working`: cutting the take (a spinner); `failed`: it could not (Try again); `recording`: a new take records (the player pauses). */
   state?: 'working' | 'failed' | 'recording';
+}
+
+/** The tools around the app: ffmpeg, and for Claude Code the cuttle command and the skill. */
+export interface ToolsStatus {
+  /** ffmpeg where the OS's PATH has it now (or WinGet's links folder), with its version. */
+  ffmpeg?: { path: string; version: string };
+  /**
+   * A `cuttle` command on that PATH: the app's own (`ours`; `moved`: written for another copy of
+   * the app, so Update), or another (the repository's, say).
+   */
+  command?: { path: string; ours: boolean; moved?: boolean };
+  /** The cuttle skill in Claude Code's config folder: put there by Cuttle, missing, or someone else's folder. */
+  skill: { dir: string; state: 'installed' | 'missing' | 'other' };
+  /** The app's command folder was just put on the user's PATH: a terminal opened before does not see it. */
+  newTerminal?: boolean;
+  /** What the last install could not do, per tool, said for people. */
+  problems?: { command?: string; skill?: string };
+  /** Off Windows: the shims are written but their folder is not on PATH; the line for the shell profile. */
+  pathLine?: string;
+}
+
+/** How motion is set: the OS's "reduce motion", or always on, or always off. */
+export const MOTIONS = ['system', 'reduce', 'full'] as const;
+export type Motion = (typeof MOTIONS)[number];
+
+/** What the settings window shows. */
+export interface SettingsView {
+  projectsFolder: string;
+  countdown: 0 | 3 | 5;
+  /** The camera and microphone a new recording starts with (the picker's last choice). */
+  camera?: string;
+  mic?: string;
+  launchAtLogin: boolean;
+  motion: Motion;
+  /** `open`: the project is open in Cuttle, here (`here`) or on the computer named. */
+  recent: { dir: string; name: string; opened: number; open?: string }[];
+  version: string;
 }
 
 const rect = z.strictObject({ x: z.number().finite(), y: z.number().finite(), width: z.number().finite().positive(), height: z.number().finite().positive() });
@@ -152,6 +191,10 @@ export const REQUESTS = {
   // HUD
   'hud:stop': z.undefined(),
   'hud:marker': z.undefined(),
+  'hud:pause': z.undefined(),
+  'hud:resume': z.undefined(),
+  /** Puts the take aside and records again with the same settings (the HUD asks for a press held 600 ms). */
+  'hud:restart': z.undefined(),
   // editor (editing)
   'project:save': z
     .strictObject({
@@ -166,6 +209,39 @@ export const REQUESTS = {
   'project:reload': z.undefined(),
   /** The page has written its last edits (`project:closing`): the window may close. */
   'project:closed': z.undefined(),
+  /** Brings back the take a restart put aside (its folder inside `takes/.discarded`), as the project's take. */
+  'project:undo-restart': z.string().min(1).max(4096),
+  /** Opens the settings window. */
+  'app:settings': z.undefined(),
+  // settings and the first run
+  'settings:get': z.undefined(),
+  'settings:set': z.strictObject({
+    countdown: z.union([z.literal(0), z.literal(3), z.literal(5)]).optional(),
+    /** A device's name, or null for none. */
+    camera: z.string().min(1).max(512).nullable().optional(),
+    mic: z.string().min(1).max(512).nullable().optional(),
+    launchAtLogin: z.boolean().optional(),
+    motion: z.enum(MOTIONS).optional(),
+  }),
+  /** Asks for the projects folder (a folder dialog) and keeps it. */
+  'settings:choose-folder': z.undefined(),
+  'settings:devices': z.undefined(),
+  /** The first run is done: the window closes and the pill shows. */
+  'settings:welcomed': z.undefined(),
+  'tools:status': z.undefined(),
+  /** Looks for ffmpeg again (after `winget install`): found, the app uses it at once. */
+  'tools:check': z.undefined(),
+  /** Installs the cuttle command (the app's own copy of the CLI) and the Claude skill. */
+  'tools:install': z.undefined(),
+  'tools:copy': z.string().min(1).max(200),
+  /** Shows the skill folder (one Cuttle did not install, to move away). */
+  'tools:reveal': z.undefined(),
+  /** A recent project, by its folder (only folders in the recent list are accepted). */
+  'recent:open': z.string().min(1).max(4096),
+  'recent:reveal': z.string().min(1).max(4096),
+  'recent:forget': z.string().min(1).max(4096),
+  /** Renames a recent project's folder (not while it is open or recording). */
+  'recent:rename': z.strictObject({ dir: z.string().min(1).max(4096), name: z.string().trim().min(1).max(120) }),
 } as const;
 
 export type Request = keyof typeof REQUESTS;
@@ -200,6 +276,9 @@ export interface Responses {
   'picker:retry': void;
   'hud:stop': void;
   'hud:marker': void;
+  'hud:pause': void;
+  'hud:resume': void;
+  'hud:restart': void;
   /** Written (its new hash); or the file changed meanwhile (the version on disk now); or it could not be written. */
   'project:save': { hash: string } | { conflict: ProjectVersion & { origin: 'outside' | 'suggest' } } | { problem: string };
   /** An image chosen by the person, copied into the project when it lay outside (a path inside the project). */
@@ -208,6 +287,25 @@ export interface Responses {
   'project:draft': void;
   'project:reload': void;
   'project:closed': void;
+  'project:undo-restart': void;
+  'app:settings': void;
+  'settings:get': SettingsView;
+  'settings:set': SettingsView;
+  'settings:choose-folder': SettingsView;
+  /** The cameras and mics this machine has, or why they could not be listed. */
+  'settings:devices': { cameras: string[]; mics: string[]; problem?: string };
+  'settings:welcomed': void;
+  'tools:status': ToolsStatus;
+  'tools:check': ToolsStatus;
+  /** What is installed now, and in `problems` what could not be. */
+  'tools:install': ToolsStatus;
+  'tools:copy': void;
+  'tools:reveal': void;
+  'recent:open': void;
+  'recent:reveal': void;
+  'recent:forget': SettingsView;
+  /** The project's new folder, or why it could not be renamed. */
+  'recent:rename': { dir: string } | { problem: string };
 }
 
 /** A version of cuttle.json: as written, and the SHA-256 of its bytes. */
@@ -233,16 +331,27 @@ export interface Events {
   'picker:devices': Pick<PickerSetup, 'cameras' | 'mics' | 'choices'>;
   'picker:active': { display: number };
   'picker:choices': RecordChoices;
-  'countdown:tick': { seconds: number };
+  /** `restart`: counting down again after a restart (the take before is kept). */
+  'countdown:tick': { seconds: number; restart?: boolean };
   'hud:state': HudState;
   /** What the main process is doing to the project (cutting the take), or nothing. */
   'project:status': ProjectStatus;
   'project:file': ProjectFileEvent;
   /** The window is about to close: write the last edits, then `project:closed`. */
   'project:closing': Record<string, never>;
+  /** The take was restarted: the one before is kept in `discarded` (a folder relative to the project). */
+  'project:restarted': { discarded: string };
+  /** A note for the editor's person once the take is in, said there (an undone restart). */
+  'project:note': { text: string };
+  'settings:changed': SettingsView;
+  /** Every window: how motion is set now (`data-motion` on the page's root). */
+  'app:motion': Motion;
 }
 
 export type Event = keyof Events;
+
+/** What a window sends with request `R`. */
+export type RequestArgument<R extends Request> = z.input<(typeof REQUESTS)[R]>;
 
 /** The bridge a preload exposes as `window.cuttle`. */
 export interface Bridge {

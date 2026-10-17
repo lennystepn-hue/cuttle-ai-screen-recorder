@@ -7,7 +7,7 @@ import type { Command, EditLimits } from '../../shared/document';
 import type { ExportEnd, ExportProgress, ExportTarget, MediaState, ProjectInfo, ProjectStatus } from '../../shared/ipc';
 import type { OverlayKind } from '../../shared/timeline-model';
 import { bridge } from '../bridge';
-import { beforeClose, dismissToast, edit, flush, openDocument, outsideChange, redo, undo, type DocState } from './doc';
+import { beforeClose, dismissToast, edit, flush, offerUndoRestart, openDocument, outsideChange, redo, toast, undo, type DocState } from './doc';
 import { ensureMedia, openProjectMedia, openVideo, type EditorMedia } from './media';
 import { Player, type PlayerState } from './player';
 import { createStore } from './store';
@@ -128,6 +128,10 @@ export async function openSession(canvas: HTMLCanvasElement): Promise<void> {
     bridge.on('export:end', (end) => store.set((state) => ({ exportEnd: end, exporting: false, exportUnseen: !state.exportOpen })));
     // (another take reloads the editor: outsideChange asks the main process)
     bridge.on('project:file', (event) => void outsideChange(event));
+    // A restarted take: the one before it is kept aside, and can be the take again.
+    bridge.on('project:restarted', ({ discarded }) => offerUndoRestart(discarded));
+    // what happened to the take (an undone restart), once it is in
+    bridge.on('project:note', ({ text }) => toast(text));
   } catch (error) {
     store.set({ phase: 'failed', error: error instanceof Error ? error.message : String(error) });
   }
@@ -175,7 +179,7 @@ function exposeCheckHook(canvas: HTMLCanvasElement): void {
       /** The document as edited, and whether it is saved. */
       doc: () => {
         const doc = store.get().doc!;
-        return { raw: doc.raw, hash: doc.hash, saving: doc.saving, problem: doc.problem, issues: doc.issues, toast: doc.toast, draftNote: doc.draftNote, undo: doc.undoLabel, redo: doc.redoLabel };
+        return { raw: doc.raw, hash: doc.hash, saving: doc.saving, problem: doc.problem, issues: doc.issues, toast: doc.toast, draftNote: doc.draftNote, restartNote: doc.restartNote, undo: doc.undoLabel, redo: doc.redoLabel };
       },
       edit: (commands: Command[], label: string) => edit(commands, label),
       undo,
@@ -238,8 +242,9 @@ export function setTool(tool: Tool): void {
 
 /** Opens the export sheet: on the running export or one that ended unseen, else on a new one. */
 export function openExport(): void {
-  const { phase, exporting, exportUnseen } = store.get();
-  if (phase !== 'ready') return;
+  const { phase, exporting, exportUnseen, doc } = store.get();
+  // nothing to export without a scene (the title bar's Export is off then too)
+  if (phase !== 'ready' || (!exporting && (doc?.project.scenes.length ?? 0) === 0)) return;
   store.set({ exportOpen: true, exportUnseen: false, ...(!exporting && !exportUnseen && { exportEnd: undefined, exportProgress: undefined }) });
 }
 

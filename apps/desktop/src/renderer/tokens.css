@@ -56,13 +56,19 @@
   --slow: 320ms;
 
   --shadow-float: 0 16px 48px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.06);
-  --focus: 0 0 0 2px var(--accent);
+  --focus: 0 0 0 2px var(--bg), 0 0 0 4px var(--accent);
 }
 
+/* Motion: the OS's setting, unless the settings say always reduced or always full. */
 @media (prefers-reduced-motion: reduce) {
-  :root {
+  :root:not([data-motion='full']) {
     --fast: 0ms;
     --normal: 0ms;
     --slow: 0ms;
   }
+}
+:root[data-motion='reduce'] {
+  --fast: 0ms;
+  --normal: 0ms;
+  --slow: 0ms;
 }

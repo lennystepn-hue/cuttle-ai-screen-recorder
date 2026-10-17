@@ -2,8 +2,8 @@
 // the recorder host, and what happens after the stop: the take becomes the project's, the editor
 // opens on it, and `suggest` cuts it in the background.
 import { existsSync, realpathSync } from 'node:fs';
-import { copyFile, mkdir, readdir, rmdir, statfs } from 'node:fs/promises';
-import { join, resolve } from 'node:path';
+import { copyFile, mkdir, readdir, rename, rmdir, statfs } from 'node:fs/promises';
+import { basename, dirname, join, relative, resolve, sep } from 'node:path';
 import { BrowserWindow, dialog, globalShortcut, screen, session, type Rectangle } from 'electron';
 import { PROJECT_FILE, newProjectFile, projectExists, readProjectFile, recoverTake, useTake, writeProjectFile } from '@cuttle/core';
 import { focusWindow, recentClaudeFolders, type Devices, type RecorderEvent, type Take } from '@cuttle/recorder';
@@ -14,11 +14,12 @@ import { bindRequests, send } from './ipc';
 import { cutTake } from './media-service';
 import { APP_ORIGIN, serveApp, bundlePath } from './protocols';
 import { recorderHost, RecordingError } from './recorder-host';
+import { findFfmpeg } from './tools';
 import { loadSettings, updateSettings } from './settings';
-import { editorWindowOf, expectSuggest, guard, hidePill, reopenEditor, setEditorStatus, showPill, webPreferences } from './windows';
+import { editorWindowOf, expectSuggest, guard, hidePill, reopenEditor, sendToEditor, setEditorStatus, showPill, webPreferences } from './windows';
 
 /** The HUD's window (the HUD and a margin for its shadow): never in the video, and a dead zone for the input log. */
-const HUD_SIZE = { width: 380, height: 64 };
+const HUD_SIZE = { width: 440, height: 64 };
 /** The recorder host answers a listing in this time, or the picker says it cannot record. */
 const LISTING_TIMEOUT_MS = 10_000;
 
@@ -44,7 +45,7 @@ let writing: Promise<void> | undefined;
 let quitting = false;
 
 /** A project's key, as the editors key it: the real path (a junction or a short name is the same folder). */
-function keyOf(dir: string): string {
+export function keyOf(dir: string): string {
   let path = resolve(dir);
   try {
     path = realpathSync.native(path);
@@ -251,11 +252,13 @@ function openPicker(display: PickerDisplay, displays: PickerDisplay[], devices: 
     },
     'picker:record': (target) => void beginRecording(target, displays),
     'picker:cancel': () => endPicking(true),
-    'picker:retry': () => {
+    'picker:retry': async () => {
       const project = pickingFor;
       const fromPill = pillHidden;
       endPicking(false);
       busy = false;
+      // ffmpeg installed since (winget): found where the OS's PATH has it now, without a restart
+      await findFfmpeg().catch(() => undefined);
       void startPicking(project, { fromPill });
     },
     'picker:claude-folder': async () => {
@@ -277,6 +280,16 @@ function openPicker(display: PickerDisplay, displays: PickerDisplay[], devices: 
     () => {},
   );
   return picker;
+}
+
+/** The cameras and mics this machine has (the settings' defaults), or why they could not be listed. */
+export async function listCamerasAndMics(): Promise<{ cameras: string[]; mics: string[]; problem?: string }> {
+  try {
+    const devices = await withTimeout(recorderHost.devices(true), LISTING_TIMEOUT_MS, 'The device listing');
+    return { cameras: devices.cameras, mics: devices.mics };
+  } catch (error) {
+    return { cameras: [], mics: [], problem: ffmpegMissing(error) ? 'Cuttle needs ffmpeg to list the cameras and mics.' : messageOf(error).split('\n')[0]! };
+  }
 }
 
 /** The cameras and mics for every picker, once DirectShow has listed them. */
@@ -472,162 +485,298 @@ async function record(target: PickedTarget, display: PickerDisplay, displays: Pi
     }
 
     const area = targetRect(target, display, picked);
-    const countdown = overlay(inside(area, display.workArea), 'countdown.cjs', { focusable: false });
-    countdown.setIgnoreMouseEvents(true);
-    // Without a countdown (0 s) it closes before its page loaded, which rejects the load.
-    void countdown.loadURL(`${APP_ORIGIN}/countdown.html`).then(
-      () => !HIDDEN && !countdown.isDestroyed() && countdown.showInactive(),
-      () => {},
-    );
-    const hud = overlay({ ...hudPosition(displays, display.id, area, HUD_SIZE), ...HUD_SIZE }, 'hud.cjs', { focusable: false, movable: true });
-    const hudState: HudState = { phase: 'countdown', markers: 0 };
-    // a check of the drive or the window still under way may note something after the HUD closed
-    const showHud = () => !hud.isDestroyed() && send(hud.webContents, 'hud:state', { ...hudState });
-    const note = (message: string, detail: string, tone: HudState['tone']) => {
-      hudState.message = message;
-      hudState.detail = detail;
-      hudState.tone = tone;
-      showHud();
-    };
-    bindRequests(hud.webContents, 'hud', {
-      'hud:stop': () => {
-        hudState.phase = 'stopping';
-        note('Stopping…', 'Writing the take', 'info');
-        recorderHost.stop();
-      },
-      'hud:marker': () => recorderHost.marker(),
-    });
-    bindRequests(countdown.webContents, 'countdown', {});
-    const deadZone = () => screen.dipToScreenRect(null, hud.getBounds());
-    hud.on('moved', () => recorderHost.setDeadZones([deadZone()]));
-    // Windows ends the session (sign out, shut down): the end waits while the take is stopped and written.
-    hud.on('query-session-end', (event) => {
-      event.preventDefault();
-      recorderHost.stop();
-    });
-    hud.on('session-end', () => recorderHost.stop());
-    void hud.loadURL(`${APP_ORIGIN}/hud.html`).catch(() => {});
-    const cancelKey = 'Escape';
-    globalShortcut.register(cancelKey, () => recorderHost.stop());
-    const closeOverlays = () => {
-      if (globalShortcut.isRegistered(cancelKey)) globalShortcut.unregister(cancelKey);
-      if (!countdown.isDestroyed()) countdown.destroy();
-    };
-
-    // While it records: a warning when the drive fills up, or when a recorded window moves (its area
-    // stays where it was picked).
-    let takeDir: string | undefined;
-    let watch: ReturnType<typeof setInterval> | undefined;
-    let lastSpaceCheck = 0;
-    const pickedWindow = target.kind === 'window' ? picked?.windows.find((candidate) => candidate.id === target.window) : undefined;
-    /** Whether a window's physical bounds left where it was picked (DIP bounds converted back). */
-    const moved = (bounds: { x: number; y: number }) => {
-      if (!pickedWindow) return false;
-      const origin = TEST_BACKEND ? pickedWindow.bounds : screen.dipToScreenRect(null, roundRect(pickedWindow.bounds));
-      return Math.abs(bounds.x - origin.x) > 2 || Math.abs(bounds.y - origin.y) > 2;
-    };
-    const watchTake = async () => {
-      if (hudState.phase !== 'recording') return;
-      if (Date.now() - lastSpaceCheck > 30_000) {
-        lastSpaceCheck = Date.now();
-        const left = await freeBytes(projectDir);
-        if (left !== undefined && left < 2 * GB && hudState.message === undefined) note(`Disk almost full: ${gigabytes(left)}`, `Only ${gigabytes(left)} free on the drive of ${projectDir}.`, 'warn');
-      }
-      if (pickedWindow && hudState.message === undefined) {
-        const now = (await recorderHost.devices(false).catch(() => undefined))?.windows.find((window) => window.id === pickedWindow.id);
-        const before = pickedWindow.pixels;
-        if (now && (now.bounds.width !== before.width || now.bounds.height !== before.height || moved(now.bounds))) {
-          note('The window moved', 'The window moved or changed size: the area where it was picked is still recorded.', 'warn');
-        }
-      }
-    };
-
-    const onEvent = (event: RecorderEvent) => {
-      switch (event.type) {
-        case 'countdown':
-          send(countdown.webContents, 'countdown:tick', { seconds: event.seconds });
-          return;
-        case 'recording':
-          closeOverlays();
-          takeDir = event.dir;
-          hudState.phase = 'recording';
-          hudState.startedAt = Date.now();
-          if (!HIDDEN) hud.showInactive();
-          showHud();
-          watch = setInterval(() => void watchTake(), 2000);
-          return;
-        case 'marker':
-          hudState.markers++;
-          showHud();
-          return;
-        case 'warning': {
-          const warning = hudWarning(event.message);
-          note(warning.text, warning.detail, 'warn');
-          return;
-        }
-        case 'stopping':
+    /** Takes a restart put aside, newest last (folders relative to the project). */
+    const discarded: string[] = [];
+    for (;;) {
+      let restarting = false;
+      const countdown = overlay(inside(area, display.workArea), 'countdown.cjs', { focusable: false });
+      countdown.setIgnoreMouseEvents(true);
+      // Without a countdown (0 s) it closes before its page loaded, which rejects the load.
+      void countdown.loadURL(`${APP_ORIGIN}/countdown.html`).then(
+        () => !HIDDEN && !countdown.isDestroyed() && countdown.showInactive(),
+        () => {},
+      );
+      const hud = overlay({ ...hudPosition(displays, display.id, area, HUD_SIZE), ...HUD_SIZE }, 'hud.cjs', { focusable: false, movable: true });
+      const hudState: HudState = { phase: 'countdown', markers: 0 };
+      // a check of the drive or the window still under way may note something after the HUD closed
+      const showHud = () => !hud.isDestroyed() && send(hud.webContents, 'hud:state', { ...hudState });
+      /** The last warning: a pause shows its own note, the resume brings the warning back. */
+      let warning: { message: string; detail: string } | undefined;
+      const note = (message: string, detail: string, tone: HudState['tone']) => {
+        if (tone === 'warn') warning = { message, detail };
+        hudState.message = message;
+        hudState.detail = detail;
+        hudState.tone = tone;
+        showHud();
+      };
+      bindRequests(hud.webContents, 'hud', {
+        'hud:stop': () => {
           hudState.phase = 'stopping';
           note('Stopping…', 'Writing the take', 'info');
-          return;
-      }
-    };
-
-    // The picker's camera preview lets go of the camera a moment after the picker closed.
-    const countdownFor = await countdownSeconds();
-    if (choices.camera && countdownFor < 1) await new Promise((resolve) => setTimeout(resolve, 600));
-    let take: Take;
-    try {
-      if (quitting) throw new RecordingError('cancelled', 'The app quits');
-      take = await recorderHost.record(
-        {
-          projectDir,
-          source,
-          ...(choices.camera && { webcam: choices.camera }),
-          ...(choices.mic && { mic: choices.mic }),
-          stop: stopOptionsFor(choices),
-          countdownSeconds: countdownFor,
-          deadZones: [deadZone()],
+          recorderHost.stop();
         },
-        onEvent,
-      );
-    } catch (error) {
+        'hud:marker': () => recorderHost.marker(),
+        'hud:pause': () => recorderHost.pause(),
+        'hud:resume': () => recorderHost.resume(),
+        'hud:restart': () => {
+          if (hudState.phase === 'stopping' || hudState.phase === 'countdown') return;
+          restarting = true;
+          hudState.phase = 'stopping';
+          note('Restarting…', 'This take is put aside: the editor can bring it back', 'info');
+          recorderHost.stop();
+        },
+      });
+      bindRequests(countdown.webContents, 'countdown', {});
+      const deadZone = () => screen.dipToScreenRect(null, hud.getBounds());
+      hud.on('moved', () => recorderHost.setDeadZones([deadZone()]));
+      // Windows ends the session (sign out, shut down): the end waits while the take is stopped and written.
+      hud.on('query-session-end', (event) => {
+        event.preventDefault();
+        recorderHost.stop();
+      });
+      hud.on('session-end', () => recorderHost.stop());
+      void hud.loadURL(`${APP_ORIGIN}/hud.html`).catch(() => {});
+      const cancelKey = 'Escape';
+      globalShortcut.register(cancelKey, () => recorderHost.stop());
+      const closeOverlays = () => {
+        if (globalShortcut.isRegistered(cancelKey)) globalShortcut.unregister(cancelKey);
+        if (!countdown.isDestroyed()) countdown.destroy();
+      };
+
+      // While it records: a warning when the drive fills up, or when a recorded window moves (its area
+      // stays where it was picked).
+      let takeDir: string | undefined;
+      let watch: ReturnType<typeof setInterval> | undefined;
+      let lastSpaceCheck = 0;
+      const pickedWindow = target.kind === 'window' ? picked?.windows.find((candidate) => candidate.id === target.window) : undefined;
+      /** Whether a window's physical bounds left where it was picked (DIP bounds converted back). */
+      const moved = (bounds: { x: number; y: number }) => {
+        if (!pickedWindow) return false;
+        const origin = TEST_BACKEND ? pickedWindow.bounds : screen.dipToScreenRect(null, roundRect(pickedWindow.bounds));
+        return Math.abs(bounds.x - origin.x) > 2 || Math.abs(bounds.y - origin.y) > 2;
+      };
+      const watchTake = async () => {
+        if (hudState.phase !== 'recording') return;
+        if (Date.now() - lastSpaceCheck > 30_000) {
+          lastSpaceCheck = Date.now();
+          const left = await freeBytes(projectDir);
+          if (left !== undefined && left < 2 * GB && hudState.message === undefined) note(`Disk almost full: ${gigabytes(left)}`, `Only ${gigabytes(left)} free on the drive of ${projectDir}.`, 'warn');
+        }
+        if (pickedWindow && hudState.message === undefined) {
+          const now = (await recorderHost.devices(false).catch(() => undefined))?.windows.find((window) => window.id === pickedWindow.id);
+          const before = pickedWindow.pixels;
+          if (now && (now.bounds.width !== before.width || now.bounds.height !== before.height || moved(now.bounds))) {
+            note('The window moved', 'The window moved or changed size: the area where it was picked is still recorded.', 'warn');
+          }
+        }
+      };
+
+      const onEvent = (event: RecorderEvent) => {
+        switch (event.type) {
+          case 'countdown':
+            send(countdown.webContents, 'countdown:tick', { seconds: event.seconds, ...(discarded.length > 0 && { restart: true }) });
+            return;
+          case 'recording':
+            closeOverlays();
+            takeDir = event.dir;
+            hudState.phase = 'recording';
+            hudState.startedAt = Date.now();
+            hudState.recorded = 0;
+            if (!HIDDEN) hud.showInactive();
+            showHud();
+            watch = setInterval(() => void watchTake(), 2000);
+            return;
+          case 'paused':
+            hudState.recorded = (hudState.recorded ?? 0) + (Date.now() - (hudState.startedAt ?? Date.now())) / 1000;
+            delete hudState.startedAt;
+            hudState.phase = 'paused';
+            note('Paused', 'Nothing is recorded until you resume (Ctrl+Shift+Alt+P)', 'info');
+            return;
+          case 'resuming':
+            hudState.phase = 'resuming';
+            note('Resuming…', 'Starting the tracks again', 'info');
+            return;
+          case 'resumed':
+            hudState.phase = 'recording';
+            hudState.startedAt = Date.now();
+            if (warning) {
+              note(warning.message, warning.detail, 'warn');
+              return;
+            }
+            delete hudState.message;
+            delete hudState.detail;
+            delete hudState.tone;
+            showHud();
+            return;
+          case 'marker':
+            hudState.markers++;
+            showHud();
+            return;
+          case 'warning': {
+            const warning = hudWarning(event.message);
+            note(warning.text, warning.detail, 'warn');
+            return;
+          }
+          case 'stopping':
+            hudState.phase = 'stopping';
+            // a restart says so to the end ("Restarting…"), not "Stopping…"
+            if (!restarting) note('Stopping…', 'Writing the take', 'info');
+            return;
+        }
+      };
+
+      // The picker's camera preview lets go of the camera a moment after the picker closed.
+      const countdownFor = await countdownSeconds();
+      if (choices.camera && countdownFor < 1) await new Promise((resolve) => setTimeout(resolve, 600));
+      let take: Take;
+      try {
+        if (quitting) throw new RecordingError('cancelled', 'The app quits');
+        take = await recorderHost.record(
+          {
+            projectDir,
+            source,
+            ...(choices.camera && { webcam: choices.camera }),
+            ...(choices.mic && { mic: choices.mic }),
+            stop: stopOptionsFor(choices),
+            countdownSeconds: countdownFor,
+            deadZones: [deadZone()],
+          },
+          onEvent,
+        );
+      } catch (error) {
+        clearInterval(watch);
+        closeOverlays();
+        if (!hud.isDestroyed()) hud.destroy();
+        if (error instanceof RecordingError && error.code === 'cancelled') {
+          // cancelled after a restart: the take put aside is the take after all
+          const previous = discarded.pop();
+          if (previous) {
+            const back = await bringBack(projectDir, previous);
+            if (back) {
+              cutting = await recoverAndOpen(projectDir, back, '', showEditor, true);
+              return cutting;
+            }
+          }
+          await giveUp();
+          return false;
+        }
+        // A take that had started is kept: repaired with recover, then opened like any other (and
+        // the take a restart put aside is offered back there).
+        if (takeDir) {
+          const previous = discarded.at(-1);
+          if (previous) restarted.set(keyOf(projectDir), previous);
+          cutting = await recoverAndOpen(projectDir, takeDir, (error as Error).message, showEditor);
+          if (!cutting) restarted.delete(keyOf(projectDir));
+          return cutting;
+        }
+        // Nothing recorded after a restart: the take put aside is the take again.
+        const previous = discarded.pop();
+        const back = previous && (await bringBack(projectDir, previous).catch(() => undefined));
+        if (back) {
+          const failure = recordingFailure((error as Error).message);
+          say(`The recording could not start again. ${failure.text} The take from before the restart is kept.`, failure.detail);
+          cutting = await recoverAndOpen(projectDir, back, '', showEditor, true);
+          return cutting;
+        }
+        await giveUp();
+        const failure = recordingFailure((error as Error).message);
+        say(`The recording could not start. ${failure.text}`, failure.detail);
+        return false;
+      }
       clearInterval(watch);
       closeOverlays();
       if (!hud.isDestroyed()) hud.destroy();
-      if (error instanceof RecordingError && error.code === 'cancelled') {
-        await giveUp();
-        return false;
+      if (restarting && !quitting) {
+        // put aside, not deleted ("Undo restart" in the editor), and counted down again
+        const aside = await putAside(projectDir, take.dir).catch((error: Error) => {
+          say(`The take could not be put aside for a new one (${error.message.split('\n')[0]}): it is kept as the take.`);
+          return undefined;
+        });
+        if (aside) {
+          discarded.push(aside);
+          continue;
+        }
       }
-      // A take that had started is kept: repaired with recover, then opened like any other.
-      if (takeDir) {
-        cutting = await recoverAndOpen(projectDir, takeDir, (error as Error).message, showEditor);
-        return cutting;
-      }
-      await giveUp();
-      const failure = recordingFailure((error as Error).message);
-      say(`The recording could not start. ${failure.text}`, failure.detail);
-      return false;
+      // the editor that opens on this take offers to bring back the one a restart put aside
+      const restartedFrom = discarded.at(-1);
+      if (restartedFrom) restarted.set(keyOf(projectDir), restartedFrom);
+      cutting = await finishTake(projectDir, take, showEditor);
+      if (!cutting) restarted.delete(keyOf(projectDir));
+      return cutting;
     }
-    clearInterval(watch);
-    closeOverlays();
-    if (!hud.isDestroyed()) hud.destroy();
-    cutting = await finishTake(projectDir, take, showEditor);
-    return cutting;
   } finally {
     if (!cutting) finishing.delete(project);
   }
 }
 
+/** A folder rename that waits a moment for a file in it someone holds (a scanner on a take just written, OneDrive). */
+async function renameWhenFree(from: string, to: string): Promise<void> {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await rename(from, to);
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (attempt >= 8 || (code !== 'EPERM' && code !== 'EBUSY' && code !== 'EACCES')) throw error;
+      await new Promise((resolve) => setTimeout(resolve, 150 * attempt));
+    }
+  }
+}
+
+/** Moves a take into `takes/.discarded/` (a restart); returns its new folder relative to the project. */
+async function putAside(projectDir: string, takeDir: string): Promise<string> {
+  const aside = join(projectDir, 'takes', '.discarded');
+  await mkdir(aside, { recursive: true });
+  const taken = new Set(await readdir(aside));
+  const name = basename(takeDir);
+  let target = name;
+  for (let n = 2; taken.has(target); n++) target = `${name}-${n}`;
+  await renameWhenFree(join(projectDir, takeDir), join(aside, target));
+  return ['takes', '.discarded', target].join('/');
+}
+
+/** Moves a take put aside back as the next take (`takes/<n>`); returns its folder, or undefined when it is not there. */
+async function bringBack(projectDir: string, discarded: string): Promise<string | undefined> {
+  const from = resolve(projectDir, discarded);
+  const aside = resolve(projectDir, 'takes', '.discarded');
+  const inside = relative(aside, from);
+  if (inside === '' || inside.startsWith('..') || inside.includes(sep) || !existsSync(from)) return undefined;
+  const names = await readdir(join(projectDir, 'takes')).catch(() => [] as string[]);
+  const next = names.reduce((max, name) => (/^\d+$/.test(name) ? Math.max(max, Number(name)) : max), 0) + 1;
+  await mkdir(dirname(join(projectDir, 'takes', String(next))), { recursive: true });
+  await renameWhenFree(from, join(projectDir, 'takes', String(next)));
+  return `takes/${next}`;
+}
+
+/**
+ * "Undo restart" in the editor: the take put aside becomes the project's again (the restarted one
+ * stays restorable, "Back to take n"), and is cut like a new one.
+ */
+export async function undoRestart(projectDir: string, discarded: string): Promise<void> {
+  const dir = resolve(projectDir);
+  const file = projectExists(dir) ? await readProjectFile(dir).catch(() => undefined) : undefined;
+  const current = file && currentTake(file.raw);
+  if (current && existsSync(join(dir, 'takes', current))) await copyFile(join(dir, PROJECT_FILE), join(dir, 'takes', current, PROJECT_FILE)).catch(() => {});
+  try {
+    const back = await bringBack(dir, discarded);
+    if (!back) return say('The take put aside by the restart is not there any more.');
+    notesAfterCut.set(keyOf(dir), `The take from before the restart is back (take ${back.split('/').at(-1)}). The other one is in Record again ▾.`);
+    await recoverAndOpen(dir, back, '', async () => {}, true);
+  } catch (error) {
+    say(`The take from before the restart could not be brought back: ${(error as Error).message.split('\n')[0]}`);
+  }
+}
+
 /**
  * A take that ended badly (the capture failed after it started): `recover` repairs it and points the
- * project at it, and it is cut like any other. Returns whether the cut started.
+ * project at it, and it is cut like any other; `quiet`: a take brought back, nothing to say.
+ * Returns whether the cut started.
  */
-async function recoverAndOpen(projectDir: string, takeDir: string, why: string, showEditor: () => Promise<void>): Promise<boolean> {
+async function recoverAndOpen(projectDir: string, takeDir: string, why: string, showEditor: () => Promise<void>, quiet = false): Promise<boolean> {
   const dir = resolve(projectDir);
   const failure = recordingFailure(why);
   try {
     const result = await recoverTake(dir, takeDir);
-    say(`The recording stopped early. ${failure.text} Cuttle kept the ${Math.round(result.seconds)} s it had and opened it.`, [failure.detail, ...result.repaired].join('\n'));
+    if (!quiet) say(`The recording stopped early. ${failure.text} Cuttle kept the ${Math.round(result.seconds)} s it had and opened it.`, [failure.detail, ...result.repaired].join('\n'));
   } catch (error) {
     await showEditor();
     say(`The recording stopped early. ${failure.text} Its take in ${takeDir} could not be recovered: ${(error as Error).message.split('\n')[0]}`, failure.detail);
@@ -673,15 +822,26 @@ export async function cutIfPending(dir: string): Promise<void> {
   await recut(dir);
 }
 
+/** Projects whose new take came after a restart: the take put aside, for the editor's "Undo restart". */
+const restarted = new Map<string, string>();
+/** What the editor of a project says once its take is cut (an undone restart). */
+const notesAfterCut = new Map<string, string>();
+
 /**
  * Opens the editor on the take at once while `suggest` cuts it in the background; the editor gets
- * the cut as a change of the file, one step to undo ("Cut by suggest").
+ * the cut as a change of the file, one step to undo ("Cuttle's cut").
  */
 async function cutAndShow(dir: string): Promise<void> {
   finishing.add(keyOf(dir));
   try {
     await reopenEditor(dir);
+    const discarded = restarted.get(keyOf(dir));
+    restarted.delete(keyOf(dir));
+    const said = notesAfterCut.get(keyOf(dir));
+    notesAfterCut.delete(keyOf(dir));
     await cut(dir);
+    if (discarded) await sendToEditor(dir, 'project:restarted', { discarded });
+    if (said) await sendToEditor(dir, 'project:note', { text: said });
   } finally {
     finishing.delete(keyOf(dir));
   }
@@ -689,7 +849,7 @@ async function cutAndShow(dir: string): Promise<void> {
 
 /**
  * Cuts the project's take with `suggest`; the editor says so, gets the cut as a change of the file
- * (one step to undo, "Cut by suggest"), and says when it could not (with Try again).
+ * (one step to undo, "Cuttle's cut"), and says when it could not (with Try again).
  */
 async function cut(dir: string): Promise<void> {
   await setEditorStatus(dir, { text: 'Cutting the take…', state: 'working' });

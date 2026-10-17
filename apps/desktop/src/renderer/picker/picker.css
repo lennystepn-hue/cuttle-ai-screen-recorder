@@ -374,6 +374,19 @@ body.transparent #root {
   color: #fff;
   animation: pop 1s var(--ease-out);
 }
+.countdown em {
+  position: absolute;
+  top: 22px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-style: normal;
+  font-weight: 600;
+  color: #fff;
+  background: rgba(19, 19, 23, 0.72);
+  padding: 5px 12px;
+  border-radius: 8px;
+  white-space: nowrap;
+}
 .countdown small {
   position: absolute;
   bottom: 22px;
@@ -398,7 +411,7 @@ body.transparent #root {
   place-items: center;
 }
 .hud {
-  width: 360px;
+  width: 420px;
   height: 48px;
   display: flex;
   align-items: center;
@@ -431,10 +444,53 @@ body.transparent #root {
   box-shadow: 0 0 0 4px rgba(255, 77, 79, 0.22);
   animation: pulse 1.6s ease-in-out infinite;
 }
-.hud.stopping .dot {
+.hud.stopping .dot,
+.hud.resuming .dot,
+.hud.countdown .dot {
   background: var(--muted);
   box-shadow: none;
   animation: none;
+}
+/* paused: the dot stands still in amber, the time stands still too */
+.hud.paused .dot {
+  background: var(--card);
+  box-shadow: 0 0 0 4px rgba(242, 179, 74, 0.2);
+  animation: none;
+}
+.hud.paused .time {
+  color: var(--card);
+}
+.hud button.pause.paused {
+  color: var(--text);
+  background: var(--raised);
+}
+/* restart: a ring fills while it is held */
+.hud button.restart {
+  position: relative;
+}
+.hud button.restart .ring {
+  position: absolute;
+  inset: 3px;
+  border-radius: 50%;
+  pointer-events: none;
+  opacity: 0;
+}
+.hud button.restart.holding .ring {
+  opacity: 1;
+  background: conic-gradient(var(--text) calc(var(--held, 0) * 1turn), transparent 0);
+  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 2px), #000 calc(100% - 2px));
+  mask: radial-gradient(farthest-side, transparent calc(100% - 2px), #000 calc(100% - 2px));
+  animation: hold 600ms linear forwards;
+}
+@property --held {
+  syntax: '<number>';
+  inherits: false;
+  initial-value: 0;
+}
+@keyframes hold {
+  to {
+    --held: 1;
+  }
 }
 .hud .time {
   font-variant-numeric: tabular-nums;
@@ -507,8 +563,12 @@ body.transparent #root {
   }
 }
 @media (prefers-reduced-motion: reduce) {
-  .countdown b,
-  .hud .dot {
+  :root:not([data-motion='full']) .countdown b,
+  :root:not([data-motion='full']) .hud .dot {
     animation: none;
   }
+}
+:root[data-motion='reduce'] .countdown b,
+:root[data-motion='reduce'] .hud .dot {
+  animation: none;
 }

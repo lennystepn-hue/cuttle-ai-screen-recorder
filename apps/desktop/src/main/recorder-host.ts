@@ -19,7 +19,7 @@ interface Running {
   onEvent: (event: RecorderEvent) => void;
   resolve: (take: Take) => void;
   reject: (error: Error) => void;
-  /** ffmpeg's process ids, reported by the recorder as the tracks start. */
+  /** The running ffmpegs' process ids, reported by the recorder as the tracks start (none while paused). */
   pids: number[];
 }
 
@@ -38,6 +38,8 @@ export class RecorderHost {
     const child = utilityProcess.fork(bundlePath('main', 'recorder-host.mjs'), TEST_BACKEND ? ['--test-backend'] : [], { serviceName: 'Cuttle recorder', stdio: 'ignore' });
     child.on('message', (message: HostReply) => this.receive(message));
     child.on('exit', (code) => {
+      // a host let go by refresh(): the new one's listings and recording are not its own
+      if (this.process !== child) return;
       this.process = undefined;
       for (const listing of this.listings.values()) listing.reject(new RecordingError('capture', 'the recorder stopped'));
       this.listings.clear();
@@ -73,6 +75,8 @@ export class RecorderHost {
       }
       case 'event':
         if (message.event.type === 'processes' && this.running) this.running.pids.push(...message.event.pids);
+        // paused: every capture has exited, and a process id can be given to another process later
+        if (message.event.type === 'paused' && this.running) this.running.pids = [];
         this.running?.onEvent(message.event);
         return;
       case 'done': {
@@ -118,12 +122,29 @@ export class RecorderHost {
     if (this.running) this.send({ type: 'marker', ...(label !== undefined && { label }) });
   }
 
+  /** Pauses the take: every track stops until `resume()` (events `paused`, `resuming`, `resumed`). */
+  pause(): void {
+    if (this.running) this.send({ type: 'pause' });
+  }
+
+  resume(): void {
+    if (this.running) this.send({ type: 'resume' });
+  }
+
   setDeadZones(zones: Bounds[]): void {
     if (this.running) this.send({ type: 'dead-zones', zones });
   }
 
   quit(): void {
     this.process?.kill();
+  }
+
+  /** Ends the host while it does nothing, so the next one starts with the environment as it is now (ffmpeg found since). */
+  refresh(): void {
+    if (this.running || this.listings.size > 0 || !this.process) return;
+    const old = this.process;
+    this.process = undefined;
+    old.kill();
   }
 }
 

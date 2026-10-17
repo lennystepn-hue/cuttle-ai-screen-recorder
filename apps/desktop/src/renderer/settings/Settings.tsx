@@ -1,0 +1,538 @@
+// The settings window, and the first run in the same window (#welcome): ffmpeg, the cuttle command
+// and the Claude skill, then the pill. Every change is kept at once; there is no Save.
+import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
+import type { Motion, RequestArgument, SettingsView, ToolsStatus } from '../../shared/ipc';
+import { bridge } from '../bridge';
+import { CheckIcon, CloseIcon, CopyIcon, FolderIcon, Mark, WarningIcon } from '../icons';
+
+const WINGET = 'winget install Gyan.FFmpeg';
+
+type Devices = { cameras: string[]; mics: string[]; problem?: string };
+
+/** A path as people read it: the user's folder as ~ (the whole path is in the tooltip). */
+const shortPath = (path: string) => path.replace(/^[A-Za-z]:\\Users\\[^\\]+(?=\\|$)/i, '~').replace(/^\/(home|Users)\/[^/]+(?=\/|$)/, '~');
+/** A long path cut in its middle, so the folder's own name shows: "~\AppData\…\Videos\Cuttle". */
+function middlePath(path: string, max = 46): string {
+  if (path.length <= max) return path;
+  const parts = path.split(/(?=[\\/])/);
+  let tail = parts.pop() ?? '';
+  while (parts.length > 1 && (parts.at(-1)!.length + tail.length) < max * 0.6) tail = parts.pop()! + tail;
+  const head = parts.slice(0, 2).join('');
+  return `${head}${path.includes('\\') ? '\\' : '/'}…${tail}`;
+}
+/** "9.0" from "9.0-full_build-www.gyan.dev". */
+const shortVersion = (version: string) => /^n?(\d+(\.\d+)*)/.exec(version)?.[1] ?? version;
+/** "2 h ago" for a recent project. */
+function ago(at: number): string {
+  const minutes = Math.round((Date.now() - at) / 60_000);
+  if (minutes < 1) return 'just now';
+  if (minutes < 60) return `${minutes} min ago`;
+  if (minutes < 48 * 60) return `${Math.round(minutes / 60)} h ago`;
+  return `${Math.round(minutes / (24 * 60))} days ago`;
+}
+
+/** A request's failure, said in its first line (the rest is for logs). */
+const firstLine = (error: unknown) => (error instanceof Error ? error.message : String(error)).replace(/^Error invoking remote method '[^']+': (Error: )?/, '').split('\n')[0]!;
+
+/** Keys as the editor writes them: one chip per key. */
+const Keys = ({ keys }: { keys: string }) => (
+  <span className="keys">
+    {keys.split('+').map((key) => (
+      <kbd key={key}>{key}</kbd>
+    ))}
+  </span>
+);
+
+export function Settings() {
+  const welcome = location.hash === '#welcome';
+  const [view, setView] = useState<SettingsView>();
+  const [tools, setTools] = useState<ToolsStatus>();
+  const [devices, setDevices] = useState<Devices>();
+
+  useEffect(() => {
+    // the taskbar and Alt+Tab name the window by its page
+    document.title = welcome ? 'Welcome to Cuttle' : 'Cuttle settings';
+    void bridge.invoke('settings:get').then(setView);
+    void bridge.invoke('tools:status').then(setTools);
+    void bridge.invoke('settings:devices').then(setDevices);
+    // Esc (not while a field or menu has it) and Ctrl+W close the window
+    const onKey = (event: globalThis.KeyboardEvent) => {
+      const typing = (event.target as HTMLElement | null)?.closest('input, select, textarea');
+      if ((event.key === 'Escape' && !typing && !event.defaultPrevented) || (event.ctrlKey && event.key.toLowerCase() === 'w')) {
+        event.preventDefault();
+        window.close();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    const off = bridge.on('settings:changed', setView);
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      off();
+    };
+  }, []);
+
+  const change = (next: RequestArgument<'settings:set'>) => void bridge.invoke('settings:set', next).then(setView);
+
+  return (
+    <div className="settings" data-mode={welcome ? 'welcome' : 'settings'} data-testid="settings">
+      <header className="drag">
+        <Mark />
+        <span>{welcome ? 'Welcome to Cuttle' : 'Settings'}</span>
+      </header>
+      <main>
+        {welcome ? (
+          <Welcome tools={tools} setTools={setTools} />
+        ) : (
+          <>
+            <Section title="Recording">
+              <Row label="Projects folder" hint="Every new recording gets a folder here, named by its date and time." stacked>
+                <div className="path-row">
+                  <span className="path" title={view?.projectsFolder} data-testid="projects-folder">
+                    {view ? middlePath(shortPath(view.projectsFolder)) : ''}
+                  </span>
+                  <button className="ghost" onClick={() => void bridge.invoke('settings:choose-folder').then(setView)} data-testid="choose-folder">
+                    Change…
+                  </button>
+                </div>
+              </Row>
+              <Row label="Countdown" hint="Counts down over the recorded area before recording starts.">
+                <Segmented
+                  value={view?.countdown}
+                  options={[
+                    [0, 'Off'],
+                    [3, '3 s'],
+                    [5, '5 s'],
+                  ]}
+                  onChange={(countdown) => change({ countdown })}
+                  label="Countdown"
+                  testid="countdown"
+                />
+              </Row>
+              <Row label="Camera" hint={devices?.problem ?? 'Shown as a bubble in the corner. The picker can change it for one recording.'}>
+                <DeviceSelect kind="camera" value={view?.camera} devices={devices?.cameras} onChange={(camera) => change({ camera })} />
+              </Row>
+              <Row label="Microphone">
+                <DeviceSelect kind="mic" value={view?.mic} devices={devices?.mics} onChange={(mic) => change({ mic })} />
+              </Row>
+            </Section>
+
+            <Section title="To record">
+              <FfmpegLine tools={tools} setTools={setTools} />
+            </Section>
+
+            <Section title="For Claude Code">
+              <ClaudeTools tools={tools} setTools={setTools} />
+            </Section>
+
+            <Section title="App">
+              <Row label="Start Cuttle when you sign in" hint={<>It waits in the tray; <Keys keys="Ctrl+Shift+Alt+R" /> starts a recording.</>}>
+                <button
+                  className="toggle"
+                  role="switch"
+                  aria-checked={view?.launchAtLogin ?? false}
+                  aria-label="Start Cuttle when you sign in"
+                  onClick={() => view && change({ launchAtLogin: !view.launchAtLogin })}
+                  data-testid="launch-at-login"
+                >
+                  <i />
+                </button>
+              </Row>
+              <Row label="Motion" hint="Animations in Cuttle's windows. The video is not affected.">
+                <Segmented<Motion>
+                  value={view?.motion}
+                  options={[
+                    ['system', 'Like Windows'],
+                    ['reduce', 'Less'],
+                    ['full', 'Full'],
+                  ]}
+                  onChange={(motion) => change({ motion })}
+                  label="Motion"
+                  testid="motion"
+                />
+              </Row>
+            </Section>
+
+            <Section title="Recent projects">
+              <Recent view={view} />
+            </Section>
+            <p className="version">Cuttle {view?.version}</p>
+          </>
+        )}
+      </main>
+    </div>
+  );
+}
+
+function Section({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <section>
+      <h2>{title}</h2>
+      <div className="card">{children}</div>
+    </section>
+  );
+}
+
+function Row({ label, hint, stacked, children }: { label: string; hint?: ReactNode; stacked?: boolean; children: ReactNode }) {
+  return (
+    <div className={`row${stacked ? ' stacked' : ''}`}>
+      <div className="row-text">
+        <div className="row-label">{label}</div>
+        {hint && <div className="row-hint">{hint}</div>}
+      </div>
+      <div className="row-control">{children}</div>
+    </div>
+  );
+}
+
+/** A radio group: Tab reaches the chosen one, the arrow keys move and choose. */
+function Segmented<T extends string | number>({ value, options, onChange, label, testid }: { value: T | undefined; options: [T, string][]; onChange: (value: T) => void; label: string; testid: string }) {
+  const group = useRef<HTMLDivElement>(null);
+  const at = Math.max(0, options.findIndex(([option]) => option === value));
+  const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    const step = event.key === 'ArrowRight' || event.key === 'ArrowDown' ? 1 : event.key === 'ArrowLeft' || event.key === 'ArrowUp' ? -1 : 0;
+    if (step === 0) return;
+    event.preventDefault();
+    const next = (at + step + options.length) % options.length;
+    onChange(options[next]![0]);
+    group.current?.querySelectorAll<HTMLButtonElement>('button')[next]?.focus();
+  };
+  return (
+    <div className="seg" role="radiogroup" aria-label={label} data-testid={testid} ref={group} onKeyDown={onKeyDown}>
+      {options.map(([option, text], index) => (
+        <button key={String(option)} role="radio" aria-checked={value === option} tabIndex={index === at ? 0 : -1} onClick={() => onChange(option)}>
+          {text}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/** A camera or mic: None, the devices listed, and the saved one when it is not plugged in now. */
+function DeviceSelect({ kind, value, devices, onChange }: { kind: 'camera' | 'mic'; value: string | undefined; devices: string[] | undefined; onChange: (device: string | null) => void }) {
+  const missing = value !== undefined && devices !== undefined && !devices.includes(value);
+  return (
+    <select
+      value={value ?? ''}
+      onChange={(event) => {
+        onChange(event.target.value === '' ? null : event.target.value);
+        event.target.blur();
+      }}
+      disabled={devices === undefined}
+      aria-label={kind === 'camera' ? 'Camera' : 'Microphone'}
+      data-testid={`${kind}-select`}
+    >
+      <option value="">{devices === undefined ? 'Listing…' : 'None'}</option>
+      {missing && <option value={value}>{value} (not connected)</option>}
+      {(devices ?? []).map((device) => (
+        <option key={device} value={device}>
+          {device}
+        </option>
+      ))}
+    </select>
+  );
+}
+
+/** ffmpeg: found (its version and where), or how to install it and look again. */
+function FfmpegLine({ tools, setTools }: { tools: ToolsStatus | undefined; setTools: (tools: ToolsStatus) => void }) {
+  const [looking, setLooking] = useState(false);
+  const check = async () => {
+    setLooking(true);
+    try {
+      setTools(await bridge.invoke('tools:check'));
+    } finally {
+      setLooking(false);
+    }
+  };
+  return (
+    <ToolLine
+      state={tools === undefined ? 'unknown' : tools.ffmpeg ? 'ok' : 'warn'}
+      name={tools?.ffmpeg ? `ffmpeg ${shortVersion(tools.ffmpeg.version)}` : 'ffmpeg'}
+      detail={tools?.ffmpeg ? shortPath(tools.ffmpeg.path) : 'Cuttle records and exports with it. Install it in a terminal, then check again.'}
+      title={tools?.ffmpeg?.path}
+      testid="tool-ffmpeg"
+    >
+      {tools && !tools.ffmpeg && (
+        <>
+          <Winget />
+          <button className="ghost" onClick={() => void check()} disabled={looking} data-testid="check-again">
+            {looking ? 'Looking…' : 'Check again'}
+          </button>
+        </>
+      )}
+    </ToolLine>
+  );
+}
+
+/** The cuttle command and the skill: what is there, and Install (or Update, after the app moved). */
+function ClaudeTools({ tools, setTools, welcome }: { tools: ToolsStatus | undefined; setTools: (tools: ToolsStatus) => void; welcome?: boolean }) {
+  const [busy, setBusy] = useState(false);
+  const [failure, setFailure] = useState<string>();
+  const install = async () => {
+    setBusy(true);
+    setFailure(undefined);
+    try {
+      setTools(await bridge.invoke('tools:install'));
+    } catch (error) {
+      setFailure(firstLine(error));
+    } finally {
+      setBusy(false);
+    }
+  };
+  const check = async () => setTools(await bridge.invoke('tools:check'));
+  const problems = tools?.problems;
+  const missing = tools !== undefined && (!tools.command || tools.skill.state === 'missing');
+  const moved = !welcome && tools?.command?.moved === true;
+  const command = tools?.command;
+  const skill = tools?.skill;
+  return (
+    <>
+      <ToolLine
+        state={tools === undefined ? 'unknown' : problems?.command ? 'failed' : command ? 'ok' : 'off'}
+        name="The cuttle command"
+        detail={problems?.command ?? (command ? shortPath(command.path) : tools?.pathLine ? `Its folder is not on your PATH yet. Add this line to your shell profile: ${tools.pathLine}` : 'Claude Code runs it to record, cut and render.')}
+        title={command?.path}
+        testid="tool-command"
+      />
+      <ToolLine
+        state={tools === undefined ? 'unknown' : problems?.skill ? 'failed' : skill?.state === 'installed' ? 'ok' : skill?.state === 'other' ? 'warn' : 'off'}
+        name="The Claude skill"
+        detail={
+          problems?.skill ??
+          (skill?.state === 'other'
+            ? `${shortPath(skill.dir)} has a cuttle skill from somewhere else. Cuttle leaves it alone. To use Cuttle's, move or rename that folder, then check again.`
+            : skill?.state === 'installed'
+              ? shortPath(skill.dir)
+              : 'Tells Claude Code how to make a demo with Cuttle.')
+        }
+        title={skill?.dir}
+        testid="tool-skill"
+      >
+        {skill?.state === 'other' && (
+          <>
+            <button className="ghost" onClick={() => void bridge.invoke('tools:reveal')}>
+              Show the folder
+            </button>
+            <button className="ghost" onClick={() => void check()}>
+              Check again
+            </button>
+          </>
+        )}
+      </ToolLine>
+      <div className="tools-actions">
+        <span className={`row-hint${failure ? ' error-inline' : ''}`} role={failure ? 'alert' : undefined} data-testid="tools-note">
+          {failure ??
+            (tools?.newTerminal
+              ? 'Start Claude Code again in a new terminal: one opened before does not know the cuttle command or the skill yet.'
+              : moved
+                ? 'Cuttle moved: update the cuttle command so it runs this copy.'
+                : 'Lets Claude Code record and cut with Cuttle.')}
+        </span>
+        {(missing || moved || problems) && (
+          <button className="primary" onClick={() => void install()} disabled={busy} data-testid="install-tools">
+            {busy ? 'Installing…' : problems ? 'Try again' : moved && !missing ? 'Update' : 'Install both'}
+          </button>
+        )}
+      </div>
+    </>
+  );
+}
+
+type ToolState = 'unknown' | 'ok' | 'off' | 'warn' | 'failed';
+
+function ToolLine({ state, name, detail, title, testid, children }: { state: ToolState; name: string; detail: string; title?: string; testid: string; children?: ReactNode }) {
+  return (
+    <div className="tool" data-state={state === 'ok' ? 'ok' : state === 'unknown' ? 'unknown' : 'missing'} data-testid={testid}>
+      <span className={`tool-mark ${state}`} aria-hidden>
+        {state === 'ok' ? <CheckIcon size={12} /> : state === 'warn' || state === 'failed' ? <WarningIcon size={12} /> : null}
+      </span>
+      <div className="tool-text">
+        <div className="row-label">{name}</div>
+        <div className={`row-hint${state === 'ok' ? ' path-text' : ''}${state === 'failed' ? ' error-inline' : ''}`} title={title ?? detail} role={state === 'failed' ? 'alert' : undefined}>
+          {state === 'unknown' ? 'Looking…' : detail}
+        </div>
+        {children && <div className="tool-extra">{children}</div>}
+      </div>
+    </div>
+  );
+}
+
+/** The command that installs ffmpeg, to copy into a terminal. */
+function Winget() {
+  const [copied, setCopied] = useState(false);
+  return (
+    <button
+      className="command"
+      onClick={() => {
+        void bridge.invoke('tools:copy', WINGET);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 1600);
+      }}
+      title="Copy, then paste it in a terminal"
+      data-testid="copy-winget"
+    >
+      <code>{WINGET}</code>
+      {copied ? <CheckIcon size={13} /> : <CopyIcon size={13} />}
+      <span>{copied ? 'Copied' : 'Copy'}</span>
+    </button>
+  );
+}
+
+/** The recent projects: open, rename (its folder), show in the folder, take off the list. */
+function Recent({ view }: { view: SettingsView | undefined }) {
+  const [renaming, setRenaming] = useState<string>();
+  const [problem, setProblem] = useState<{ dir: string; text: string }>();
+  /** Where the focus goes once a rename or a removal ends: that row's Rename, or the next row. */
+  const [focusAfter, setFocusAfter] = useState<{ dir: string; what: 'rename' | 'name' }>();
+  const list = useRef<HTMLUListElement>(null);
+  useLayoutEffect(() => {
+    if (!focusAfter || renaming) return;
+    const row = [...(list.current?.querySelectorAll<HTMLElement>('li') ?? [])].find((item) => item.dataset.dir === focusAfter.dir);
+    (row?.querySelector<HTMLElement>(focusAfter.what === 'rename' ? '[data-testid=recent-rename]' : '.recent-name') ?? list.current?.querySelector<HTMLElement>('.recent-name'))?.focus();
+    setFocusAfter(undefined);
+  }, [focusAfter, renaming, view]);
+
+  if (view && view.recent.length === 0) return <p className="empty">Projects you open or record show here.</p>;
+  const parentOf = (dir: string) => dir.replace(/[\\/][^\\/]+$/, '');
+  const inProjects = (dir: string) => view !== undefined && parentOf(dir).toLowerCase() === view.projectsFolder.replace(/[\\/]+$/, '').toLowerCase();
+  const rename = async (dir: string, name: string) => {
+    if (name === '') return setProblem({ dir, text: 'Type a name for the folder.' });
+    try {
+      const answer = await bridge.invoke('recent:rename', { dir, name });
+      if ('problem' in answer) return setProblem({ dir, text: answer.problem });
+      setProblem(undefined);
+      setRenaming(undefined);
+      setFocusAfter({ dir: answer.dir, what: 'rename' });
+    } catch (error) {
+      setProblem({ dir, text: firstLine(error) });
+    }
+  };
+  return (
+    <ul className="recent" data-testid="recent" ref={list}>
+      {view?.recent.map((entry, index) => (
+        <li key={entry.dir} data-dir={entry.dir}>
+          {renaming === entry.dir ? (
+            <RenameField
+              initial={entry.name}
+              onDone={(name) => {
+                if (name === undefined || name === entry.name) {
+                  setProblem(undefined);
+                  setRenaming(undefined);
+                  setFocusAfter({ dir: entry.dir, what: 'rename' });
+                  return;
+                }
+                void rename(entry.dir, name);
+              }}
+            />
+          ) : (
+            <button className="recent-name" onClick={() => void bridge.invoke('recent:open', entry.dir)} title={`Open ${entry.dir}`}>
+              <b>{entry.name}</b>
+              <span className="path-text">{inProjects(entry.dir) ? ago(entry.opened) : shortPath(parentOf(entry.dir))}</span>
+            </button>
+          )}
+          {renaming !== entry.dir && (
+            <span className="recent-actions">
+              <button
+                onClick={() => {
+                  setProblem(undefined);
+                  setRenaming(entry.dir);
+                }}
+                disabled={entry.open !== undefined}
+                title={entry.open === 'here' ? 'Close its editor to rename it' : entry.open ? `Open in Cuttle on ${entry.open}` : 'Rename the project’s folder'}
+                data-testid="recent-rename"
+              >
+                Rename
+              </button>
+              <button className="icon" onClick={() => void bridge.invoke('recent:reveal', entry.dir)} title="Show in its folder" aria-label="Show in its folder">
+                <FolderIcon size={14} />
+              </button>
+              <button
+                className="icon"
+                onClick={() => {
+                  const next = view.recent[index + 1] ?? view.recent[index - 1];
+                  void bridge.invoke('recent:forget', entry.dir).then(() => next && setFocusAfter({ dir: next.dir, what: 'name' }));
+                }}
+                title="Remove from the list (the folder stays)"
+                aria-label="Remove from the list (the folder stays)"
+                data-testid="recent-forget"
+              >
+                <CloseIcon size={12} />
+              </button>
+            </span>
+          )}
+          {problem?.dir === entry.dir && (
+            <div className="error-text" role="alert" data-testid="rename-problem">
+              {problem.text}
+            </div>
+          )}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function RenameField({ initial, onDone }: { initial: string; onDone: (name: string | undefined) => void }) {
+  const input = useRef<HTMLInputElement>(null);
+  const ended = useRef(false);
+  useEffect(() => input.current?.select(), []);
+  const end = (name: string | undefined) => {
+    if (ended.current && name !== undefined) return;
+    ended.current = name !== undefined;
+    onDone(name);
+  };
+  return (
+    <input
+      ref={input}
+      className="rename"
+      defaultValue={initial}
+      aria-label="Project name"
+      onKeyDown={(event) => {
+        if (event.key === 'Enter') {
+          ended.current = false;
+          end(event.currentTarget.value.trim());
+        }
+        if (event.key === 'Escape') {
+          // Esc ends the rename, not the window
+          event.preventDefault();
+          event.stopPropagation();
+          ended.current = true;
+          onDone(undefined);
+        }
+      }}
+      onBlur={(event) => {
+        if (!ended.current) end(event.currentTarget.value.trim());
+      }}
+      data-testid="rename-input"
+    />
+  );
+}
+
+/** The first run: what recording needs, what Claude Code can use, then Done (the pill). */
+function Welcome({ tools, setTools }: { tools: ToolsStatus | undefined; setTools: (tools: ToolsStatus) => void }) {
+  // one accent: Install while Claude Code's part is missing, Done once all is there
+  const ready = tools !== undefined && tools.ffmpeg !== undefined && tools.command !== undefined && tools.skill.state !== 'missing';
+  return (
+    <div className="welcome">
+      <div className="welcome-head">
+        <Mark size={44} />
+        <div>
+          <h1>Record Claude Code at work.</h1>
+          <p>Cuttle cuts the take for you: waiting sped up, a zoom on the answer, ready to export.</p>
+        </div>
+      </div>
+      <Section title="To record">
+        <FfmpegLine tools={tools} setTools={setTools} />
+      </Section>
+      <Section title="For Claude Code">
+        <ClaudeTools tools={tools} setTools={setTools} welcome />
+      </Section>
+      <div className="welcome-foot">
+        <span className="row-hint">
+          Cuttle waits at the top of your screen and in the tray. <Keys keys="Ctrl+Shift+Alt+R" /> starts a recording from anywhere.
+        </span>
+        <button className={ready ? 'primary' : 'ghost'} onClick={() => void bridge.invoke('settings:welcomed')} data-testid="welcome-done">
+          Done
+        </button>
+      </div>
+    </div>
+  );
+}

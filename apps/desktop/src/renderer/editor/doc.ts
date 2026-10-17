@@ -42,6 +42,8 @@ export interface DocState {
   toast?: Toast;
   /** A version a conflict set aside (cuttle.json.draft), offered back ("Use mine") until answered: why. */
   draftNote?: string;
+  /** The take a restart put aside (its folder in the project), offered back ("Undo restart") until answered. */
+  restartNote?: string;
 }
 
 const undoStack: Step[] = [];
@@ -53,6 +55,8 @@ const redoStack: Step[] = [];
 let unsaved: { label: string; commands: Command[] }[] = [];
 /** A whole version to write (undo, redo, an outside change undone), instead of replaying commands. */
 let unsavedRestore = false;
+/** Counts the restores: a write ends one only when no newer one came while it ran (two fast undos). */
+let restores = 0;
 let saving: Promise<void> | undefined;
 /** The person's version a save conflict could not carry over (also in cuttle.json.draft), until answered. */
 let draft: Raw | undefined;
@@ -79,6 +83,16 @@ export function toast(text: string, options: Omit<Toast, 'id' | 'text'> = {}): v
 
 export function dismissToast(): void {
   setDoc({ toast: undefined });
+}
+
+/** The take was restarted: the one before is offered back, in a note no other note replaces. */
+export function offerUndoRestart(discarded: string): void {
+  setDoc({ restartNote: discarded });
+}
+
+/** Keeps the new take: the one before stays put aside (takes/.discarded), the offer goes. */
+export function dismissRestart(): void {
+  setDoc({ restartNote: undefined });
 }
 
 /** Declines the draft: cuttle.json.draft stays on disk, the offer goes. */
@@ -160,6 +174,7 @@ export function redo(): void {
 
 function restore(raw: Raw): void {
   unsavedRestore = true;
+  restores++;
   unsaved = [];
   setDoc({ raw, project: parse(raw), preview: undefined, toast: undefined });
   void save();
@@ -182,10 +197,12 @@ function save(): Promise<void> {
       const { raw, hash } = doc();
       const writing = unsaved.length;
       const restoring = unsavedRestore;
+      const restored = restores;
       const answer = await bridge.invoke('project:save', { raw, base: hash }).catch((error: Error) => ({ problem: error.message }));
       if ('hash' in answer) {
         unsaved = unsaved.slice(writing);
-        if (restoring) unsavedRestore = false;
+        // a restore that came while this one was written still has to be written (the save chained after this)
+        if (restoring && restored === restores) unsavedRestore = false;
         setDoc({ hash: answer.hash, problem: undefined });
         return finish();
       }
@@ -210,7 +227,7 @@ function save(): Promise<void> {
         setDoc({ problem: 'cuttle.json changed outside the app and has a mistake: your edit is saved once it is fixed' });
         return finish();
       }
-      const outside = conflict.origin === 'suggest' ? 'Cut by suggest' : 'the outside change';
+      const outside = conflict.origin === 'suggest' ? "Cuttle's cut" : 'the outside change';
       if (restoring) {
         // An undo or redo is a whole version: the newer one shows, as a step to undo (back to the
         // version the person had asked for).
@@ -335,9 +352,9 @@ export async function outsideChange(event: ProjectFileEvent): Promise<void> {
   } catch {
     return;
   }
-  undoStack.push({ raw: before.raw, label: event.origin === 'suggest' ? 'Cut by suggest' : 'the outside change' });
+  undoStack.push({ raw: before.raw, label: event.origin === 'suggest' ? "Cuttle's cut" : 'the outside change' });
   redoStack.length = 0;
   setDoc({ raw, project, hash: event.hash, preview: undefined });
   const show = firstChanged(before.project, project);
-  toast(event.origin === 'suggest' ? 'Cut by suggest' : `Changed outside the app: ${describeChange(before.project, project)}`, { undo: true, ...(show && event.origin !== 'suggest' && { show }) });
+  toast(event.origin === 'suggest' ? 'Cuttle cut the take.' : `Changed outside the app: ${describeChange(before.project, project)}`, { undo: true, ...(show && event.origin !== 'suggest' && { show }) });
 }

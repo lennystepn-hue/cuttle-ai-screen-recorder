@@ -63,6 +63,8 @@ class Worker {
       else job.reject(Object.assign(new Error(message.error), { cancelled: message.cancelled === true }));
     });
     child.on('exit', () => {
+      // a worker let go by refresh(): the new one's jobs are not its own
+      if (this.process !== child) return;
       this.process = undefined;
       this.running = undefined;
       for (const job of this.pending.values()) job.reject(new Error('the media worker stopped'));
@@ -112,6 +114,14 @@ class Worker {
 
   stop(): void {
     this.process?.kill();
+  }
+
+  /** Ends the worker while it has nothing to do, so the next one starts with the environment as it is now. */
+  refresh(): void {
+    if (this.pending.size > 0 || !this.process) return;
+    const old = this.process;
+    this.process = undefined;
+    old.kill();
   }
 }
 

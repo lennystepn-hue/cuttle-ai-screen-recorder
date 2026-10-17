@@ -18,9 +18,9 @@ source pixels, and how to find them.
 cuttle --version
 ```
 
-If the command is missing, ask the user to run `pnpm cli:install` in the cuttle repository
-(`{{REPO}}`) and to open a new terminal. Recording and rendering also need ffmpeg on PATH
-(Windows: `winget install Gyan.FFmpeg`). Recording works on Windows for now.
+If the command is missing, {{INSTALL_CLI}}, and to open a new terminal. Recording and
+rendering also need ffmpeg on PATH (Windows: `winget install Gyan.FFmpeg`). Recording works on
+Windows for now.
 
 Give the project folder as an absolute path, `-C "<project>"`, for example
 `-C "$HOME/cuttle-demos/<name>"` (a `~` inside quotes is not expanded). Use `--json` for every
@@ -68,9 +68,11 @@ cuttle -C "<project>" record --monitor 0 --until-file "<project>/stop" --until-c
   markers. If that folder is the one you run in, tell the user not to write to you until the
   recording has stopped: your own next turn would end it.
 - `--until-idle 5`: also ends once the screen and the input have rested 5 s.
-- `--max <seconds>` is the safety net. The user can also stop with Ctrl+Shift+Alt+S and add a
-  marker with Ctrl+Shift+Alt+M. Other sources: `--window "<part of the title>"`,
-  `--region x,y,w,h` (pixels of `--monitor`). `--countdown 3` is the default.
+- `--max <seconds>` is the safety net (it counts recorded time, not pauses). The user can also stop
+  with Ctrl+Shift+Alt+S, add a marker with Ctrl+Shift+Alt+M and pause or resume with
+  Ctrl+Shift+Alt+P (nothing is recorded while paused; the pieces are joined at the stop). Other
+  sources: `--window "<part of the title>"`, `--region x,y,w,h` (pixels of `--monitor`).
+  `--countdown 3` is the default.
 - A project open in the Cuttle app is refused (`project-open`): the app records it itself
   ("Record again"). Ask the user to record there or to close it; `--force` only if they say so.
 

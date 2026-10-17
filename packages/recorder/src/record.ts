@@ -1,6 +1,6 @@
 import { closeSync, existsSync, mkdirSync, openSync, readdirSync, rmSync, statSync, writeFileSync, writeSync } from 'node:fs';
 import { join, relative, resolve, sep } from 'node:path';
-import { MARKERS_VERSION, TAKE_VERSION, type Marker, type MarkersFile, type TakeFile } from '@cuttle/project';
+import { MARKERS_VERSION, SEGMENTS_VERSION, TAKE_VERSION, takeTime, type Marker, type MarkersFile, type Segment, type SegmentsFile, type TakeFile } from '@cuttle/project';
 import { SILENCE_SECONDS, freezeEnd, freezeStart, micArgs, screenArgs, silenceStart, webcamArgs } from './args';
 import { claudeTranscriptDir, watchClaude, type ClaudeSignal } from './claude';
 import { devicesFor, windowsFor } from './devices';
@@ -8,6 +8,7 @@ import { RecorderError } from './errors';
 import { EventsWriter } from './events';
 import { spawnCapture, type CaptureProcess } from './ffmpeg';
 import { startInput, type InputSource } from './input';
+import { joinSegments, mediaInfo, renameWhenFree } from './join';
 import { areaGeometry, checkDevice, micInput, micLatency, platformFor, resolveArea, screenInput, webcamInput, type Platform, type ScreenArea } from './sources';
 import type { Bounds, RawInput, RecordOptions, Recording, RecorderEvent, StopOptions, StopReason, Take } from './types';
 
@@ -19,7 +20,11 @@ const START_TIMEOUT_SECONDS = 20;
 const FILE_POLL_MS = 200;
 const IDLE_POLL_MS = 200;
 
-const FILES = { screen: 'screen.mp4', webcam: 'webcam.mp4', mic: 'mic.m4a', events: 'events.jsonl', markers: 'markers.json', take: 'take.json' };
+/** A take is joined from at most this many pieces (each adds to one ffmpeg command line). */
+export const MAX_SEGMENTS = 100;
+const FILES = { screen: 'screen.mp4', webcam: 'webcam.mp4', mic: 'mic.m4a', events: 'events.jsonl', markers: 'markers.json', take: 'take.json', segments: 'segments.json' };
+/** How often maxSeconds is checked against the take's time (which stands still while paused). */
+const MAX_POLL_MS = 50;
 
 const now = () => Date.now() / 1000;
 const message = (error: unknown) => (error instanceof Error ? error.message : String(error));
@@ -37,18 +42,54 @@ export function record(options: RecordOptions): Recording {
       return done;
     },
     marker: (label) => control.marker(label),
+    pause: () => control.setPaused(true),
+    resume: () => control.setPaused(false),
     setDeadZones: (zones) => (control.deadZones = [...zones]),
     done,
   };
 }
 
-/** Stop requests and manual markers from the caller, the hotkeys and the triggers. */
+/** Stop requests, pauses and manual markers from the caller, the hotkeys and the triggers. */
 class Control {
   reason: StopReason | undefined;
   onMarker: ((label?: string) => void) | undefined;
   /** Pointer input inside these is not logged. */
   deadZones: Bounds[] = [];
   private waiters: ((reason: StopReason) => void)[] = [];
+  /** Whether the caller wants the take paused: the newest `pause` or `resume` wins. */
+  private paused = false;
+  private pauseWaiters: { paused: boolean; resolve: () => void }[] = [];
+
+  /** A pause that cannot be taken (the take has as many pieces as it may), and what to say then. */
+  pauseRefused: (() => boolean) | undefined;
+  onPauseRefused: (() => void) | undefined;
+
+  setPaused(paused: boolean): void {
+    if (paused && !this.paused && this.pauseRefused?.()) return void this.onPauseRefused?.();
+    this.paused = paused;
+    const ready = this.pauseWaiters.filter((waiter) => waiter.paused === paused);
+    this.pauseWaiters = this.pauseWaiters.filter((waiter) => waiter.paused !== paused);
+    for (const waiter of ready) waiter.resolve();
+  }
+
+  toggle(): void {
+    this.setPaused(!this.paused);
+  }
+
+  /** Resolves once the take should be paused; at once when it already should. */
+  pauseWanted(): Promise<'pause'> {
+    return this.until(true).then(() => 'pause' as const);
+  }
+
+  /** Resolves once the take should record again; at once when it already should. */
+  resumeWanted(): Promise<'resume'> {
+    return this.until(false).then(() => 'resume' as const);
+  }
+
+  private until(paused: boolean): Promise<void> {
+    if (this.paused === paused) return Promise.resolve();
+    return new Promise((resolve) => this.pauseWaiters.push({ paused, resolve }));
+  }
 
   /** The first request wins. */
   request(reason: StopReason): void {
@@ -158,10 +199,37 @@ interface TakeContext {
   claude: ClaudeTrigger | undefined;
 }
 
+/** One stretch of the take's capture processes, from a start (or resume) to a pause or the stop. */
+interface Tracks {
+  screen: CaptureProcess;
+  webcam?: CaptureProcess;
+  mic?: CaptureProcess;
+  /** Rejects with the first capture that fails; never resolves. */
+  failed: Promise<never>;
+  /** This screen process's freeze detection (a new one starts unfrozen). */
+  frozen: boolean;
+}
+
+const all = (tracks: Tracks) => [tracks.screen, tracks.webcam, tracks.mic].filter((capture): capture is CaptureProcess => capture !== undefined);
+
+/** A track's file in segment `k` of a paused take: `screen.2.mp4`. */
+const numbered = (file: string, k: number) => file.replace(/\.(mp4|m4a)$/, `.${k}.$1`);
+
 async function recordTake({ options, control, platform, area, projectDir, dir, reporter, claude }: TakeContext): Promise<Take> {
   const path = (file: string) => join(dir, file);
   const rel = (file: string) => relative(projectDir, file).split(sep).join('/');
-  let screenStart: number | undefined;
+  /** The take's stretches between pauses; written to segments.json from the first pause on. */
+  const segments: Segment[] = [];
+  /** It was paused at least once: its segments are joined at the end. */
+  let paused = false;
+  /** Input is logged and the take's time runs only while every track records. */
+  let capturing = false;
+  /** Seconds recorded before the segment that runs now. */
+  const recordedBefore = () => segments.reduce((sum, segment) => sum + (segment.duration ?? 0), 0);
+  const recordedNow = () => {
+    const last = segments.at(-1);
+    return recordedBefore() + (capturing && last && last.duration === undefined ? now() - last.screen.start : 0);
+  };
 
   const markers: Marker[] = [];
   let markersFailed = false;
@@ -175,8 +243,10 @@ async function recordTake({ options, control, platform, area, projectDir, dir, r
     }
   };
   const addMarker = (marker: Omit<Marker, 't'>, time: number) => {
-    if (screenStart === undefined || time < screenStart) return; // nothing on screen yet
-    const entry = { t: Math.round((time - screenStart) * 1000) / 1000, ...marker };
+    // nothing on screen yet; while paused, where the take paused
+    const t = takeTime(segments, time, true);
+    if (t === undefined) return;
+    const entry = { t: Math.round(t * 1000) / 1000, ...marker };
     markers.push(entry);
     markers.sort((a, b) => a.t - b.t);
     saveMarkers();
@@ -184,6 +254,12 @@ async function recordTake({ options, control, platform, area, projectDir, dir, r
   };
   saveMarkers();
   control.onMarker = (label) => addMarker({ kind: 'manual', ...(label && { label }) }, now());
+
+  const writeSegments = (joined = false) => {
+    const file = path(FILES.segments);
+    writeJson(`${file}.part`, { version: SEGMENTS_VERSION, segments, ...(joined && { joined }) } satisfies SegmentsFile);
+    renameWhenFree(`${file}.part`, file);
+  };
 
   const { size, origin } = areaGeometry(area);
   const events = openSync(path(FILES.events), 'a');
@@ -209,6 +285,7 @@ async function recordTake({ options, control, platform, area, projectDir, dir, r
     }
   }, origin);
   let lastInput = now();
+  /** Every capture started, so a failure stops the ones still running. */
   const captures: CaptureProcess[] = [];
   let input: InputSource | undefined;
   const cleanups: (() => void)[] = [];
@@ -217,6 +294,7 @@ async function recordTake({ options, control, platform, area, projectDir, dir, r
     if (finished) return; // a late Claude answer must not start a timer after the take ended
     const handle = repeat ? setInterval(callback, ms) : setTimeout(callback, ms);
     cleanups.push(() => clearTimeout(handle));
+    return handle;
   };
   /** Ends every trigger, the transcript watcher and the input: nothing new happens after this. */
   const finish = () => {
@@ -226,107 +304,214 @@ async function recordTake({ options, control, platform, area, projectDir, dir, r
     input?.stop();
   };
 
-  try {
-    input = await startInput(
-      platform,
-      (raw) => {
-        // Nothing after a stop was asked for, nothing over the app's own controls: no take shows the
-        // pointer travelling to Stop or its click.
-        if (control.reason !== undefined || inDeadZone(raw, control.deadZones)) return;
-        lastInput = raw.time;
-        writer.push(raw);
-      },
-      (action) => (action === 'stop' ? control.request('hotkey') : control.marker()),
-    );
-    const screen = spawnCapture('screen', screenArgs(screenInput(platform, area, options.drawMouse ?? false), path(FILES.screen), options.stop.untilIdleSeconds));
-    captures.push(screen);
-    const webcam = options.webcam === undefined ? undefined : spawnCapture('webcam', webcamArgs(webcamInput(platform, options.webcam), path(FILES.webcam)));
-    if (webcam) captures.push(webcam);
-    const mic = options.mic === undefined ? undefined : spawnCapture('mic', micArgs(micInput(platform, options.mic), path(FILES.mic)));
-    if (mic) captures.push(mic);
-    reporter.emit({ type: 'processes', pids: captures.map((capture) => capture.pid).filter((pid): pid is number => pid !== undefined) });
-
+  let micWarned = false;
+  /** The capture processes of segment `k` (the first writes the take's own file names). */
+  const spawnTracks = (k: number): Tracks => {
+    const file = (name: string) => path(k === 1 ? name : numbered(name, k));
+    const screen = spawnCapture('screen', screenArgs(screenInput(platform, area, options.drawMouse ?? false), file(FILES.screen), options.stop.untilIdleSeconds));
+    const webcam = options.webcam === undefined ? undefined : spawnCapture('webcam', webcamArgs(webcamInput(platform, options.webcam), file(FILES.webcam)));
+    const mic = options.mic === undefined ? undefined : spawnCapture('mic', micArgs(micInput(platform, options.mic), file(FILES.mic)));
+    // Rejects with the first capture that fails; `exited` only resolves after stop() was called.
+    const failed: Promise<never> = Promise.race([screen, webcam, mic].filter((capture) => capture !== undefined).map((capture) => capture.exited)).then(() => new Promise<never>(() => {}));
+    failed.catch(() => {});
+    const tracks: Tracks = { screen, ...(webcam && { webcam }), ...(mic && { mic }), failed, frozen: false };
+    captures.push(...all(tracks));
+    reporter.emit({ type: 'processes', pids: all(tracks).map((capture) => capture.pid).filter((pid): pid is number => pid !== undefined) });
     // A freeze that starts at 0 means the screen has not changed yet: untilIdleSeconds waits for one
     // after a change, and for the input to rest as long (someone pointing at a still chart is not idle).
-    let frozen = false;
     screen.onLine((line) => {
       const start = freezeStart(line);
-      if (start !== undefined && start > 0) frozen = true;
-      if (freezeEnd(line) !== undefined) frozen = false;
+      if (start !== undefined && start > 0) tracks.frozen = true;
+      if (freezeEnd(line) !== undefined) tracks.frozen = false;
     });
-    let micWarned = false;
     mic?.onLine((line) => {
       const start = silenceStart(line);
       if (start === undefined || start >= SILENCE_SECONDS || micWarned) return;
       micWarned = true;
       reporter.warn(`the microphone "${options.mic}" records silence: it may be muted, or blocked for desktop apps (Windows: Settings > Privacy & security > Microphone)`);
     });
-    // Rejects with the first capture that fails; `exited` only resolves after stop() was called.
-    const failed: Promise<never> = Promise.race(captures.map((capture) => capture.exited)).then(() => new Promise<never>(() => {}));
-    failed.catch(() => {});
+    return tracks;
+  };
+
+  /**
+   * Starts segment `k` and waits until its screen runs and its other tracks do, or a stop comes.
+   * Undefined when the stop came before the screen's first frame. A track that has not started by
+   * the stop is left out of the segment (and its file removed).
+   */
+  const startSegment = async (k: number): Promise<{ tracks: Tracks; segment: Segment } | { tracks: Tracks; segment: undefined }> => {
+    const tracks = spawnTracks(k);
+    const screenAt = await startedWithin(Promise.race([tracks.screen.started, tracks.failed, control.stopped().then(() => undefined)]), 'screen');
+    if (screenAt === undefined) return { tracks, segment: undefined };
+    const starts: { webcam?: number; mic?: number } = {};
+    void tracks.webcam?.started.then((at) => (starts.webcam = at), () => {});
+    void tracks.mic?.started.then((at) => (starts.mic = at), () => {});
+    const others = [tracks.webcam && 'webcam', tracks.mic && 'mic'].filter(Boolean).join(' and ');
+    if (others !== '') await startedWithin(Promise.race([Promise.all([tracks.webcam?.started, tracks.mic?.started]), tracks.failed, control.stopped()]), others);
+    const begun = { ...starts };
+    const name = (file: string) => (k === 1 ? file : numbered(file, k));
+    for (const track of ['webcam', 'mic'] as const) {
+      if (tracks[track] && begun[track] === undefined) reporter.warn(`the ${track} had not started when the recording was stopped; it is left out of the take`);
+    }
+    return {
+      tracks,
+      segment: {
+        screen: { file: name(FILES.screen), start: screenAt },
+        ...(begun.webcam !== undefined && { webcam: { file: name(FILES.webcam), start: begun.webcam } }),
+        // the mic's stamp is when its first buffer arrived: its first sample came that much earlier
+        ...(begun.mic !== undefined && { mic: { file: name(FILES.mic), start: begun.mic - micLatency(platform) } }),
+      },
+    };
+  };
+
+  /** Removes the files of `tracks` that `segment` does not list (they had not started). */
+  const removeUnlisted = (k: number, segment: Segment | undefined) => {
+    for (const [track, file] of [['screen', FILES.screen], ['webcam', FILES.webcam], ['mic', FILES.mic]] as const) {
+      if (!segment?.[track]) removeQuietly(path(k === 1 ? file : numbered(file, k)));
+    }
+  };
+
+  /** The screen file's length, to ffmpeg's 10 ms (what joining it end to end uses). */
+  const lengthOf = async (file: string, fallback: number) => (await mediaInfo(path(file), 'v').catch(() => undefined))?.seconds || fallback;
+
+  let tracks: Tracks | undefined;
+  let k = 1;
+  try {
+    input = await startInput(
+      platform,
+      (raw) => {
+        // Nothing while paused, nothing after a stop was asked for, nothing over the app's own
+        // controls: no take shows the pointer travelling to Stop or its click.
+        if (!capturing || control.reason !== undefined || inDeadZone(raw, control.deadZones)) return;
+        lastInput = raw.time;
+        writer.push(raw);
+      },
+      (action) => (action === 'stop' ? control.request('hotkey') : action === 'pause' ? control.toggle() : control.marker()),
+    );
 
     // The screen track's start is the take's clock: input, markers and maxSeconds count from it.
-    const screenAt = await startedWithin(Promise.race([screen.started, failed, control.stopped().then(() => undefined)]), 'screen');
-    if (screenAt === undefined) throw cancelled('the screen track started');
-    screenStart = screenAt;
+    const first = await startSegment(1);
+    tracks = first.tracks;
+    if (!first.segment) throw cancelled('the screen track started');
+    const screenAt = first.segment.screen.start;
+    segments.push(first.segment);
     writer.setStart(screenAt, input.initial(screenAt));
-
-    // The other tracks: a stop before they deliver anything leaves them out of the take.
-    const starts: { webcam?: number; mic?: number } = {};
-    void webcam?.started.then((at) => (starts.webcam = at), () => {});
-    void mic?.started.then((at) => (starts.mic = at), () => {});
-    const others = [webcam && 'webcam', mic && 'mic'].filter(Boolean).join(' and ');
-    if (others !== '') await startedWithin(Promise.race([Promise.all([webcam?.started, mic?.started]), failed, control.stopped()]), others);
-    // The tracks of this take: one that starts while the stop runs is left out of take.json and the Take alike.
-    const begun = { ...starts };
-    for (const [track, capture] of [['webcam', webcam], ['mic', mic]] as const) {
-      if (capture && begun[track] === undefined) reporter.warn(`the ${track} had not started when the recording was stopped; it is left out of the take`);
-    }
+    const begun = first.segment;
     writeJson(path(FILES.take), {
       version: TAKE_VERSION,
       tracks: {
         screen: { file: FILES.screen, start: screenAt },
-        ...(begun.webcam !== undefined && { webcam: { file: FILES.webcam, start: begun.webcam } }),
-        ...(begun.mic !== undefined && { mic: { file: FILES.mic, start: begun.mic - micLatency(platform) } }),
+        ...(begun.webcam && { webcam: { file: FILES.webcam, start: begun.webcam.start } }),
+        ...(begun.mic && { mic: { file: FILES.mic, start: begun.mic.start } }),
       },
     } satisfies TakeFile);
+    capturing = true;
     reporter.emit({ type: 'recording', dir: rel(dir) });
-    startTriggers(options.stop, screenAt, control, () => frozen && now() - lastInput >= (options.stop.untilIdleSeconds ?? Infinity), timer);
+    // Claude's answer stops the take a little after it; while paused, a little after the resume.
+    let claudeStop = false;
+    // one timer at a time; a pause clears it (the tail is recorded time), the resume starts it again
+    let claudeTimer: ReturnType<typeof setTimeout> | undefined;
+    const stopForClaude = () => {
+      clearTimeout(claudeTimer);
+      claudeTimer = timer(() => control.request('claude'), CLAUDE_TAIL_SECONDS * 1000);
+    };
+    startTriggers(options.stop, recordedNow, control, () => capturing && tracks !== undefined && tracks.frozen && now() - lastInput >= (options.stop.untilIdleSeconds ?? Infinity), timer);
     claude?.attach((signal) => {
       addMarker({ kind: signal.kind, ...(signal.label !== undefined && { label: signal.label }) }, signal.time);
-      if (signal.kind === 'answer') timer(() => control.request('claude'), CLAUDE_TAIL_SECONDS * 1000);
+      if (signal.kind !== 'answer' || claudeStop) return;
+      claudeStop = true;
+      if (capturing) stopForClaude();
     });
 
-    const reason = await Promise.race([control.stopped(), failed]);
+    let reason: StopReason;
+    let running = true;
+    control.pauseRefused = () => segments.length >= MAX_SEGMENTS;
+    control.onPauseRefused = () => reporter.warn(`this take cannot pause again: it has ${MAX_SEGMENTS} pieces; stop it and record another`);
+    for (;;) {
+      const next = await Promise.race([control.stopped(), tracks.failed, control.pauseWanted()]);
+      if (next !== 'pause') {
+        reason = next;
+        break;
+      }
+      // Pause: every track finishes its file; the take's time stands still.
+      capturing = false;
+      clearTimeout(claudeTimer);
+      await Promise.all(all(tracks).map((capture) => capture.stop()));
+      running = false;
+      const segment = segments.at(-1)!;
+      segment.duration = await lengthOf(segment.screen.file, now() - segment.screen.start);
+      if (!paused) {
+        // the first pause: the first segment's files get their number too
+        paused = true;
+        for (const track of ['screen', 'webcam', 'mic'] as const) {
+          const entry = segment[track];
+          if (!entry) continue;
+          renameWhenFree(path(entry.file), path(numbered(entry.file, 1)));
+          entry.file = numbered(entry.file, 1);
+        }
+      }
+      writeSegments();
+      reporter.emit({ type: 'paused' });
+      const after = await Promise.race([control.stopped(), control.resumeWanted()]);
+      if (after !== 'resume') {
+        reason = after;
+        break;
+      }
+      // Resume: the next segment's tracks start; its input counts on from where the take paused.
+      k++;
+      reporter.emit({ type: 'resuming' });
+      const resumed = await startSegment(k);
+      tracks = resumed.tracks;
+      running = true;
+      if (!resumed.segment) {
+        // stopped before the screen started again: that segment is not part of the take
+        await Promise.allSettled(all(tracks).map((capture) => capture.stop()));
+        running = false;
+        removeUnlisted(k, undefined);
+        reason = control.reason ?? 'stop';
+        break;
+      }
+      const offset = recordedBefore();
+      segments.push(resumed.segment);
+      writeSegments();
+      writer.setStart(resumed.segment.screen.start - offset, input.initial(resumed.segment.screen.start));
+      lastInput = now();
+      capturing = true;
+      reporter.emit({ type: 'resumed' });
+      if (claudeStop) stopForClaude();
+    }
     reporter.emit({ type: 'stopping', reason });
+    capturing = false;
     finish();
-    await Promise.all(captures.map((capture) => capture.stop()));
+    if (running) {
+      await Promise.all(all(tracks).map((capture) => capture.stop()));
+      removeUnlisted(k, segments.at(-1));
+    }
     writer.close();
     closeEvents();
-    // A track that was left out has no file of this take.
-    for (const [track, file] of [['webcam', FILES.webcam], ['mic', FILES.mic]] as const) {
-      if ((track === 'webcam' ? webcam : mic) && begun[track] === undefined) removeQuietly(path(file));
-    }
     if (markersFailed) saveMarkers();
+    const last = segments.at(-1)!;
+    if (paused && last.duration === undefined) last.duration = await lengthOf(last.screen.file, now() - last.screen.start);
+    const has = paused ? await joinTake() : { webcam: last.webcam !== undefined, mic: last.mic !== undefined };
     return {
       dir: rel(dir),
       screen: rel(path(FILES.screen)),
-      ...(begun.webcam !== undefined && { webcam: rel(path(FILES.webcam)) }),
-      ...(begun.mic !== undefined && { mic: rel(path(FILES.mic)) }),
+      ...(has.webcam && { webcam: rel(path(FILES.webcam)) }),
+      ...(has.mic && { mic: rel(path(FILES.mic)) }),
       events: rel(path(FILES.events)),
       markers: rel(path(FILES.markers)),
       screenSize: size,
-      seconds: screen.seconds() ?? now() - screenAt,
+      seconds: paused ? recordedBefore() : (tracks.screen.seconds() ?? now() - segments[0]!.screen.start),
       stopReason: reason,
       warnings: reporter.warnings,
     };
   } catch (error) {
+    capturing = false;
     finish();
     // The tracks that still run finish their files first; the take folder keeps what was recorded.
     await Promise.allSettled(captures.map((capture) => capture.stop()));
     writer.close();
     closeEvents();
-    if (screenStart === undefined) {
+    if (segments.length === 0) {
       removeQuietly(dir); // nothing on screen: no take
       throw error instanceof RecorderError ? error : new RecorderError('capture', `the recording failed: ${message(error)}`, { cause: error });
     }
@@ -335,6 +520,27 @@ async function recordTake({ options, control, platform, area, projectDir, dir, r
   } finally {
     control.onMarker = undefined;
     closeEvents();
+  }
+
+  /**
+   * Joins the segments into the take's own files, lined up (a new take.json says they start
+   * together), marks segments.json joined, and removes the segments' files.
+   */
+  async function joinTake(): Promise<{ webcam: boolean; mic: boolean }> {
+    const has = await joinSegments(dir, segments, { screen: FILES.screen, webcam: FILES.webcam, mic: FILES.mic });
+    const start = segments[0]!.screen.start;
+    writeJson(path(FILES.take), {
+      version: TAKE_VERSION,
+      tracks: {
+        screen: { file: FILES.screen, start },
+        ...(has.webcam && { webcam: { file: FILES.webcam, start } }),
+        ...(has.mic && { mic: { file: FILES.mic, start } }),
+      },
+    } satisfies TakeFile);
+    writeSegments(true);
+    for (const segment of segments) for (const track of ['screen', 'webcam', 'mic'] as const) if (segment[track]) removeQuietly(path(segment[track].file));
+    removeQuietly(path('segments.txt'));
+    return has;
   }
 }
 
@@ -347,15 +553,16 @@ function removeQuietly(path: string): void {
   }
 }
 
-/** Starts the time, file and idle triggers on `timer`, which stops them with the take. `maxSeconds` counts from the screen's start. */
+/** Starts the time, file and idle triggers on `timer`, which stops them with the take. `maxSeconds` counts the take's time (`recorded`), not its pauses. */
 function startTriggers(
   stop: StopOptions,
-  screenAt: number,
+  recorded: () => number,
   control: Control,
   idle: () => boolean,
   timer: (callback: () => void, ms: number, repeat?: boolean) => void,
 ): void {
-  if (stop.maxSeconds !== undefined) timer(() => control.request('max-seconds'), Math.max(0, (screenAt + stop.maxSeconds - now()) * 1000));
+  const max = stop.maxSeconds;
+  if (max !== undefined) timer(() => recorded() >= max && control.request('max-seconds'), MAX_POLL_MS, true);
   if (stop.untilFile !== undefined) {
     const file = resolve(stop.untilFile);
     timer(() => existsSync(file) && control.request('file'), FILE_POLL_MS, true);

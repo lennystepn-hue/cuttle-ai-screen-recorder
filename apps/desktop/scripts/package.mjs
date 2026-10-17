@@ -1,7 +1,9 @@
 // Packages the built app (apps/desktop/dist, from app:build:js) as an unpacked app folder in
 // apps/desktop/build/Cuttle-<platform>-<arch>/: no installer, no signing. The native modules the
 // recorder loads (koffi and uiohook-napi, with their prebuilt binaries for this platform) are
-// copied next to the bundle and kept outside the asar archive.
+// copied next to the bundle and kept outside the asar archive. So is the app's own copy of the CLI
+// (apps/cli/dist, from cli:build): the cuttle command the app installs runs it with the app as Node,
+// which cannot load modules from inside the archive. The skill's files go in for the same install.
 import { cpSync, existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { basename, dirname, join } from 'node:path';
@@ -14,7 +16,10 @@ const stage = join(build, 'stage');
 const manifest = JSON.parse(readFileSync(join(desktop, 'package.json'), 'utf8'));
 const NATIVE = ['koffi', 'uiohook-napi'];
 
+const cli = join(desktop, '..', 'cli', 'dist');
+const skill = join(desktop, '..', '..', 'skill', 'cuttle');
 if (!existsSync(join(desktop, 'dist', 'main', 'index.mjs'))) throw new Error('apps/desktop/dist is missing: run "pnpm app:build:js" first');
+if (!existsSync(join(cli, 'cuttle.mjs'))) throw new Error('apps/cli/dist is missing: run "pnpm cli:build" first');
 rmSync(build, { recursive: true, force: true });
 mkdirSync(stage, { recursive: true });
 
@@ -63,6 +68,8 @@ for (const [name, dir] of modules) {
 }
 
 cpSync(join(desktop, 'dist'), join(stage, 'dist'), { recursive: true });
+cpSync(cli, join(stage, 'cli'), { recursive: true });
+cpSync(skill, join(stage, 'skill'), { recursive: true, filter: (source) => source === skill || source.endsWith('.md') });
 cpSync(join(desktop, 'assets'), join(stage, 'assets'), { recursive: true });
 writeFileSync(
   join(stage, 'package.json'),
@@ -92,7 +99,8 @@ const [out] = await packager({
   platform: process.platform,
   arch: process.arch,
   icon: join(desktop, 'assets', process.platform === 'win32' ? 'icon.ico' : 'icon.png'),
-  asar: { unpack: '**/{*.node,*.dll}' },
+  // the CLI and the native modules whole (with their package.json files), so Node resolves them
+  asar: { unpack: '**/{*.node,*.dll}', unpackDir: `{cli,${[...modules.keys()].map((name) => `node_modules/${name}`).join(',')}}` },
   prune: false,
   overwrite: true,
   quiet: true,

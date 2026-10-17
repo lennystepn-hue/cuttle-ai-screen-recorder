@@ -43,6 +43,12 @@ port.on('message', ({ data }) => {
     case 'marker':
       recording?.marker(data.label);
       return;
+    case 'pause':
+      recording?.pause();
+      return;
+    case 'resume':
+      recording?.resume();
+      return;
     case 'dead-zones':
       recording?.setDeadZones(data.zones);
       return;

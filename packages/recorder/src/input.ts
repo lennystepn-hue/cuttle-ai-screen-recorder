@@ -16,7 +16,7 @@ export type HotkeySink = (action: HotkeyAction) => void;
 const now = () => Date.now() / 1000;
 
 /** Ctrl+Shift+Alt+<key>: no app binds these, and AltGr+Shift+letter types nothing on common layouts. */
-export const HOTKEYS: Record<HotkeyAction, string> = { stop: 'Ctrl+Shift+Alt+S', marker: 'Ctrl+Shift+Alt+M' };
+export const HOTKEYS: Record<HotkeyAction, string> = { stop: 'Ctrl+Shift+Alt+S', marker: 'Ctrl+Shift+Alt+M', pause: 'Ctrl+Shift+Alt+P' };
 
 export interface KeyEvent {
   keycode: number;
@@ -73,7 +73,7 @@ async function startWindowsInput(onInput: InputSink, onHotkey: HotkeySink): Prom
     UiohookKey.Ctrl, UiohookKey.CtrlRight, UiohookKey.Shift, UiohookKey.ShiftRight,
     UiohookKey.Alt, UiohookKey.AltRight, UiohookKey.Meta, UiohookKey.MetaRight,
   ]);
-  const keys = keyHandler(modifiers, new Map<number, HotkeyAction>([[UiohookKey.S, 'stop'], [UiohookKey.M, 'marker']]), onInput, onHotkey);
+  const keys = keyHandler(modifiers, new Map<number, HotkeyAction>([[UiohookKey.S, 'stop'], [UiohookKey.M, 'marker'], [UiohookKey.P, 'pause']]), onInput, onHotkey);
   const buttons = new Map<unknown, 'left' | 'right' | 'middle'>([[1, 'left'], [2, 'right'], [3, 'middle']]);
   let shape = win.cursorShape(); // before the hook starts: nothing to undo if it throws
 

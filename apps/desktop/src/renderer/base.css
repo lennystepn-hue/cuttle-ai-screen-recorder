@@ -49,9 +49,9 @@ button:disabled {
   outline: none;
 }
 
+/* the ring keeps each control's own shape, with a gap so it shows on the accent too */
 :focus-visible {
   box-shadow: var(--focus);
-  border-radius: var(--radius-s);
 }
 
 input,

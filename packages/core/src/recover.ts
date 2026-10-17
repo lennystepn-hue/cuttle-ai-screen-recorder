@@ -1,7 +1,8 @@
 import { existsSync } from 'node:fs';
-import { readFile, writeFile } from 'node:fs/promises';
+import { readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { isAbsolute, join, relative, resolve, sep } from 'node:path';
-import { MARKERS_VERSION, TAKE_VERSION, parseEventsJsonl, parseMarkersJson, parseTakeJson, type TakeFile } from '@cuttle/project';
+import { MARKERS_VERSION, TAKE_VERSION, parseEventsJsonl, parseMarkersJson, parseSegmentsJson, parseTakeJson, type Segment, type TakeFile } from '@cuttle/project';
+import { joinSegments } from '@cuttle/recorder';
 import { CoreError } from './errors';
 import { backupFile, newProjectFile, projectExists, readProjectFile, writeProjectFile } from './project-file';
 import { streamSeconds } from './suggest/media';
@@ -20,7 +21,7 @@ export interface RecoverResult {
   backup?: string;
 }
 
-const FILES = { screen: 'screen.mp4', webcam: 'webcam.mp4', mic: 'mic.m4a', events: 'events.jsonl', markers: 'markers.json', take: 'take.json' };
+const FILES = { screen: 'screen.mp4', webcam: 'webcam.mp4', mic: 'mic.m4a', events: 'events.jsonl', markers: 'markers.json', take: 'take.json', segments: 'segments.json' };
 
 /**
  * Recovers a take (a folder relative to the project, e.g. takes/3): makes it usable after
@@ -40,6 +41,7 @@ export async function recoverTake(projectDir: string, takeDir: string): Promise<
   const source = (name: string) => `${rel.split(sep).join('/')}/${name}`;
   const repaired: string[] = [];
 
+  await joinPaused(dir, repaired);
   const seconds = await streamSeconds(path(FILES.screen), 'v');
   if (seconds <= 0) throw new CoreError('invalid-media', `${path(FILES.screen)} is missing or has no readable video; nothing to recover`);
   const webcam = existsSync(path(FILES.webcam)) && (await streamSeconds(path(FILES.webcam), 'v')) > 0;
@@ -126,6 +128,53 @@ export async function recoverTake(projectDir: string, takeDir: string): Promise<
     ...(backup && { backup }),
   };
   return result;
+}
+
+/**
+ * A take that was paused and never joined (the recorder ended during it): its segments are joined
+ * from segments.json as the recorder would have, lined up by their stamps. A segment without
+ * readable video is left out, a track without readable media is left out of its segment, and the
+ * last segment's length is measured (it was still recording).
+ */
+async function joinPaused(dir: string, repaired: string[]): Promise<void> {
+  const manifest = join(dir, FILES.segments);
+  const parsed = existsSync(manifest) ? parseSegmentsJson(await readFile(manifest, 'utf8')) : undefined;
+  if (!parsed?.ok || parsed.segments.joined) return;
+  const segments: Segment[] = [];
+  for (const [index, segment] of parsed.segments.segments.entries()) {
+    const seconds = await streamSeconds(join(dir, segment.screen.file), 'v');
+    if (seconds <= 0) {
+      repaired.push(`left out segment ${index + 1} of the paused take: ${segment.screen.file} has no readable video`);
+      continue;
+    }
+    const kept: Segment = { ...segment, duration: segment.duration ?? seconds };
+    for (const [track, stream] of [['webcam', 'v'], ['mic', 'a']] as const) {
+      const entry = kept[track];
+      if (entry && (await streamSeconds(join(dir, entry.file), stream)) <= 0) {
+        delete kept[track];
+        repaired.push(`left out ${entry.file}: it has nothing readable`);
+      }
+    }
+    segments.push(kept);
+  }
+  if (segments.length === 0) return;
+  const has = await joinSegments(dir, segments, { screen: FILES.screen, webcam: FILES.webcam, mic: FILES.mic });
+  const start = segments[0]!.screen.start;
+  const take: TakeFile = {
+    version: TAKE_VERSION,
+    tracks: {
+      screen: { file: FILES.screen, start },
+      ...(has.webcam && { webcam: { file: FILES.webcam, start } }),
+      ...(has.mic && { mic: { file: FILES.mic, start } }),
+    },
+  };
+  await writeFile(join(dir, FILES.take), `${JSON.stringify(take, null, 2)}\n`);
+  await writeFile(manifest, `${JSON.stringify({ ...parsed.segments, segments, joined: true }, null, 2)}\n`);
+  // the pieces, also those a resume started but the manifest never listed (a crash): their files go;
+  // one that cannot be removed now (held) is left, the take is joined all the same
+  const pieces = (await readdir(dir).catch(() => [] as string[])).filter((name) => /^(screen|webcam|mic)\.\d+\.(mp4|m4a)$/.test(name));
+  for (const name of [...pieces, 'segments.txt']) await rm(join(dir, name), { force: true }).catch(() => {});
+  repaired.push(`joined the ${segments.length} segments of the paused take`);
 }
 
 /** The track start times in a take.json that fails the schema but is still JSON. */

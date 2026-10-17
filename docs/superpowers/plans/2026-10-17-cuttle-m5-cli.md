@@ -3950,4 +3950,82 @@ Expected: `git status` prints nothing, then `no temp folders left`.
 
 ## Changes during execution
 
-(Filled in after the plan has been executed.)
+The code blocks above are the original plan. Its tasks were executed by replaying the plan
+mechanically (twice, on fresh clones; byte-identical to the prototype) and bringing those commits
+in; two code reviews (tasks 1–4 and 5–8) and a re-review of their fixes then found the defects
+below. The repo is the source of truth. The CLI has 25 tests in Node (plus the 4 Electron checks)
+instead of 20; the full `pnpm test` passes 354 tests in 40 files (5 skipped: the real-capture test
+and the Electron checks).
+
+- **`--json` (Task 5, both reviews):** commander's own usage errors (`--json nonsense`,
+  `--json record --monitor x`) left stdout empty. With `--json` before a `--`, they now also print
+  `{ "error": { "code": "usage", … } }`; commander's explanation stays on stderr. No command at
+  all says so (`no command given`), and `--help` and `--version` answer as `{ "help": … }` and
+  `{ "version": … }` (re-review). Electron's progress lines are left out with `--json` (`quiet` in
+  the request). An internal error keeps its stack out of the JSON (stderr only).
+- **Backups (Tasks 2, 5):** the single `cuttle.json.bak` was overwritten by the next command, so
+  `record` → `suggest` lost a hand-made edit from both files. `backupFile` keeps `.bak` and up to
+  four older versions (`.bak.1` … `.bak.4`), skips a backup identical to the newest one, and is
+  used before a command replaces scenes or overlays in cuttle.json and before `recover` rewrites a
+  take file. Writing cuttle.json retries a file that OneDrive or a scanner holds for a moment and
+  removes its temp file on failure.
+- **`recover` (Task 5):**
+  - It reads cuttle.json first: a broken project stops it before the take changes.
+  - For the take the project already uses, `sources` change and the scenes, zooms, masks and texts
+    stay; a clip over the whole take is added only when there are no scenes (`useTake(…,
+    keepEdit)`, `keptEdit` in the result).
+  - A take.json that fails the schema (an unknown key, a newer version) is backed up, and its
+    readable start times are kept (they sync webcam and mic and place Claude's markers). Without the
+    screen's start, every track starts at 0 (re-review: a readable webcam start next to a screen at
+    0 put the webcam 1.8·10⁹ s off).
+- **`suggest` (Tasks 3, 5):**
+  - Still and card scenes (a `capture-page --add`, a card) keep their place: those before the
+    first clip (a title card) stay in front, the others after the clips; masks and texts stay as
+    before.
+  - Waiting after Claude's answer is sped up too: a wait around the answer becomes two speed-ups,
+    with the answer at 1× between them.
+  - The zoom's 75 % area check runs after the rect is fitted to the screen's aspect, as the
+    timeline shows it (a tall, narrow change grew to a 1.0× "zoom").
+  - Sources are resolved (absolute paths work); an unreadable events.jsonl and a `--claude` run
+    that finds no markers (or a take.json without a start time) are reported as notes.
+- **`record` (Task 5):** a Ctrl+C while the devices are listed or the project is read is no longer
+  lost (exit 130 before the recorder starts, or a stop right after it starts). `--region` is
+  variadic, because PowerShell passes `0,0,640,360` as four arguments. `--draw-mouse` sets
+  `look.cursor.enabled` to `false` (the spec's warning about two cursors); a later take without
+  it warns while the cursor is still off (re-review).
+- **`capture-page` (Task 4):**
+  - Ctrl+C cancels it (exit 130, no PNG, no scene); the command checks the signal before it adds
+    the scene. Checked with a real console Ctrl+C: exit 130 after 1.06 s.
+  - `--scroll` no longer resizes the viewport to the page's height, which stretched sections sized
+    in `vh`: the viewport keeps its height, `Page.getLayoutMetrics` gives the content height and
+    `captureBeyondViewport` takes the rest (works offscreen; the Electron check has a 100vh page,
+    and the treg page still comes out 1920×2039 with its map). The re-review found that a viewport
+    of fixed height never scrolls, so sections revealed on scroll (IntersectionObserver) and lazy
+    images stayed blank: the page is now scrolled through a viewport at a time (150 ms each), back
+    to the top, and measured again before the capture. The check's page has such a section (it
+    stays white without the scrolling).
+  - Pages load in an in-memory session that refuses every permission and every download.
+  - One deadline (the wait plus 20 s) covers everything after loading; `--width` and `--height`
+    take 1 to 16384.
+- **`preview` (Tasks 1, 4):** stills are written into a work folder inside the output folder and
+  moved there only when every one is done, so a cancelled or failed run adds nothing (checked
+  with a real Ctrl+C after 6 of 12 stills). In the default `preview/` folder, stills of earlier
+  runs (`NN-<t>s.png`, `sheet.png`) and work folders of killed runs (their process is gone) are
+  removed first (`clean`). A work folder that cannot be removed no longer replaces the result or
+  the error, and the moves retry a locked file (re-review).
+- **Electron runner (Task 4):** a Ctrl+C before Electron started (or while it downloads) is not
+  lost; Electron cancels its job when the CLI's IPC channel disconnects (a killed CLI on macOS and
+  Linux, where no job object takes Electron along).
+- **`streamSeconds` (Task 3):** a missing ffmpeg is reported as `ffmpeg-missing` (exit 2), not as
+  an unreadable screen track.
+- **Tests:** usage errors, `--help` and `--version` with `--json`, a region split at its commas
+  with `--draw-mouse`, Ctrl+C in-process (SIGBREAK, handlers removed), rotating backups and kept
+  title and end cards, recover keeping
+  the edit, a broken take.json with its start time, a broken cuttle.json that leaves the take
+  alone, the outside-the-project error code, a speed-up after the answer, a tall narrow zoom. The
+  Electron check's comment on crossfades was wrong (a crossfade does not shorten the video).
+- **Docs:** the spec's CLI section names the backups, what `suggest` keeps, `recover` relative to
+  the project and its kept edit, `out/export.mp4` without `--format`, the capture session and
+  `vh`; the skill's step 2 uses a short test take (a preview needs scenes). The decisions above
+  that describe a single `.bak`, `recover` dropping the edit and take.json starts at 0 are
+  superseded by these entries.

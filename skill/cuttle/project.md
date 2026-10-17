@@ -28,7 +28,8 @@ errors, and every command names the path of a problem, counting from 0
     "screen": "takes/1/screen.mp4",
     "mic": "takes/1/mic.m4a",
     "events": "takes/1/events.jsonl",
-    "markers": "takes/1/markers.json"
+    "markers": "takes/1/markers.json",
+    "transcript": "takes/1/transcript.json"
   },
   "look": {
     "background": { "preset": "sunset-sky" },
@@ -54,7 +55,10 @@ errors, and every command names the path of a problem, counting from 0
 `cuttle render --format` overrides the size: `16:9` is 1920×1080, `1:1` is 1080×1080, `9:16` is
 1080×1920.
 
-`sources`: paths relative to the project folder. `cuttle record` sets them.
+`sources`: paths relative to the project folder. `cuttle record` sets them; `transcript` is set
+once the mic was transcribed (`cuttle transcribe`, or `suggest` with a speech model). Never edit
+transcript.json: `{ "language", "model", "words": [{ "t", "end", "text" }], "sounds": [{ "t", "end" }] }`,
+in source seconds; `sounds` are stretches the mic heard without a word (a cough, a dropped filler).
 
 `look` (every field is optional):
 
@@ -100,7 +104,8 @@ title bar; `bottom` keeps the title visible. Texts fade in and out over 0.25 out
 
 `cuts` take a stretch out of whatever clip covers it, without splitting the clip: `from` and `to`
 (source seconds) and `enabled` (`true`). The video jumps there (no crossfade); zooms, masks and
-texts run on across it. Use them for a slip, a filler or a pause inside a clip.
+texts run on across it. Use them for a slip, a filler or a pause inside a clip; `suggest` makes
+them for filler words ("Filler: äh") and pauses ("Pause: 2.4 s") from the transcript.
 
 Every scene, zoom, mask, text and cut may have an `id` (1 to 64 letters, digits, `-` or `_`,
 unique in the whole project) and a `label` (a name for people, shown in the Cuttle app). `suggest`

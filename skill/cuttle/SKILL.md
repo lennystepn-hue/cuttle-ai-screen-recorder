@@ -37,6 +37,9 @@ permission, 3 render, 130 cancelled.
   X takes H.264 up to 1920×1200; keep demos under 60 s. A 16:9 screen fills only about a third
   of a 9:16 video: for 9:16 record a narrow window or region, or plan tight zooms.
 - Webcam and mic only when asked (`--webcam`, `--mic`). A muted mic is reported as a warning.
+  When the user will speak, Cuttle transcribes the mic on this computer and cuts filler words and
+  pauses. That needs a speech model: `cuttle --json models` lists them. If none is downloaded, ask
+  the user before `cuttle models download small` (488 MB, once).
 - Ask the user to make text large (terminal font 16 px or more, or zoom the browser), to close
   private windows and notifications, and to use a clean folder or browser profile.
 - The project folder: a new one per demo (`record` creates it).
@@ -109,6 +112,13 @@ unused id and a label (project.md).
 For a take recorded without `--until-claude`, add `--claude "<demo folder>"` to read the markers
 from Claude Code's transcript.
 
+**Speech.** With a mic, `suggest` keeps the stretches where someone speaks (never cut or sped up),
+and when a speech model is downloaded it first transcribes the mic into `takes/<n>/transcript.json`
+(every word with its source seconds; read it to find what was said where). It then cuts filler
+words ("äh", "um") and pauses longer than a second down to 0.4 s, only where the picture rests
+(cuts tagged `filler` and `pause`). `--no-speech` leaves the speech out.
+`cuttle -C "<project>" --json transcribe --language de` transcribes again (`--model` picks one).
+
 `preview` writes 12 stills and `preview/sheet.png`. **Look at the sheet** (Read the PNG). Each
 still in the JSON has its output second `t` and the `source` second it shows. For details, run
 `cuttle -C "<project>" --json preview --at 3.5 --at 12` (output seconds). Each run replaces the
@@ -165,6 +175,10 @@ wants. Tell the user the file's path and length. Do not upload it anywhere.
 - A crash or a killed recording: `cuttle -C "<project>" --json recover takes/<n>` makes the take
   usable.
 - `suggest` found no Claude markers: pass `--claude "<demo folder>"`.
+- `model-missing` (or the note "the mic was not transcribed"): no speech model is downloaded; ask
+  the user before `cuttle models download small`.
+- `ffmpeg-old`: this ffmpeg cannot transcribe (before 8.0). Ask the user to run
+  `winget upgrade Gyan.FFmpeg` (macOS: `brew upgrade ffmpeg`).
 - `frame` says no frame starts at that second: the take ends there; take an earlier second.
 - A render fails with `render`: try `--encoder software`.
 - `conflict`: `cuttle.json` was saved by someone else (the user, or the Cuttle app) while the

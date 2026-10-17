@@ -1,6 +1,6 @@
 # Cuttle phase 5, part 1: Motion (design)
 
-Status: draft for the user's review. Roadmap: `2026-10-17-cuttle-roadmap-p4-p6.md` (Phase 5,
+Status: agreed with the user on 2026-10-17 (see "Decided with the user"). Roadmap: `2026-10-17-cuttle-roadmap-p4-p6.md` (Phase 5,
 Motion). Spike: `docs/superpowers/spikes/2026-10-17-p5-virtual-clock.md`.
 
 ## The idea
@@ -62,6 +62,25 @@ A motion page is an HTML file in the project (`motion/<name>/index.html`) with
   loaded. Cuttle also waits for `document.fonts.ready` by itself.
 - **Transitions.** `cuttle.from` and `cuttle.to` are the outgoing and the incoming frame
   (`ImageBitmap`s at the output size), and `cuttle.progress` runs from 0 to 1.
+
+## Sound
+
+Motion pages are silent on their own; sound comes in two ways that the export mixes like the
+mic and the typing sounds (and the preview plays on its AudioContext):
+
+- **`sounds` in `cuttle.json`:** `{ "id": "a1", "sound": "whoosh", "at": 4.2, "volume": 0.8 }`, at a
+  source second (it moves with its clip, and is cut with it).
+  - `sound` is a built-in sound, or a file in the project (`sounds/ding.wav`; WAV, MP3, M4A).
+  - Claude adds them with `cuttle sound add <sound or file> --at <seconds> [--volume]` and lists the
+    built-ins with `cuttle sound list`.
+- **Cues from a page:** `cuttle.sound('pop', { at: 0.4, volume: 0.6 })`, at the page's own time.
+  The renderer collects them while it draws, and they play where the page shows (a ping for each
+  callout, a whoosh with a transition).
+- **The built-in sounds** are synthesized, as the typing sounds are: nothing to download or
+  license. They are whoosh, swoosh-in, pop, click, tick, ding, chime, success, error, swell, riser,
+  impact and type-burst. Each has a few seeded variants, so a row of pops does not repeat.
+- **Levels:** the mix keeps the mic's level (`amix` without normalizing), as the typing sounds do.
+  `look.audio.effects` (on) and `effectsVolume` switch and scale them all.
 
 ## Rendering
 
@@ -169,11 +188,25 @@ P5-M1 ships the ones that show the contract; P5-M2 adds the brand kit's set.
 After them, the roadmap goes on: P5-M2 (templates and the brand kit, more backgrounds and device
 frames), P5-M3 (script and teleprompter) and so on.
 
-## Decisions for the user
+## Decided with the user (2026-10-17)
 
-1. **Downloads for the kit.** Bundling Three.js, lottie-web and JetBrains Mono means downloading
-   them as dependencies (npm, about 2 MB). They are MIT and OFL licensed. Is that all right?
-2. **GSAP** is left out (see the kit). Pages can still use it from the project.
-3. **Preview from the renderer** rather than a live iframe: a little slower on the first play of
-   an item, but the editor and the export always match. (A live iframe is faster but would differ
-   for transitions and with masks over overlays.)
+- **Freedom:** Claude may put anything into a video that a browser can draw, inside the safety
+  rules above.
+- **Downloads:** the kit's dependencies may be downloaded: Three.js, lottie-web and JetBrains Mono
+  ("hole alles was du brauchst").
+- **Sound:** Claude adds sound through the CLI (`cuttle sound add`) and from pages
+  (`cuttle.sound`).
+- **GSAP** stays out of the kit (its license limits redistribution); a page may still load it from
+  the project.
+- **The preview** draws with the export's renderer, not a live iframe, so the editor and the export
+  always match.
+
+## Milestones, with sound
+
+Sound goes into P5-M1b:
+- `sounds` and the built-ins;
+- `cuttle sound add` and `cuttle sound list`;
+- `cuttle.sound` cues;
+- the mix in the export and the preview.
+
+The editor shows the sounds on the mic lane and lists them in the inspector in P5-M1c.

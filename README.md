@@ -46,8 +46,9 @@ recorder tests also need ffprobe. Recording works on Windows so far; the recorde
 ```bash
 pnpm app                                 # build and start the app (the pill near the top of the screen, an icon in the tray)
 pnpm app -- --open <project folder>      # … and open a project in the editor
-pnpm app:check                           # end to end with its windows hidden: open, play, scrub, compare with the export, play the proxy, export, edit, record
-pnpm app:build                           # an unpacked app in apps/desktop/build/Cuttle-<platform>-<arch>/, checked that it starts
+pnpm app -- --settings                   # … and show the settings
+pnpm app:check                           # end to end with its windows hidden: open, play, scrub, compare with the export, play the proxy, export, edit, record, pause, the first run
+pnpm app:build                           # an unpacked app in apps/desktop/build/Cuttle-<platform>-<arch>/ with its own CLI, checked that it starts
 ```
 
 The editor shows exactly what the export renders: the same engine and timeline, compared pixel for
@@ -69,9 +70,19 @@ that is open in the app ("Record again" records it there).
 display: the window under the pointer lights up (the display where there is none), a drag draws a
 region, and the bar sets the camera, the mic and when to stop (your stop, Claude's answer, an idle
 screen). After the countdown only a small HUD remains, which never appears in the video;
-Ctrl+Shift+Alt+S stops and Ctrl+Shift+Alt+M sets a marker. The editor opens on the take at once
-while `suggest` cuts it in the background. "Record again" adds a take to the project; the earlier
-one stays restorable ("Back to take 1"). New projects go into `~/Cuttle/<date time>`.
+Ctrl+Shift+Alt+S stops and Ctrl+Shift+Alt+M sets a marker. Pause (the HUD, or Ctrl+Shift+Alt+P)
+records nothing until you resume; the pieces are joined at the stop. Restart is a held press: the
+take is put aside, the countdown starts again, and the editor offers "Undo restart". The editor
+opens on the take at once while `suggest` cuts it in the background. "Record again" adds a take to
+the project; the earlier one stays restorable ("Back to take 1"). New projects go into
+`~/Cuttle/<date time>`.
+
+**First run and settings.** The first start looks for ffmpeg where Windows has it now (also right
+after `winget install Gyan.FFmpeg`: "Check again", no restart) and installs, on request, the
+`cuttle` command (the app's own copy of the CLI, run by the app itself, in
+`%LOCALAPPDATA%\Cuttle\bin`, which goes on your PATH) and the Claude skill. The settings (the tray,
+the pill's menu, Ctrl+, in the editor) hold the projects folder, the countdown, the default camera
+and mic, starting at sign-in, motion, and the recent projects (open, rename, show, remove).
 
 ## The CLI
 

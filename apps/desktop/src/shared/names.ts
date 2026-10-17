@@ -33,5 +33,5 @@ export const MOTION_NAMES: Names<typeof STILL_MOTIONS> = { none: 'None', kenburn
 export const EASE_NAMES: Names<typeof EASES> = { smooth: 'Smooth', linear: 'Linear' };
 export const MASK_STYLE_NAMES: Names<typeof MASK_STYLES> = { fill: 'Fill', blur: 'Blur' };
 export const CLICK_NAMES: Names<typeof CLICK_EFFECTS> = { ripple: 'Ripple', none: 'None' };
-export const WEBCAM_SHAPE_NAMES: Names<typeof WEBCAM_SHAPES> = { circle: 'Circle', rounded: 'Rounded square' };
+export const WEBCAM_SHAPE_NAMES: Names<typeof WEBCAM_SHAPES> = { circle: 'Circle', rounded: 'Rounded', squircle: 'Squircle', square: 'Square' };
 export const CORNER_NAMES: Names<typeof WEBCAM_CORNERS> = { 'top-left': 'Top left', 'top-right': 'Top right', 'bottom-left': 'Bottom left', 'bottom-right': 'Bottom right' };

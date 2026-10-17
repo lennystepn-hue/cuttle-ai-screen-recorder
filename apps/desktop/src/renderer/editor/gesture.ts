@@ -1,7 +1,7 @@
-// The gesture under way: a drag on the timeline or in the source view. Esc, playing, or its view
-// going away ends it without an edit (its preview goes too).
+// The gesture under way: a drag on the timeline, in the source view or on the video (the webcam
+// bubble). Esc, playing, or its view going away ends it without an edit (its preview goes too).
 
-type Owner = 'timeline' | 'source';
+type Owner = 'timeline' | 'source' | 'stage';
 
 let current: { cancel: () => void; owner: Owner } | undefined;
 

@@ -158,6 +158,9 @@ export const PRIVACY_WORDS_MAX = 50;
 /** How motion is set: the OS's "reduce motion", or always on, or always off. */
 export const MOTIONS = ['system', 'reduce', 'full'] as const;
 export type Motion = (typeof MOTIONS)[number];
+/** The settings window's pages, in its sidebar's order. */
+export const SETTINGS_PAGES = ['recording', 'speech', 'privacy', 'claude', 'projects', 'general'] as const;
+export type SettingsPage = (typeof SETTINGS_PAGES)[number];
 
 /** What the settings window shows. */
 export interface SettingsView {
@@ -252,8 +255,8 @@ export const REQUESTS = {
   'project:closed': z.undefined(),
   /** Brings back the take a restart put aside (its folder inside `takes/.discarded`), as the project's take. */
   'project:undo-restart': z.string().min(1).max(4096),
-  /** Opens the settings window. */
-  'app:settings': z.undefined(),
+  /** Opens the settings window, at one of its pages (or where it was). */
+  'app:settings': z.enum(SETTINGS_PAGES).optional(),
   // settings and the first run
   'settings:get': z.undefined(),
   'settings:set': z.strictObject({
@@ -410,6 +413,8 @@ export interface Events {
   /** A note for the editor's person once the take is in, said there (an undone restart). */
   'project:note': { text: string };
   'settings:changed': SettingsView;
+  /** The settings window, already open, is asked to show this page. */
+  'settings:page': SettingsPage;
   /** The speech models changed, or a download moved on. */
   'speech:status': SpeechStatus;
   /** Every window: how motion is set now (`data-motion` on the page's root). */

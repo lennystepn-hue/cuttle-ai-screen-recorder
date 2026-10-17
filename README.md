@@ -71,7 +71,7 @@ pnpm app -- --open <project folder>      # … and open a project in the editor
 pnpm app -- --settings                   # … and show the settings
 pnpm app:check                           # end to end with its windows hidden: open, play, scrub, compare with the export, play the proxy, export, edit, record, pause, the first run
 pnpm app:build                           # an unpacked app in apps/desktop/build/Cuttle-<platform>-<arch>/ (Cuttle.exe, or Cuttle.app on macOS) with its own CLI, checked that it starts
-pnpm icons:mac                           # macOS only: draw icon.icns, the Dock icon and the menu bar's template icon into apps/desktop/assets/
+pnpm icons                               # draw both platforms' icons and the app's mark (tools/icons.mjs; the icns on macOS only)
 ```
 
 **Signing on macOS.** `pnpm app:build` signs Cuttle.app when `CUTTLE_SIGN_IDENTITY` names an
@@ -86,8 +86,10 @@ and zips the app (`apps/desktop/build/Cuttle-<version>-mac-<arch>.zip`). It also
 CUTTLE_SIGN_IDENTITY="Developer ID Application: Your Name (TEAMID)" CUTTLE_NOTARIZE_PROFILE=cuttle pnpm app:build
 ```
 
-The Windows icons (icon.ico, tray.png) come from `node tools/desktop-icons.mjs`; the macOS ones from
-`tools/mac-icons.mjs`, the same mark grown into a cuttlefish on a macOS squircle.
+The icons are one design for both platforms (`tools/icons.mjs`): the brand's arrow grown into a
+cuttlefish on the orange tile, a full tile for Windows (icon.ico, tray.png) and a squircle with a
+glass highlight for macOS (icon.icns, the Dock icon, the menu bar's template icon), a plain
+silhouette at 32 px and below, and the same silhouette as the app's own mark (`renderer/mark.ts`).
 
 The editor shows exactly what the export renders: the same engine and timeline, compared pixel for
 pixel by `app:check`. It plays a 720p proxy of the take (made in the background into the project's

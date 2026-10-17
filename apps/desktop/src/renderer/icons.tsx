@@ -1,5 +1,6 @@
 // Cuttle's icon set: 16 px, 1.6 px strokes, drawn for Cuttle.
 import type { ReactElement, SVGProps } from 'react';
+import { MARK_EYE, MARK_PATH, MARK_VIEW_BOX } from './mark';
 
 type IconProps = { size?: number } & Omit<SVGProps<SVGSVGElement>, 'children'>;
 
@@ -88,13 +89,25 @@ export const MicIcon = icon(
 export const WarningIcon = icon(<path d="M8 2.5 14 13H2zM8 6.5v3M8 11.2v.1" />);
 export const RecordIcon = icon(<circle cx="8" cy="8" r="5" />, true);
 export const ChevronIcon = icon(<path d="m4.5 6 3.5 3.5L11.5 6" />);
+// the look's parts
+export const BackgroundIcon = icon(<path d="M2.5 3.5h11v9h-11zM2.5 10l3.2-3 2.6 2.4L10.5 7.5l3 2.8" />);
+export const WindowIcon = icon(<path d="M2 3.5h12v9H2zM2 6h12M3.8 4.8h.1M5.3 4.8h.1" />);
+export const CameraIcon = icon(<path d="M8 8.2a2.3 2.3 0 1 0 0-4.6 2.3 2.3 0 0 0 0 4.6zM3.6 13.5c.6-2.3 2.3-3.5 4.4-3.5s3.8 1.2 4.4 3.5" />);
+export const SubtitlesIcon = icon(<path d="M2 3.5h12v9H2zM4.5 10h3M9 10h2.5M4.5 7.5h7" />);
+export const TerminalIcon = icon(<path d="M2 3h12v10H2zM4.5 6.5 6.5 8l-2 1.5M8 10h3" />);
+export const GearIcon = icon(
+  <path d="M8 10a2 2 0 1 0 0-4 2 2 0 0 0 0 4zM8 1.8v1.6M8 12.6v1.6M3.6 3.6l1.1 1.1M11.3 11.3l1.1 1.1M1.8 8h1.6M12.6 8h1.6M3.6 12.4l1.1-1.1M11.3 4.7l1.1-1.1" />,
+);
+export const SoundIcon = icon(<path d="M2.5 6v4h2.5L8.5 13V3L5 6zM11 5.5a3.5 3.5 0 0 1 0 5M12.8 3.8a6 6 0 0 1 0 8.4" />);
 
 /** Cuttle's mark: an orange tile with a dark arrow. */
+/** Cuttle's mark: the cuttlefish of its icons (tools/icons.mjs) on the brand's orange tile. */
 export function Mark({ size = 22 }: { size?: number }) {
   return (
-    <span className="mark" style={{ width: size, height: size, borderRadius: size * 0.32 }} aria-hidden="true">
-      <svg width={size * 0.55} height={size * 0.55} viewBox="0 0 12 12">
-        <path d="M2 2h5l3 4-3 4H2z" fill="#1b0f0a" />
+    <span className="mark" style={{ width: size, height: size, borderRadius: size * 0.3 }} aria-hidden="true">
+      <svg width={size * 0.8} height={size * 0.56} viewBox={MARK_VIEW_BOX}>
+        <path d={MARK_PATH} fill="#1b0f0a" />
+        <circle cx={MARK_EYE.cx} cy={MARK_EYE.cy} r={MARK_EYE.r} fill="#fff1e6" />
       </svg>
     </span>
   );

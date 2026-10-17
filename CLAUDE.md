@@ -35,8 +35,9 @@ Cuttle runs on **Windows and macOS**. A change made on one has to keep working o
 - **Words for people** name both ways: `winget install Gyan.FFmpeg` and `brew install ffmpeg`,
   Windows' Settings and macOS's System Settings (Privacy & Security for the screen, camera,
   microphone and Input Monitoring).
-- **Icons**: Windows' from `tools/desktop-icons.mjs` (icon.ico, tray.png), macOS's from
-  `tools/mac-icons.mjs` (`pnpm icons:mac` on a Mac: icon.icns, icon-mac.png, trayTemplate).
+- **Icons**: one generator for both, `tools/icons.mjs` (`pnpm icons`): Windows' icon.ico, icon.png
+  and tray.png, macOS's icon.icns (packed on a Mac only), icon-mac.png and trayTemplate, and the
+  app's mark (`renderer/mark.ts`). A change to the design is made there, never to one platform's files.
 
 ## Checks
 

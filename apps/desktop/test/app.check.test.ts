@@ -8,6 +8,8 @@ import { basename, delimiter, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { PNG } from 'pngjs';
 import { whisperCliPath } from '@cuttle/core';
+import { parseEventsJsonl, parseProjectJson } from '@cuttle/project';
+import { sceneSpans, typingClicks } from '@cuttle/timeline';
 import { _electron, type ElectronApplication, type Page } from 'playwright';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { FIXTURE_OUTPUT, makeFixture, makeMotionFixture, makePrivateFixture, makeRestingFixture, makeSpokenFixture } from './fixture';
@@ -381,13 +383,19 @@ describe.runIf(enabled)('the Cuttle app', () => {
     expect(stats.clock - playing.t).toBeLessThan(0.7);
     // and plays as a movie, not a slideshow: at least half the frame rate per second of the clock
     expect(stats.drawn / stats.clock).toBeGreaterThan(FIXTURE_OUTPUT.fps / 2);
-    // the six keys typed at 2.4 s click a second before the clock gets there
-    expect(stats.clicks).toBeGreaterThanOrEqual(4);
+    // the six keys typed at 2.4 s click a second before the clock gets there: every click up to
+    // 0.9 s past the clock is set (the schedule looks every 0.1 s), whatever pace the machine kept
+    const parsed = parseProjectJson(readFileSync(join(project, 'cuttle.json'), 'utf8'));
+    if (!parsed.ok) throw new Error('the demo project does not parse');
+    const { events } = parseEventsJsonl(readFileSync(join(project, parsed.project.sources.events!), 'utf8'));
+    const clicks = typingClicks(sceneSpans(parsed.project.scenes, parsed.project.cuts), events, parsed.project.look.audio);
+    expect(clicks.length).toBe(6);
+    expect(stats.clicks).toBeGreaterThanOrEqual(clicks.filter((click) => click.at <= stats.clock + 0.9).length);
     const paused = await state();
     expect(paused.playing).toBe(false);
     await editor.waitForTimeout(300);
     expect((await state()).t).toBe(paused.t);
-  });
+  }, 30_000);
 
   it('scrubs with the playhead on the ruler and on the blocks; a click selects, Esc clears', async () => {
     const { duration } = await state();

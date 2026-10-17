@@ -34,7 +34,7 @@ files, no overlap).
 | M2 | `@cuttle/engine` (WebGL2 compositor + presets) | `2026-10-16-cuttle-m2-engine.md` | Golden-image tests for each preset, frame style, mask style, text style, the badge and all six cursor styles (with click ripple) pass in headless Electron |
 | M3 | `@cuttle/export` (decode → render → encode → mux, audio via ffmpeg) | `2026-10-16-cuttle-m3-export.md` | A 10 s `testsrc` fixture renders to 16:9, 1:1 and 9:16; ffprobe shows the expected duration (±1 frame), size, H.264 and AAC |
 | M4 | `@cuttle/recorder` (devices, ffmpeg backends, events, triggers, markers) | `2026-10-17-cuttle-m4-recorder.md` | The `test` backend records a 3 s take with all tracks; `untilFile` and `untilClaude` (fake transcript) stop it; a manual Windows run records a monitor |
-| M5 | `apps/cli` (`cuttle …`) | write before starting | Every spec command exists with `--json`; snapshot tests pass; the treg demo can be rebuilt from its takes with `cuttle suggest`, a few JSON edits and `cuttle render` |
+| M5 | `apps/cli` (`cuttle …`) | `2026-10-17-cuttle-m5-cli.md` | Every spec command exists with `--json`; snapshot tests pass; the treg demo can be rebuilt from its takes with `cuttle suggest`, a few JSON edits and `cuttle render` |
 | M6 | `skill/` + installer | write before starting | `pnpm skill:install` writes `~/.claude/skills/cuttle/SKILL.md`; a fresh Claude Code session follows it end to end |
 
 ## Shared interfaces (fixed now, used by every milestone)
@@ -144,6 +144,9 @@ export class ExportError extends Error {                     // CLI exit codes: 
   code: 'invalid-project' | 'missing-file' | 'invalid-media' | 'ffmpeg-missing' | 'render' | 'cancelled';
 }                                                            // also refused: an out path that is a project file
 export const EXPORT_FORMATS: Record<'16:9' | '1:1' | '9:16', { width: number; height: number }>; // 1920×1080, 1080×1080, 1080×1920
+export function renderStills(opts: StillsOptions): Promise<StillsResult>; // M5: PNGs of output frames (cuttle preview)
+// StillsOptions: projectDir, format?, times (output seconds), outDir, sheet?: { columns? } (default 4), onProgress?, pageDir?, signal?
+// StillsResult: { stills: { t, file }[]; sheet?: string; width; height; stats: { gpu, totalMs } }; files 01-12.50s.png, sheet.png
 
 // @cuttle/recorder (M4) – Node (plain or Electron's main process); real capture on Windows, backend 'test' everywhere
 export interface RecordOptions {
@@ -187,29 +190,15 @@ export const HOTKEYS: Record<'stop' | 'marker', string>; // Ctrl+Shift+Alt+S, Ct
 - **M3:** done; see "Decisions made while planning" in `2026-10-16-cuttle-m3-export.md`.
 - **M4:** done; see "Decisions made while planning" and "Changes during execution" in
   `2026-10-17-cuttle-m4-recorder.md`.
-- **M5:** commander version; how the CLI starts the bundled Electron for `render`, `preview` and
-  `capture-page`; `pnpm link --global` on Windows. From M3: bundle the Electron entry with Vite like
-  `packages/export/electron/vite.main.config.ts` (`ssr.noExternal: true`, `electron` external) and
-  copy the page build (`vite.page.config.ts`) to `export-page/` next to it, or pass `pageDir`;
-  register a no-op `window-all-closed` (closing the export window must not quit) and an
-  `uncaughtException` handler; drop Chromium switches from `process.argv` (see
-  `packages/export/electron/cli.ts`); map `ExportError.code` to exit codes 1/1/1/2/3/130; `--json`
-  prints `ExportResult`. From the M3 reviews: turn Ctrl+C and a kill (SIGINT, SIGTERM, SIGBREAK)
-  into `ExportOptions.signal` so the export cleans up (Claude Code's Bash tool kills long commands
-  at its timeout: run renders in the background); a packaged Electron keeps Chromium switches in
-  `process.argv` without `process.defaultApp`, so strip them there too; install the
-  `uncaughtException` handler in a tiny bootstrap entry that then imports the CLI, because a
-  failure while the bundle's static imports load would otherwise show Electron's modal dialog;
-  projects with more than ~170 audible clips need ffmpeg 7 or later (the graph goes into a file).
-  Phase 2 note: `loadSources` does not confine paths to the project folder; a shared project could
-  pull in any local file, so the app should ask before opening one. From M4: `record()` runs in
-  plain Node (the CLI does not need Electron for it); in a Vite bundle keep `koffi` and
-  `uiohook-napi` external (native modules) and ship them in `node_modules`. Turn Ctrl+C and a kill
-  into `Recording.stop()` (a stop during the countdown rejects with `cancelled`, exit 130), print
-  `HOTKEYS` when the recording starts, map `RecorderError.code` to exit codes 1/2/2/2/2/130, and
-  print the `Take` for `--json`. A take does not touch `cuttle.json`: the CLI decides whether
-  `cuttle record` points `sources` at the new take (its paths are already relative to the project).
+- **M5:** done; see "Decisions made while planning" in `2026-10-17-cuttle-m5-cli.md`.
 - **M6:** current Claude skill frontmatter (`name`, `description`) and the user-level skill folder.
+  From M5: the skill drives `cuttle … --json` and reads one JSON document per command (exit codes
+  0/1/2/3/130). `cuttle record` blocks until a stop trigger, and Claude cannot press Ctrl+C or the
+  hotkey: start it in the background and stop it with `--until-claude` or `--until-file` (Claude
+  creates the file), with `--max` as a safety net. Run `render` in the background too (Claude
+  Code's Bash tool kills long commands at its timeout). Check the edit with `cuttle preview` and
+  look at `sheet.png`. The skill should check `cuttle --version` and point to `pnpm cli:install`
+  when it is missing; the shims run the repo's build, so the repo must stay where it was built.
 
 ## Lessons from the manual run (carry into M4–M6)
 

@@ -7,11 +7,15 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "engine:electron": "vite build --config packages/engine/electron/vite.config.ts && electron packages/engine/electron/main.mjs",
-    "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.node.json && tsc -p packages/engine/tsconfig.json && tsc -p packages/export/tsconfig.json && tsc -p packages/export/tsconfig.node.json && tsc -p packages/recorder/tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.node.json && tsc -p packages/engine/tsconfig.json && tsc -p packages/export/tsconfig.json && tsc -p packages/export/tsconfig.node.json && tsc -p packages/recorder/tsconfig.json && tsc -p apps/cli/tsconfig.json",
     "export:build": "vite build --config packages/export/electron/vite.main.config.ts && vite build --config packages/export/electron/vite.page.config.ts",
-    "export:run": "pnpm export:build && electron packages/export/dist/cli.mjs",
     "export:check": "pnpm export:build && electron packages/export/dist/check.mjs",
-    "recorder:real": "vitest run --mode real --silent=false packages/recorder/test/real.test.ts"
+    "recorder:real": "vitest run --mode real --silent=false packages/recorder/test/real.test.ts",
+    "cli:build": "vite build --config apps/cli/vite.config.ts && vite build --config packages/export/electron/vite.page.config.ts --outDir ../../../apps/cli/dist/export-page",
+    "cli:install": "pnpm cli:build && node apps/cli/scripts/install.mjs",
+    "cli:uninstall": "node apps/cli/scripts/install.mjs --uninstall",
+    "cli:check": "pnpm cli:build && vitest run --mode cli apps/cli/test/electron.check.test.ts",
+    "cuttle": "node apps/cli/dist/cuttle.mjs"
   },
   "devDependencies": {
     "@types/node": "^22.20.5",

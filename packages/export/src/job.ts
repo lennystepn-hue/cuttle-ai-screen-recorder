@@ -12,6 +12,7 @@ export type ExportErrorCode = 'invalid-project' | 'missing-file' | 'invalid-medi
 
 /** Everything the page needs for one export. Paths are absolute; the page may read only these files. */
 export interface ExportJob {
+  kind: 'video';
   /** Output size already set to the export format. */
   project: CuttleProject;
   screen: string;
@@ -25,6 +26,19 @@ export interface ExportJob {
   backgroundImage?: string;
   encoder: EncoderPreference;
 }
+
+/**
+ * Single frames instead of a video (a preview): PNGs of the output frames at `times` (output seconds),
+ * written through `ExportHost.writeStill` as `still-<n>` in the order of `times`, and with `sheet` one
+ * contact sheet of them (`sheet`), labelled with their times.
+ */
+export interface StillsJob extends Omit<ExportJob, 'kind' | 'encoder'> {
+  kind: 'stills';
+  times: number[];
+  sheet?: { columns: number };
+}
+
+export type PageJob = ExportJob | StillsJob;
 
 export interface PageTimings {
   /** Waiting for decoded frames and still images. */
@@ -55,11 +69,21 @@ export interface PageFailure {
   message: string;
 }
 
-export type PageResult = PageSuccess | PageFailure;
+/** A stills job's result; `width` and `height` are the output size. */
+export interface PageStillsSuccess {
+  ok: true;
+  stills: number;
+  width: number;
+  height: number;
+  gpu: string;
+  totalMs: number;
+}
+
+export type PageResult = PageSuccess | PageStillsSuccess | PageFailure;
 
 /** What the preload script exposes to the page as `window.cuttleHost`. */
 export interface ExportHost {
-  job(): Promise<ExportJob>;
+  job(): Promise<PageJob>;
   size(path: string): Promise<number>;
   /** Bytes `[start, end)` of a job file. */
   read(path: string, start: number, end: number): Promise<Uint8Array>;
@@ -67,6 +91,8 @@ export interface ExportHost {
   /** Writes into the video-only output file at a byte position. */
   write(data: Uint8Array, position: number): Promise<void>;
   progress(done: number, total: number): void;
+  /** Writes a PNG of a stills job: `still-<n>` (0-based, in the order of `times`) or `sheet`. */
+  writeStill(name: string, data: Uint8Array): Promise<void>;
 }
 
 /** IPC channel names; keep electron/export-page/preload.cjs in sync. */
@@ -77,4 +103,5 @@ export const CHANNELS = {
   readFile: 'cuttle-export:read-file',
   write: 'cuttle-export:write',
   progress: 'cuttle-export:progress',
+  writeStill: 'cuttle-export:write-still',
 } as const;

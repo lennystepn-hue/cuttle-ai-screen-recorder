@@ -3,3 +3,4 @@ export { exportProject, type ExportOptions, type ExportResult, type ExportStats 
 export { ExportError } from './errors';
 export { EXPORT_FORMATS, isExportFormat, type ExportFormat } from './formats';
 export type { EncoderPreference, ExportErrorCode } from './job';
+export { renderStills, stillName, type StillsOptions, type StillsResult } from './main/stills';

@@ -3,6 +3,6 @@
   "compilerOptions": {
     "types": ["node"]
   },
-  // Electron main process and its tests, the dev CLI, the end-to-end check, the fixture builder and the bundle configs.
+  // Electron main process and its tests, the end-to-end check, the fixture builder and the bundle configs.
   "include": ["src/index.ts", "src/main", "test/main", "test/fixture.ts", "electron/*.ts"]
 }

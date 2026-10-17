@@ -1,0 +1,8 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "types": ["node"]
+  },
+  // The Node CLI, the Electron entry for render, preview and capture-page, their tests, the build and install scripts.
+  "include": ["src", "test", "scripts", "vite.config.ts"]
+}

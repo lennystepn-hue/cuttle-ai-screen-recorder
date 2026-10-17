@@ -16,6 +16,7 @@ Status: phase 1 in progress. Spec: `docs/superpowers/specs/2026-10-16-cuttle-des
 | `@cuttle/engine` | WebGL2 compositor: backgrounds, window frames, zoom, masks, cursors, webcam, texts, stills, cards, crossfades |
 | `@cuttle/export` | MP4 export in a hidden Electron window: decode, render, encode H.264, mux; mic cut to the scenes with ffmpeg (AAC) |
 | `@cuttle/recorder` | Records a take on Windows: a monitor, region or window (ddagrab), webcam and mic (DirectShow), input events, markers; stops by hotkey, time, a file, an idle screen or the end of a Claude Code turn |
+| `apps/cli` | The `cuttle` command: init, devices, record, suggest, preview, capture-page, render, recover; `--json` for Claude |
 
 ## Development
 
@@ -27,12 +28,34 @@ pnpm typecheck
 pnpm engine:electron                     # the engine goldens in a hidden Electron window
 pnpm export:check                        # export a testsrc fixture to 16:9, 1:1, 9:16 and check it with ffprobe
 pnpm recorder:real                       # record 3 s of the primary monitor and first mic for real, check, delete
-pnpm export:run <projectDir> --format 9:16 -o out.mp4   # export a project (until the CLI exists)
+pnpm cli:check                           # build the CLI; preview, capture-page and render through it in Electron
+pnpm cuttle <command>                    # the built CLI without installing it (runs in the repo root)
 ```
 
 Export and recording need ffmpeg on PATH (or its path in `CUTTLE_FFMPEG`); `export:check` and the
 recorder tests also need ffprobe. Recording works on Windows so far; the recorder's tests use its
 `test` backend (ffmpeg test sources, synthetic input), which runs everywhere.
+
+## The CLI
+
+`pnpm cli:install` builds the CLI and puts `cuttle` on PATH: shims in npm's global folder
+(`%APPDATA%\npm` on Windows, `~/.local/bin` elsewhere; `CUTTLE_BIN_DIR` picks another one).
+`pnpm cli:uninstall` removes them.
+
+```bash
+cuttle init demo && cd demo
+cuttle devices                       # monitors, windows, cameras, microphones
+cuttle record --mic --until-claude   # stops when Claude Code in this folder ends its turn (or Ctrl+C)
+cuttle suggest                       # scenes: quiet start and end trimmed, idle cut, waiting sped up, a zoom on the answer
+cuttle preview                       # 12 stills and a contact sheet in preview/
+cuttle capture-page https://example.com --scroll --add
+cuttle render --format 9:16          # out/9x16.mp4
+cuttle recover takes/2               # after a crash
+```
+
+Every command takes `-C <project folder>` and `--json` (one JSON document on stdout, errors as
+`{ "error": { "code", "message" } }`). Exit codes: 0 ok, 1 usage or validation, 2 device or
+permission, 3 render, 130 cancelled with Ctrl+C.
 
 Engine golden images live in `packages/engine/test/__golden__/`, one PNG per platform. A new
 scenario writes its PNG on the first run and fails once so you can look at it.

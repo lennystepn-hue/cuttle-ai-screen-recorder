@@ -16,7 +16,6 @@ export default defineConfig({
     target: 'node22',
     rollupOptions: {
       input: {
-        cli: fileURLToPath(new URL('./cli.ts', import.meta.url)),
         check: fileURLToPath(new URL('./check.ts', import.meta.url)),
       },
       external: ['electron'],

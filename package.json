@@ -19,7 +19,7 @@
     "app:build:js": "node apps/desktop/scripts/build.mjs",
     "app": "pnpm app:build:js && electron apps/desktop/dist/main/index.mjs",
     "app:check": "pnpm app:build:js && pnpm cli:build && vitest run --mode app apps/desktop/test/app.check.test.ts",
-    "app:build": "pnpm app:build:js && node apps/desktop/scripts/package.mjs && vitest run --mode build apps/desktop/test/build.check.test.ts",
+    "app:build": "pnpm app:build:js && pnpm cli:build && node apps/desktop/scripts/package.mjs && vitest run --mode build apps/desktop/test/build.check.test.ts",
     "skill:install": "node skill/install.mjs",
     "skill:uninstall": "node skill/install.mjs --uninstall"
   },

@@ -23,6 +23,8 @@ function electronEntry(): string {
  * missing, runs Electron's installer with its output on stderr.
  */
 function electronBinary(): string {
+  // The Cuttle app's copy of the CLI: the app is the Electron (its shim says which)
+  if (process.env.CUTTLE_ELECTRON) return process.env.CUTTLE_ELECTRON;
   let dir: string;
   try {
     dir = dirname(createRequire(import.meta.url).resolve('electron/package.json'));
@@ -54,7 +56,12 @@ export function runInElectron<T>(request: ElectronRequest, signal: AbortSignal):
   return new Promise((resolve, reject) => {
     const binary = electronBinary(); // may download Electron first
     if (signal.aborted) return reject(new CliError('cancelled', 'cancelled before Electron started'));
-    const child = spawn(binary, [electronEntry(), encodeRequest(request)], { stdio: ['ignore', 'pipe', 'inherit', 'ipc'], windowsHide: true });
+    const entry = electronEntry();
+    // Run as Node by the Cuttle app, the CLI must not pass that on to its Electron; the app runs the
+    // CLI's Electron part instead of itself when CUTTLE_CLI_ELECTRON names it.
+    const { ELECTRON_RUN_AS_NODE: _node, ...env } = process.env;
+    if (process.env.CUTTLE_ELECTRON) env.CUTTLE_CLI_ELECTRON = entry;
+    const child = spawn(binary, [entry, encodeRequest(request)], { stdio: ['ignore', 'pipe', 'inherit', 'ipc'], windowsHide: true, env });
     child.stdout?.pipe(process.stderr);
     let response: ElectronResponse | undefined;
     child.on('message', (message: ResponseMessage) => {

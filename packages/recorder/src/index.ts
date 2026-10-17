@@ -1,4 +1,5 @@
 export { record, CLAUDE_TAIL_SECONDS } from './record';
+export { joinSegments } from './join';
 export { listDevices } from './devices';
 export { RecorderError, type RecorderErrorCode } from './errors';
 export { HOTKEYS } from './input';

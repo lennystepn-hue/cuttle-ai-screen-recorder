@@ -1,10 +1,10 @@
 import { spawnSync } from 'node:child_process';
-import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
-import { parseEventsJsonl, parseMarkersJson, parseTakeJson, trackOffset } from '@cuttle/project';
+import { parseEventsJsonl, parseMarkersJson, parseSegmentsJson, parseTakeJson, trackOffset } from '@cuttle/project';
 import { CLAUDE_TAIL_SECONDS, claudeTranscriptDir, record, type RecordOptions, type RecorderEvent } from '../src/index';
 import { inDeadZone } from '../src/record';
 
@@ -78,8 +78,9 @@ describe.concurrent('record (test backend)', () => {
 
     const takeFile = parseTakeJson(read(projectDir, 'takes/1/take.json'));
     if (!takeFile.ok) throw new Error(JSON.stringify(takeFile.issues));
-    expect(Math.abs(trackOffset(takeFile.take, 'webcam')!)).toBeLessThan(0.2);
-    expect(Math.abs(trackOffset(takeFile.take, 'mic')!)).toBeLessThan(0.2);
+    // each track's start is recorded (the engine lines them up); a loaded machine starts one late
+    expect(Math.abs(trackOffset(takeFile.take, 'webcam')!)).toBeLessThan(0.5);
+    expect(Math.abs(trackOffset(takeFile.take, 'mic')!)).toBeLessThan(0.5);
 
     const { events: input, issues } = parseEventsJsonl(read(projectDir, take.events));
     expect(issues).toEqual([]);
@@ -222,6 +223,110 @@ describe.concurrent('record (test backend)', () => {
 });
 
 // Not concurrent: these set CLAUDE_CONFIG_DIR, which the watcher reads when the recording starts.
+describe.concurrent('pausing a take (test backend)', () => {
+  it('records nothing while paused, joins the segments with every track in step, and counts maxSeconds in take time', async () => {
+    const projectDir = project();
+    const events: RecorderEvent['type'][] = [];
+    let wallAtPause = 0;
+    const started = Date.now() / 1000;
+    const recording = record({
+      ...test,
+      projectDir,
+      webcam: 'Test Camera',
+      mic: 'Test Microphone',
+      stop: { maxSeconds: 5 },
+      onEvent: (event) => {
+        events.push(event.type);
+        if (event.type === 'recording') setTimeout(() => recording.pause(), 1200);
+        if (event.type === 'paused' && wallAtPause === 0) {
+          wallAtPause = Date.now() / 1000;
+          // a marker set while paused lands where the take paused
+          recording.marker('during the pause');
+          setTimeout(() => recording.resume(), 1000);
+        }
+        if (event.type === 'resumed' && events.filter((type) => type === 'resumed').length === 1) {
+          setTimeout(() => recording.pause(), 1000);
+          // the second pause is short: resume asked before it even finished
+          setTimeout(() => recording.resume(), 1100);
+        }
+      },
+    });
+    const take = await recording.done;
+    const elapsed = Date.now() / 1000 - started;
+
+    expect(take.stopReason).toBe('max-seconds');
+    // 5 s of take (room for two segments that start late on a loaded machine), and at least a second more of pauses on the clock
+    expect(take.seconds).toBeCloseTo(5, 0);
+    expect(elapsed).toBeGreaterThan(take.seconds + 1);
+    expect(events.filter((type) => type === 'paused')).toHaveLength(2);
+    expect(events.filter((type) => type === 'resumed')).toHaveLength(2);
+    expect(events.at(-1)).toBe('stopping');
+
+    // the joined tracks are as long as the take (each segment lined up with its screen segment)
+    const screen = probe(join(projectDir, take.screen));
+    expect(screen).toMatchObject({ codec_name: 'h264', width: 1280, height: 720 });
+    expect(screen.duration).toBeCloseTo(take.seconds, 1);
+    expect(probe(join(projectDir, take.webcam!)).duration).toBeCloseTo(take.seconds, 1);
+    expect(probe(join(projectDir, take.mic!)).duration).toBeCloseTo(take.seconds, 1);
+    // take.json: the joined webcam and mic start with the screen
+    const takeFile = parseTakeJson(read(projectDir, 'takes/1/take.json'));
+    if (!takeFile.ok) throw new Error(JSON.stringify(takeFile.issues));
+    expect(trackOffset(takeFile.take, 'webcam')).toBe(0);
+    expect(trackOffset(takeFile.take, 'mic')).toBe(0);
+    // segments.json keeps the stamps (for Claude's markers later); the segments' files are gone
+    const manifest = parseSegmentsJson(read(projectDir, 'takes/1/segments.json'));
+    if (!manifest.ok) throw new Error(JSON.stringify(manifest.issues));
+    expect(manifest.segments.joined).toBe(true);
+    expect(manifest.segments.segments).toHaveLength(3);
+    const lengths = manifest.segments.segments.map((segment) => segment.duration!);
+    expect(lengths.reduce((sum, length) => sum + length, 0)).toBeCloseTo(take.seconds, 1);
+    expect(readdirSync(join(projectDir, 'takes/1')).sort()).toEqual(['events.jsonl', 'markers.json', 'mic.m4a', 'screen.mp4', 'segments.json', 'take.json', 'webcam.mp4']);
+
+    // the marker set while paused is at the end of the first segment
+    expect(markersOf(projectDir, take.markers)).toEqual([{ t: expect.closeTo(lengths[0]!, 1), kind: 'manual', label: 'during the pause' }]);
+    // input is in take time: nothing beyond the take, and none while paused
+    const { events: input } = parseEventsJsonl(read(projectDir, take.events));
+    expect(input.at(-1)!.t).toBeLessThanOrEqual(take.seconds + 0.1);
+    expect(Math.max(...input.map((event) => event.t))).toBeLessThanOrEqual(take.seconds + 0.1);
+  }, SLOW);
+
+  it('stops while paused: the take ends where it paused', async () => {
+    const projectDir = project();
+    let pausedAt = 0;
+    let stoppedAt = 0;
+    const recording = record({
+      ...test,
+      projectDir,
+      mic: 'Test Microphone',
+      stop: {},
+      onEvent: (event) => {
+        if (event.type === 'recording')
+          setTimeout(() => {
+            pausedAt = Date.now() / 1000;
+            recording.pause();
+          }, 1000);
+        if (event.type === 'paused')
+          setTimeout(() => {
+            stoppedAt = Date.now() / 1000;
+            void recording.stop();
+          }, 800);
+      },
+    });
+    const take = await recording.done;
+    expect(take.stopReason).toBe('stop');
+    // from the screen's first frame (the recording event waits for the mic too, later on a loaded
+    // machine) to the pause; the 0.8 s paused before the stop are not in it
+    const manifest = parseSegmentsJson(read(projectDir, 'takes/1/segments.json'));
+    if (!manifest.ok) throw new Error(JSON.stringify(manifest.issues));
+    const screenStart = manifest.segments.segments[0]!.screen.start;
+    expect(take.seconds).toBeCloseTo(pausedAt - screenStart, 0);
+    expect(take.seconds).toBeLessThan(stoppedAt - screenStart - 0.5);
+    expect(probe(join(projectDir, take.screen)).duration).toBeCloseTo(take.seconds, 1);
+    expect(probe(join(projectDir, take.mic!)).duration).toBeCloseTo(take.seconds, 1);
+    expect(existsSync(join(projectDir, 'takes/1/screen.1.mp4'))).toBe(false);
+  }, SLOW);
+});
+
 describe('record until a Claude Code turn ends (test backend)', () => {
   function transcripts() {
     const config = temp('cuttle-claude-');

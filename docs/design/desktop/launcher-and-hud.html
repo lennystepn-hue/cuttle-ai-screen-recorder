@@ -1,0 +1,95 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<link rel="stylesheet" href="tokens.css">
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; width: 1600px; height: 1000px; overflow: hidden; font: var(--size-m)/1.4 var(--font); color: var(--text); -webkit-font-smoothing: antialiased;
+    background: linear-gradient(160deg, #2b3a55, #4a3f63 55%, #2a2238); }
+  svg { display: block; }
+  .caption { position: absolute; left: 40px; font-size: 11px; letter-spacing: .6px; text-transform: uppercase; color: rgba(255,255,255,.55); font-weight: 600; }
+  .panel { position: absolute; border-radius: 16px; background: rgba(0,0,0,.18); border: 1px dashed rgba(255,255,255,.12); }
+
+  /* 1. launcher: a pill near the top of the primary screen, and the tray menu */
+  .pill { position: absolute; left: 80px; top: 92px; height: 48px; display: flex; align-items: center; gap: 4px; padding: 6px; border-radius: 16px; background: var(--overlay); box-shadow: var(--shadow-float); backdrop-filter: blur(20px); }
+  .pill .logo { width: 36px; height: 36px; border-radius: 11px; background: linear-gradient(135deg, #f0956f, #c45a3f); display: grid; place-items: center; }
+  .pill .btn { height: 36px; padding: 0 12px; border-radius: 10px; display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: var(--size-s); }
+  .pill .btn.main { color: var(--text); background: var(--raised); }
+  .pill .btn.main i { width: 10px; height: 10px; border-radius: 50%; background: var(--recording); display: block; }
+  .pill kbd, .menu kbd { font: 600 10px var(--font); color: var(--faint); }
+  .menu { position: absolute; left: 80px; top: 160px; width: 300px; padding: 6px; border-radius: 14px; background: var(--overlay); box-shadow: var(--shadow-float); }
+  .menu .item { height: 34px; display: flex; align-items: center; gap: 10px; padding: 0 10px; border-radius: 8px; color: var(--text); font-size: var(--size-s); }
+  .menu .item.hl { background: var(--raised); }
+  .menu .item span { flex: 1; } .menu .sub { color: var(--faint); font-size: 11px; }
+  .menu .sep { height: 1px; background: var(--line); margin: 6px 4px; }
+  .menu .title { padding: 6px 10px 4px; font-size: 10.5px; letter-spacing: .5px; text-transform: uppercase; color: var(--faint); font-weight: 600; }
+
+  /* 2. countdown over the selected area */
+  .area { position: absolute; left: 470px; top: 92px; width: 520px; height: 300px; border-radius: 10px; background: #0f0f12; box-shadow: 0 0 0 2px var(--accent); overflow: hidden; }
+  .area .count { position: absolute; inset: 0; display: grid; place-items: center; background: transparent; }
+  .area .count b { width: 120px; height: 120px; border-radius: 50%; background: rgba(19,19,23,.45); border: 3px solid rgba(255,255,255,.85); display: grid; place-items: center; font-size: 56px; font-weight: 600; color: #fff; }
+  .area .count small { position: absolute; bottom: 22px; color: rgba(255,255,255,.75); font-size: var(--size-s); }
+
+  /* 3. the recording HUD: hidden from the capture, draggable, at the screen's bottom edge */
+  .hud { position: absolute; left: 1080px; top: 92px; height: 48px; display: flex; align-items: center; gap: 4px; padding: 6px 6px 6px 14px; border-radius: 16px; background: var(--overlay); box-shadow: var(--shadow-float); }
+  .hud .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--recording); box-shadow: 0 0 0 4px rgba(255,77,79,.22); }
+  .hud .time { font-variant-numeric: tabular-nums; font-weight: 600; margin: 0 8px 0 4px; width: 52px; }
+  .hud .b { width: 36px; height: 36px; border-radius: 10px; display: grid; place-items: center; color: var(--muted); }
+  .hud .b.stop { background: var(--raised); color: var(--text); }
+  .hud .b.stop i { width: 12px; height: 12px; border-radius: 3px; background: var(--recording); display: block; }
+  .hud .sep { width: 1px; height: 22px; background: var(--line-strong); margin: 0 2px; }
+  .hud .mic { width: 30px; height: 4px; border-radius: 2px; background: #2a2a33; overflow: hidden; margin: 0 6px; } .hud .mic i { display: block; width: 45%; height: 100%; background: var(--caption); }
+  .note { position: absolute; color: rgba(255,255,255,.6); font-size: var(--size-s); line-height: 1.5; }
+  .hud.paused .dot { background: var(--muted); box-shadow: none; }
+
+  /* 4. after stop: the editor opens with the suggested cut */
+  .toast { position: absolute; left: 1080px; top: 368px; width: 420px; padding: 14px; border-radius: 14px; background: var(--overlay); box-shadow: var(--shadow-float); display: flex; gap: 12px; align-items: center; }
+  .spinner { width: 34px; height: 34px; border-radius: 50%; border: 3px solid var(--raised); border-top-color: var(--accent); }
+  .toast b { display: block; } .toast small { color: var(--muted); }
+</style>
+</head>
+<body>
+<div class="caption" style="top:60px">1 · Idle: the pill (and the tray)</div>
+<div class="pill">
+  <div class="logo"><svg width="16" height="16" viewBox="0 0 12 12"><path d="M2 2h5l3 4-3 4H2z" fill="#1b0f0a"/></svg></div>
+  <div class="btn main"><i></i>New recording <kbd>Ctrl Shift Alt R</kbd></div>
+  <div class="btn"><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M2 4.5h4l1.5 1.5H14v6.5H2z"/></svg>Open</div>
+</div>
+<div class="menu">
+  <div class="title">Recent</div>
+  <div class="item hl"><span>treg launch demo</span><div class="sub">today · 23.8 s</div></div>
+  <div class="item"><span>Holofish catch card</span><div class="sub">yesterday</div></div>
+  <div class="item"><span>cuttle-demo</span><div class="sub">by Claude · Oct 16</div></div>
+  <div class="sep"></div>
+  <div class="item"><span>Open folder…</span><kbd>Ctrl O</kbd></div>
+  <div class="item"><span>Settings</span></div>
+  <div class="item"><span>Quit</span></div>
+</div>
+
+<div class="caption" style="left:470px;top:60px">2 · Countdown over the area</div>
+<div class="area"><div style="padding:14px 16px;font:12px/1.6 var(--mono);color:#c9c9d1">❯ find the 8 best specialty coffee shops in Berlin<br><span style="color:#6b6b75">  ready when you are</span></div><div class="count"><b>2</b><small>Esc to cancel</small></div></div>
+
+<div class="caption" style="left:1080px;top:60px">3 · Recording: the HUD (not in the video)</div>
+<div class="hud">
+  <div class="dot"></div><div class="time">0:42</div>
+  <div class="mic"><i></i></div>
+  <div class="sep"></div>
+  <div class="b" title="Pause"><svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor"><rect x="3" y="2" width="3" height="10" rx="1"/><rect x="8" y="2" width="3" height="10" rx="1"/></svg></div>
+  <div class="b" title="Marker"><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 14V2.5h8l-2 3 2 3H4"/></svg></div>
+  <div class="b" title="Restart"><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M3 8a5 5 0 1 0 1.5-3.6M3 2.5v3h3"/></svg></div>
+  <div class="b stop" title="Stop"><i></i></div>
+</div>
+<div class="note" style="left:1080px;top:150px;width:420px">Hidden from the capture (WDA_EXCLUDEFROMCAPTURE), always on top, draggable; starts at the top centre of the recorded display's work area (or on another display), outside the picked window or region. A pause records nothing (each pause ends a segment; the segments are joined on stop). Restart is press-and-hold and keeps the old take restorable. Never takes the focus; clicks on it are not logged.</div>
+<div class="hud paused" style="top:262px">
+  <div class="dot"></div><div class="time" style="color:var(--muted)">0:42</div>
+  <div class="sep"></div>
+  <div class="b" style="color:var(--text)"><svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor"><path d="M3 1.5v11l9-5.5z"/></svg></div>
+  <span style="color:var(--muted);font-size:12px;margin:0 8px">Paused</span>
+  <div class="b stop"><i></i></div>
+</div>
+
+<div class="toast"><div class="spinner"></div><div><b>Cutting the take…</b><small>In the editor's timeline bar; the cut arrives as one undoable step</small></div></div>
+<div class="caption" style="left:1080px;top:340px">4 · After stop: the editor opens on the take at once</div>
+</body>
+</html>

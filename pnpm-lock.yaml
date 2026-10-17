@@ -50,6 +50,9 @@ importers:
       '@cuttle/export':
         specifier: workspace:*
         version: link:../../packages/export
+      '@cuttle/motion-kit':
+        specifier: workspace:*
+        version: link:../../packages/motion-kit
       '@cuttle/project':
         specifier: workspace:*
         version: link:../../packages/project

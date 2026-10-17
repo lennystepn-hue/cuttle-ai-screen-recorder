@@ -1,17 +1,21 @@
 // The picker: one transparent window per display, over everything. Hovering lights the window under
 // the pointer (the display where there is none), dragging draws a region; the bar sets the camera,
-// the mic and when to stop, and Enter records. Never in a recording (content protection).
-import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
+// the mic and when to stop, and Enter records. Never in a recording (content protection). The bar,
+// the label and the camera bubble keep clear of what is about to be recorded where there is room.
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import type { PickedTarget, PickerSetup, Rect, RecordChoices } from '../../shared/ipc';
-import { dragRect, matchMediaDevice, windowsAt } from '../../shared/recording';
+import { barPlacement, bubbleSize, dragRect, labelPlacement, matchMediaDevice, windowsAt } from '../../shared/recording';
 import { bridge } from '../bridge';
-import { MicIcon, WarningIcon } from '../icons';
+import { FolderIcon, MicIcon, WarningIcon } from '../icons';
 
 type Mode = 'auto' | 'screen' | 'window' | 'region';
-type Shown = { kind: 'screen' | 'window' | 'region'; rect: Rect; title: string; pixels: { width: number; height: number }; window?: number };
+type Shown = { kind: 'screen' | 'window' | 'region'; rect: Rect; title: string; pixels: { width: number; height: number }; window?: number; of?: [number, number] };
 
 const MIN_REGION = 16;
-const BAR_HEIGHT = 52;
+const STOPS: RecordChoices['stop'][] = ['none', 'claude', 'idle'];
+const STOP_NAMES: Record<RecordChoices['stop'], string> = { none: 'When I stop', claude: "Claude's answer", idle: 'Screen still for 10 s' };
+/** A display narrower than this gets the bar's compact form (mode icons only). */
+const COMPACT_BELOW = 1200;
 
 function Camera({ size }: { size?: number }) {
   return (
@@ -45,6 +49,22 @@ const ModeIcons = {
 /** A local rect (DIP inside this display) in physical pixels of the display. */
 const pixelsOf = (rect: Rect, scale: number) => ({ width: Math.round(rect.width * scale), height: Math.round(rect.height * scale) });
 
+/** The size an element has, measured after each layout (for placing it). */
+function useSize<T extends HTMLElement>(fallback: { width: number; height: number }): [React.RefObject<T | null>, { width: number; height: number }] {
+  const ref = useRef<T>(null);
+  const [size, setSize] = useState(fallback);
+  useLayoutEffect(() => {
+    const element = ref.current;
+    if (!element) return;
+    const measure = () => setSize((old) => (Math.abs(old.width - element.offsetWidth) < 0.5 && Math.abs(old.height - element.offsetHeight) < 0.5 ? old : { width: element.offsetWidth, height: element.offsetHeight }));
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    return () => observer.disconnect();
+  });
+  return [ref, size];
+}
+
 export function Picker() {
   const [setup, setSetup] = useState<PickerSetup>();
   const [active, setActive] = useState(false);
@@ -55,19 +75,22 @@ export function Picker() {
   const [region, setRegion] = useState<Rect>();
   const [frozen, setFrozen] = useState<Shown>();
   const drag = useRef<{ from: { x: number; y: number }; handle?: string; start?: Rect; moved: boolean }>(undefined);
+  const [barRef, barSize] = useSize<HTMLDivElement>({ width: 1000, height: 52 });
+  const [labelRef, labelSize] = useSize<HTMLDivElement>({ width: 260, height: 28 });
+  const [hintRef, hintSize] = useSize<HTMLDivElement>({ width: 560, height: 30 });
 
   useEffect(() => {
     const offOpen = bridge.on('picker:open', (next) => {
       setSetup(next);
       setActive(next.active);
       setChoices(next.choices);
-      setMode('auto');
-      setRegion(undefined);
-      setFrozen(undefined);
-      setCycle(0);
     });
     const offActive = bridge.on('picker:active', ({ display }) => setActive((current) => (setup ? display === setup.display.id : current)));
     const offChoices = bridge.on('picker:choices', (next) => setChoices(next));
+    const offDevices = bridge.on('picker:devices', ({ cameras, mics, choices: listed }) => {
+      setSetup((current) => (current ? { ...current, cameras, mics, listingDevices: false } : current));
+      setChoices(listed);
+    });
     void bridge.invoke('picker:setup').then((initial) => {
       if (!initial) return;
       setSetup(initial);
@@ -78,6 +101,7 @@ export function Picker() {
       offOpen();
       offActive();
       offChoices();
+      offDevices();
     };
   }, [setup?.display.id]);
 
@@ -87,6 +111,9 @@ export function Picker() {
     [setup],
   );
   const full: Rect = display ? { x: 0, y: 0, width: display.bounds.width, height: display.bounds.height } : { x: 0, y: 0, width: 0, height: 0 };
+  const work: Rect = display
+    ? { x: display.workArea.x - display.bounds.x, y: display.workArea.y - display.bounds.y, width: display.workArea.width, height: display.workArea.height }
+    : full;
 
   // What would be recorded now.
   const shown: Shown | undefined = useMemo(() => {
@@ -97,13 +124,18 @@ export function Picker() {
     if (mode === 'region') return undefined;
     if (mode === 'screen') return screen;
     const under = pointer ? windowsAt(local, pointer.x, pointer.y) : [];
-    const window = under.length > 0 ? under[cycle % under.length] : undefined;
-    if (window) return { kind: 'window', rect: window.bounds, title: window.title, pixels: window.pixels, window: window.id };
+    const index = under.length > 0 ? cycle % under.length : 0;
+    const window = under[index];
+    if (window) return { kind: 'window', rect: window.bounds, title: window.title, pixels: window.pixels, window: window.id, ...(under.length > 1 && { of: [index + 1, under.length] as [number, number] }) };
     return mode === 'window' ? undefined : screen;
-  }, [display, frozen, region, mode, pointer, local, cycle, full]);
+  }, [display, frozen, region, mode, pointer, local, cycle, full.width, full.height]);
+
+  const blocked = setup?.problem;
+  const needsFolder = choices.stop === 'claude' && !choices.claudeFolder;
+  const recordReason = blocked ?? (!shown ? 'Pick a window, a display or a region first' : needsFolder ? 'Choose the folder Claude Code runs in first' : undefined);
 
   const record = useCallback(() => {
-    if (!display || !shown) return;
+    if (!display || !shown || recordReason) return;
     const target: PickedTarget =
       shown.kind === 'screen'
         ? { kind: 'screen', display: display.id }
@@ -111,33 +143,52 @@ export function Picker() {
           ? { kind: 'window', display: display.id, window: shown.window! }
           : { kind: 'region', display: display.id, rect: { ...shown.rect, x: shown.rect.x + display.bounds.x, y: shown.rect.y + display.bounds.y } };
     void bridge.invoke('picker:record', target);
-  }, [display, shown]);
+  }, [display, shown, recordReason]);
 
   const updateChoices = (change: Partial<RecordChoices>) => {
     const next = { ...choices, ...change };
     setChoices(next);
     void bridge.invoke('picker:choices', next);
   };
+  /** A camera to switch on: the first that is not a virtual one (OBS and the like). */
+  const firstCamera = (names: string[]) => names.find((name) => !/virtual|obs/i.test(name)) ?? names[0];
+  const chooseFolder = () => void bridge.invoke('picker:claude-folder').then((folder) => folder && updateChoices({ claudeFolder: folder }));
 
   // Keys work on the display the pointer is on (that picker has the focus).
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (event.target instanceof HTMLSelectElement) return;
       const key = event.key;
+      const inField = event.target instanceof HTMLSelectElement || event.target instanceof HTMLInputElement;
       if (key === 'Escape') return void bridge.invoke('picker:cancel');
-      if (key === 'Enter') return record();
-      if (key === 'Tab') {
+      if (key === 'Enter') {
+        if (inField) return;
+        // a focused button of the bar does not also press itself
+        event.preventDefault();
+        return record();
+      }
+      if (inField) return;
+      if (key === 'F6') {
+        event.preventDefault();
+        barRef.current?.querySelector<HTMLElement>('button')?.focus();
+        return;
+      }
+      if (key === 'Tab' && !barRef.current?.contains(document.activeElement)) {
         event.preventDefault();
         setFrozen(undefined);
         setCycle((value) => value + 1);
         return;
       }
-      const forced = ({ s: 'screen', w: 'window', r: 'region' } as const)[key.toLowerCase() as 's' | 'w' | 'r'];
-      if (forced && !event.ctrlKey && !event.altKey) {
+      if (event.ctrlKey || event.altKey || event.metaKey) return;
+      const lower = key.toLowerCase();
+      const forced = ({ s: 'screen', w: 'window', r: 'region' } as const)[lower as 's' | 'w' | 'r'];
+      if (forced) {
         setMode((current) => (current === forced ? 'auto' : forced));
         setFrozen(undefined);
         return;
       }
+      if (lower === 'c' && setup && setup.cameras.length > 0) return updateChoices({ camera: choices.camera ? undefined : firstCamera(setup.cameras) });
+      if (lower === 'm' && setup && setup.mics.length > 0) return updateChoices({ mic: choices.mic ? undefined : setup.mics[0] });
+      if (lower === 'o') return updateChoices({ stop: STOPS[(STOPS.indexOf(choices.stop) + 1) % STOPS.length]! });
       if (region && key.startsWith('Arrow')) {
         event.preventDefault();
         const step = event.shiftKey ? 10 : 1 / (display?.scaleFactor ?? 1);
@@ -148,7 +199,7 @@ export function Picker() {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [record, region, display, full.width, full.height]);
+  }, [record, region, display, full.width, full.height, choices, setup]);
 
   const onMove = (event: ReactPointerEvent) => {
     const at = { x: event.clientX, y: event.clientY };
@@ -196,99 +247,157 @@ export function Picker() {
 
   if (!setup || !display) return null;
   const rect = shown?.rect;
+  const compact = full.width < COMPACT_BELOW;
   const hole = rect
     ? `polygon(evenodd, 0 0, 100% 0, 100% 100%, 0 100%, 0 0, ${rect.x}px ${rect.y}px, ${rect.x + rect.width}px ${rect.y}px, ${rect.x + rect.width}px ${rect.y + rect.height}px, ${rect.x}px ${rect.y + rect.height}px, ${rect.x}px ${rect.y}px)`
     : undefined;
-  const barTop = rect ? Math.min(rect.y + rect.height + 24, full.height - BAR_HEIGHT - 56) : full.height - BAR_HEIGHT - 56;
-  const labelTop = rect ? (rect.y >= 40 ? rect.y - 36 : rect.y + 8) : 0;
+  const label = rect ? labelPlacement(rect, work, labelSize) : undefined;
+  const barAt = barPlacement(rect ?? { x: work.x, y: work.y + work.height - 160, width: work.width, height: 0 }, work, barSize, label?.above ?? false);
+  // The hint goes to the top corner away from the target and its label.
+  const covers = (a: Rect, b: Rect) => a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height;
+  const hintRight: Rect = { x: work.x + work.width - 24 - hintSize.width, y: work.y + 16, width: hintSize.width, height: hintSize.height };
+  const labelBox = label ? { x: label.x, y: label.y, width: labelSize.width, height: labelSize.height } : undefined;
+  const wholeDisplay = rect !== undefined && rect.width >= full.width - 1 && rect.height >= full.height - 1;
+  const hintLeft = (rect !== undefined && !wholeDisplay && covers(hintRight, rect)) || (labelBox !== undefined && covers(hintRight, labelBox));
+  const bubble = rect && choices.camera ? bubbleSize(rect) : 0;
+  // bottom left inside the target, above the bar when the bar had to go inside it
+  const bubbleBottom = rect ? Math.min(rect.y + rect.height, barAt.where === 'inside' ? barAt.y : Infinity) - 16 : 0;
+  const bubbleTop = rect ? Math.max(rect.y + 8 + (label && !label.above ? labelSize.height + 8 : 0), bubbleBottom - bubble) : 0;
+  const atEdge = rect !== undefined && (rect.x <= 0 || rect.y <= 0 || rect.x + rect.width >= full.width || rect.y + rect.height >= full.height);
   const kindName = shown?.kind === 'screen' ? 'Screen' : shown?.kind === 'window' ? 'Window' : 'Region';
   const effective = shown?.kind ?? (mode === 'auto' ? 'screen' : mode);
+  const notice = blocked ?? setup.warning;
 
   return (
     <div className={`picker${active ? '' : ' inactive'}`} onPointerMove={onMove} onPointerDown={onDown} onPointerUp={onUp} data-testid="picker">
       <div className="dim" style={{ clipPath: active ? hole : undefined }} />
+      {!active && <div className="point-here">Point here to record this display</div>}
       {active && rect && (
         <>
-          <div className={`target ${shown!.kind}`} style={{ left: rect.x, top: rect.y, width: rect.width, height: rect.height }} />
-          <div className="target-label" style={{ left: Math.max(16, rect.x), top: labelTop }}>
+          <div className={`target ${shown!.kind}${atEdge ? ' edge' : ''}`} style={{ left: rect.x, top: rect.y, width: rect.width, height: rect.height }} />
+          <div className="target-label" ref={labelRef} style={{ left: label!.x, top: label!.y }}>
             <b>
               {kindName}
-              {shown!.kind === 'window' ? ` · ${shown!.title}` : shown!.kind === 'screen' ? ` · ${shown!.title}` : ''}
+              {shown!.kind !== 'region' ? ` · ${shown!.title}` : ''}
             </b>
             <span>
-              {shown!.pixels.width} × {shown!.pixels.height} · {shown!.kind === 'window' ? 'records this area' : 'pixels'}
+              {shown!.pixels.width} × {shown!.pixels.height} px
+              {shown!.kind === 'window' ? ' · records this area' : ''}
+              {shown!.of ? ` · ${shown!.of[0]} of ${shown!.of[1]} here (Tab)` : ''}
             </span>
           </div>
           {shown!.kind === 'region' &&
             ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'].map((handle) => {
               const x = handle.includes('w') ? rect.x : handle.includes('e') ? rect.x + rect.width : rect.x + rect.width / 2;
               const y = handle.includes('n') ? rect.y : handle.includes('s') ? rect.y + rect.height : rect.y + rect.height / 2;
-              return <div key={handle} className="handle" data-handle={handle} style={{ left: x, top: y, cursor: `${handle}-resize`, pointerEvents: 'auto' }} />;
+              return <div key={handle} className="handle" data-handle={handle} style={{ left: Math.min(Math.max(x, 6), full.width - 6), top: Math.min(Math.max(y, 6), full.height - 6), cursor: `${handle}-resize`, pointerEvents: 'auto' }} />;
             })}
         </>
       )}
       {active && (
         <>
-          <div className="hint">
-            <kbd>Esc</kbd> cancel · <kbd>Tab</kbd> next window · drag for a region · <kbd>S</kbd> <kbd>W</kbd> <kbd>R</kbd> mode
+          <div className="hint" ref={hintRef} style={hintLeft ? { left: work.x + 24, top: work.y + 16 } : { left: hintRight.x, top: hintRight.y }}>
+            <span>
+              <kbd>Esc</kbd> cancel
+            </span>
+            <span>
+              <kbd>Enter</kbd> record
+            </span>
+            <span>
+              <kbd>Tab</kbd> next window
+            </span>
+            <span>drag for a region</span>
+            <span>
+              <kbd>Ctrl+Shift+Alt+S</kbd> stops
+            </span>
           </div>
-          {choices.camera && rect && <CameraBubble name={choices.camera} rect={rect} />}
-          {setup.problem && (
-            <div className="problem" style={{ top: barTop - 52 }}>
+          {choices.camera && rect && <CameraBubble name={choices.camera} size={bubble} left={rect.x + 16} top={bubbleTop} />}
+          {notice && (
+            <div
+              className={`problem${blocked ? ' blocking' : ''}`}
+              style={{ left: barAt.x, top: barAt.where === 'above' ? barAt.y - 52 : barAt.y + barSize.height + 10, maxWidth: Math.max(320, barSize.width) }}
+              role="alert"
+              onPointerDown={(event) => event.stopPropagation()}
+            >
               <WarningIcon size={15} />
-              {setup.problem}
+              <span>{notice}</span>
+              {blocked && /ffmpeg|did not answer|cannot record/i.test(blocked) && (
+                <button type="button" className="retry" onClick={() => void bridge.invoke('picker:retry')}>
+                  Try again
+                </button>
+              )}
             </div>
           )}
-          <div className="bar-rec" style={{ top: barTop }} onPointerDown={(event) => event.stopPropagation()} onPointerMove={(event) => event.stopPropagation()} onPointerUp={(event) => event.stopPropagation()}>
+          <div
+            className={`bar-rec${compact ? ' compact' : ''}`}
+            ref={barRef}
+            style={{ left: barAt.x, top: barAt.y }}
+            onPointerDown={(event) => event.stopPropagation()}
+            onPointerMove={(event) => event.stopPropagation()}
+            onPointerUp={(event) => event.stopPropagation()}
+          >
             <div className="modes" role="group" aria-label="What to record">
               {(['screen', 'window', 'region'] as const).map((kind) => (
                 <button key={kind} aria-pressed={effective === kind} onClick={() => setMode((current) => (current === kind ? 'auto' : kind))} title={`${kind[0]!.toUpperCase()}${kind.slice(1)} (${kind[0]!.toUpperCase()})`}>
                   {ModeIcons[kind]}
-                  {kind[0]!.toUpperCase() + kind.slice(1)}
+                  <span className="mode-name">{kind[0]!.toUpperCase() + kind.slice(1)}</span>
                 </button>
               ))}
             </div>
             <div className="divider" />
-            <Device label="Camera" icon={<Camera />} names={setup.cameras} chosen={choices.camera} onChange={(camera) => updateChoices({ camera })} />
-            <Device label="Mic" icon={<MicIcon />} names={setup.mics} chosen={choices.mic} onChange={(mic) => updateChoices({ mic })} meter={choices.mic && active ? <MicMeter name={choices.mic} /> : undefined} />
-            <div className={`opt${choices.stop !== 'none' ? ' on' : ''}`}>
+            <Device label="Camera" keyName="C" icon={<Camera />} names={setup.cameras} listing={setup.listingDevices} chosen={choices.camera} pick={firstCamera} onChange={(camera) => updateChoices({ camera })} />
+            <Device
+              label="Mic"
+              keyName="M"
+              icon={<MicIcon />}
+              names={setup.mics}
+              listing={setup.listingDevices}
+              chosen={choices.mic}
+              pick={(names) => names[0]}
+              onChange={(mic) => updateChoices({ mic })}
+              meter={choices.mic && active ? <MicMeter name={choices.mic} /> : undefined}
+            />
+            <div className={`opt${choices.stop !== 'none' ? ' on' : ''}`} title="When the recording stops (O)">
               <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true">
                 <path d="M8 1.5v3M8 11.5v3M1.5 8h3M11.5 8h3" />
                 <circle cx="8" cy="8" r="2" />
               </svg>
               <div className="name">
                 Stop on
-                <select value={choices.stop} onChange={(event) => updateChoices({ stop: event.target.value as RecordChoices['stop'] })} aria-label="Stop on">
-                  <option value="none">my stop (Ctrl Shift Alt S)</option>
-                  <option value="claude">Claude's answer</option>
-                  <option value="idle">10 s without change</option>
+                <select
+                  className="stop"
+                  value={choices.stop}
+                  onChange={(event) => {
+                    updateChoices({ stop: event.target.value as RecordChoices['stop'] });
+                    event.target.blur();
+                  }}
+                  aria-label="Stop on"
+                >
+                  {STOPS.map((stop) => (
+                    <option key={stop} value={stop}>
+                      {STOP_NAMES[stop]}
+                    </option>
+                  ))}
                 </select>
               </div>
-              {choices.stop === 'claude' && (
-                <button
-                  className="more"
-                  title={choices.claudeFolder ? `Claude Code runs in ${choices.claudeFolder}; choose another folder` : 'Choose the folder Claude Code runs in'}
-                  onClick={() => void bridge.invoke('picker:claude-folder').then((folder) => folder && updateChoices({ claudeFolder: folder }))}
-                >
-                  <small>{choices.claudeFolder ? choices.claudeFolder.split(/[\\/]/).at(-1) : 'folder…'}</small>
-                </button>
-              )}
+              {choices.stop === 'claude' &&
+                (choices.claudeFolder ? (
+                  <button type="button" className="folder" onClick={chooseFolder} title={`Claude Code runs in ${choices.claudeFolder}; choose another folder`}>
+                    <FolderIcon size={13} />
+                    <span>{choices.claudeFolder.split(/[\\/]/).at(-1)}</span>
+                  </button>
+                ) : (
+                  <button type="button" className="folder need" onClick={chooseFolder}>
+                    Choose Claude's folder
+                  </button>
+                ))}
             </div>
             <div className="divider" />
-            <button className="rec" onClick={record} disabled={!shown || (choices.stop === 'claude' && !choices.claudeFolder)} data-testid="picker-record">
-              <i />
-              Record <kbd>Enter</kbd>
-            </button>
-          </div>
-          <div className="stopwhen" style={{ top: barTop + BAR_HEIGHT + 12 }}>
-            <span>
-              <b>{setup.countdown} s</b> countdown
-            </span>
-            <span>
-              stop <kbd>Ctrl Shift Alt S</kbd>
-            </span>
-            <span>
-              marker <kbd>Ctrl Shift Alt M</kbd>
+            <span title={recordReason ?? 'Record (Enter)'}>
+              <button className="rec" onClick={record} disabled={!!recordReason} data-testid="picker-record">
+                <i />
+                Record <kbd>Enter</kbd>
+              </button>
             </span>
           </div>
         </>
@@ -310,20 +419,41 @@ function resize(start: Rect, handle: string, dx: number, dy: number, area: Rect)
   return { x: left, y: top, width: right - left, height: bottom - top };
 }
 
-function Device(props: { label: string; icon: React.ReactNode; names: string[]; chosen?: string; onChange: (name: string | undefined) => void; meter?: React.ReactNode }) {
-  const { label, icon, names, chosen, onChange, meter } = props;
+function Device(props: {
+  label: string;
+  keyName: string;
+  icon: React.ReactNode;
+  names: string[];
+  listing?: boolean;
+  chosen?: string;
+  pick: (names: string[]) => string | undefined;
+  onChange: (name: string | undefined) => void;
+  meter?: React.ReactNode;
+}) {
+  const { label, keyName, icon, names, listing, chosen, pick, onChange, meter } = props;
   const on = chosen !== undefined;
+  const state = chosen ?? (listing ? 'listing…' : names.length === 0 ? 'none found' : 'off');
   return (
-    <div className={`opt${on ? ' on' : ''}`} title={chosen ?? (names.length === 0 ? `No ${label.toLowerCase()} found` : `${label} off`)}>
-      <button className="toggle" onClick={() => onChange(on ? undefined : names[0])} disabled={names.length === 0} aria-pressed={on} aria-label={`${label} ${on ? 'on' : 'off'}`}>
+    <div className={`opt${on ? ' on' : ''}`} title={chosen ? `${chosen} (${keyName} turns it off)` : names.length === 0 ? `No ${label.toLowerCase()} found` : `${label} off (${keyName} turns it on)`}>
+      <button className="toggle" onClick={() => onChange(on ? undefined : pick(names))} disabled={names.length === 0} aria-pressed={on} aria-label={`${label} ${on ? 'on' : 'off'}`}>
         {icon}
         <span className="name">
           {label}
-          <small>{chosen ?? (names.length === 0 ? 'none found' : 'off')}</small>
+          <small>{state}</small>
         </span>
       </button>
-      {on && names.length > 1 && (
-        <select className="more" value={chosen} onChange={(event) => onChange(event.target.value)} aria-label={`${label} device`} style={{ width: 20 }}>
+      {names.length > 1 && (
+        <select
+          className="more"
+          value={chosen ?? ''}
+          onChange={(event) => {
+            onChange(event.target.value || undefined);
+            event.target.blur();
+          }}
+          aria-label={`${label} device`}
+          style={{ width: 20 }}
+        >
+          <option value="">Off</option>
           {names.map((name) => (
             <option key={name} value={name}>
               {name}
@@ -336,8 +466,8 @@ function Device(props: { label: string; icon: React.ReactNode; names: string[]; 
   );
 }
 
-/** A live preview of the camera at the target's bottom-left corner, where the look puts the bubble. */
-function CameraBubble({ name, rect }: { name: string; rect: Rect }) {
+/** A live preview of the camera inside the target, where the look puts the bubble (bottom left). */
+function CameraBubble({ name, size, left, top }: { name: string; size: number; left: number; top: number }) {
   const video = useRef<HTMLVideoElement>(null);
   const [problem, setProblem] = useState<string>();
   useEffect(() => {
@@ -354,7 +484,7 @@ function CameraBubble({ name, rect }: { name: string; rect: Rect }) {
         if (cancelled) return stream.getTracks().forEach((track) => track.stop());
         if (video.current) video.current.srcObject = stream;
       } catch {
-        setProblem('No preview');
+        setProblem('Camera busy or blocked');
       }
     })();
     return () => {
@@ -363,7 +493,7 @@ function CameraBubble({ name, rect }: { name: string; rect: Rect }) {
     };
   }, [name]);
   return (
-    <div className="bubble" style={{ left: rect.x + 24, top: rect.y + rect.height - 144 }}>
+    <div className="bubble" style={{ left, top, width: size, height: size, fontSize: size < 80 ? 9 : 11 }}>
       {problem ? problem : <video ref={video} autoPlay muted playsInline />}
     </div>
   );

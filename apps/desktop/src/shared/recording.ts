@@ -90,12 +90,26 @@ export function dragRect(from: { x: number; y: number }, to: { x: number; y: num
   return { x: Math.min(x0, x1), y: Math.min(y0, y1), width: Math.abs(x1 - x0), height: Math.abs(y1 - y0) };
 }
 
-/** A DIP rectangle on a display in physical pixels of that display (its top-left at 0, 0), whole pixels. */
-export function toDisplayPixels(rect: Rect, display: Pick<PickerDisplay, 'bounds' | 'scaleFactor'>): Rect {
+/**
+ * A DIP rectangle on a display in physical pixels of that display (its top-left at 0, 0), whole
+ * pixels, inside the display: a display of 2560 px at 150 % is 1706.67 DIP wide, so a region drawn
+ * to its right edge would otherwise end at pixel 2561.
+ */
+export function toDisplayPixels(rect: Rect, display: Pick<PickerDisplay, 'bounds' | 'scaleFactor' | 'pixels'>): Rect {
   const s = display.scaleFactor;
-  const x = Math.round((rect.x - display.bounds.x) * s);
-  const y = Math.round((rect.y - display.bounds.y) * s);
-  return { x, y, width: Math.round((rect.x + rect.width - display.bounds.x) * s) - x, height: Math.round((rect.y + rect.height - display.bounds.y) * s) - y };
+  const clampX = (value: number) => Math.min(Math.max(value, 0), display.pixels.width);
+  const clampY = (value: number) => Math.min(Math.max(value, 0), display.pixels.height);
+  const x = clampX(Math.round((rect.x - display.bounds.x) * s));
+  const y = clampY(Math.round((rect.y - display.bounds.y) * s));
+  return { x, y, width: clampX(Math.round((rect.x + rect.width - display.bounds.x) * s)) - x, height: clampY(Math.round((rect.y + rect.height - display.bounds.y) * s)) - y };
+}
+
+/**
+ * The recorder's monitor that shows a display: the one containing the display's centre (physical
+ * pixels). Exact bounds would miss displays whose DIP size is not whole (2560 px at 150 %).
+ */
+export function monitorAt<T extends { bounds: Bounds }>(monitors: readonly T[], centre: { x: number; y: number }): T | undefined {
+  return monitors.find(({ bounds }) => centre.x >= bounds.x && centre.x < bounds.x + bounds.width && centre.y >= bounds.y && centre.y < bounds.y + bounds.height);
 }
 
 /** The recorder's capture source for a pick. */
@@ -120,13 +134,58 @@ export function stopOptionsFor(choices: RecordChoices): StopOptions {
   return {};
 }
 
+const overlaps = (a: Rect, b: Rect) => a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height;
+
 /**
- * Where the HUD goes: top centre of the display's work area, 12 DIP below its top edge, clamped
- * inside the work area. `size` is the HUD's size in DIP.
+ * Where the HUD goes: outside what is recorded when it fits. The top centre of the recorded
+ * display's work area, else its bottom centre, else the top centre of another display; the top
+ * centre when the target covers them all (the HUD is never in the video anyway). DIP.
  */
-export function hudPosition(display: Pick<PickerDisplay, 'workArea'>, size: { width: number; height: number }): { x: number; y: number } {
-  const area = display.workArea;
-  return { x: Math.round(area.x + (area.width - size.width) / 2), y: area.y + 12 };
+export function hudPosition(displays: readonly Pick<PickerDisplay, 'id' | 'workArea'>[], recorded: number, target: Rect, size: { width: number; height: number }): { x: number; y: number } {
+  const at = (area: Rect, place: 'top' | 'bottom'): Rect => ({
+    x: Math.round(area.x + (area.width - size.width) / 2),
+    y: place === 'top' ? area.y + 12 : area.y + area.height - size.height - 12,
+    ...size,
+  });
+  const own = displays.find((display) => display.id === recorded) ?? displays[0]!;
+  const candidates = [at(own.workArea, 'top'), at(own.workArea, 'bottom'), ...displays.filter((display) => display !== own).map((display) => at(display.workArea, 'top'))];
+  const free = candidates.find((place) => !overlaps(place, target)) ?? candidates[0]!;
+  return { x: free.x, y: free.y };
+}
+
+/** A recorder warning for the HUD: a few words, and the whole message for its tooltip. */
+export function hudWarning(message: string): { text: string; detail: string } {
+  const rules: [RegExp, (match: RegExpExecArray) => string][] = [
+    [/^the microphone .* records silence/i, () => 'Mic is silent: muted?'],
+    [/^markers\.json could not be written/i, () => 'Markers not saved yet'],
+    [/^events\.jsonl could not be written/i, () => 'Input log stopped'],
+    [/^the (\w+) had not started/i, (match) => `No ${match[1] === 'webcam' ? 'camera' : match[1]} in this take`],
+  ];
+  for (const [pattern, text] of rules) {
+    const match = pattern.exec(message);
+    if (match) return { text: text(match), detail: message };
+  }
+  return { text: message.length > 40 ? `${message.slice(0, 38)}…` : message, detail: message };
+}
+
+/**
+ * A failed recording for people: one plain sentence for what the person can act on, and the
+ * recorder's message (ffmpeg's last lines) as the details.
+ */
+export function recordingFailure(message: string): { text: string; detail: string } {
+  const track = /the (screen|webcam|mic) capture stopped unexpectedly/i.exec(message)?.[1]?.toLowerCase();
+  const text =
+    track === 'webcam'
+      ? 'The camera stopped sending video (unplugged, or taken by another app).'
+      : track === 'mic'
+        ? 'The microphone stopped (unplugged, or taken by another app).'
+        : track === 'screen'
+          ? 'The screen capture stopped.'
+          : /not found|could not find|no such device/i.test(message)
+            ? 'A camera or microphone could not be found.'
+            : (message.split('\n')[0] ?? message).replace(/\s*\(ffmpeg[^)]*\)/i, '').slice(0, 200);
+  const lines = message.split('\n').filter((line) => line.trim() !== '');
+  return { text, detail: lines.slice(-8).join('\n') };
 }
 
 /**
@@ -138,3 +197,29 @@ export function matchMediaDevice<T extends { label: string }>(name: string, devi
   const wanted = normal(name);
   return devices.find((device) => normal(device.label) === wanted) ?? devices.find((device) => wanted !== '' && normal(device.label).startsWith(wanted));
 }
+
+/**
+ * Where the picker's bar goes (DIP, the display's top-left at 0, 0): below the target when it fits
+ * in the work area, else above the target (and its label), else inside the target near its top;
+ * centred on the target and inside the work area, so it never hides what is about to be recorded
+ * when there is room elsewhere.
+ */
+export function barPlacement(target: Rect, area: Rect, bar: { width: number; height: number }, labelAbove: boolean): { x: number; y: number; where: 'below' | 'above' | 'inside' } {
+  const gap = 16;
+  const x = Math.min(Math.max(target.x + target.width / 2 - bar.width / 2, area.x + 16), Math.max(area.x + 16, area.x + area.width - 16 - bar.width));
+  const below = target.y + target.height + gap;
+  if (below + bar.height <= area.y + area.height - 8) return { x, y: below, where: 'below' };
+  const above = target.y - (labelAbove ? 36 : 0) - gap - bar.height;
+  if (above >= area.y + 8) return { x, y: above, where: 'above' };
+  return { x, y: Math.min(Math.max(target.y + (labelAbove ? 16 : 52), area.y + 8), area.y + area.height - 8 - bar.height), where: 'inside' };
+}
+
+/** Where the target's label goes: above the target when there is room, else inside its top; never off the display. */
+export function labelPlacement(target: Rect, area: Rect, label: { width: number }): { x: number; y: number; above: boolean } {
+  const above = target.y - 36 >= area.y;
+  const x = Math.min(Math.max(target.x, area.x + 16), Math.max(area.x + 16, area.x + area.width - 16 - label.width));
+  return { x, y: above ? target.y - 36 : target.y + 8, above };
+}
+
+/** The camera bubble's size for a target: 18 % of its shorter side, 48 to 120 DIP. */
+export const bubbleSize = (target: Rect) => Math.round(Math.min(120, Math.max(48, Math.min(target.width, target.height) * 0.18)));

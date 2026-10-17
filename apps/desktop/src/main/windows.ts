@@ -5,7 +5,7 @@ import { basename, dirname, join, resolve } from 'node:path';
 import { app, BrowserWindow, dialog, Menu, screen, session, shell, type Session, type WebContents } from 'electron';
 import { PROJECT_FILE, writeProjectFile, type ProjectFile } from '@cuttle/core';
 import { plainIssue } from '../shared/format';
-import type { ExportEnd } from '../shared/ipc';
+import type { ExportEnd, ProjectStatus } from '../shared/ipc';
 import { isInside } from '../shared/media-path';
 import { CHECK, HIDDEN } from './check';
 import { ExportRun, exportPath } from './export-service';
@@ -13,7 +13,7 @@ import { bindRequests, send } from './ipc';
 import { ProjectMedia } from './media-service';
 import { LockedError, lockProject, openProjectFile, projectInfo } from './project';
 import { APP_ORIGIN, assetPath, bundlePath, serveApp, serveMedia } from './protocols';
-import { startPicking } from './recording';
+import { recut, startPicking } from './recording';
 import { addRecent, loadSettings, updateSettings } from './settings';
 
 
@@ -53,7 +53,7 @@ interface Editor {
   release: () => Promise<void>;
   run?: ExportRun;
   /** What the main process is doing to the project, shown in the title bar. */
-  status?: string;
+  status?: ProjectStatus;
 }
 
 /** Open editors and editors being opened, by the project folder's real path (junction and case aliases are one project). */
@@ -160,8 +160,9 @@ async function editorWindow(dir: string, key: string, file: ProjectFile, release
     'export:cancel': () => editor.run?.cancel(),
     'project:record': () => void startPicking(dir),
     'project:takes': () => takesMenu(dir, window),
+    'project:cut': () => void recut(dir),
   });
-  contents.on('did-finish-load', () => send(contents, 'project:status', { ...(editor.status !== undefined && { text: editor.status }) }));
+  contents.on('did-finish-load', () => send(contents, 'project:status', editor.status ?? {}));
 
   window.on('closed', () => {
     if (editors.get(key) === editor) editors.delete(key);
@@ -199,11 +200,11 @@ export async function editorWindowOf(dir: string): Promise<BrowserWindow | undef
 }
 
 /** Shows what the main process does to a project (`undefined`: nothing) in its editor's title bar. */
-export async function setEditorStatus(dir: string, text: string | undefined): Promise<void> {
+export async function setEditorStatus(dir: string, status: ProjectStatus | undefined): Promise<void> {
   const editor = await editorOf(dir);
   if (!editor) return;
-  editor.status = text;
-  send(editor.contents, 'project:status', { ...(text !== undefined && { text }) });
+  editor.status = status;
+  send(editor.contents, 'project:status', status ?? {});
 }
 
 /**
@@ -374,7 +375,7 @@ export async function createPill(): Promise<BrowserWindow> {
     'pill:hide': () => window.hide(),
     'pill:record': () => {
       window.hide();
-      void startPicking();
+      void startPicking(undefined, { fromPill: true });
     },
     'pill:menu': async () => {
       const recent = (await loadSettings()).recent;

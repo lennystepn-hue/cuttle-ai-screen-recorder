@@ -81,11 +81,18 @@ function TitleBar() {
         )}
       </div>
       <div className="grow" />
-      {status && (
-        <div className="chip-status" role="status" data-testid="project-status">
-          <span className="spinner small" aria-hidden="true" />
-          {status}
-        </div>
+      {status?.state === 'failed' ? (
+        <button className="chip-status warn" onClick={() => void bridge.invoke('project:cut')} title={`${status.text}. Click to try again.`} data-testid="project-status">
+          <WarningIcon size={14} />
+          <span className="chip-text">The take could not be cut</span> · Try again
+        </button>
+      ) : (
+        status && (
+          <div className="chip-status" role="status" data-testid="project-status" title={status.text}>
+            <span className="spinner small" aria-hidden="true" />
+            <span className="chip-text">{status.text}</span>
+          </div>
+        )
       )}
       {phase === 'ready' && (
         <>

@@ -6,7 +6,7 @@ import { app, globalShortcut, Menu, session } from 'electron';
 import { HIDDEN } from './check';
 import { mediaWorker } from './media-service';
 import { recorderHost } from './recorder-host';
-import { startPicking } from './recording';
+import { startPicking, stopForQuit, recordingRuns } from './recording';
 import { assetPath, registerSchemes } from './protocols';
 import { loadSettings, onSettingsChange } from './settings';
 import { createTray, updateTray, type TrayActions } from './tray';
@@ -43,6 +43,14 @@ if (!app.requestSingleInstanceLock()) {
 
   // The app lives in the tray: closing the last editor does not quit it.
   app.on('window-all-closed', () => {});
+  // Quitting while a take records stops it and writes it into its project first.
+  let quitAfterTake = false;
+  app.on('before-quit', (event) => {
+    if (quitAfterTake || !recordingRuns()) return;
+    event.preventDefault();
+    quitAfterTake = true;
+    void stopForQuit().finally(() => app.quit());
+  });
   app.on('will-quit', () => {
     globalShortcut.unregisterAll();
     mediaWorker.stop();

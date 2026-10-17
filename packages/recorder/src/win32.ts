@@ -199,7 +199,8 @@ async function create(): Promise<Win32> {
       if (DwmGetWindowAttribute(hwnd, DWMWA_EXTENDED_FRAME_BOUNDS, rect, 16) < 0) return 1;
       const [left, top, right, bottom] = [0, 4, 8, 12].map((offset) => rect.readInt32LE(offset)) as [number, number, number, number];
       if (right - left < 2 || bottom - top < 2) return 1;
-      found.push({ id: Number(koffi.address(hwnd)), pid: pid[0]!, className, title, bounds: { x: left, y: top, width: right - left, height: bottom - top }, monitor });
+      // A window handle has 32 significant bits (64-bit Windows sign-extends it): the id is those, unsigned.
+      found.push({ id: Number(BigInt.asUintN(32, koffi.address(hwnd))), pid: pid[0]!, className, title, bounds: { x: left, y: top, width: right - left, height: bottom - top }, monitor });
       return 1;
     }, koffi.pointer(WNDENUMPROC));
     try {
@@ -220,7 +221,8 @@ async function create(): Promise<Win32> {
       return { x: point.x, y: point.y };
     },
     focus(id) {
-      return IsWindow(id) !== 0 && SetForegroundWindow(id) !== 0;
+      const handle = id >= 2 ** 31 ? id - 2 ** 32 : id;
+      return IsWindow(handle) !== 0 && SetForegroundWindow(handle) !== 0;
     },
     cursorShape() {
       if (!GetCursorInfo(info) || info.hCursor === null) return 'arrow';

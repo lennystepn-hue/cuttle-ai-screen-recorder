@@ -191,7 +191,7 @@ describe.runIf(enabled)('the Cuttle app', () => {
   }, 60_000);
 
   afterAll(async () => {
-    await app?.close();
+    await app?.close().catch(() => {});
     await rm(root, { recursive: true, force: true });
   });
 
@@ -363,10 +363,36 @@ describe.runIf(enabled)('the Cuttle app', () => {
   });
 
   /** Records one take through the picker on the display that has the bar, stopping from the HUD after about 2 s. */
-  async function recordThroughPicker(start: () => Promise<unknown>): Promise<void> {
+  /**
+   * The picker of the display the test backend's first monitor (its moving pattern) maps to: the
+   * check records the same source wherever the real pointer is.
+   */
+  async function firstMonitorPicker(): Promise<{ page: Page; display: number }> {
+    let found: { page: Page; display: number } | undefined;
+    await waitForPage(app, async (page) => {
+      if (!page.url().includes('/picker.html')) return false;
+      const setup = await page.evaluate(() => (window as unknown as { cuttle: { invoke(channel: string): Promise<{ display: { id: number; monitor?: number } } | undefined> } }).cuttle.invoke('picker:setup'));
+      if (setup?.display.monitor !== 0) return false;
+      found = { page, display: setup.display.id };
+      return true;
+    });
+    return found!;
+  }
+
+  /** Records the first monitor's display from the picker (with `choices`), stopping from the HUD after about 1.5 s. */
+  async function recordThroughPicker(start: () => Promise<unknown>, choices?: Record<string, unknown>, stop = true): Promise<void> {
     await start();
-    const picker = await waitForPage(app, async (page) => page.url().includes('/picker.html') && (await page.locator('[data-testid=picker-record]').count()) > 0);
-    await click(picker, '[data-testid=picker-record]');
+    const { page, display } = await firstMonitorPicker();
+    await page.evaluate(
+      async ({ display, choices }) => {
+        const bridge = (window as unknown as { cuttle: { invoke(channel: string, argument?: unknown): Promise<unknown> } }).cuttle;
+        if (choices) await bridge.invoke('picker:choices', choices);
+        // the pickers close as the recording begins: the answer never comes back to this page
+        void bridge.invoke('picker:record', { kind: 'screen', display }).catch(() => {});
+      },
+      { display, choices },
+    ).catch(() => {});
+    if (!stop) return;
     const hud = await waitForPage(app, async (page) => page.url().includes('/hud.html') && (await page.locator('[data-testid=hud-time]').textContent()) !== '0:00');
     await new Promise((resolve) => setTimeout(resolve, 1500));
     await click(hud, '[data-testid=hud-stop]');
@@ -408,13 +434,12 @@ describe.runIf(enabled)('the Cuttle app', () => {
     const projects = join(root, 'projects');
     const before = new Set(readdirSync(projects));
     const pill = app.windows().find((page) => page.url().includes('/pill.html'))!;
-    await pill.evaluate(() => (window as unknown as { cuttle: { invoke(channel: string): Promise<unknown> } }).cuttle.invoke('pill:record'));
-    const picker = await waitForPage(app, async (page) => page.url().includes('/picker.html') && (await page.locator('[data-testid=picker-record]').count()) > 0);
     // The test backend's failing camera ends after 1 s, as an unplugged one does: the capture fails.
-    await picker.evaluate(() =>
-      (window as unknown as { cuttle: { invoke(channel: string, argument: unknown): Promise<unknown> } }).cuttle.invoke('picker:choices', { stop: 'none', camera: 'Failing Test Camera' }),
+    await recordThroughPicker(
+      () => pill.evaluate(() => (window as unknown as { cuttle: { invoke(channel: string): Promise<unknown> } }).cuttle.invoke('pill:record')),
+      { stop: 'none', camera: 'Failing Test Camera' },
+      false,
     );
-    await click(picker, '[data-testid=picker-record]');
     let made: string | undefined;
     await expect.poll(() => (made = readdirSync(projects).find((name) => !before.has(name))), { timeout: 30_000 }).toBeDefined();
     const recovered = await projectWhen(join(projects, made!), (written) => written.sources.screen === 'takes/1/screen.mp4' && written.scenes[0]?.id !== undefined);
@@ -423,7 +448,35 @@ describe.runIf(enabled)('the Cuttle app', () => {
     await opened.waitForSelector('.app[data-phase="ready"]', { timeout: 30_000 });
   }, 120_000);
 
+  it('ends a pick whose picker was closed (Alt+F4), so New recording works again', async () => {
+    const pill = app.windows().find((page) => page.url().includes('/pill.html'))!;
+    const pick = () => pill.evaluate(() => (window as unknown as { cuttle: { invoke(channel: string): Promise<unknown> } }).cuttle.invoke('pill:record'));
+    await pick();
+    await firstMonitorPicker();
+    await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find((window) => window.webContents.getURL().includes('/picker.html'))?.close());
+    await expect.poll(() => app.windows().filter((page) => page.url().includes('/picker.html')).length, { timeout: 10_000 }).toBe(0);
+    await pick();
+    const { page } = await firstMonitorPicker();
+    await page.evaluate(() => (window as unknown as { cuttle: { invoke(channel: string): Promise<unknown> } }).cuttle.invoke('picker:cancel')).catch(() => {});
+  }, 60_000);
+
   it('had no unhandled rejection in the main process', async () => {
     expect(await app.evaluate(() => (globalThis as unknown as { __rejections: string[] }).__rejections)).toEqual([]);
   });
+
+  // Last: the app quits here.
+  it('stops a recording when the app quits, and writes the take into its project first', async () => {
+    const projects = join(root, 'projects');
+    const before = new Set(readdirSync(projects));
+    const pill = app.windows().find((page) => page.url().includes('/pill.html'))!;
+    // no camera: the one the check before chose fails on purpose
+    await recordThroughPicker(() => pill.evaluate(() => (window as unknown as { cuttle: { invoke(channel: string): Promise<unknown> } }).cuttle.invoke('pill:record')), { stop: 'none' }, false);
+    await waitForPage(app, async (page) => page.url().includes('/hud.html') && (await page.locator('[data-testid=hud-time]').textContent()) !== '0:00');
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+    const exited = new Promise((resolve) => app.process().once('exit', resolve));
+    await app.evaluate(({ app: electronApp }) => electronApp.quit()).catch(() => {});
+    await exited;
+    const made = readdirSync(projects).find((name) => !before.has(name))!;
+    expect(JSON.parse(readFileSync(join(projects, made, 'cuttle.json'), 'utf8')).sources.screen).toBe('takes/1/screen.mp4');
+  }, 60_000);
 });

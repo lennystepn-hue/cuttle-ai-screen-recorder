@@ -2,8 +2,14 @@ import { describe, expect, it } from 'vitest';
 import {
   captureSourceFor,
   dragRect,
+  barPlacement,
+  bubbleSize,
   hudPosition,
+  hudWarning,
+  labelPlacement,
   matchMediaDevice,
+  monitorAt,
+  recordingFailure,
   stopOptionsFor,
   toDisplayPixels,
   windowAt,
@@ -65,6 +71,23 @@ describe('from a pick to the recorder', () => {
     expect(toDisplayPixels({ x: 2148, y: 507, width: 640, height: 360 }, second)).toEqual({ x: 100, y: 100, width: 640, height: 360 });
   });
 
+  it('keeps a region drawn to the edge of a display whose DIP size is not whole inside its pixels', () => {
+    // 2560×1440 at 150 % is 1706.67×960 DIP; the picker's edge rounds up to 1707
+    const odd: PickerDisplay = { ...primary, bounds: { x: 0, y: 0, width: 1707, height: 960 }, scaleFactor: 1.5 };
+    expect(toDisplayPixels({ x: 102, y: 100, width: 1605, height: 400 }, odd)).toEqual({ x: 153, y: 150, width: 2407, height: 600 });
+  });
+
+  it('finds the monitor that shows a display by its centre, whatever the rounding of its edges', () => {
+    const monitors = [
+      { index: 0, bounds: { x: 0, y: 0, width: 2560, height: 1440 } },
+      { index: 1, bounds: { x: 2560, y: 0, width: 1920, height: 1080 } },
+    ];
+    // the display's DIP bounds converted back come out a pixel larger (2561 wide)
+    expect(monitorAt(monitors, { x: 1280, y: 720 })?.index).toBe(0);
+    expect(monitorAt(monitors, { x: 3520, y: 540 })?.index).toBe(1);
+    expect(monitorAt(monitors, { x: 9000, y: 0 })).toBeUndefined();
+  });
+
   it('records a screen by its monitor, a window by its id and a region in monitor pixels', () => {
     expect(captureSourceFor({ kind: 'screen', display: 2 }, second)).toEqual({ kind: 'monitor', index: 1 });
     expect(captureSourceFor({ kind: 'window', display: 1, window: 77 }, primary)).toEqual({ kind: 'window', id: 77 });
@@ -83,8 +106,25 @@ describe('from a pick to the recorder', () => {
     expect(stopOptionsFor({ stop: 'none' })).toEqual({});
   });
 
-  it('puts the HUD at the top centre of the work area', () => {
-    expect(hudPosition(second, { width: 360, height: 60 })).toEqual({ x: 2048 + 780, y: 419 });
+  it('puts the HUD outside what is recorded: the top centre, else the bottom, else another display', () => {
+    const size = { width: 360, height: 60 };
+    const displays = [primary, second];
+    expect(hudPosition(displays, 2, { x: 2300, y: 600, width: 400, height: 300 }, size)).toEqual({ x: 2048 + 780, y: 419 });
+    // a window at the top of the display: the bottom
+    expect(hudPosition(displays, 1, { x: 700, y: 0, width: 600, height: 400 }, size)).toEqual({ x: 844, y: 1104 - 72 });
+    // the whole display: another one
+    expect(hudPosition(displays, 1, primary.bounds, size)).toEqual({ x: 2048 + 780, y: 419 });
+    // one display, all of it recorded: the top
+    expect(hudPosition([primary], 1, primary.bounds, size)).toEqual({ x: 844, y: 12 });
+  });
+
+  it('says what went wrong in a few plain words, with the details apart', () => {
+    expect(hudWarning('the microphone "Headset (Jabra)" records silence: it may be muted, or blocked').text).toBe('Mic is silent: muted?');
+    expect(hudWarning('the webcam had not started when the recording was stopped; it is left out of the take').text).toBe('No camera in this take');
+    const failed = recordingFailure('the webcam capture stopped unexpectedly (ffmpeg exit code 0): Side data:\n[libx264 @ 0x1] kb/s:374.97\n(what was recorded is in takes/1)');
+    expect(failed.text).toBe('The camera stopped sending video (unplugged, or taken by another app).');
+    expect(failed.detail).toContain('kb/s:374.97');
+    expect(recordingFailure('the recorder stopped unexpectedly (exit code 3); the capture was ended').text).toBe('the recorder stopped unexpectedly (exit code 3); the capture was ended');
   });
 });
 
@@ -96,5 +136,24 @@ describe('matchMediaDevice', () => {
     expect(matchMediaDevice('logi c920', devices)).toBe(devices[2]);
     expect(matchMediaDevice('Elgato Facecam', devices)).toBeUndefined();
     expect(matchMediaDevice('', devices)).toBeUndefined();
+  });
+});
+
+describe('the picker’s layout', () => {
+  const area = { x: 0, y: 0, width: 2048, height: 1104 };
+  const bar = { width: 1000, height: 52 };
+  it('puts the bar below the target, else above it, else inside near its top, centred and inside the work area', () => {
+    expect(barPlacement({ x: 100, y: 100, width: 600, height: 400 }, area, bar, true)).toEqual({ x: 16, y: 516, where: 'below' });
+    expect(barPlacement({ x: 600, y: 500, width: 800, height: 580 }, area, bar, true)).toEqual({ x: 500, y: 396, where: 'above' });
+    expect(barPlacement({ x: 0, y: 0, width: 2048, height: 1104 }, area, bar, false)).toEqual({ x: 524, y: 52, where: 'inside' });
+  });
+
+  it('keeps the label on the display, inside the target when there is no room above', () => {
+    expect(labelPlacement({ x: 1900, y: 200, width: 148, height: 100 }, area, { width: 300 })).toEqual({ x: 1732, y: 164, above: true });
+    expect(labelPlacement({ x: 0, y: 10, width: 400, height: 300 }, area, { width: 200 })).toEqual({ x: 16, y: 18, above: false });
+  });
+
+  it('sizes the camera bubble to the target', () => {
+    expect([bubbleSize({ x: 0, y: 0, width: 200, height: 90 }), bubbleSize({ x: 0, y: 0, width: 640, height: 360 }), bubbleSize({ x: 0, y: 0, width: 2048, height: 1104 })]).toEqual([48, 65, 120]);
   });
 });

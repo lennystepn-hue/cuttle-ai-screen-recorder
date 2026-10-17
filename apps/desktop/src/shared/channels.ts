@@ -3,7 +3,7 @@ import type { Event, Request } from './ipc';
 
 export const WINDOW_CHANNELS = {
   editor: {
-    requests: ['project:info', 'project:reveal', 'media:state', 'media:retry', 'export:targets', 'export:start', 'export:cancel', 'project:record', 'project:takes'],
+    requests: ['project:info', 'project:reveal', 'media:state', 'media:retry', 'export:targets', 'export:start', 'export:cancel', 'project:record', 'project:takes', 'project:cut'],
     events: ['media:state', 'export:progress', 'export:end', 'project:status'],
   },
   pill: {
@@ -11,8 +11,8 @@ export const WINDOW_CHANNELS = {
     events: ['pill:recent'],
   },
   picker: {
-    requests: ['picker:setup', 'picker:hover', 'picker:choices', 'picker:record', 'picker:cancel', 'picker:claude-folder'],
-    events: ['picker:open', 'picker:active', 'picker:choices'],
+    requests: ['picker:setup', 'picker:hover', 'picker:choices', 'picker:record', 'picker:cancel', 'picker:claude-folder', 'picker:retry'],
+    events: ['picker:open', 'picker:active', 'picker:choices', 'picker:devices'],
   },
   hud: {
     requests: ['hud:stop', 'hud:marker'],
@@ -25,3 +25,6 @@ export const WINDOW_CHANNELS = {
 } as const satisfies Record<string, { requests: readonly Request[]; events: readonly Event[] }>;
 
 export type WindowKind = keyof typeof WINDOW_CHANNELS;
+
+/** Events that are news, not a state: the preload does not replay them to a listener that comes late. */
+export const STREAM_EVENTS: ReadonlySet<string> = new Set<Event>(['export:progress', 'export:end']);

@@ -251,8 +251,10 @@ export async function recentClaudeFolders(limit = 5, configDir = process.env.CLA
   const folders: ClaudeFolder[] = [];
   for (const transcript of newest) {
     if (folders.length >= limit) break;
-    const size = (await stat(transcript.path)).size;
-    const text = (await readRange(transcript.path, Math.max(0, size - CWD_TAIL_BYTES), size)).toString('utf8');
+    // a transcript deleted since the listing is skipped
+    const size = (await stat(transcript.path).catch(() => undefined))?.size;
+    if (size === undefined) continue;
+    const text = (await readRange(transcript.path, Math.max(0, size - CWD_TAIL_BYTES), size).catch(() => Buffer.alloc(0))).toString('utf8');
     const cwd = text
       .split('\n')
       .reverse()

@@ -21,6 +21,14 @@
 .titlebar .seg {
   -webkit-app-region: no-drag;
 }
+.titlebar .seg button {
+  white-space: nowrap;
+}
+.chip-status .chip-text {
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .project-name {
   display: flex;
   align-items: baseline;

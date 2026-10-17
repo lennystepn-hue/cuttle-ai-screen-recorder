@@ -2,7 +2,7 @@
 import { loadEngineAssets } from '@cuttle/engine';
 import { withFormat, type ExportFormat } from '@cuttle/export/formats';
 import type { CuttleProject } from '@cuttle/project';
-import type { ExportEnd, ExportProgress, ExportTarget, MediaState, ProjectInfo } from '../../shared/ipc';
+import type { ExportEnd, ExportProgress, ExportTarget, MediaState, ProjectInfo, ProjectStatus } from '../../shared/ipc';
 import type { OverlayKind } from '../../shared/timeline-model';
 import { bridge } from '../bridge';
 import { openProjectMedia, openVideo, type EditorMedia } from './media';
@@ -33,8 +33,8 @@ export interface EditorState {
   exportUnseen: boolean;
   /** Timeline scale; 0 until the timeline fits itself. */
   pxPerSecond: number;
-  /** What the main process is doing to the project ("Cutting the take…"). */
-  status?: string;
+  /** What the main process is doing to the project ("Cutting the take…", or that it could not). */
+  status?: ProjectStatus;
 }
 
 export const store = createStore<EditorState>({
@@ -68,7 +68,11 @@ const query = new URLSearchParams(location.search);
 /** Opens the window's project: its media through the protocol, the engine's assets, the player. */
 export async function openSession(canvas: HTMLCanvasElement): Promise<void> {
   // The status comes before the project is open (the window opens while the take is cut).
-  bridge.on('project:status', ({ text }) => store.set({ status: text }));
+  bridge.on('project:status', (status) => {
+    store.set({ status: status.text ? status : undefined });
+    // A new take records while this editor is hidden: its sound must not reach the mic.
+    if (status.state === 'recording') player?.pause();
+  });
   try {
     const info = await bridge.invoke('project:info');
     document.title = `${info.name} · Cuttle`;

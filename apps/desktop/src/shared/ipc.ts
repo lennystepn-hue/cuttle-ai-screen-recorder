@@ -76,8 +76,12 @@ export interface PickerSetup {
   /** Whether this picker is on the display the pointer is on (it shows the bar). */
   active: boolean;
   countdown: number;
-  /** Why recording cannot start (no ffmpeg, the recorder failed), said for people. */
+  /** Why recording cannot start (no ffmpeg, the recorder failed, an unknown display), said for people: Record is off. */
   problem?: string;
+  /** What is worth knowing first (little disk space), said for people: Record stays on. */
+  warning?: string;
+  /** Cameras and mics are still being listed (DirectShow takes a moment): the bar says so. */
+  listingDevices?: boolean;
 }
 
 /** What the HUD shows. */
@@ -86,8 +90,19 @@ export interface HudState {
   /** When the take started (epoch milliseconds). */
   startedAt?: number;
   markers: number;
-  /** A warning from the recorder, or "Stopping…". */
+  /** A warning in a few words ("Mic is silent: muted?"), or "Stopping…". */
   message?: string;
+  /** The whole warning, for the tooltip. */
+  detail?: string;
+  /** `warn`: a warning (amber); `info`: a state ("Stopping…"). */
+  tone?: 'warn' | 'info';
+}
+
+/** What the main process is doing to a project, shown in its editor's title bar. */
+export interface ProjectStatus {
+  text?: string;
+  /** `working`: cutting the take (a spinner); `failed`: it could not (Try again); `recording`: a new take records (the player pauses). */
+  state?: 'working' | 'failed' | 'recording';
 }
 
 const rect = z.strictObject({ x: z.number().finite(), y: z.number().finite(), width: z.number().finite().positive(), height: z.number().finite().positive() });
@@ -115,6 +130,8 @@ export const REQUESTS = {
   // editor (recording)
   'project:record': z.undefined(),
   'project:takes': z.undefined(),
+  // cut the take with suggest again, after it failed
+  'project:cut': z.undefined(),
   // picker
   'picker:setup': z.undefined(),
   'picker:hover': z.undefined(),
@@ -131,6 +148,7 @@ export const REQUESTS = {
   ]),
   'picker:cancel': z.undefined(),
   'picker:claude-folder': z.undefined(),
+  'picker:retry': z.undefined(),
   // HUD
   'hud:stop': z.undefined(),
   'hud:marker': z.undefined(),
@@ -155,12 +173,14 @@ export interface Responses {
   'pill:record': void;
   'project:record': void;
   'project:takes': void;
+  'project:cut': void;
   'picker:setup': PickerSetup | undefined;
   'picker:hover': void;
   'picker:choices': void;
   'picker:record': void;
   'picker:cancel': void;
   'picker:claude-folder': string | undefined;
+  'picker:retry': void;
   'hud:stop': void;
   'hud:marker': void;
 }
@@ -172,12 +192,14 @@ export interface Events {
   'export:end': ExportEnd;
   'pill:recent': Responses['pill:recent'];
   'picker:open': PickerSetup;
+  /** The cameras and mics, listed after the pickers opened (DirectShow is slow). */
+  'picker:devices': Pick<PickerSetup, 'cameras' | 'mics' | 'choices'>;
   'picker:active': { display: number };
   'picker:choices': RecordChoices;
   'countdown:tick': { seconds: number };
   'hud:state': HudState;
   /** What the main process is doing to the project (cutting the take), or nothing. */
-  'project:status': { text?: string };
+  'project:status': ProjectStatus;
 }
 
 export type Event = keyof Events;

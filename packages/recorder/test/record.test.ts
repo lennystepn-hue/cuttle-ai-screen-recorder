@@ -87,8 +87,10 @@ describe.concurrent('record (test backend)', () => {
     // The still test monitor moves for 1 s, then stands still; the synthetic input rests from 1.5 s.
     const take = await record({ ...test, projectDir: project(), source: { kind: 'monitor', index: 1 }, stop: { untilIdleSeconds: 1, maxSeconds: 20 } }).done;
     expect(take.stopReason).toBe('idle');
-    expect(take.seconds).toBeGreaterThan(2.2);
-    expect(take.seconds).toBeLessThan(3.5);
+    // At least 1 s of movement and 1 s of rest. The input is timed from record(), the screen from its
+    // first frame: on a loaded machine the screen starts later, so the rest begins earlier in its seconds.
+    expect(take.seconds).toBeGreaterThan(1.95);
+    expect(take.seconds).toBeLessThan(5);
     expect(take.screenSize).toEqual({ width: 640, height: 360 });
   }, SLOW);
 

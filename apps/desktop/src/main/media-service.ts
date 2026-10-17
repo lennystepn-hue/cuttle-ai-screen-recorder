@@ -81,7 +81,9 @@ class Worker {
 
   private pump(): void {
     if (this.running !== undefined) return;
-    const next = this.queue.shift();
+    // Peaks take seconds and the waveform is wanted at once: they go before a proxy's long encode.
+    const peaks = this.queue.findIndex((entry) => entry.job.job.job === 'peaks');
+    const [next] = this.queue.splice(Math.max(0, peaks), 1);
     if (!next) return;
     this.running = next.id;
     this.start().postMessage({ id: next.id, ...next.job.job });
@@ -198,7 +200,8 @@ export class ProjectMedia {
     const screenKey = await sourceKey(screen, this.project.sources.screen);
     const mic = this.project.sources.mic === undefined ? undefined : resolve(this.dir, this.project.sources.mic);
     const micKey = mic === undefined ? undefined : await sourceKey(mic, this.project.sources.mic!);
-    await Promise.all([this.visual(screen, screenKey), mic && micKey ? this.peaks(mic, micKey) : Promise.resolve()]);
+    const peaks = mic && micKey ? this.peaks(mic, micKey) : Promise.resolve();
+    await Promise.all([peaks, this.visual(screen, screenKey)]);
   }
 
   private async visual(screen: string, key: SourceKey | undefined): Promise<void> {

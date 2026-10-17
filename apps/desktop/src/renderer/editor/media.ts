@@ -17,11 +17,11 @@ export function mediaUrl(path: string): string {
   return `${MEDIA_ORIGIN}/${path.replaceAll('\\', '/').split('/').filter((part) => part !== '' && part !== '.').map(encodeURIComponent).join('/')}`;
 }
 
-/** Whether a file of the project is there (one byte of it is read). */
+/** Whether a file of the project is there (one byte of it is read; an empty file answers 416 and is there too). */
 async function present(path: string): Promise<boolean> {
   const response = await fetch(mediaUrl(path), { headers: { Range: 'bytes=0-0' } }).catch(() => undefined);
   await response?.body?.cancel();
-  return response?.ok === true;
+  return response !== undefined && response.status !== 404;
 }
 
 const missing = (path: string) => new MediaError(`${path} is missing from the project folder.`);

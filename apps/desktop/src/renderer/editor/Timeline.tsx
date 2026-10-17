@@ -29,6 +29,12 @@ const DRAG_PX = 3;
 /** Labels hide on blocks narrower than this. */
 const LABEL_MIN_PX = 48;
 
+/**
+ * Until when the playhead was last moved with the pointer (performance.now()): the view does not
+ * follow those seeks, or a drag near an edge would scroll the content under the pointer and run away.
+ */
+let pointerSeekUntil = 0;
+
 const MARKER_DOT: Record<MarkerKind, string> = { prompt: '#ececf1', tool: '#7a7a85', answer: '#4fd1a1', manual: '#9a9aa5' };
 
 interface Layout {
@@ -164,11 +170,15 @@ export function Timeline() {
     }
     const startX = event.clientX;
     let dragging = false;
-    if (seekAtDown) void player.seek(timeAt(startX));
+    const seekTo = (clientX: number) => {
+      pointerSeekUntil = performance.now() + 1000;
+      void player.seek(timeAt(clientX));
+    };
+    if (seekAtDown) seekTo(startX);
     const move = (moved: PointerEvent) => {
       if (!dragging && Math.abs(moved.clientX - startX) < DRAG_PX) return;
       dragging = true;
-      void player.seek(timeAt(moved.clientX));
+      seekTo(moved.clientX);
     };
     const up = () => {
       target.removeEventListener('pointermove', move);
@@ -231,7 +241,8 @@ export function Timeline() {
           <div
             className="tl-content"
             style={{ width: width + END_SPACE, height: layout.total }}
-            onPointerDown={(event) => scrub(event, () => select(undefined), true)}
+            // a press on the ruler or the markers seeks; a click on an empty lane also clears the selection
+            onPointerDown={(event) => scrub(event, (event.target as HTMLElement).closest('.ruler, .markers') ? undefined : () => select(undefined), true)}
           >
             {model && pps > 0 && (
               <>
@@ -303,13 +314,13 @@ export function Timeline() {
 
 const isSelected = (selection: Selection | undefined, kind: Selection['kind'], index: number) => selection?.kind === kind && selection.index === index;
 
-/** The playhead: the only part that changes on every frame. Keeps itself in view after any seek. */
+/** The playhead: the only part that changes on every frame. Keeps itself in view while playing and after a seek by key. */
 function Playhead({ pps, top, scroller }: { pps: number; top: number; scroller: React.RefObject<HTMLDivElement | null> }) {
   const t = useStore(store, (state) => state.player.t);
   const playing = useStore(store, (state) => state.player.playing);
   useEffect(() => {
     const element = scroller.current;
-    if (!element) return;
+    if (!element || (!playing && performance.now() < pointerSeekUntil)) return;
     const x = t * pps;
     if (x < element.scrollLeft + (playing ? 0 : 40) || x > element.scrollLeft + element.clientWidth - 40) element.scrollLeft = Math.max(0, x - element.clientWidth / 3);
   }, [t, pps, playing, scroller]);
@@ -319,7 +330,7 @@ function Playhead({ pps, top, scroller }: { pps: number; top: number; scroller: 
 const Markers = memo(function Markers({ model, pps }: { model: TimelineModel; pps: number }) {
   const groups = groupPins(model.markers, 70 / pps);
   return (
-    <div className="tl-row" style={{ position: 'absolute', top: 0, height: BASE_ROWS.markers, left: 0, right: 0 }}>
+    <div className="tl-row markers" style={{ position: 'absolute', top: 0, height: BASE_ROWS.markers, left: 0, right: 0 }}>
       {groups.map((group, i) => {
         // A flag ends before the next one starts (its dot always shows); the tooltip names it in full.
         const next = groups[i + 1];

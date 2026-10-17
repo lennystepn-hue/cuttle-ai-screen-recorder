@@ -56,7 +56,17 @@ export class LockedError extends Error {
  */
 export async function lockProject(dir: string, options: { force?: boolean } = {}): Promise<() => Promise<void>> {
   const path = join(dir, CACHE_DIR, LOCK);
-  const held = await readFile(path, 'utf8').then((text) => JSON.parse(text) as { host?: unknown }, () => undefined);
+  // A lock that does not parse (a power cut during its write leaves it empty) is stale too.
+  const held = await readFile(path, 'utf8').then(
+    (text) => {
+      try {
+        return JSON.parse(text) as { host?: unknown } | null;
+      } catch {
+        return undefined;
+      }
+    },
+    () => undefined,
+  );
   if (!options.force && held && typeof held.host === 'string' && held.host !== hostname()) throw new LockedError(held.host);
   await mkdir(dirname(path), { recursive: true });
   const lock = `${JSON.stringify({ host: hostname(), pid: process.pid, opened: new Date().toISOString() })}\n`;

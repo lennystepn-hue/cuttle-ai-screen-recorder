@@ -37,4 +37,13 @@ describe('lockProject', () => {
     await release();
     expect(JSON.parse(readFileSync(lockFile(), 'utf8')).host).toBe('other-pc');
   });
+
+  it('takes over a lock that does not parse (a power cut during its write leaves it empty)', async () => {
+    for (const text of ['', '{"host":', 'null', '42']) {
+      mkdirSync(join(dir, '.cuttle'), { recursive: true });
+      writeFileSync(lockFile(), text);
+      await (await lockProject(dir))();
+      expect(existsSync(lockFile()), JSON.stringify(text)).toBe(false);
+    }
+  });
 });

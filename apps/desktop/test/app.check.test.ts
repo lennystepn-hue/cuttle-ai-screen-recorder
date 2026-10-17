@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
@@ -211,6 +211,7 @@ describe.runIf(enabled)('the Cuttle app', () => {
     expect(t).toBeGreaterThan(duration * 0.3);
     expect(t).toBeLessThan(duration * 0.7);
     // dragging across a scene scrubs too, and leaves the selection alone
+    await seek(0);
     await press('.scene:nth-child(1)', 60);
     await editor.waitForTimeout(300);
     expect((await state()).t).toBeGreaterThan(0);
@@ -238,7 +239,7 @@ describe.runIf(enabled)('the Cuttle app', () => {
     await shot('04-thumbnails');
   }, 90_000);
 
-  it('scrubs and plays the proxy: the same frames, and key frames only in the 8× clip', async () => {
+  it('scrubs and plays the proxy: the same frames, and it keeps up through the 8× clip', async () => {
     await seek(1);
     const take = await pixels();
     expect(await useProxy()).toBe(true);
@@ -299,8 +300,9 @@ describe.runIf(enabled)('the Cuttle app', () => {
     );
     await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find((window) => window.getTitle() === 'second · Cuttle')?.close());
     await expect.poll(() => existsSync(lock), { timeout: 10_000 }).toBe(false);
-    await editor.waitForTimeout(1000);
-    expect(existsSync(join(second, 'out', 'export.mp4'))).toBe(false);
+    // longer than the whole export takes: had it gone on, its file would be there by now
+    await editor.waitForTimeout(5000);
+    expect(existsSync(join(second, 'out')) ? readdirSync(join(second, 'out')) : []).toEqual([]);
   }, 90_000);
 
   it('keeps the pill out of recordings, with the projects in its recent list, and brings it back after a close', async () => {

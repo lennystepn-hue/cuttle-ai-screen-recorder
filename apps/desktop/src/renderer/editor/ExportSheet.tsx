@@ -1,7 +1,7 @@
 // The export sheet: formats (the project's own size first), encoder, which files it writes and what
 // they replace, a check of things worth a second look, progress, cancel, and the files at the end.
 // Closing it while an export runs keeps the export running (the title bar shows it).
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { EXPORT_FORMATS } from '@cuttle/export/formats';
 import { formatBytes, formatDuration, formatTime } from '../../shared/format';
 import type { ExportTarget } from '../../shared/ipc';
@@ -54,18 +54,39 @@ export function ExportSheet() {
     };
   }, [open, chosen, end]);
 
-  // Focus moves into the sheet when it opens and back where it was when it closes.
+  // Focus stays in the sheet while it is open: it goes back where it was when the sheet closes (the
+  // Export button when that is gone, as the title bar's export chip is) ...
   useEffect(() => {
     if (!open) return;
     const before = document.activeElement instanceof HTMLElement ? document.activeElement : undefined;
-    requestAnimationFrame(() => sheet.current?.querySelector<HTMLElement>('[data-autofocus]')?.focus());
-    return () => before?.focus();
+    return () => (before?.isConnected ? before : document.querySelector<HTMLElement>('.titlebar .primary'))?.focus();
   }, [open]);
 
+  // ... it moves in when the sheet opens or changes view (the button that had it is gone) ...
+  const view = exporting ? 'progress' : end ? 'end' : 'form';
+  useEffect(() => {
+    if (!open) return;
+    const frame = requestAnimationFrame(() => {
+      const element = sheet.current;
+      if (element && !element.contains(document.activeElement)) element.querySelector<HTMLElement>('[data-autofocus]')?.focus();
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [open, view]);
+
+  // ... and Tab cycles inside it, also from wherever the focus fell. Esc closes it.
   useEffect(() => {
     if (!open) return;
     const onKey = (event: globalThis.KeyboardEvent) => {
-      if (event.key === 'Escape') closeExport();
+      if (event.key === 'Escape') return closeExport();
+      const element = sheet.current;
+      if (event.key !== 'Tab' || !element) return;
+      const focusable = [...element.querySelectorAll<HTMLElement>('button:not(:disabled), select, [tabindex]:not([tabindex="-1"])')];
+      if (focusable.length === 0) return;
+      const at = focusable.indexOf(document.activeElement as HTMLElement);
+      if (at < 0 || (event.shiftKey && at === 0) || (!event.shiftKey && at === focusable.length - 1)) {
+        event.preventDefault();
+        (event.shiftKey ? focusable.at(-1)! : focusable[0]!).focus();
+      }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
@@ -75,22 +96,6 @@ export function ExportSheet() {
 
   if (!open) return null;
 
-  /** Tab stays inside the sheet. */
-  const trap = (event: KeyboardEvent) => {
-    if (event.key !== 'Tab' || !sheet.current) return;
-    const focusable = [...sheet.current.querySelectorAll<HTMLElement>('button:not(:disabled), select, [tabindex]:not([tabindex="-1"])')];
-    const first = focusable[0];
-    const last = focusable.at(-1);
-    if (!first || !last) return;
-    if (event.shiftKey && document.activeElement === first) {
-      event.preventDefault();
-      last.focus();
-    } else if (!event.shiftKey && document.activeElement === last) {
-      event.preventDefault();
-      first.focus();
-    }
-  };
-
   const toggle = (name: ExportTarget) => setChosen((list) => (list.includes(name) ? list.filter((item) => item !== name) : targets.filter((item) => item === name || list.includes(item))));
   const done = progress ? progress.done / Math.max(1, progress.total) : 0;
   const finishing = progress !== undefined && progress.position === progress.formats - 1 && progress.done >= progress.total;
@@ -99,7 +104,7 @@ export function ExportSheet() {
 
   return (
     <div className="scrim" onPointerDown={(event) => event.target === event.currentTarget && closeExport()}>
-      <div className="sheet" role="dialog" aria-modal="true" aria-labelledby="export-title" data-testid="export-sheet" ref={sheet} onKeyDown={trap}>
+      <div className="sheet" role="dialog" aria-modal="true" aria-labelledby="export-title" data-testid="export-sheet" ref={sheet}>
         <div style={{ display: 'flex', alignItems: 'center' }}>
           <h2 id="export-title" style={{ flex: 1 }}>
             Export

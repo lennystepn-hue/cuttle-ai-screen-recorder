@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { realpath, stat } from 'node:fs/promises';
 import { basename, dirname, join, resolve } from 'node:path';
 import { app, BrowserWindow, dialog, Menu, screen, session, shell, type Session, type WebContents } from 'electron';
-import { PROJECT_FILE } from '@cuttle/core';
+import { PROJECT_FILE, type ProjectFile } from '@cuttle/core';
 import { plainIssue } from '../shared/format';
 import type { ExportEnd } from '../shared/ipc';
 import { isInside } from '../shared/media-path';
@@ -91,6 +91,22 @@ export async function openEditor(projectDir: string, options: { force?: boolean 
 async function createEditor(dir: string, key: string, force: boolean): Promise<BrowserWindow> {
   const file = await openProjectFile(dir);
   const release = await lockProject(dir, { force });
+  try {
+    return await editorWindow(dir, key, file, release);
+  } catch (error) {
+    // A window that failed to load is not left open (and invisible), nor the project locked.
+    const editor = editors.get(key);
+    if (editor) {
+      editors.delete(key);
+      editor.media.dispose();
+      if (!editor.window.isDestroyed()) editor.window.destroy();
+    }
+    await release();
+    throw error;
+  }
+}
+
+async function editorWindow(dir: string, key: string, file: ProjectFile, release: () => Promise<void>): Promise<BrowserWindow> {
   const ses = projectSession(dir);
   await serveMedia(ses, dir);
 

@@ -7100,6 +7100,107 @@ Expected: no output.
 These need a person and a real screen; the checks drive the app with synthetic events, record test patterns and never show a window.
 
 1. A real recording with a pause: record a window, pause from the HUD for a few seconds (do something private meanwhile), resume, stop. The video has no trace of the pause; the voice stays in step.
-2. Hold the HUD's restart button: the countdown starts again. Stop, then press "Undo restart" in the editor: the first take is back.
-3. Start the unpacked app once with a fresh profile (rename `%APPDATA%\Cuttle\settings.json`): the first run shows. Press Install, open a new terminal, run `cuttle --version`. Ask Claude Code (a new session) for a demo video: it finds the skill.
+2. Hold the HUD's restart button: the countdown says "Restarting · the last take is kept". Stop, then press "Use it instead" in the editor's title bar: the first take is back, and a note says so.
+3. Start the unpacked app once with a fresh profile (rename `%APPDATA%\Cuttle\settings.json`): the first run shows. Press "Install both", open a new terminal, run `cuttle --version`. Start Claude Code in a new terminal and ask for a demo video: it finds the skill. Your user Path (`reg query HKCU\Environment /v Path`) keeps its type and its `%…%` entries, with the command folder at its end.
 4. Settings: turn on "Start Cuttle when you sign in", sign out and in: Cuttle is in the tray. Set motion to "Less": the HUD's dot and the countdown stop pulsing.
+
+## Changes during execution
+
+The code blocks above are the original plan. Its tasks were replayed mechanically on a fresh clone,
+byte-identical to the prototype, and those commits were pushed. Two reviews followed. The code
+review probed the recorder with the `test` backend, the hidden app, and a throwaway registry value.
+The experience review photographed every new state: the first run and the settings at their sizes,
+the HUD's states, the editor's notes and empty states. They found the problems below, and all are
+fixed in the commits after the plan's. The repo is the source of truth.
+
+**The cuttle command and the user's PATH**
+
+- **Installing the command rewrote the user's Path.** .NET's Environment API expands every `%VAR%`
+  entry and stores REG_SZ, so a REG_EXPAND_SZ Path lost its variables for good.
+  - `user-path.ts` reads and writes the registry value as it is stored. The value keeps its kind
+    and its unexpanded entries; a new value is REG_EXPAND_SZ.
+  - The duplicate check runs on the expanded entries, in the same script.
+  - Running programs are told with WM_SETTINGCHANGE.
+  - PowerShell's output is read as UTF-8: reg.exe wrote names like "Jürgen" in the console's code
+    page, so the old check missed them and added the folder again on every install.
+  - `user-path.test.ts` runs the script on a key of its own under `HKCU\Software`, never on the
+    user's environment.
+- **The shim failed for paths with letters outside ASCII, or a `%`.** cmd.exe reads batch files
+  in the console's code page.
+  - `cuttle.cmd` now holds ASCII only: a user folder becomes its variable (`%LOCALAPPDATA%\…`), and
+    a `%` is doubled (`batch.ts`, tested).
+  - Otherwise the shim uses Windows' 8.3 name. Failing that, the app says to move Cuttle.
+- **The first Try again after installing ffmpeg failed** ("the recorder stopped"). `refresh()`
+  killed the idle helper but kept it as the current one. The helper is now let go first, and only
+  the current helper's exit counts. The media worker is fixed the same way.
+- Off Windows the command's folder is not on PATH by itself, so the status says which line to add
+  to the shell profile instead of showing a check mark.
+
+**Pause and restart**
+
+- **A restart followed by a failed take left the good take stuck** in `takes/.discarded`.
+  - A failure after the start opens the recovered take and offers the earlier one.
+  - A failure before the start brings the earlier take back and says so.
+  - `app:check` covers it with the failing test camera.
+- **Claude's markers after a paused take landed at its end** and moved the answer zoom there. The
+  take's clock ends with the take.
+- **Claude's stop could land during a pause.** One timer only; a pause clears it, and the resume
+  starts it again.
+- Takes put aside stay reachable from the takes menu ("Put aside by a restart"), not only from the
+  editor's one-time offer.
+- The restart and bring-back renames wait for a held file, and a failure is said instead of being
+  hidden or unhandled.
+- The offer to use the earlier take, and the note after using it, come once the cut is in. They no
+  longer race the cut.
+- At most 100 pieces per take: the join's command line stays within Windows' limit, and a pause
+  beyond that says why it was not taken.
+- `recover`'s cleanup no longer fails a join that worked, and it removes pieces the manifest never
+  listed.
+- A warning on the HUD comes back after a pause.
+- A project renamed in Settings keeps its pending cut, and under `pnpm app` the login item starts
+  the app's script.
+
+**The experience**
+
+- **The HUD.**
+  - Holding Restart keeps "Restarting…" to the end instead of "Stopping…".
+  - The countdown after it says "Restarting · the last take is kept".
+  - A short press says "Hold to restart".
+- **The editor.**
+  - The offer to use the earlier take is a quiet chip in the title bar ("Restarted: the earlier
+    take is kept. Use it instead ×"), no longer a note over the video.
+  - After using it, a note says which take is back and where the other one is.
+  - Suggest's step and note are "Cuttle's cut" and "Cuttle cut the take."
+- **The first run.**
+  - Two groups: "To record" (ffmpeg, amber only when missing) and "For Claude Code" (the command and
+    the skill, an empty ring until installed, "Install both").
+  - An install problem shows in its row, in plain words and in red, with "Try again".
+  - The note says to start Claude Code again in a new terminal.
+  - "Update" shows only when the shim runs another copy of the app, and never in the first run.
+  - A skill folder from somewhere else says what to do, with "Show the folder".
+  - The window is titled "Welcome to Cuttle", and Done stays in sight at any size.
+- **The settings.**
+  - Focus rings have a gap, so they show on the accent buttons. They keep each control's own shape,
+    and the Copy chip has one.
+  - The radio groups move with the arrow keys.
+  - The title bar is the editor's: 44 px, the mark, a line under it. Esc and Ctrl+W close the
+    window.
+  - Renaming keeps the focus and clears a stale error on Esc. An empty name says so. A reserved name
+    ("con") and a project open on another computer get their own message. Rename is off for a
+    project open here.
+  - Recent rows show how long ago a project in the projects folder was opened (other projects show
+    their folder). The projects folder is cut in its middle. Remove is an × icon.
+- **Empty states.**
+  - A disabled primary button has no accent.
+  - Play says why it is off.
+  - An empty timeline says where the scenes will show.
+  - The lane hints show their key as a chip, and the input lane says "No clicks or keys recorded in
+    this take".
+
+Left as they were:
+
+- With the countdown off, nothing shows between a restart and the new HUD; the old HUD is not kept
+  up until then.
+- A take whose first-pause renames were cut off by a crash still needs `screen.1.mp4` renamed by
+  hand before `recover` takes it.
+- Removing a recent project has no undo; its folder stays where it is.

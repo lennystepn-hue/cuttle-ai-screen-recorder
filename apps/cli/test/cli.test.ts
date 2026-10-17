@@ -1,7 +1,7 @@
 import { spawnSync } from 'node:child_process';
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { hostname, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { VERSION, runCli } from '../src/main';
@@ -158,6 +158,23 @@ describe('cuttle devices and record (test backend)', () => {
     });
     expect(project.scenes).toEqual([{ type: 'clip', from: 0, to: Math.floor(result.take.seconds * 1000) / 1000 }]);
   }, 20_000);
+
+  it('refuses a project open in the Cuttle app, unless forced or its app is gone', async () => {
+    const dir = join(temp(), 'demo');
+    mkdirSync(join(dir, '.cuttle'), { recursive: true });
+    // this process stands in for the app on this computer
+    writeFileSync(join(dir, '.cuttle', 'editor.lock'), JSON.stringify({ host: hostname(), pid: process.pid }));
+    const refused = await cli('--json', '-C', dir, 'record', '--backend', 'test', '--max', '1', '--countdown', '0');
+    expect(refused.code).toBe(1);
+    expect(refused.json).toMatchObject({ error: { code: 'project-open' } });
+    expect(existsSync(join(dir, 'takes'))).toBe(false);
+    const forced = await cli('--json', '-C', dir, 'record', '--backend', 'test', '--max', '1', '--countdown', '0', '--force');
+    expect(forced.code).toBe(0);
+    // an app that crashed left its lock: no process has its id any more
+    const gone = spawnSync(process.execPath, ['-e', '']).pid!;
+    writeFileSync(join(dir, '.cuttle', 'editor.lock'), JSON.stringify({ host: hostname(), pid: gone }));
+    expect((await cli('--json', '-C', dir, 'record', '--backend', 'test', '--max', '1', '--countdown', '0')).code).toBe(0);
+  }, 30_000);
 
   it('takes a region split at its commas (as PowerShell passes it) and hides the drawn cursor with --draw-mouse', async () => {
     const dir = join(temp(), 'demo');

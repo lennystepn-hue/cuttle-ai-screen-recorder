@@ -2,6 +2,7 @@
 // as written (with backups), point the project at a take, suggest scenes, recover a take, grab a
 // frame, and run ffmpeg.
 export { CoreError, type CoreErrorCode } from './errors';
+export { EDITOR_LOCK, editorLockOf, type EditorLock } from './editor-lock';
 export { ffmpegPath, runFfmpeg } from './ffmpeg';
 export { BACKUPS, PROJECT_FILE, backupFile, newProjectFile, projectExists, projectHash, readProjectFile, writeProjectFile, type ProjectFile, type WriteOptions, type WriteResult } from './project-file';
 export { samePath, useTake, type TakeFiles } from './use-take';

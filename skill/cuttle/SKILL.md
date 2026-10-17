@@ -71,6 +71,8 @@ cuttle -C "<project>" record --monitor 0 --until-file "<project>/stop" --until-c
 - `--max <seconds>` is the safety net. The user can also stop with Ctrl+Shift+Alt+S and add a
   marker with Ctrl+Shift+Alt+M. Other sources: `--window "<part of the title>"`,
   `--region x,y,w,h` (pixels of `--monitor`). `--countdown 3` is the default.
+- A project open in the Cuttle app is refused (`project-open`): the app records it itself
+  ("Record again"). Ask the user to record there or to close it; `--force` only if they say so.
 
 The Bash tool's result names the background task's output file. Wait until the recording runs
 (at most 40 s: the countdown plus up to 20 s for the tracks to start):

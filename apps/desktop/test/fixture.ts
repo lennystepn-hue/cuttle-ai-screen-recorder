@@ -1,6 +1,7 @@
 // A small project for the app's checks, made with ffmpeg: a 12 s screen recording (a test pattern
-// with a moving box), a mic (a tone), input events, Claude's markers, a page still, and a
-// cuttle.json with a continuous cut into a 4× clip, a jump cut, a card, a zoom, a mask and a caption.
+// with a moving box), a webcam that started 0.4 s later, a mic (a tone), input events, Claude's
+// markers, a page still, and a cuttle.json with a continuous cut into an 8× clip (above 6×, playback
+// from the proxy shows key frames only), a jump cut, a card, a zoom, a mask and a caption.
 import { spawnSync } from 'node:child_process';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -18,6 +19,7 @@ export function makeFixture(dir: string): void {
   mkdirSync(join(dir, 'stills'), { recursive: true });
   const screen = "testsrc2=s=1280x800:r=30:d=12[bg];color=c=white:s=120x120:r=30:d=12[box];[bg][box]overlay=x='100+t*80':y=520";
   ffmpeg(['-f', 'lavfi', '-i', screen, '-c:v', 'libx264', '-preset', 'ultrafast', '-g', '60', '-pix_fmt', 'yuv420p', '-color_trc', 'bt709', join(take, 'screen.mp4')]);
+  ffmpeg(['-f', 'lavfi', '-i', 'testsrc=s=320x240:r=30:d=11', '-c:v', 'libx264', '-preset', 'ultrafast', '-g', '30', '-pix_fmt', 'yuv420p', join(take, 'webcam.mp4')]);
   ffmpeg(['-f', 'lavfi', '-i', 'sine=frequency=330:sample_rate=48000:duration=12', '-c:a', 'aac', '-b:a', '96k', join(take, 'mic.m4a')]);
   ffmpeg(['-f', 'lavfi', '-i', 'testsrc=s=1200x1600:d=1', '-frames:v', '1', join(dir, 'stills', 'page.png')]);
   const events = [
@@ -30,15 +32,15 @@ export function makeFixture(dir: string): void {
   ];
   writeFileSync(join(take, 'events.jsonl'), events.map((event) => `${JSON.stringify(event)}\n`).join(''));
   writeFileSync(join(take, 'markers.json'), JSON.stringify({ version: 1, markers: [{ t: 2.5, kind: 'prompt' }, { t: 4, kind: 'tool', label: 'Bash' }, { t: 4.6, kind: 'tool', label: 'Bash' }, { t: 9, kind: 'answer' }] }));
-  writeFileSync(join(take, 'take.json'), JSON.stringify({ version: 1, tracks: { screen: { file: 'screen.mp4', start: 100 }, mic: { file: 'mic.m4a', start: 100 } } }));
+  writeFileSync(join(take, 'take.json'), JSON.stringify({ version: 1, tracks: { screen: { file: 'screen.mp4', start: 100 }, webcam: { file: 'webcam.mp4', start: 100.4 }, mic: { file: 'mic.m4a', start: 100 } } }));
   const project = {
     version: 1,
     output: FIXTURE_OUTPUT,
-    sources: { screen: 'takes/1/screen.mp4', mic: 'takes/1/mic.m4a', events: 'takes/1/events.jsonl', markers: 'takes/1/markers.json' },
-    look: { background: { preset: 'aurora' }, frame: { title: 'claude · ~/demo' } },
+    sources: { screen: 'takes/1/screen.mp4', webcam: 'takes/1/webcam.mp4', mic: 'takes/1/mic.m4a', events: 'takes/1/events.jsonl', markers: 'takes/1/markers.json' },
+    look: { background: { preset: 'aurora' }, frame: { title: 'claude · ~/demo' }, webcam: { enabled: true } },
     scenes: [
       { type: 'clip', id: 's1', label: 'Prompt', from: 0, to: 3 },
-      { type: 'clip', id: 's2', label: 'Claude at work', from: 3, to: 8, speed: 4 },
+      { type: 'clip', id: 's2', label: 'Claude at work', from: 3, to: 8, speed: 8 },
       { type: 'clip', id: 's3', label: 'Answer', from: 8.5, to: 11.5 },
       { type: 'still', id: 's4', image: 'stills/page.png', duration: 2, motion: 'scroll', frame: 'browser-light' },
       { type: 'card', id: 's5', title: 'Built with Claude Code', subtitle: 'example.com', duration: 1.5 },

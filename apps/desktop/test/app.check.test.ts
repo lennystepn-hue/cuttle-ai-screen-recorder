@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
@@ -11,9 +11,10 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { FIXTURE_OUTPUT, makeFixture } from './fixture';
 
 /**
- * The app end to end, its windows never shown: open a project, play, scrub, compare the output view
- * with the export's frames (`cuttle preview`), export. Runs only with `pnpm app:check` (vitest
- * --mode app, after app:build:js and cli:build). CUTTLE_CHECK_SHOTS=<folder> keeps screenshots.
+ * The app end to end, its windows never shown: open a project, play, scrub, select, compare the
+ * output view with the export's frames (`cuttle preview`), play the proxy, export, open a project
+ * twice at once, close an editor during its export, close the pill. Runs only with `pnpm app:check`
+ * (vitest --mode app, after app:build:js and cli:build). CUTTLE_CHECK_SHOTS=<folder> keeps screenshots.
  */
 const enabled = process.env.MODE === 'app';
 const MAIN = fileURLToPath(new URL('../dist/main/index.mjs', import.meta.url));
@@ -26,7 +27,16 @@ interface CheckState {
   source?: number;
   error?: string;
   duration: number;
+  proxyInUse: boolean;
   mediaState: { proxy: { state: string }; thumbnails: { state: string }; peaks: { state: string } };
+}
+
+interface Check {
+  state(): CheckState;
+  seek(t: number): Promise<void>;
+  playback(): { drawn: number; restarts: number; clock: number };
+  pixels(): string;
+  useProxy(): Promise<boolean>;
 }
 
 const electronPath = (): string => createRequire(import.meta.url)('electron') as unknown as string;
@@ -55,20 +65,57 @@ describe.runIf(enabled)('the Cuttle app', () => {
   let project: string;
   let app: ElectronApplication;
   let editor: Page;
-  const state = () => editor.evaluate(() => (window as unknown as { __cuttleCheck: { state(): CheckState } }).__cuttleCheck.state());
-  const seek = (t: number) => editor.evaluate((time) => (window as unknown as { __cuttleCheck: { seek(t: number): Promise<void> } }).__cuttleCheck.seek(time), t);
+  // The page's hook (`__cuttleCheck`); each call is its own function, as the page's CSP allows no eval.
+  type Hooked = { __cuttleCheck: Check };
+  const state = () => editor.evaluate(() => (window as unknown as Hooked).__cuttleCheck.state());
+  const seek = (t: number) => editor.evaluate((time) => (window as unknown as Hooked).__cuttleCheck.seek(time), t);
+  const pixels = async () => decode(await editor.evaluate(() => (window as unknown as Hooked).__cuttleCheck.pixels()));
+  const useProxy = () => editor.evaluate(() => (window as unknown as Hooked).__cuttleCheck.useProxy());
+  /** Plays from `from` for `ms`, then pauses: what the playback counters said while it played. */
+  const play = async (from: number, ms: number) => {
+    await seek(from);
+    await editor.keyboard.press('Space');
+    await editor.waitForTimeout(ms);
+    const stats = await editor.evaluate(() => (window as unknown as Hooked).__cuttleCheck.playback());
+    const playing = await state();
+    await editor.keyboard.press('Space');
+    return { stats, playing };
+  };
+  /** Pointer events on an element (a window that is never shown gets no real mouse). */
+  const press = (selector: string, moveBy = 0) =>
+    editor.evaluate(
+      ({ selector, moveBy }) => {
+        const element = document.querySelector(selector)!;
+        const box = element.getBoundingClientRect();
+        const at = (type: string, x: number) => element.dispatchEvent(new PointerEvent(type, { bubbles: true, clientX: x, clientY: box.top + box.height / 2, button: 0, pointerId: 7 }));
+        const x = box.left + Math.min(20, box.width / 2);
+        at('pointerdown', x);
+        if (moveBy) for (let step = 1; step <= 8; step++) at('pointermove', x + (moveBy * step) / 8);
+        at('pointerup', x + moveBy);
+      },
+      { selector, moveBy },
+    );
   /** A screenshot of the editor (CUTTLE_CHECK_SHOTS): Electron's capturePage, which works on a window never shown. */
   const shot = async (name: string) => {
     if (!SHOTS) return;
     const png = await app.evaluate(async ({ BrowserWindow }) => {
       const window = BrowserWindow.getAllWindows().find((candidate) => candidate.webContents.getURL().includes('/editor.html'))!;
-      // A hidden window paints only when asked: repaint, then capture.
+      // A hidden window paints only when asked, and composites about once a second: repaint, wait, capture.
       window.webContents.invalidate();
-      await new Promise((resolve) => setTimeout(resolve, 250));
+      await new Promise((resolve) => setTimeout(resolve, 1600));
       return (await window.webContents.capturePage()).toPNG().toString('base64');
     });
     writeFileSync(join(SHOTS, `${name}.png`), Buffer.from(png, 'base64'));
   };
+  /** Asks the running app to open `argv` as a second launch would, `times` times at once. */
+  const launchAgain = (argv: string[], times = 1) =>
+    app.evaluate(
+      ({ app: electronApp }, { args, count }) => {
+        for (let i = 0; i < count; i++) electronApp.emit('second-instance', {}, ['Cuttle.exe', ...args], process.cwd(), {});
+      },
+      { args: argv, count: times },
+    );
+  const editorTitles = () => app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().filter((window) => window.webContents.getURL().includes('/editor.html')).map((window) => window.getTitle()));
 
   beforeAll(async () => {
     root = mkdtempSync(join(tmpdir(), 'cuttle-app-'));
@@ -78,8 +125,14 @@ describe.runIf(enabled)('the Cuttle app', () => {
     if (SHOTS) mkdirSync(SHOTS, { recursive: true });
     app = await _electron.launch({
       executablePath: electronPath(),
-      args: [MAIN, '--open', project],
+      args: [MAIN, '--cuttle-check', '--open', project],
       env: { ...process.env, CUTTLE_HIDDEN: '1', CUTTLE_CHECK: '1', CUTTLE_NO_PROXY: '1', CUTTLE_USER_DATA: join(root, 'user-data') },
+    });
+    // Unhandled rejections in the main process are bugs: collect them for the last test.
+    await app.evaluate(() => {
+      const seen: string[] = [];
+      Object.assign(globalThis, { __rejections: seen });
+      process.on('unhandledRejection', (reason) => seen.push(String(reason)));
     });
     editor = await new Promise<Page>((resolve) => {
       const find = () => app.windows().find((page) => page.url().includes('/editor.html'));
@@ -104,26 +157,26 @@ describe.runIf(enabled)('the Cuttle app', () => {
     expect(await editor.locator('.scene').count()).toBe(5);
     expect(await editor.locator('.scene').first().getAttribute('title')).toBe('Prompt · 3 s');
     expect(await editor.locator('.item.zoom').count()).toBe(1);
-    // the mask (source 0–9) runs across the continuous cut into the 4× clip as one block, then
+    // the mask (source 0–9) runs across the continuous cut into the 8× clip as one block, then
     // shows again after the jump cut to source 8.5
     expect(await editor.locator('.item.mask').count()).toBe(2);
     // a caption's block shows its label ("Hook"), its text when it has none
     expect(await editor.locator('.item.caption').textContent()).toBe('Hook');
     expect(await editor.locator('.flag').allTextContents()).toEqual(['Prompt', 'Bash ×2', 'Answer']);
     const { duration } = await state();
-    expect(duration).toBeCloseTo(3 + 5 / 4 + 3 + 2 + 1.5, 6);
+    expect(duration).toBeCloseTo(3 + 5 / 8 + 3 + 2 + 1.5, 6);
     await shot('01-opened');
   });
 
-  it('shows what the export renders, frame for frame', async () => {
+  it('shows what the export renders, frame for frame, the webcam lined up', async () => {
     const stills = join(root, 'stills');
-    const times = [1, 4, 6.8, 9.9];
+    const times = [1, 3.3, 6.8, 9.9];
     const result = spawnSync('node', [CLI, '--json', '-C', project, 'preview', ...times.flatMap((t) => ['--at', String(t)]), '-o', stills], { encoding: 'utf8', timeout: 120_000 });
     expect(result.status, result.stderr).toBe(0);
     const files = (JSON.parse(result.stdout) as { stills: { file: string }[] }).stills.map((still) => still.file);
     for (const [i, t] of times.entries()) {
       await seek(t);
-      const view = decode(await editor.evaluate(() => (window as unknown as { __cuttleCheck: { pixels(): string } }).__cuttleCheck.pixels()));
+      const view = await pixels();
       expect([view.width, view.height]).toEqual([FIXTURE_OUTPUT.width, FIXTURE_OUTPUT.height]);
       const { mean, max } = difference(view, PNG.sync.read(readFileSync(files[i]!)));
       expect(mean, `t = ${t}: mean difference`).toBeLessThan(0.5);
@@ -133,49 +186,48 @@ describe.runIf(enabled)('the Cuttle app', () => {
   }, 120_000);
 
   it('plays with the mic as the clock, the picture keeping up, and pauses', async () => {
-    await seek(0);
-    await editor.keyboard.press('Space');
-    await editor.waitForTimeout(2000);
-    const playing = await state();
-    const stats = await editor.evaluate(() => (window as unknown as { __cuttleCheck: { playback(): { drawn: number; restarts: number; clock: number } } }).__cuttleCheck.playback());
+    const { stats, playing } = await play(0, 2000);
     console.log(`playback after 2 s: clock ${stats.clock.toFixed(2)} s, picture ${playing.t.toFixed(2)} s, ${stats.drawn} frames drawn, ${stats.restarts} restarts`);
     expect(playing.playing).toBe(true);
-    // the clock (the sound) runs in real time, from 0.12 s after the key
-    expect(stats.clock).toBeGreaterThan(1.5);
+    // the clock (the sound as heard) runs in real time, from 0.12 s after the key
+    expect(stats.clock).toBeGreaterThan(1);
     expect(stats.clock).toBeLessThan(2.4);
     // the picture follows it, never more than about half a second behind (then it drops frames)
     expect(stats.clock - playing.t).toBeLessThan(0.7);
-    // and plays as a movie, not a slideshow: about 55 frames at 30 fps, at least 25 on a busy machine
-    expect(stats.drawn).toBeGreaterThan(25);
-    await editor.keyboard.press('Space');
+    // and plays as a movie, not a slideshow: at least half the frame rate per second of the clock
+    expect(stats.drawn / stats.clock).toBeGreaterThan(FIXTURE_OUTPUT.fps / 2);
     const paused = await state();
     expect(paused.playing).toBe(false);
     await editor.waitForTimeout(300);
     expect((await state()).t).toBe(paused.t);
   });
 
-  it('scrubs with the playhead on the ruler', async () => {
+  it('scrubs with the playhead on the ruler and on the blocks; a click selects, Esc clears', async () => {
     const { duration } = await state();
-    // A window that is never shown gets no real mouse: the pointer events are dispatched on the ruler's lane.
-    await editor.evaluate(() => {
-      const lane = document.querySelector('.tl-content')!;
-      const box = document.querySelector('[data-testid=timeline]')!.getBoundingClientRect();
-      const at = (type: string, x: number) =>
-        lane.dispatchEvent(new PointerEvent(type, { bubbles: true, clientX: box.left + x, clientY: box.top + 34, button: 0, pointerId: 7 }));
-      at('pointerdown', 20);
-      for (let step = 1; step <= 8; step++) at('pointermove', 20 + ((box.width / 2 - 20) * step) / 8);
-      at('pointerup', box.width / 2);
-    });
-    await editor.waitForTimeout(500);
+    const width = await editor.evaluate(() => document.querySelector('[data-testid=timeline]')!.getBoundingClientRect().width);
+    await press('.ruler', width / 2 - 20);
+    await editor.waitForTimeout(300);
     const { t } = await state();
     expect(t).toBeGreaterThan(duration * 0.3);
     expect(t).toBeLessThan(duration * 0.7);
+    // dragging across a scene scrubs too, and leaves the selection alone
+    await press('.scene:nth-child(1)', 60);
+    await editor.waitForTimeout(300);
+    expect((await state()).t).toBeGreaterThan(0);
+    expect(await editor.locator('.scene.selected').count()).toBe(0);
+    // a click selects the 8× clip and shows it in the inspector
+    await press('.scene:nth-child(2)');
+    await editor.waitForSelector('.scene.selected');
+    expect(await editor.locator('.inspector .kind-head .name').textContent()).toBe('8× Claude at work');
+    await shot('03-selected');
+    await editor.keyboard.press('Escape');
+    expect(await editor.locator('.scene.selected').count()).toBe(0);
   });
 
   it('makes the proxy, the thumbnails and the waveform in the background', async () => {
     await editor.waitForFunction(
       () => {
-        const media = (window as unknown as { __cuttleCheck: { state(): CheckState } }).__cuttleCheck.state().mediaState;
+        const media = (window as unknown as { __cuttleCheck: Check }).__cuttleCheck.state().mediaState;
         return media.proxy.state === 'ready' && media.thumbnails.state === 'ready' && media.peaks.state === 'ready';
       },
       undefined,
@@ -183,28 +235,89 @@ describe.runIf(enabled)('the Cuttle app', () => {
     );
     expect(existsSync(join(project, '.cuttle', 'proxy.mp4'))).toBe(true);
     await editor.waitForSelector('.scene .thumbs i');
-    await shot('03-thumbnails');
+    await shot('04-thumbnails');
   }, 90_000);
 
-  it('exports 16:9 into out/ and says where', async () => {
+  it('scrubs and plays the proxy: the same frames, and key frames only in the 8× clip', async () => {
+    await seek(1);
+    const take = await pixels();
+    expect(await useProxy()).toBe(true);
+    await seek(1);
+    // the proxy is smaller; its frame scaled into the output barely differs (one frame off is ≥ 2.3)
+    expect(difference(take, await pixels()).mean).toBeLessThan(1.5);
+    const { stats, playing } = await play(2.5, 1500);
+    console.log(`proxy playback from 2.5 s: clock ${stats.clock.toFixed(2)} s, picture ${playing.t.toFixed(2)} s, ${stats.drawn} frames, ${stats.restarts} restarts`);
+    expect(stats.clock).toBeGreaterThan(3.2);
+    expect(stats.drawn / (stats.clock - 2.5)).toBeGreaterThan(FIXTURE_OUTPUT.fps / 2);
+    expect((await state()).error).toBeUndefined();
+  });
+
+  it('exports the project size into out/, says what it replaces, and where', async () => {
     await editor.keyboard.press('Control+E');
     await editor.waitForSelector('[data-testid=export-sheet]');
-    await shot('04-export-sheet');
+    // the project's own size first and chosen; the sheet says which file it writes
+    await editor.waitForSelector('[data-testid=export-note]');
+    expect(await editor.locator('[data-testid=export-note]').textContent()).toContain('Saves out/export.mp4 from cuttle.json as it is saved now.');
+    expect(await editor.locator('.format').first().textContent()).toContain('640×360');
+    await shot('05-export-sheet');
     await editor.click('[data-testid=export-start]');
     await editor.waitForSelector('[data-testid=export-file]', { timeout: 120_000 });
-    await shot('05-exported');
-    const out = join(project, 'out', '16x9.mp4');
+    await shot('06-exported');
+    const out = join(project, 'out', 'export.mp4');
     const probe = spawnSync('ffprobe', ['-v', 'error', '-show_entries', 'stream=codec_name,width,height', '-of', 'csv=p=0', out], { encoding: 'utf8' }).stdout.trim().split(/\r?\n/);
-    expect(probe).toEqual(['h264,1920,1080', 'aac']);
+    expect(probe).toEqual([`h264,${FIXTURE_OUTPUT.width},${FIXTURE_OUTPUT.height}`, 'aac']);
+    // again: now it says which export it replaces
+    await editor.click('text=Export again');
+    await editor.waitForFunction(() => document.querySelector('[data-testid=export-note]')?.textContent?.includes('Replaces out/export.mp4 from'));
     await editor.keyboard.press('Escape');
+    expect(await editor.locator('[data-testid=export-sheet]').count()).toBe(0);
   }, 150_000);
 
-  it('keeps the pill out of recordings, with the project in its recent list', async () => {
+  it('opens a project once when asked twice at once, and cancels its export when it closes', async () => {
+    const second = join(root, 'second');
+    cpSync(project, second, { recursive: true, filter: (path) => !/[\\/](\.cuttle|out)$/.test(path) });
+    await launchAgain(['--open', second], 2);
+    await expect.poll(editorTitles, { timeout: 30_000 }).toContain('second · Cuttle');
+    await editor.waitForTimeout(1500);
+    expect((await editorTitles()).filter((title) => title === 'second · Cuttle')).toHaveLength(1);
+    const lock = join(second, '.cuttle', 'editor.lock');
+    expect(existsSync(lock)).toBe(true);
+    // export from it, then close it at its first frames: the export stops and leaves nothing half-written
+    const page = app.windows().find((candidate) => candidate.url().includes('/editor.html') && candidate !== editor)!;
+    await page.waitForSelector('.app[data-phase="ready"]', { timeout: 30_000 });
+    await page.evaluate(
+      () =>
+        new Promise<void>((resolve) => {
+          const bridge = (window as unknown as { cuttle: { invoke(channel: string, argument: unknown): Promise<unknown>; on(channel: string, listener: (progress: { done: number }) => void): () => void } }).cuttle;
+          const off = bridge.on('export:progress', (progress) => {
+            if (progress.done === 0) return;
+            off();
+            resolve();
+          });
+          void bridge.invoke('export:start', { formats: ['project'], encoder: 'software' });
+        }),
+    );
+    await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find((window) => window.getTitle() === 'second · Cuttle')?.close());
+    await expect.poll(() => existsSync(lock), { timeout: 10_000 }).toBe(false);
+    await editor.waitForTimeout(1000);
+    expect(existsSync(join(second, 'out', 'export.mp4'))).toBe(false);
+  }, 90_000);
+
+  it('keeps the pill out of recordings, with the projects in its recent list, and brings it back after a close', async () => {
     const pill = app.windows().find((page) => page.url().includes('/pill.html'))!;
     expect(pill).toBeDefined();
     const recent = await pill.evaluate(() => (window as unknown as { cuttle: { invoke(channel: string): Promise<{ name: string }[]> } }).cuttle.invoke('pill:recent'));
-    expect(recent.map((entry) => entry.name)).toEqual(['demo']);
+    expect(recent.map((entry) => entry.name)).toEqual(['second', 'demo']);
     const editorBridge = await editor.evaluate(() => (window as unknown as { cuttle: { invoke(channel: string): Promise<unknown> } }).cuttle.invoke('pill:recent').then(() => 'reached', (error: Error) => error.message));
     expect(editorBridge).toContain('unknown request');
+    // Alt+F4 on the pill hides it; a second launch (or the tray) shows it again
+    await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find((window) => window.webContents.getURL().includes('/pill.html'))?.close());
+    await launchAgain([]);
+    await editor.waitForTimeout(500);
+    expect(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().filter((window) => window.webContents.getURL().includes('/pill.html')).length)).toBe(1);
+  });
+
+  it('had no unhandled rejection in the main process', async () => {
+    expect(await app.evaluate(() => (globalThis as unknown as { __rejections: string[] }).__rejections)).toEqual([]);
   });
 });

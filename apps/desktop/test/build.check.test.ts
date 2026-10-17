@@ -26,7 +26,7 @@ describe.runIf(enabled)('the unpacked Cuttle app', () => {
     makeFixture(project);
     app = await _electron.launch({
       executablePath: EXE,
-      args: ['--open', project],
+      args: ['--cuttle-check', '--open', project],
       env: { ...process.env, CUTTLE_HIDDEN: '1', CUTTLE_CHECK: '1', CUTTLE_USER_DATA: join(root, 'user-data') },
     });
     editor = await new Promise<Page>((resolve) => {

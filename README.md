@@ -46,7 +46,7 @@ recorder tests also need ffprobe. Recording works on Windows so far; the recorde
 ```bash
 pnpm app                                 # build and start the app (the pill near the top of the screen, an icon in the tray)
 pnpm app -- --open <project folder>      # … and open a project in the editor
-pnpm app:check                           # end to end with its windows hidden: open, play, scrub, compare with the export, export
+pnpm app:check                           # end to end with its windows hidden: open, play, scrub, select, compare with the export, play the proxy, export
 pnpm app:build                           # an unpacked app in apps/desktop/build/Cuttle-<platform>-<arch>/, checked that it starts
 ```
 

@@ -106,9 +106,18 @@ const LookSchema = z.strictObject({
   transition: TransitionSchema.prefault({}),
 });
 
+// Scenes and overlays may carry an id (for editors: selection, undo; unique in the project) and a
+// label (a name for people, e.g. "Answer").
+export const ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
+const named = {
+  id: z.string().regex(ID_PATTERN, 'an id is 1 to 64 letters, digits, "-" or "_"').optional(),
+  label: z.string().max(200).optional(),
+};
+
 const ClipSceneSchema = z
   .strictObject({
     type: z.literal('clip'),
+    ...named,
     from: seconds,
     to: seconds,
     speed: z.number().positive().max(64).default(1),
@@ -118,6 +127,7 @@ const ClipSceneSchema = z
 
 const StillSceneSchema = z.strictObject({
   type: z.literal('still'),
+  ...named,
   image: z.string().min(1),
   duration: positiveSeconds,
   motion: z.enum(STILL_MOTIONS).default('none'),
@@ -126,6 +136,7 @@ const StillSceneSchema = z.strictObject({
 
 const CardSceneSchema = z.strictObject({
   type: z.literal('card'),
+  ...named,
   title: z.string().min(1),
   subtitle: z.string().optional(),
   duration: positiveSeconds,
@@ -134,6 +145,7 @@ const CardSceneSchema = z.strictObject({
 const SceneSchema = z.discriminatedUnion('type', [ClipSceneSchema, StillSceneSchema, CardSceneSchema]);
 
 const ZoomSchema = z.strictObject({
+  ...named,
   at: seconds,
   duration: positiveSeconds,
   rect: RectSchema,
@@ -143,6 +155,7 @@ const ZoomSchema = z.strictObject({
 
 const MaskSchema = z
   .strictObject({
+    ...named,
     from: seconds,
     to: seconds,
     rect: RectSchema,
@@ -152,6 +165,7 @@ const MaskSchema = z
   .refine((mask) => mask.to > mask.from, { message: '"to" must be greater than "from"', path: ['to'] });
 
 const TextSchema = z.strictObject({
+  ...named,
   at: seconds,
   duration: positiveSeconds,
   text: z.string().min(1),
@@ -160,16 +174,29 @@ const TextSchema = z.strictObject({
   enabled: z.boolean().default(true),
 });
 
-export const ProjectSchema = z.strictObject({
-  version: z.literal(CURRENT_VERSION),
-  output: OutputSchema.prefault({}),
-  sources: SourcesSchema,
-  look: LookSchema.prefault({}),
-  scenes: z.array(SceneSchema).default([]),
-  zooms: z.array(ZoomSchema).default([]),
-  masks: z.array(MaskSchema).default([]),
-  texts: z.array(TextSchema).default([]),
-});
+export const ProjectSchema = z
+  .strictObject({
+    version: z.literal(CURRENT_VERSION),
+    output: OutputSchema.prefault({}),
+    sources: SourcesSchema,
+    look: LookSchema.prefault({}),
+    scenes: z.array(SceneSchema).default([]),
+    zooms: z.array(ZoomSchema).default([]),
+    masks: z.array(MaskSchema).default([]),
+    texts: z.array(TextSchema).default([]),
+  })
+  // Runs once everything else is valid (see the note above BackgroundSchema).
+  .superRefine((project, ctx) => {
+    const seen = new Map<string, string>();
+    for (const list of ['scenes', 'zooms', 'masks', 'texts'] as const) {
+      project[list].forEach((item: { id?: string }, index) => {
+        if (item.id === undefined) return;
+        const first = seen.get(item.id);
+        if (first === undefined) seen.set(item.id, `${list}[${index}]`);
+        else ctx.addIssue({ code: 'custom', message: `the id "${item.id}" is already used by ${first}`, path: [list, index, 'id'] });
+      });
+    }
+  });
 
 // One line of events.jsonl. Times are source seconds (seconds since the screen track started).
 // x and y are source pixels of the screen track (the recorder subtracts the capture origin and,

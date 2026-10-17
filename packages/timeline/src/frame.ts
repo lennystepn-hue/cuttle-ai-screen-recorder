@@ -1,9 +1,10 @@
-import type { CuttleProject, Mask, Rect } from '@cuttle/project';
+import type { CuttleProject, Ease, Mask, Rect } from '@cuttle/project';
 import { cursorAt, type CursorFrame, type CursorTrack } from './cursor';
 import { clamp } from './easing';
-import { activeMasks, activeTexts, badgeFor, type ActiveText } from './overlays';
-import { sceneSpans, sourceTimeAt, spanAt, totalDuration, type SceneSpan } from './time';
-import { zoomRectAt } from './zoom';
+import { occurrences, rampAmount, type Occurrence } from './occurrences';
+import { TEXT_FADE_SECONDS, activeMasks, activeTexts, badgeFor, type ActiveText } from './overlays';
+import { crossfadeHalf, isContinuousCut, sceneSpans, sourceTimeAt, spanAt, totalDuration, type SceneSpan } from './time';
+import { ZOOM_RAMP_SECONDS, zoomRectAt } from './zoom';
 
 export interface SceneFrame {
   index: number;
@@ -44,12 +45,12 @@ export function createTimeline(project: CuttleProject, opts: TimelineOptions): T
   const spans = sceneSpans(project.scenes);
   const duration = totalDuration(spans);
   const full: Rect = [0, 0, opts.screenSize.width, opts.screenSize.height];
-  const transition = project.look.transition;
-  const maxHalf = transition.enabled ? transition.duration / 2 : 0;
 
-  function halfBetween(a: SceneSpan, b: SceneSpan): number {
-    return Math.min(maxHalf, (a.end - a.start) / 2, (b.end - b.start) / 2);
-  }
+  // Where each zoom and text shows in output time, per span: their ramps run in output seconds.
+  const zoomShown = new Map(project.zooms.map((zoom) => [zoom, occurrences(spans, zoom.at, zoom.at + zoom.duration)]));
+  const textShown = new Map(project.texts.map((text) => [text, occurrences(spans, text.at, text.at + text.duration)]));
+
+  const halfBetween = (a: SceneSpan, b: SceneSpan): number => crossfadeHalf(a, b, project.look.transition);
 
   /**
    * The last output frame (frame i at i / fps) that shows the clip inside its source range
@@ -79,13 +80,19 @@ export function createTimeline(project: CuttleProject, opts: TimelineOptions): T
     const sourceTime = sourceTimeAt(scene, sourceLocal);
     let cursor = project.look.cursor.enabled && opts.cursor ? cursorAt(opts.cursor, sourceTime, scene.speed) : undefined;
     if (cursor && project.look.cursor.clickEffect === 'none') cursor = { ...cursor, clicks: [] };
+    // The output time this source frame belongs to (a held or frozen frame's, during a crossfade).
+    const shownAt = span.start + (sourceTime - scene.from) / scene.speed;
+    const amount = (shown: (Occurrence | undefined)[] | undefined, ramp: number, curve: Ease): number => {
+      const occurrence = shown?.[span.index];
+      return occurrence ? rampAmount(occurrence, shownAt, ramp, curve) : 1;
+    };
     return {
       ...base,
       kind: 'clip',
       sourceTime,
-      zoom: zoomRectAt(project.zooms, sourceTime, scene.speed, full),
+      zoom: zoomRectAt(project.zooms, sourceTime, (zoom) => amount(zoomShown.get(zoom), ZOOM_RAMP_SECONDS, zoom.ease), full),
       masks: activeMasks(project.masks, sourceTime),
-      texts: activeTexts(project.texts, sourceTime, scene.speed),
+      texts: activeTexts(project.texts, sourceTime, (text) => amount(textShown.get(text), TEXT_FADE_SECONDS, 'linear')),
       badge: badgeFor(scene),
       cursor,
     };
@@ -93,8 +100,16 @@ export function createTimeline(project: CuttleProject, opts: TimelineOptions): T
 
   function frameAt(t: number): RenderState {
     const time = Number.isNaN(t) ? 0 : clamp(t, 0, duration);
-    const span = spanAt(spans, time);
+    let span = spanAt(spans, time);
     if (!span) return { t: time, layers: [] };
+    // Span ends are rounded to the microsecond, so a frame can fall inside a clip while its source
+    // time is already the clip's end. At a continuous cut that frame is the next clip's first, not a
+    // held one.
+    const following = spans[span.index + 1];
+    const scene = span.scene;
+    if (following && isContinuousCut(scene, following.scene) && scene.type === 'clip' && !(scene.from + (time - span.start) * scene.speed < scene.to)) {
+      span = following;
+    }
 
     const next = spans[span.index + 1];
     if (next) {

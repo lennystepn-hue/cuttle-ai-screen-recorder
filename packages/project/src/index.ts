@@ -6,6 +6,7 @@ export {
   CURSOR_STYLES,
   EASES,
   FRAME_STYLES,
+  ID_PATTERN,
   MASK_STYLES,
   MOUSE_BUTTONS,
   STILL_MOTIONS,
@@ -41,6 +42,7 @@ export {
 } from './schema';
 export { formatPath, parseProject, parseProjectJson, type ParseResult, type ProjectIssue } from './parse';
 export { defaultProject } from './defaults';
+export { ID_PREFIXES, newId, usedIds, type IdList } from './ids';
 export { parseEventsJsonl } from './events';
 export { TAKE_VERSION, TakeFileSchema, parseTakeJson, trackOffset, type TakeFile, type TakeFileParseResult, type TakeFileTrack } from './take';
 export {

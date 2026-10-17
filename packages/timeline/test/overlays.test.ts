@@ -19,21 +19,14 @@ describe('activeMasks', () => {
 });
 
 describe('activeTexts', () => {
-  it('fades in and out over 0.25 output seconds', () => {
-    expect(activeTexts([text], 11.125, 1)).toEqual([{ overlay: text, opacity: 0.5 }]);
-    expect(activeTexts([text], 12, 1)).toEqual([{ overlay: text, opacity: 1 }]);
-    expect(activeTexts([text], 12.9, 1)[0]?.opacity).toBeCloseTo(0.4, 6);
+  it('gives each active text its opacity', () => {
+    expect(activeTexts([text], 12, () => 0.4)).toEqual([{ overlay: text, opacity: 0.4 }]);
   });
 
   it('hides texts outside their range and disabled texts', () => {
-    expect(activeTexts([text], 10.9, 1)).toEqual([]);
-    expect(activeTexts([text], 13, 1)).toEqual([]);
-    expect(activeTexts([{ ...text, enabled: false }], 12, 1)).toEqual([]);
-  });
-
-  it('stretches the fade with speed, capped at half the duration', () => {
-    // speed 12 → fade min(3, 1) = 1 source second
-    expect(activeTexts([text], 11.5, 12)).toEqual([{ overlay: text, opacity: 0.5 }]);
+    expect(activeTexts([text], 10.9, () => 1)).toEqual([]);
+    expect(activeTexts([text], 13, () => 1)).toEqual([]);
+    expect(activeTexts([{ ...text, enabled: false }], 12, () => 1)).toEqual([]);
   });
 });
 

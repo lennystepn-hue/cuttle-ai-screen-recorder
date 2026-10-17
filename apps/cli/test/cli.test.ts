@@ -164,6 +164,27 @@ describe('cuttle devices and record (test backend)', () => {
     expect(JSON.parse(readFileSync(join(dir, 'cuttle.json'), 'utf8')).look).toEqual({ cursor: { enabled: false } });
   }, 20_000);
 
+  it('keeps an edit made to cuttle.json during the take', async () => {
+    const dir = join(temp(), 'demo');
+    const path = join(dir, 'cuttle.json');
+    let stderr = '';
+    const code = await runCli(['-C', dir, 'record', '--backend', 'test', '--max', '1', '--countdown', '0'], {
+      stdout: () => {},
+      stderr: (chunk) => {
+        // "recording takes/1 …": the take runs; edit the project as a person or the app would
+        if (chunk.startsWith('recording takes/1')) {
+          const project = JSON.parse(readFileSync(path, 'utf8'));
+          writeFileSync(path, JSON.stringify({ ...project, look: { frame: { title: 'edited during the take' } } }));
+        }
+        stderr += chunk;
+      },
+    });
+    expect(code, stderr).toBe(0);
+    const written = JSON.parse(readFileSync(path, 'utf8'));
+    expect(written.look).toEqual({ frame: { title: 'edited during the take' } });
+    expect(written.sources.screen).toBe('takes/1/screen.mp4');
+  }, 30_000);
+
   it('stops the recording on Ctrl+C, keeps the take and removes its handlers', async () => {
     const dir = join(temp(), 'demo');
     const listeners = process.listenerCount('SIGBREAK');
@@ -239,17 +260,23 @@ describe('cuttle suggest and recover', () => {
         "scenes": [
           {
             "from": 1.8,
+            "id": "s1",
+            "label": "Prompt",
             "to": 5.1,
             "type": "clip",
           },
           {
             "from": 5.1,
+            "id": "s2",
+            "label": "Claude at work",
             "speed": 3,
             "to": 14.5,
             "type": "clip",
           },
           {
             "from": 14.5,
+            "id": "s3",
+            "label": "Answer",
             "to": 18.5,
             "type": "clip",
           },
@@ -259,6 +286,8 @@ describe('cuttle suggest and recover', () => {
           {
             "at": 15.5,
             "duration": 3,
+            "id": "z1",
+            "label": "Answer",
             "rect": [
               145,
               422,
@@ -303,6 +332,60 @@ describe('cuttle suggest and recover', () => {
     expect(readFileSync(`${path}.bak`, 'utf8')).toBe(suggested);
     expect(readFileSync(`${path}.bak.1`, 'utf8')).toBe(edited);
     expect(existsSync(`${path}.bak.2`)).toBe(false);
+  }, 30_000);
+
+  it('keeps the ids and labels of what it keeps, and gives its clips and zoom new ones', async () => {
+    const dir = temp();
+    cpSync(fixture, dir, { recursive: true });
+    const path = join(dir, 'cuttle.json');
+    const card = { type: 'card', id: 's1', label: 'End', title: 'The end', duration: 2 };
+    const mask = { id: 'm1', label: 'Token', from: 0, to: 20, rect: [0, 0, 100, 40] };
+    const text = { id: 'z1', label: 'Hook', at: 4, duration: 2, text: 'One prompt' };
+    writeFileSync(path, JSON.stringify({ ...JSON.parse(readFileSync(path, 'utf8')), scenes: [{ type: 'clip', id: 's9', from: 0, to: 5 }, card], masks: [mask], texts: [text] }));
+    const { code } = await cli('--json', '-C', dir, 'suggest');
+    expect(code).toBe(0);
+    const written = JSON.parse(readFileSync(path, 'utf8'));
+    expect(written.scenes.map((scene: { id: string; label?: string }) => [scene.id, scene.label])).toEqual([
+      ['s2', 'Prompt'],
+      ['s3', 'Claude at work'],
+      ['s4', 'Answer'],
+      ['s1', 'End'],
+    ]);
+    expect(written.zooms.map((zoom: { id: string; label: string }) => [zoom.id, zoom.label])).toEqual([['z2', 'Answer']]);
+    expect([written.masks, written.texts]).toEqual([[mask], [text]]);
+  }, 30_000);
+
+  it('never gives a new item the id of one it replaced', async () => {
+    const dir = temp();
+    cpSync(fixture, dir, { recursive: true });
+    const ids = async () => {
+      expect((await cli('--json', '-C', dir, 'suggest')).code).toBe(0);
+      const written = JSON.parse(readFileSync(join(dir, 'cuttle.json'), 'utf8'));
+      return [...written.scenes, ...written.zooms].map((item: { id: string }) => item.id);
+    };
+    const first = await ids();
+    const second = await ids();
+    expect(first).toEqual(['s1', 's2', 's3', 'z1']);
+    expect(second).toEqual(['s4', 's5', 's6', 'z2']);
+  }, 30_000);
+
+  it('refuses to overwrite cuttle.json saved by someone else while it ran', async () => {
+    const dir = temp();
+    cpSync(fixture, dir, { recursive: true });
+    const path = join(dir, 'cuttle.json');
+    const theirs = JSON.stringify({ ...JSON.parse(readFileSync(path, 'utf8')), texts: [{ at: 1, duration: 2, text: 'saved meanwhile' }] });
+    let stderr = '';
+    const code = await runCli(['-C', dir, 'suggest'], {
+      stdout: () => {},
+      stderr: (chunk) => {
+        // the first status line comes after suggest read cuttle.json: save it now, as the app would
+        if (stderr === '') writeFileSync(path, theirs);
+        stderr += chunk;
+      },
+    });
+    expect(code).toBe(1);
+    expect(stderr).toContain(`error: ${path} changed while suggest ran, so it was left as it is; run suggest again`);
+    expect(readFileSync(path, 'utf8')).toBe(theirs);
   }, 30_000);
 
   it('repairs a crashed take and uses it', async () => {

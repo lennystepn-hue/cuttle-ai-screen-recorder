@@ -1,7 +1,7 @@
 import type { Rect, Zoom } from '@cuttle/project';
-import { clamp, ease, lerpRect } from './easing';
+import { clamp, lerpRect } from './easing';
 
-/** Ramp length in output seconds; converted to source seconds with the scene speed. */
+/** Length of a zoom's ramps in output seconds (see `rampAmount`). */
 export const ZOOM_RAMP_SECONDS = 0.6;
 
 /** Grows `rect` around its centre to the aspect ratio of `full`, shrinks it to fit inside `full`, then shifts it inside `full`. Source pixels. */
@@ -22,19 +22,17 @@ export function fitZoomRect(rect: Rect, full: Rect): Rect {
   return [x, y, w, h];
 }
 
-/** Crop rect at `sourceTime` (source seconds); `speed` scales the 0.6 s output ramp, `full` is the screen rect in source pixels, overlapping zooms fold in `at` order, and the result is a new array. */
-export function zoomRectAt(zooms: readonly Zoom[], sourceTime: number, speed: number, full: Rect): Rect {
+/**
+ * Crop rect at `sourceTime` (source seconds): the enabled zooms whose range contains it fold in
+ * `at` order, each `amountOf(zoom)` (0 to 1, its ramp) of the way from the rect before it to its
+ * own. `full` is the screen rect in source pixels; the result is a new array.
+ */
+export function zoomRectAt(zooms: readonly Zoom[], sourceTime: number, amountOf: (zoom: Zoom) => number, full: Rect): Rect {
   const active = zooms
     .filter((zoom) => zoom.enabled && sourceTime >= zoom.at && sourceTime < zoom.at + zoom.duration)
     .sort((a, b) => a.at - b.at);
 
   let rect: Rect = [...full];
-  for (const zoom of active) {
-    const ramp = Math.min(ZOOM_RAMP_SECONDS * speed, zoom.duration / 2);
-    const sinceStart = sourceTime - zoom.at;
-    const untilEnd = zoom.at + zoom.duration - sourceTime;
-    const amount = Math.min(ease(zoom.ease, sinceStart / ramp), ease(zoom.ease, untilEnd / ramp));
-    rect = lerpRect(rect, fitZoomRect(zoom.rect, full), amount);
-  }
+  for (const zoom of active) rect = lerpRect(rect, fitZoomRect(zoom.rect, full), amountOf(zoom));
   return rect;
 }

@@ -47,3 +47,25 @@ export function spanAt(spans: readonly SceneSpan[], t: number): SceneSpan | unde
 export function sourceTimeAt(scene: ClipScene, local: number): number {
   return clamp(scene.from + local * scene.speed, scene.from, scene.to);
 }
+
+/** Two clips closer than this (source seconds) at a boundary count as one continuous piece of footage. */
+export const CONTINUOUS_CUT_SECONDS = 1e-3;
+
+/**
+ * Half the crossfade between neighbouring spans `a` and `b`, in output seconds: half the look's
+ * transition, but at most half of either span; none at a continuous cut or with transitions off.
+ * The picture and the export's sound share it.
+ */
+export function crossfadeHalf(a: SceneSpan, b: SceneSpan, transition: { enabled: boolean; duration: number }): number {
+  if (!transition.enabled || isContinuousCut(a.scene, b.scene)) return 0;
+  return Math.min(transition.duration / 2, (a.end - a.start) / 2, (b.end - b.start) / 2);
+}
+
+/**
+ * Whether the boundary from scene `a` to scene `b` is a continuous cut: two clips where the first
+ * ends where the second begins (within 1 ms), as a split or a speed change makes. It has no
+ * crossfade, no held frame and no audio fade; overlays run across it.
+ */
+export function isContinuousCut(a: Scene, b: Scene): boolean {
+  return a.type === 'clip' && b.type === 'clip' && Math.abs(a.to - b.from) < CONTINUOUS_CUT_SECONDS;
+}

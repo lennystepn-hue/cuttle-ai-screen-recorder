@@ -1,7 +1,7 @@
 import { join, resolve } from 'node:path';
 import { runInElectron } from '../electron-runner';
 import type { Output } from '../output';
-import { readProjectFile } from '../project-file';
+import { readProjectFile } from '@cuttle/core';
 
 export interface RenderArgs {
   format?: string;

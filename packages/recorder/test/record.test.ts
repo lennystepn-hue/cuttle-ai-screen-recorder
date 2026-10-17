@@ -39,8 +39,24 @@ describe.concurrent('record (test backend)', () => {
   it('records a 3 s take with every track', async () => {
     const projectDir = project();
     const events: RecorderEvent[] = [];
-    const recording = record({ ...test, projectDir, webcam: 'Test Camera', mic: 'Test Microphone', stop: { maxSeconds: 3 }, onEvent: (event) => events.push(event) });
-    setTimeout(() => recording.marker('one second'), 1000);
+    let markedAt = 0;
+    const recording = record({
+      ...test,
+      projectDir,
+      webcam: 'Test Camera',
+      mic: 'Test Microphone',
+      stop: { maxSeconds: 3 },
+      onEvent: (event) => {
+        events.push(event);
+        // From the recording event on, the screen has started: a marker before it would be dropped.
+        if (event.type === 'recording') {
+          setTimeout(() => {
+            markedAt = Date.now() / 1000;
+            recording.marker('one second');
+          }, 1000);
+        }
+      },
+    });
     const take = await recording.done;
 
     expect(take).toEqual({
@@ -69,7 +85,9 @@ describe.concurrent('record (test backend)', () => {
     expect(input.slice(0, 2)).toEqual([expect.objectContaining({ t: 0, type: 'move' }), { t: 0, type: 'shape', shape: 'arrow' }]);
     expect(new Set(input.map((event) => event.type))).toEqual(new Set(['move', 'shape', 'click', 'scroll', 'keys']));
 
-    expect(markersOf(projectDir, take.markers)).toEqual([{ t: expect.closeTo(1, 0), kind: 'manual', label: 'one second' }]);
+    // Marker times count from the screen's first frame, which starts late on a loaded machine.
+    const markedSecond = markedAt - takeFile.take.tracks.screen.start;
+    expect(markersOf(projectDir, take.markers)).toEqual([{ t: expect.closeTo(markedSecond, 1), kind: 'manual', label: 'one second' }]);
     expect(events.map((event) => event.type)).toEqual(['recording', 'marker', 'stopping']);
   }, SLOW);
 
@@ -121,10 +139,10 @@ describe.concurrent('record (test backend)', () => {
       projectDir: project(),
       stop: { maxSeconds: 1.5 },
       onEvent: (event) => {
+        if (event.type === 'recording') setTimeout(() => recording.marker(), 300);
         if (event.type === 'marker') throw new Error('listener bug');
       },
     });
-    setTimeout(() => recording.marker(), 500);
     const take = await recording.done;
     expect(take.stopReason).toBe('max-seconds');
     expect(take.warnings).toEqual(['onEvent failed on "marker": listener bug']);

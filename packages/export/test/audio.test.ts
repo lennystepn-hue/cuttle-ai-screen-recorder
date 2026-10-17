@@ -11,7 +11,7 @@ function project(input: Omit<CuttleProjectInput, 'version' | 'sources'>): Cuttle
 
 const scenes: CuttleProjectInput['scenes'] = [
   { type: 'clip', from: 1, to: 3 },
-  { type: 'clip', from: 3, to: 11, speed: 4 },
+  { type: 'clip', from: 4, to: 12, speed: 4 },
   { type: 'still', image: 'p.png', duration: 1 },
   { type: 'clip', from: 0.5, to: 1.5 },
 ];
@@ -37,7 +37,7 @@ describe('planAudio', () => {
       { from: 24_000, to: 72_000, speed: 1, content: 48_000 },
     ]);
     const loud = plan({ scenes, look: { audio: { muteSpedUp: false } } });
-    expect(loud[1]!.mic).toEqual({ from: 144_000, to: 528_000, speed: 4, content: 96_000 });
+    expect(loud[1]!.mic).toEqual({ from: 192_000, to: 576_000, speed: 4, content: 96_000 });
   });
 
   it('is silent without a mic or with audio switched off', () => {
@@ -57,6 +57,23 @@ describe('planAudio', () => {
     expect(segments[3]).toMatchObject({ fadeIn: 7_200, fadeOut: 480 });
     const hard = plan({ scenes, look: { transition: { enabled: false } } });
     expect(hard.every((s) => s.fadeIn === 480 && s.fadeOut === 480)).toBe(true);
+  });
+
+  it('plays clips joined by continuous cuts at one speed as one segment, without a fade between them', () => {
+    // one piece of footage: 1–3, 3–5, then 5–13 at 4×
+    const continuous = [
+      { type: 'clip', from: 1, to: 3 },
+      { type: 'clip', from: 3, to: 5 },
+      { type: 'clip', from: 5, to: 13, speed: 4 },
+    ] as const;
+    const segments = plan({ scenes: [...continuous] });
+    expect(segments).toEqual([
+      { samples: 192_000, mic: { from: 48_000, to: 240_000, speed: 1, content: 192_000 }, fadeIn: 480, fadeOut: 480 },
+      { samples: 96_000, fadeIn: 480, fadeOut: 480 },
+    ]);
+    // where the sped-up clip is heard too, its speed changes there: 10 ms against a click
+    const loud = plan({ scenes: [...continuous], look: { audio: { muteSpedUp: false } } });
+    expect(loud.map((s) => [s.mic?.speed, s.fadeIn, s.fadeOut])).toEqual([[1, 480, 480], [4, 480, 480]]);
   });
 });
 
@@ -89,7 +106,7 @@ describe('audioFilterGraph', () => {
   it('feeds atempo silence past a sped-up clip, because it returns fewer samples, then cuts to the clip', () => {
     const graph = audioFilterGraph(plan({ scenes, look: { audio: { muteSpedUp: false } } }));
     expect(graph).toContain(
-      '[m1]atrim=start_sample=144000:end_sample=528000,asetpts=N/SR/TB,apad=pad_len=200000,atempo=4,atrim=end_sample=96000,asetpts=N/SR/TB,apad,',
+      '[m1]atrim=start_sample=192000:end_sample=576000,asetpts=N/SR/TB,apad=pad_len=200000,atempo=4,atrim=end_sample=96000,asetpts=N/SR/TB,apad,',
     );
   });
 

@@ -4,8 +4,7 @@ import { HOTKEYS, listDevices, record, type Backend, type CaptureSource, type Ta
 import type { Rect } from '@cuttle/project';
 import { CliError } from '../errors';
 import type { Output } from '../output';
-import { newProjectFile, projectExists, readProjectFile, writeProjectFile } from '../project-file';
-import { useTake } from '../use-take';
+import { newProjectFile, projectExists, readProjectFile, useTake, writeProjectFile } from '@cuttle/core';
 
 export interface RecordArgs {
   monitor?: number;
@@ -41,11 +40,12 @@ export async function recordCommand(projectDir: string, args: RecordArgs, output
   const source = captureSource(args, devices.monitors.find((monitor) => monitor.primary)?.index ?? devices.monitors[0]?.index ?? 0);
   const webcam = deviceName('camera', args.webcam, devices.cameras);
   const mic = deviceName('microphone', args.mic, devices.mics);
-  const file = projectExists(projectDir) ? await readProjectFile(projectDir) : await writeProjectFile(newProjectFile(projectDir));
+  // Read (or created) now, so a broken project stops the command before anything is recorded.
+  const before = projectExists(projectDir) ? await readProjectFile(projectDir) : (await writeProjectFile(newProjectFile(projectDir), 'record')).file;
   if (signal.aborted) throw new CliError('cancelled', 'stopped before the recording started');
 
   const recording = record({
-    projectDir: file.dir,
+    projectDir: before.dir,
     source,
     ...(webcam !== undefined && { webcam }),
     ...(mic !== undefined && { mic }),
@@ -78,7 +78,11 @@ export async function recordCommand(projectDir: string, args: RecordArgs, output
   // The stop file did its job; left there it would refuse the next take (it must not exist at the start).
   if (take.stopReason === 'file' && args.untilFile !== undefined) await rm(resolve(args.untilFile), { force: true }).catch(() => {});
 
-  const backup = await useTake(file, take);
+  // Read again: the project may have been edited during the take; that version switches to the take.
+  const file = await readProjectFile(projectDir).catch((error: unknown) => {
+    throw takeKept(take, error);
+  });
+  const hadEdit = useTake(file, take);
   if (args.drawMouse) {
     // The real pointer is in the video: the engine's cursor would be a second one.
     const look = (file.raw.look ?? {}) as Record<string, unknown>;
@@ -87,7 +91,9 @@ export async function recordCommand(projectDir: string, args: RecordArgs, output
     // Left from an earlier --draw-mouse take, this take would show no pointer at all.
     output.warn('look.cursor.enabled is false (from an earlier --draw-mouse take?): this take has no pointer in the video, so set it to true to show one');
   }
-  await writeProjectFile(file);
+  const { backup } = await writeProjectFile(file, 'record', { backup: hadEdit }).catch((error: unknown) => {
+    throw takeKept(take, error);
+  });
   const result: RecordResult = { project: file.path, take, ...(backup && { backup }) };
   output.result(result, () =>
     [
@@ -121,4 +127,18 @@ function deviceName(kind: 'camera' | 'microphone', wanted: string | true | undef
   const first = available[0];
   if (first === undefined) throw new CliError('device-not-found', `no ${kind} found; "cuttle devices" lists them`);
   return first;
+}
+
+/**
+ * The take is recorded, but cuttle.json could not be pointed at it (changed into something invalid,
+ * deleted, or saved by someone else at the moment of the write): say where the take is and how to use it.
+ */
+function takeKept(take: Take, error: unknown): CliError {
+  const code = (error as { code?: unknown })?.code;
+  const reason = code === 'conflict' ? 'it was saved by someone else at that moment' : error instanceof Error ? error.message : String(error);
+  return new CliError(
+    typeof code === 'string' ? code : 'invalid-project',
+    `the take is saved in ${take.dir}, but cuttle.json could not be pointed at it (${reason}); fix cuttle.json if needed, then run "cuttle recover ${take.dir}"`,
+    { cause: error },
+  );
 }

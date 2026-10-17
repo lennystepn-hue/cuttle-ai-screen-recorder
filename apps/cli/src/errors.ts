@@ -20,6 +20,8 @@ const EXIT_CODES: Record<string, number> = {
   'missing-file': EXIT.usage,
   'invalid-media': EXIT.usage,
   render: EXIT.render,
+  // @cuttle/core
+  conflict: EXIT.usage,
 };
 
 /** A failure the CLI reports with a code and an exit code. */

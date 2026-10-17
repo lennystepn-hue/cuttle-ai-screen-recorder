@@ -36,13 +36,13 @@ errors, and every command names the path of a problem, counting from 0
     "cursor": { "style": "system" }
   },
   "scenes": [
-    { "type": "clip", "from": 1.2, "to": 7.5 },
-    { "type": "clip", "from": 7.5, "to": 120.4, "speed": 12 },
-    { "type": "clip", "from": 120.4, "to": 128 },
+    { "type": "clip", "id": "s1", "label": "Prompt", "from": 1.2, "to": 7.5 },
+    { "type": "clip", "id": "s2", "label": "Claude at work", "from": 7.5, "to": 120.4, "speed": 12 },
+    { "type": "clip", "id": "s3", "label": "Answer", "from": 120.4, "to": 128 },
     { "type": "still", "image": "stills/example-com.png", "duration": 5, "motion": "scroll", "frame": "browser-light" },
     { "type": "card", "title": "Built with Claude Code", "subtitle": "example.com", "duration": 2.5 }
   ],
-  "zooms": [{ "at": 121, "duration": 4, "rect": [0, 600, 1400, 788] }],
+  "zooms": [{ "id": "z1", "label": "Answer", "at": 121, "duration": 4, "rect": [0, 600, 1400, 788] }],
   "masks": [{ "from": 0, "to": 128, "rect": [2200, 0, 360, 40], "style": "fill" }],
   "texts": [{ "at": 2, "duration": 3, "text": "One prompt", "style": "pill", "position": "bottom" }]
 }
@@ -67,6 +67,10 @@ errors, and every command names the path of a problem, counting from 0
 | `audio` | `enabled` (`true`), `muteSpedUp` (`true`: sped-up clips are silent) |
 | `transition` | `enabled` (`true`: a crossfade between scenes), `duration` (`0.3` s, up to 2) |
 
+Two clips where the second starts where the first ends (within 1 ms), as `suggest`'s speed-ups and
+any split make, are one continuous piece: no crossfade, zooms and texts run on across the cut, and
+the sound runs on where the speed stays the same (a speed change gets a 10 ms fade against clicks).
+
 `frame.enabled: false` shows the screen alone, filling the output. A take recorded with
 `--draw-mouse` has the real pointer in the video; `record` then sets `cursor.enabled` to `false`, so
 there are not two cursors.
@@ -81,8 +85,9 @@ there are not two cursors.
 
 `zooms`: `at` and `duration` (source seconds), `rect`, `ease` (`smooth`, `linear`) and `enabled`
 (`true`). The rect is widened to the screen's aspect and kept inside the screen. The zoom eases in
-and out over 0.6 output seconds each, so give it 2 output seconds or more (`2 × speed` source
-seconds over a sped-up clip).
+and out over 0.6 output seconds each where it starts and ends on screen (a cut into its middle
+lands zoomed), so give it 2 output seconds or more (`2 × speed` source seconds over a sped-up
+clip).
 
 `masks` hide private things: `from` and `to` (source seconds), `rect`, `style` (`fill`: the colour
 around it, safest for tokens and keys; `blur`) and `enabled` (`true`). Make the rect generous: a
@@ -91,7 +96,12 @@ page).
 
 `texts`: `at` and `duration` (source seconds), `text`, `style` (`pill`, `lower-third`, `caption`),
 `position` (`top`, `center`, `bottom`) and `enabled` (`true`). A `top` text sits over the window's
-title bar; `bottom` keeps the title visible.
+title bar; `bottom` keeps the title visible. Texts fade in and out over 0.25 output seconds.
+
+Every scene, zoom, mask and text may have an `id` (1 to 64 letters, digits, `-` or `_`, unique in
+the whole project) and a `label` (a name for people, shown in the Cuttle app). `suggest` sets both
+on what it makes (`s1`, `z1`; "Prompt", "Claude at work", "Waiting", "Answer"). Keep them when
+you edit an item; give a new item an id no other item uses (`s7`, `m2`) and a short label.
 
 ## Finding source seconds and rects
 

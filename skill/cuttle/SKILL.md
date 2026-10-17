@@ -97,9 +97,11 @@ cuttle -C "<project>" --json preview
 
 `suggest` trims the quiet start and end, cuts idle stretches, speeds up waiting (Claude at work)
 and zooms on Claude's answer. Its `notes` say what it did, in source seconds. It replaces every clip
-and zoom (masks, texts, stills and cards stay), so run it once, before your hand edits. For a take
-recorded without `--until-claude`, add `--claude "<demo folder>"` to read the markers from Claude
-Code's transcript.
+and zoom (masks, texts, stills and cards stay), so run it once, before your hand edits. Its clips
+and zoom have ids, and labels where Claude's markers say what they show ("Claude at work",
+"Answer"): keep them when you edit, and give items you add an unused id and a label (project.md).
+For a take recorded without `--until-claude`, add `--claude "<demo folder>"` to read the markers
+from Claude Code's transcript.
 
 `preview` writes 12 stills and `preview/sheet.png`. **Look at the sheet** (Read the PNG). Each
 still in the JSON has its output second `t` and the `source` second it shows. For details, run
@@ -159,3 +161,5 @@ wants. Tell the user the file's path and length. Do not upload it anywhere.
 - `suggest` found no Claude markers: pass `--claude "<demo folder>"`.
 - `frame` says no frame starts at that second: the take ends there; take an earlier second.
 - A render fails with `render`: try `--encoder software`.
+- `conflict`: `cuttle.json` was saved by someone else (the user, or the Cuttle app) while the
+  command ran, and nothing was written. Read the file again, then run the command again.

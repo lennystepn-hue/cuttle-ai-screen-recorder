@@ -41,7 +41,7 @@ describe('createTimeline', () => {
     expect(layer?.zoom).toEqual([0, 0, 1280, 720]);
   });
 
-  it('eases the zoom and fades the text in source time', () => {
+  it('eases the zoom and fades the text in output time', () => {
     const zoom = timeline.frameAt(2.3).layers[0]?.zoom;
     expect(zoom?.[2]).toBeCloseTo(1920, 6);
     expect(zoom?.[3]).toBeCloseTo(1080, 6);
@@ -125,7 +125,13 @@ describe('createTimeline', () => {
 });
 
 describe('crossfades', () => {
-  const timeline = createTimeline(project({ transition: { enabled: true, duration: 0.4 } }), { screenSize });
+  // The second clip starts a second after the first ends: a cut, not a continuous one.
+  const JUMP = [
+    { type: 'clip', from: 10, to: 20 },
+    { type: 'clip', from: 21, to: 141, speed: 12 },
+    { type: 'card', title: 'End', duration: 2 },
+  ];
+  const timeline = createTimeline(project({ transition: { enabled: true, duration: 0.4 } }, { scenes: JUMP }), { screenSize });
 
   it('shows one layer away from boundaries', () => {
     expect(timeline.frameAt(5).layers).toHaveLength(1);
@@ -136,7 +142,7 @@ describe('crossfades', () => {
     expect(before.map((l) => l.index)).toEqual([0, 1]);
     expect(before[0]?.opacity).toBeCloseTo(0.75, 6);
     expect(before[1]?.opacity).toBeCloseTo(0.25, 6);
-    expect(before[1]?.sourceTime).toBe(20);
+    expect(before[1]?.sourceTime).toBe(21);
 
     const after = timeline.frameAt(10.1).layers;
     expect(after.map((l) => l.index)).toEqual([0, 1]);
@@ -150,6 +156,7 @@ describe('crossfades', () => {
       project(
         { transition: { enabled: true, duration: 0.4 } },
         {
+          scenes: JUMP,
           masks: [
             { from: 0, to: 15, rect: [0, 0, 50, 50] },
             { from: 10, to: 20, rect: [0, 0, 50, 50] },
@@ -245,5 +252,103 @@ describe('crossfades', () => {
     expect(incoming?.sourceTime).toBeUndefined();
     expect(incoming?.zoom).toBeUndefined();
     expect((outgoing?.opacity ?? 0) + (incoming?.opacity ?? 0)).toBeCloseTo(1, 9);
+  });
+});
+
+describe('continuous cuts', () => {
+  const look = { transition: { enabled: true, duration: 0.4 } };
+  // One piece of footage: 0–5 at 1×, 5–25 at 4× (output 5–10), 25–30 at 1× (output 10–15).
+  const scenes = [
+    { type: 'clip', from: 0, to: 5 },
+    { type: 'clip', from: 5, to: 25, speed: 4 },
+    { type: 'clip', from: 25, to: 30 },
+  ];
+  const timeline = createTimeline(project(look, { scenes, zooms: [], masks: [], texts: [] }), { screenSize });
+
+  it('shows one layer at a continuous cut, without a crossfade', () => {
+    for (const t of [4.9, 5, 5.1, 9.9, 10, 10.1]) expect(timeline.frameAt(t).layers, `t ${t}`).toHaveLength(1);
+  });
+
+  it('moves on in source time on every frame across the cuts: nothing held or frozen', () => {
+    const times = Array.from({ length: 330 }, (_, i) => timeline.frameAt(4 + i / 30).layers[0]?.sourceTime ?? NaN);
+    for (let i = 1; i < times.length; i++) expect(times[i], `frame ${i}`).toBeGreaterThan(times[i - 1]!);
+  });
+
+  it('shows each frame of a split clip as the whole clip does, at any frame rate', () => {
+    // Span ends are rounded to the microsecond: a split at a frame time used to hold the frame before it.
+    for (const fps of [24, 25, 29, 30, 60]) {
+      const at = (scenes: unknown[]) => createTimeline(project(look, { output: { fps }, scenes, zooms: [], masks: [], texts: [] }), { screenSize });
+      const whole = at([{ type: 'clip', from: 0, to: 10 }]);
+      for (let splitFrame = 1; splitFrame < 3 * fps; splitFrame++) {
+        const split = at([{ type: 'clip', from: 0, to: splitFrame / fps }, { type: 'clip', from: splitFrame / fps, to: 10 }]);
+        for (const frame of [splitFrame - 1, splitFrame, splitFrame + 1]) {
+          const t = frame / fps;
+          expect(split.frameAt(t).layers[0]?.sourceTime, `${fps} fps, split at frame ${splitFrame}, frame ${frame}`).toBeCloseTo(whole.frameAt(t).layers[0]!.sourceTime!, 6);
+        }
+      }
+    }
+  });
+
+  it('still crossfades where the source jumps', () => {
+    const jump = createTimeline(project(look, { scenes: [{ type: 'clip', from: 0, to: 5 }, { type: 'clip', from: 5.5, to: 10 }] }), { screenSize });
+    expect(jump.frameAt(5).layers).toHaveLength(2);
+  });
+});
+
+describe('overlay ramps in output time', () => {
+  const look = { transition: { enabled: true, duration: 0.4 } };
+  // 0–5 at 1×, then the same footage on at 4× (output 5–10).
+  const scenes = [
+    { type: 'clip', from: 0, to: 5 },
+    { type: 'clip', from: 5, to: 25, speed: 4 },
+  ];
+  const zoomRect = [0, 0, 1280, 720];
+  const width = (timeline: ReturnType<typeof createTimeline>, t: number): number => timeline.frameAt(t).layers[0]?.zoom?.[2] ?? NaN;
+
+  it('runs a zoom across a speed change without a jump', () => {
+    // source 4.7–8.7 shows at output 4.7–5.925: one occurrence, ramps of 0.6 output seconds
+    const timeline = createTimeline(project(look, { scenes, zooms: [{ at: 4.7, duration: 4, rect: zoomRect }], masks: [], texts: [] }), { screenSize });
+    expect(width(timeline, 5)).toBeCloseTo(1920, 6);
+    const widths = Array.from({ length: 19 }, (_, i) => width(timeline, 4.7 + i / 30));
+    for (let i = 1; i < widths.length; i++) {
+      expect(widths[i], `frame ${i}`).toBeLessThanOrEqual(widths[i - 1]!);
+      // no step is bigger than the ease's steepest (slope 3, halfway) over one frame of the 0.6 s ramp
+      expect(widths[i - 1]! - widths[i]!, `frame ${i}`).toBeLessThanOrEqual((1280 * 3) / (30 * 0.6) + 1e-6);
+    }
+  });
+
+  it('lands fully zoomed where a cut jumps into the middle of a zoom', () => {
+    // the zoom is source 10–16; the second clip starts at 12, inside it
+    const timeline = createTimeline(
+      project(look, { scenes: [{ type: 'clip', from: 0, to: 5 }, { type: 'clip', from: 12, to: 20 }], zooms: [{ at: 10, duration: 6, rect: zoomRect }], masks: [], texts: [] }),
+      { screenSize },
+    );
+    expect(timeline.frameAt(5).layers[1]?.zoom).toEqual(zoomRect);
+    expect(width(timeline, 5.3)).toBe(1280);
+    // and ramps out where its end shows: output 9, 0.3 s before it halfway
+    expect(width(timeline, 8.7)).toBeCloseTo(1920, 6);
+  });
+
+  it('fades a text in output seconds across a speed change', () => {
+    // source 4–5.4 shows at output 4–5.1: the fade-out starts at 4.85, on the 1× side
+    const timeline = createTimeline(project(look, { scenes, zooms: [], masks: [], texts: [{ at: 4, duration: 1.4, text: 'Hi' }] }), { screenSize });
+    const opacity = (t: number): number => timeline.frameAt(t).layers[0]?.texts[0]?.opacity ?? NaN;
+    expect(opacity(4.8)).toBe(1);
+    expect(opacity(4.95)).toBeCloseTo(0.6, 9);
+    expect(opacity(5)).toBeCloseTo(0.4, 9);
+    expect(opacity(5.05)).toBeCloseTo(0.2, 9);
+  });
+
+  it('ramps a zoom over a split exactly as over the unsplit clip', () => {
+    const zooms = [{ at: 4.5, duration: 1, rect: zoomRect }];
+    const whole = createTimeline(project(look, { scenes: [{ type: 'clip', from: 0, to: 10 }], zooms, masks: [], texts: [] }), { screenSize });
+    const split = createTimeline(
+      project(look, { scenes: [{ type: 'clip', from: 0, to: 5 }, { type: 'clip', from: 5, to: 10 }], zooms, masks: [], texts: [] }),
+      { screenSize },
+    );
+    for (let frame = 120; frame < 180; frame++) {
+      expect(split.frameAt(frame / 30).layers).toHaveLength(1);
+      expect(width(split, frame / 30), `frame ${frame}`).toBeCloseTo(width(whole, frame / 30), 6);
+    }
   });
 });

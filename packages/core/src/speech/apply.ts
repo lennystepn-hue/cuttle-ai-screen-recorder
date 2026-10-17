@@ -91,14 +91,15 @@ export interface SpeechEditsResult extends SpeechCutsResult {
 /**
  * Applies the speech edits of the project's transcript to cuttle.json, leaving its scenes and every
  * other item as they are: the app's step once the transcript arrives after the cut. `link`: a
- * transcript to link first (in the same write), which must belong to the project's mic.
+ * transcript to link first (in the same write), which must belong to the project's mic; `cleanMic`:
+ * the cleaned-up mic, linked with it.
  */
-export async function applySpeechEdits(projectDir: string, options: { link?: string; onStatus?: (text: string) => void } = {}): Promise<SpeechEditsResult> {
+export async function applySpeechEdits(projectDir: string, options: { link?: string; cleanMic?: string; onStatus?: (text: string) => void } = {}): Promise<SpeechEditsResult> {
   const file = await readProjectFile(projectDir);
   const { sources } = file.project;
   if (options.link !== undefined) {
     if (!transcriptOfMic(file.dir, sources, options.link)) throw new CoreError('conflict', `the project moved to another take while it was transcribed: ${options.link} is not linked`);
-    file.raw.sources = { ...(file.raw.sources as Record<string, unknown>), transcript: options.link };
+    file.raw.sources = { ...(file.raw.sources as Record<string, unknown>), transcript: options.link, ...(options.cleanMic && { cleanMic: options.cleanMic }) };
   }
   const linked = options.link ?? sources.transcript;
   const { transcript, note } = await readTranscript(file.dir, linked);
@@ -113,7 +114,7 @@ export async function applySpeechEdits(projectDir: string, options: { link?: str
   const clips = file.project.scenes.flatMap((scene) => (scene.type === 'clip' && scene.speed === 1 ? [{ from: scene.from, to: scene.to }] : []));
   const result = withSpeechCuts(file.raw, file.project, transcript, { still: screen.still, events, clips });
   const before = JSON.stringify(file.raw.cuts ?? []);
-  const linking = options.link !== undefined && options.link !== sources.transcript;
+  const linking = (options.link !== undefined && options.link !== sources.transcript) || (options.cleanMic !== undefined && options.cleanMic !== sources.cleanMic);
   if (JSON.stringify(result.cuts) === before && !linking) return { ...result, project: file.path, written: false };
   if (result.cuts.length > 0 || file.raw.cuts !== undefined) file.raw.cuts = result.cuts;
   await writeProjectFile(file, 'the speech edits');

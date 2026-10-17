@@ -7,12 +7,15 @@ import { createHash } from 'node:crypto';
 import { afterAll, describe, expect, it } from 'vitest';
 import type { InputEvent, TranscriptWord } from '@cuttle/project';
 import { runFfmpeg } from '../src/ffmpeg';
+import { streamSeconds } from '../src/suggest/media';
 import { suggestClips } from '../src/suggest/plan';
 import { alignWords, guessLanguage } from '../src/speech/align';
-import { fillerCuts, fillerWords, likelyFiller, mergeCuts, pauseCuts, restingAt, speechCuts, type SpeechEditInput } from '../src/speech/edits';
+import { cleanMic, cleanupFilter, denoiseLatency } from '../src/speech/cleanup';
+import { likelyFiller, normWord } from '@cuttle/project';
+import { fillerCuts, fillerWords, mergeCuts, pauseCuts, restingAt, speechCuts, type SpeechEditInput } from '../src/speech/edits';
 import { LEVEL_SECONDS, micLevels, speechStretches } from '../src/speech/levels';
 import { downloadFile } from '../src/speech/models';
-import { filterValue, normWord, parseWhisperLines, type HeardWord } from '../src/speech/whisper';
+import { filterValue, parseWhisperLines, type HeardWord } from '../src/speech/whisper';
 
 const dirs: string[] = [];
 afterAll(() => Promise.all(dirs.map((dir) => rm(dir, { recursive: true, force: true }))));
@@ -363,4 +366,32 @@ describe('downloadFile', () => {
     await server.close();
     expect(existsSync(`${path}.part`)).toBe(false);
   });
+});
+
+describe('the cleaned-up mic', () => {
+  it('takes the noise filter\'s delay out again and keeps the length', () => {
+    expect(cleanupFilter(1200)).toBe('aresample=48000,highpass=f=80,afftdn=nr=12:nf=-50:tn=1,atrim=start_sample=1200,asetpts=PTS-STARTPTS,apad=pad_len=1200,loudnorm=I=-16:TP=-1.5:LRA=11,aresample=48000');
+    expect(cleanupFilter(0)).not.toContain('atrim');
+  });
+
+  it('is louder, as long as the mic, and in step with it', async () => {
+    expect(await denoiseLatency()).toBeGreaterThan(0);
+    const mic = join(fixtures, 'en.m4a');
+    const out = join(temp(), 'mic.clean.m4a');
+    await cleanMic(mic, out);
+    expect(Math.abs((await streamSeconds(out, 'a')) - (await streamSeconds(mic, 'a')))).toBeLessThan(0.03);
+    const [before, after] = [await micLevels(mic), await micLevels(out)];
+    // the best lag between the two loudness curves, in 10 ms steps
+    let best = 0;
+    let bestScore = -Infinity;
+    for (let lag = -10; lag <= 10; lag++) {
+      let score = 0;
+      for (let i = 100; i < before.length - 100; i++) score -= Math.abs(before[i]! - (after[i + lag] ?? -100));
+      if (score > bestScore) [best, bestScore] = [lag, score];
+    }
+    expect(best).toBe(0);
+    const loud = (levels: Float32Array) => Float32Array.from(levels).sort()[Math.floor(levels.length * 0.95)]!;
+    expect(loud(after)).toBeGreaterThan(loud(before) + 3);
+    expect(speechStretches(after)).toHaveLength(speechStretches(before).length);
+  }, 30_000);
 });

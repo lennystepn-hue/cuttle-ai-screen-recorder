@@ -5,6 +5,7 @@ import { spawn } from 'node:child_process';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { normWord } from '@cuttle/project';
 import { CoreError } from '../errors';
 import { ffmpegPath, runFfmpeg } from '../ffmpeg';
 
@@ -25,9 +26,6 @@ export function filterValue(value: string, path = true): string {
   const option = plain.replace(/[\\':]/g, '\\$&');
   return option.replace(/[\\'[\],;]/g, '\\$&');
 }
-
-/** Letters and digits only, lower case: how words are compared. */
-export const normWord = (text: string) => text.toLowerCase().normalize('NFC').replace(/[^\p{L}\p{N}]+/gu, '');
 
 /**
  * The words of the filter's `format=json` output, one per line: `{"start":ms,"end":ms,"text":"…"}`.

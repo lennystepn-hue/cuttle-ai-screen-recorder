@@ -2,8 +2,9 @@
 // stretch takes, in order, the run of words whose letters fit its length at the take's speaking rate,
 // near where whisper put them; inside a stretch the words share its length by their letters. In the
 // spike this cut the median start error from about 500 ms to 35 to 76 ms.
+import { normWord } from '@cuttle/project';
 import type { Span } from '../suggest/spans';
-import { normWord, type HeardWord } from './whisper';
+import type { HeardWord } from './whisper';
 
 export const ALIGN_RULES = {
   /** A stretch shorter than this may take no word, cheaply: a filler whisper left out, a cough, a click. */

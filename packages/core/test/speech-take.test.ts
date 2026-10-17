@@ -44,7 +44,7 @@ describe.runIf(model !== undefined && whisper)(`speech on a spoken take (${model
     const dir = await spokenTake();
     const progress: number[] = [];
     const done = await transcribeTake(dir, { model, onProgress: (fraction) => progress.push(fraction) });
-    expect(done).toMatchObject({ transcript: 'takes/1/transcript.json', model, language: 'en', aligned: true });
+    expect(done).toMatchObject({ transcript: 'takes/1/transcript.json', cleanMic: 'takes/1/mic.clean.m4a', model, language: 'en', aligned: true });
     expect(progress.at(-1)).toBe(1);
     const parsed = parseTranscriptJson(readFileSync(join(dir, 'takes', '1', 'transcript.json'), 'utf8'));
     if (!parsed.ok) throw new Error('invalid transcript');
@@ -52,7 +52,7 @@ describe.runIf(model !== undefined && whisper)(`speech on a spoken take (${model
     const records = parsed.transcript.words.find((word) => /records/i.test(word.text));
     expect(records?.t).toBeCloseTo(2.945, 0);
     expect(Math.abs(records!.t - 2.945)).toBeLessThan(0.25);
-    expect(JSON.parse(readFileSync(join(dir, 'cuttle.json'), 'utf8')).sources.transcript).toBe('takes/1/transcript.json');
+    expect(JSON.parse(readFileSync(join(dir, 'cuttle.json'), 'utf8')).sources).toMatchObject({ transcript: 'takes/1/transcript.json', cleanMic: 'takes/1/mic.clean.m4a' });
 
     const result = await suggestProject(dir);
     expect(result.speech.from).toBe('transcript');

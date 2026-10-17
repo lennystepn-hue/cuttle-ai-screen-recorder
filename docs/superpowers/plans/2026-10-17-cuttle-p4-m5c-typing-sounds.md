@@ -1672,3 +1672,11 @@ Expected: no output.
 - **The thud first sounded like a drum:** a pure 260 Hz tone 35 dB over the clack (seen in the spectrum). It is filtered noise now, and the test checks where the energy lies.
 - **`Math.max(...samples)` over a 3 s track overflowed the stack** in the tests; they fold with `reduce`.
 - **A recorder timing test wobbles** ("stops while paused": the take 0.6 s longer than up to the pause, 0.5 s allowed), also alone (1 of 3 runs). The recorder is untouched here; it is noted as a follow-up.
+
+**After the plan: main brought in the new Look tab (#25)**
+- The macOS branch's PR #25 (the Look tab as parts, the settings redone) was merged first, at the user's word. Main was merged into this branch:
+  - The Look tab's rows (Task 4) moved into the new Sound part. "Typing volume" is a slider (`RangeInput`, as the camera's size) instead of a number field, and the part's summary says "key clicks".
+  - The check sets the slider through the input's own value setter and opens the Sound part for these steps.
+  - `schema.test.ts` and `project.md` keep #25's webcam lines and this branch's audio lines.
+- #25 brought two golden scenarios (`webcam-squircle`, `webcam-square-moved`) with macOS images only. Their Windows images were made here, compared with the macOS ones side by side (the same), and added.
+- On the merged tree: the typecheck, `pnpm test` (all goldens pass) and `app:check` (46 tests) pass.

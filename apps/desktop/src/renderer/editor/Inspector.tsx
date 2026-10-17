@@ -2,7 +2,7 @@
 // left or Enter is pressed (text also every 2 s while typing); each save is one step to undo.
 // Output times read m:ss.t, take seconds "54.4 s into the take", lengths "2.5 s". While cuttle.json
 // does not parse, every field is off (editing waits).
-import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ComponentType, type KeyboardEvent, type ReactNode } from 'react';
 import { EXPORT_FORMATS } from '@cuttle/export/formats';
 import {
   BACKGROUND_PRESETS,
@@ -40,11 +40,11 @@ import {
   WEBCAM_SHAPE_NAMES,
 } from '../../shared/names';
 import { outputTimesOf } from '../../shared/timeline-model';
-import { CardIcon, ChevronIcon, CopyIcon, CropIcon, FilmIcon, MaskIcon, PageIcon, SplitIcon, TextIcon, TrashIcon, ZoomIcon } from '../icons';
+import { BackgroundIcon, CameraIcon, CardIcon, CheckIcon, ChevronIcon, CopyIcon, CropIcon, FilmIcon, MaskIcon, PageIcon, SelectIcon, SoundIcon, SplitIcon, SubtitlesIcon, TextIcon, TrashIcon, WindowIcon, ZoomIcon } from '../icons';
 import { Select as StyledSelect } from '../Select';
 import { chooseImage, cutShownAt, deleteSelection, duplicateSelection, LIST_OF, playheadPlace, reveal, SPEEDS } from './actions';
 import { edit, preview } from './doc';
-import { currentPlayer, engineAssets, select, setTool, store, type Selection, type Tool } from './session';
+import { currentPlayer, engineAssets, select, setTool, store, type LookSection, type Selection, type Tool } from './session';
 import { isColoured, swatch, type SwatchKey } from './swatches';
 import { useStore } from './store';
 import { PrivacyNote } from './PrivacyNote';
@@ -917,217 +917,335 @@ const SIZES = [
   { name: '9:16', ...EXPORT_FORMATS['9:16'] },
 ];
 
+/** The look's parts, in the order the tab lists them. */
+const LOOK_PARTS: { id: LookSection; title: string; icon: ComponentType<{ size?: number }> }[] = [
+  { id: 'background', title: 'Background', icon: BackgroundIcon },
+  { id: 'window', title: 'Window', icon: WindowIcon },
+  { id: 'cursor', title: 'Cursor', icon: SelectIcon },
+  { id: 'camera', title: 'Camera', icon: CameraIcon },
+  { id: 'subtitles', title: 'Subtitles', icon: SubtitlesIcon },
+  { id: 'sound', title: 'Sound', icon: SoundIcon },
+  { id: 'video', title: 'Video', icon: FilmIcon },
+];
+
+/**
+ * One part of the look: a line with its name and what it is now; a click opens it (one part at a
+ * time), so the whole look reads at a glance and only one part's fields show.
+ */
+function LookPart({ id, summary, children }: { id: LookSection; summary: string; children: ReactNode }) {
+  const open = useStore(store, (state) => state.lookSection === id);
+  const part = LOOK_PARTS.find((item) => item.id === id)!;
+  const Icon = part.icon;
+  return (
+    <section className={`look-part${open ? ' open' : ''}`} data-testid={`look-${id}`}>
+      <button type="button" className="look-head" aria-expanded={open} onClick={() => store.set({ lookSection: id })} data-testid={`look-open-${id}`}>
+        <Icon size={16} />
+        <b>{part.title}</b>
+        <span className="look-summary" title={summary}>
+          {summary}
+        </span>
+        <ChevronIcon size={13} />
+      </button>
+      {open && <div className="look-body">{children}</div>}
+    </section>
+  );
+}
+
 function LookPanel() {
   const project = useStore(store, (state) => state.doc?.project);
   const raw = useStore(store, (state) => state.doc?.raw);
   if (!project || !raw) return null;
   const { look: current, output, sources, captions } = project;
   const size = SIZES.find((item) => item.width === output.width && item.height === output.height);
+  const webcam = current.webcam;
+  const summaries: Record<LookSection, string> = {
+    background: current.background.preset === 'solid' ? `Solid · ${(current.background.color ?? '#1c1c22').toUpperCase()}` : BACKGROUND_NAMES[current.background.preset],
+    window: current.frame.enabled ? [FRAME_NAMES[current.frame.style], current.frame.title].filter(Boolean).join(' · ') : 'No frame',
+    cursor: current.cursor.enabled ? `${CURSOR_NAMES[current.cursor.style]} · ${current.cursor.size}×` : 'Hidden',
+    camera: !sources.webcam
+      ? 'No webcam in this take'
+      : webcam.enabled
+        ? `${WEBCAM_SHAPE_NAMES[webcam.shape]} · ${webcam.position ? 'moved' : CORNER_NAMES[webcam.corner].toLowerCase()} · ${Math.round(webcam.size * 100)} %`
+        : 'Off',
+    subtitles: captions.enabled ? CAPTION_STYLE_NAMES[captions.style] : sources.transcript ? 'Off' : 'Not transcribed yet',
+    sound: current.audio.enabled ? [sources.cleanMic && current.audio.cleanup ? 'Mic · clean voice' : 'Mic', current.audio.typing && 'key clicks'].filter(Boolean).join(' · ') : 'Muted',
+    video: `${size?.name ?? `${output.width} × ${output.height}`} · ${output.fps} fps${current.transition.enabled ? ' · crossfades' : ''}`,
+  };
+  return (
+    <div className="look-parts">
+      <LookPart id="background" summary={summaries.background}>
+        <div className="swatches" role="group" aria-label="Background">
+          {BACKGROUND_PRESETS.map((preset) => (
+            <button
+              key={preset}
+              type="button"
+              className={`swatch-button bg-${preset}`}
+              aria-pressed={current.background.preset === preset}
+              title={BACKGROUND_NAMES[preset]}
+              onClick={() => {
+                if (preset === 'image') return void chooseImage('background');
+                look(['background'], preset === 'solid' ? { preset, color: current.background.color ?? '#1c1c22' } : { preset }, `Background: ${BACKGROUND_NAMES[preset]}`);
+              }}
+            >
+              <span>{BACKGROUND_NAMES[preset]}</span>
+            </button>
+          ))}
+        </div>
+        {current.background.preset === 'solid' && (
+          <Row label="Colour">
+            <ColorInput value={current.background.color ?? '#1c1c22'} path={['background', 'color']} label="Background colour" />
+          </Row>
+        )}
+        {current.background.preset === 'image' && current.background.image && (
+          <Row label="Image" plain>
+            <span className="path" title={current.background.image}>
+              {current.background.image}
+            </span>
+            <button type="button" className="ghost small" onClick={() => void chooseImage('background')}>
+              Replace…
+            </button>
+          </Row>
+        )}
+      </LookPart>
+
+      <LookPart id="window" summary={summaries.window}>
+        <Row label="Frame" inline>
+          <Toggle checked={current.frame.enabled} label="Window frame" onChange={(on) => look(['frame', 'enabled'], on, on ? 'Window frame on' : 'Window frame off')} />
+        </Row>
+        {current.frame.enabled && (
+          <>
+            <PictureSwatches
+              label="Frame style"
+              kind="frame"
+              options={FRAME_STYLES}
+              names={FRAME_NAMES}
+              value={current.frame.style}
+              color={current.cursor.color}
+              onPick={(style) => look(['frame', 'style'], style, `Frame: ${FRAME_NAMES[style]}`)}
+            />
+            <Row label="Title">
+              <TextInput value={current.frame.title} placeholder="none" onCommit={(title) => look(['frame', 'title'], title, 'Frame title')} />
+            </Row>
+            <div className="grid2">
+              <Row label="Corners (px)">
+                <NumberInput value={current.frame.radius} min={0} max={48} step={1} digits={0} onCommit={(radius) => look(['frame', 'radius'], radius, 'Frame corners')} />
+              </Row>
+              <Row label="Shadow" inline>
+                <Toggle checked={current.frame.shadow} label="Shadow" onChange={(on) => look(['frame', 'shadow'], on, on ? 'Shadow on' : 'Shadow off')} />
+              </Row>
+            </div>
+          </>
+        )}
+      </LookPart>
+
+      <LookPart id="cursor" summary={summaries.cursor}>
+        <Row label="Cursor" inline>
+          <Toggle checked={current.cursor.enabled} label="Cursor" onChange={(on) => look(['cursor', 'enabled'], on, on ? 'Cursor on' : 'Cursor off')} />
+        </Row>
+        {current.cursor.enabled && (
+          <>
+            <PictureSwatches
+              label="Cursor style"
+              kind="cursor"
+              options={CURSOR_STYLES}
+              names={CURSOR_NAMES}
+              titles={CURSOR_TITLES}
+              value={current.cursor.style}
+              color={current.cursor.color}
+              onPick={(style) => look(['cursor', 'style'], style, `Cursor: ${CURSOR_NAMES[style]}`)}
+            />
+            <div className="grid2">
+              <Row label="Size">
+                <NumberInput value={current.cursor.size} min={0.5} max={4} step={0.25} onCommit={(value) => look(['cursor', 'size'], value, 'Cursor size')} />
+              </Row>
+              <Row label="Colour">
+                <ColorInput value={current.cursor.color} path={['cursor', 'color']} label="Cursor colour" upper />
+              </Row>
+            </div>
+            <Row label="Clicks">
+              <Select value={current.cursor.clickEffect} options={CLICK_EFFECTS} names={CLICK_NAMES} onChange={(effect) => look(['cursor', 'clickEffect'], effect, 'Click effect')} />
+            </Row>
+            <Row label="Movement" note="the pointer glides; clicks stay exact">
+              <SmoothingSelect value={current.cursor.smoothing} />
+            </Row>
+          </>
+        )}
+      </LookPart>
+
+      <LookPart id="camera" summary={summaries.camera}>
+        <Row label="Bubble" inline note={sources.webcam ? undefined : 'no webcam in this take'}>
+          <Toggle checked={webcam.enabled} disabled={!sources.webcam} label="Webcam bubble" onChange={(on) => look(['webcam', 'enabled'], on, on ? 'Webcam on' : 'Webcam off')} testId="webcam-enabled" />
+        </Row>
+        {webcam.enabled && sources.webcam && <CameraFields webcam={webcam} />}
+      </LookPart>
+
+      <LookPart id="subtitles" summary={summaries.subtitles}>
+        <Row label="Subtitles" inline note={sources.transcript ? undefined : 'the take is not transcribed yet'}>
+          <Toggle checked={captions.enabled} label="Subtitles" onChange={(on) => caption('enabled', on, on ? 'Subtitles on' : 'Subtitles off')} testId="captions-enabled" />
+        </Row>
+        {captions.enabled && (
+          <>
+            <div className="grid2">
+              <Row label="Style">
+                <Select value={captions.style} options={CAPTION_STYLES} names={CAPTION_STYLE_NAMES} onChange={(style) => caption('style', style, `Subtitles: ${CAPTION_STYLE_NAMES[style]}`)} testId="captions-style" />
+              </Row>
+              <Row label="Position">
+                <Select value={captions.position} options={TEXT_POSITIONS} names={POSITION_NAMES} onChange={(position) => caption('position', position, 'Subtitles position')} testId="captions-position" />
+              </Row>
+            </div>
+            <div className="grid2">
+              <Row label="Size">
+                <NumberInput value={captions.size} min={0.5} max={2} step={0.1} onCommit={(size) => caption('size', size, 'Subtitles size')} testId="captions-size" />
+              </Row>
+              {captions.style !== 'subtitle' && (
+                <Row label="Spoken word">
+                  <ColorInput value={captions.color} label="Spoken word colour" upper toCommand={(color) => ({ type: 'captions', field: 'color', value: color })} />
+                </Row>
+              )}
+            </div>
+          </>
+        )}
+      </LookPart>
+
+      <LookPart id="sound" summary={summaries.sound}>
+        <Row label="Mic" inline>
+          <Toggle checked={current.audio.enabled} label="Mic sound" onChange={(on) => look(['audio', 'enabled'], on, on ? 'Sound on' : 'Sound off')} />
+        </Row>
+        {current.audio.enabled && sources.cleanMic && (
+          <Row label="Clean voice" inline note="less noise">
+            <Toggle checked={current.audio.cleanup} label="Clean voice" onChange={(on) => look(['audio', 'cleanup'], on, on ? 'Clean voice on' : 'Clean voice off')} testId="audio-cleanup" />
+          </Row>
+        )}
+        {current.audio.enabled && (
+          <Row label="Typing sounds" inline note="a click per key">
+            <Toggle checked={current.audio.typing} label="Typing sounds" onChange={(on) => look(['audio', 'typing'], on, on ? 'Typing sounds on' : 'Typing sounds off')} testId="audio-typing" />
+          </Row>
+        )}
+        {current.audio.enabled && current.audio.typing && (
+          <Row label={`Typing volume · ${Math.round(current.audio.typingVolume * 100)} %`}>
+            <RangeInput
+              value={Math.round(current.audio.typingVolume * 100)}
+              min={0}
+              max={100}
+              label="Typing volume"
+              toCommand={(value) => ({ type: 'look', path: ['audio', 'typingVolume'], value: value / 100 }) as Command}
+              commitLabel="Typing volume"
+              testId="audio-typing-volume"
+            />
+          </Row>
+        )}
+        {current.audio.enabled && (
+          <Row label="Sped-up clips" inline>
+            <Toggle checked={current.audio.muteSpedUp} label="Silent when sped up" onChange={(on) => look(['audio', 'muteSpedUp'], on, on ? 'Sped-up clips silent' : 'Sped-up clips heard')} />
+            <em>{current.audio.muteSpedUp ? 'Silent' : 'Heard'}</em>
+          </Row>
+        )}
+      </LookPart>
+
+      <LookPart id="video" summary={summaries.video}>
+        <Row label="Size" note={`${output.fps} fps`}>
+          <StyledSelect
+            value={size?.name ?? 'custom'}
+            options={[
+              ...(size ? [] : [{ value: 'custom', label: `${output.width} × ${output.height}` }]),
+              ...SIZES.map((item) => ({ value: item.name, label: item.name, note: `${item.width} × ${item.height}` })),
+            ]}
+            onChange={(name) => {
+              const chosen = SIZES.find((item) => item.name === name);
+              if (chosen) edit([{ type: 'output', width: chosen.width, height: chosen.height }], `Output ${chosen.name}`);
+            }}
+            label="Output size"
+            testId="output-size"
+          >
+            {size ? `${size.name} · ${size.width} × ${size.height}` : `${output.width} × ${output.height}`}
+          </StyledSelect>
+        </Row>
+        <Row label="Crossfade" inline>
+          <Toggle checked={current.transition.enabled} label="Crossfade at cuts" onChange={(on) => look(['transition', 'enabled'], on, on ? 'Crossfade on' : 'Crossfade off')} />
+        </Row>
+        {current.transition.enabled && (
+          <Row label="Length (s)">
+            <NumberInput value={current.transition.duration} min={0} max={2} step={0.1} onCommit={(value) => look(['transition', 'duration'], value, 'Crossfade length')} />
+          </Row>
+        )}
+      </LookPart>
+    </div>
+  );
+}
+
+/**
+ * The camera bubble's look: its shape as tiles, its corner (or where it was placed on the video,
+ * with the way back to a corner), its size, its ring, shadow and mirror. Dragging it on the video
+ * moves and resizes it too.
+ */
+function CameraFields({ webcam }: { webcam: CuttleProject['look']['webcam'] }) {
   return (
     <>
-      <div className="section-title">Output</div>
-      <Row label="Size" note={`${output.fps} fps`}>
-        <StyledSelect
-          value={size?.name ?? 'custom'}
-          options={[
-            ...(size ? [] : [{ value: 'custom', label: `${output.width} × ${output.height}` }]),
-            ...SIZES.map((item) => ({ value: item.name, label: item.name, note: `${item.width} × ${item.height}` })),
-          ]}
-          onChange={(name) => {
-            const chosen = SIZES.find((item) => item.name === name);
-            if (chosen) edit([{ type: 'output', width: chosen.width, height: chosen.height }], `Output ${chosen.name}`);
-          }}
-          label="Output size"
-          testId="output-size"
-        >
-          {size ? `${size.name} · ${size.width} × ${size.height}` : `${output.width} × ${output.height}`}
-        </StyledSelect>
-      </Row>
-
-      <div className="section-title">Background</div>
-      <div className="swatches" role="group" aria-label="Background">
-        {BACKGROUND_PRESETS.map((preset) => (
-          <button
-            key={preset}
-            type="button"
-            className={`swatch-button bg-${preset}`}
-            aria-pressed={current.background.preset === preset}
-            title={BACKGROUND_NAMES[preset]}
-            onClick={() => {
-              if (preset === 'image') return void chooseImage('background');
-              look(['background'], preset === 'solid' ? { preset, color: current.background.color ?? '#1c1c22' } : { preset }, `Background: ${BACKGROUND_NAMES[preset]}`);
-            }}
-          >
-            <span>{BACKGROUND_NAMES[preset]}</span>
+      <div className="shape-tiles" role="group" aria-label="Camera shape">
+        {WEBCAM_SHAPES.map((shape) => (
+          <button key={shape} type="button" className={`shape-tile ${shape}`} aria-pressed={webcam.shape === shape} onClick={() => look(['webcam', 'shape'], shape, `Camera: ${WEBCAM_SHAPE_NAMES[shape]}`)} data-testid={`webcam-shape-${shape}`}>
+            <i />
+            <span>{WEBCAM_SHAPE_NAMES[shape]}</span>
           </button>
         ))}
       </div>
-      {current.background.preset === 'solid' && (
-        <Row label="Colour">
-          <ColorInput value={current.background.color ?? '#1c1c22'} path={['background', 'color']} label="Background colour" />
-        </Row>
-      )}
-      {current.background.preset === 'image' && current.background.image && (
-        <Row label="Image" plain>
-          <span className="path" title={current.background.image}>
-            {current.background.image}
-          </span>
-          <button type="button" className="ghost small" onClick={() => void chooseImage('background')}>
-            Replace…
+      <Row label="Place" plain note={webcam.position ? 'moved; a corner puts it back' : 'or drag it on the video'}>
+        <div className="corner-picker" role="group" aria-label="Camera corner">
+          {WEBCAM_CORNERS.map((corner) => (
+            <button
+              key={corner}
+              type="button"
+              className={corner}
+              aria-pressed={!webcam.position && webcam.corner === corner}
+              title={CORNER_NAMES[corner]}
+              aria-label={CORNER_NAMES[corner]}
+              onClick={() => edit([{ type: 'look', path: ['webcam', 'corner'], value: corner } as Command, { type: 'look', path: ['webcam', 'position'], value: undefined } as Command], `Camera: ${CORNER_NAMES[corner].toLowerCase()}`)}
+              data-testid={`webcam-corner-${corner}`}
+            >
+              <i />
+            </button>
+          ))}
+        </div>
+      </Row>
+      <Row label={`Size · ${Math.round(webcam.size * 100)} %`}>
+        <RangeInput value={Math.round(webcam.size * 100)} min={8} max={50} label="Camera size" toCommand={(value) => ({ type: 'look', path: ['webcam', 'size'], value: value / 100 }) as Command} commitLabel="Camera size" testId="webcam-size" />
+      </Row>
+      <div className="chips" role="group" aria-label="Camera details">
+        {(
+          [
+            ['border', 'Ring', 'Camera ring'],
+            ['shadow', 'Shadow', 'Camera shadow'],
+            ['mirror', 'Mirror', 'Camera mirrored'],
+          ] as const
+        ).map(([field, name, change]) => (
+          <button key={field} type="button" className="chip" aria-pressed={webcam[field]} onClick={() => look(['webcam', field], !webcam[field], `${change} ${webcam[field] ? 'off' : 'on'}`)} data-testid={`webcam-${field}`}>
+            {webcam[field] && <CheckIcon size={12} />}
+            {name}
           </button>
-        </Row>
-      )}
-
-      <div className="section-title">Window frame</div>
-      <Row label="Frame" inline>
-        <Toggle checked={current.frame.enabled} label="Window frame" onChange={(on) => look(['frame', 'enabled'], on, on ? 'Window frame on' : 'Window frame off')} />
-      </Row>
-      {current.frame.enabled && (
-        <>
-          <PictureSwatches
-            label="Frame style"
-            kind="frame"
-            options={FRAME_STYLES}
-            names={FRAME_NAMES}
-            value={current.frame.style}
-            color={current.cursor.color}
-            onPick={(style) => look(['frame', 'style'], style, `Frame: ${FRAME_NAMES[style]}`)}
-          />
-          <Row label="Title">
-            <TextInput value={current.frame.title} placeholder="none" onCommit={(title) => look(['frame', 'title'], title, 'Frame title')} />
-          </Row>
-          <div className="grid2">
-            <Row label="Corners (px)">
-              <NumberInput value={current.frame.radius} min={0} max={48} step={1} digits={0} onCommit={(radius) => look(['frame', 'radius'], radius, 'Frame corners')} />
-            </Row>
-            <Row label="Shadow" inline>
-              <Toggle checked={current.frame.shadow} label="Shadow" onChange={(on) => look(['frame', 'shadow'], on, on ? 'Shadow on' : 'Shadow off')} />
-            </Row>
-          </div>
-        </>
-      )}
-
-      <div className="section-title">Cursor</div>
-      <Row label="Cursor" inline>
-        <Toggle checked={current.cursor.enabled} label="Cursor" onChange={(on) => look(['cursor', 'enabled'], on, on ? 'Cursor on' : 'Cursor off')} />
-      </Row>
-      {current.cursor.enabled && (
-        <>
-          <PictureSwatches
-            label="Cursor style"
-            kind="cursor"
-            options={CURSOR_STYLES}
-            names={CURSOR_NAMES}
-            titles={CURSOR_TITLES}
-            value={current.cursor.style}
-            color={current.cursor.color}
-            onPick={(style) => look(['cursor', 'style'], style, `Cursor: ${CURSOR_NAMES[style]}`)}
-          />
-          <div className="grid2">
-            <Row label="Size">
-              <NumberInput value={current.cursor.size} min={0.5} max={4} step={0.25} onCommit={(value) => look(['cursor', 'size'], value, 'Cursor size')} />
-            </Row>
-            <Row label="Colour">
-              <ColorInput value={current.cursor.color} path={['cursor', 'color']} label="Cursor colour" upper />
-            </Row>
-          </div>
-          <Row label="Clicks">
-            <Select value={current.cursor.clickEffect} options={CLICK_EFFECTS} names={CLICK_NAMES} onChange={(effect) => look(['cursor', 'clickEffect'], effect, 'Click effect')} />
-          </Row>
-          <Row label="Movement" note="the pointer glides; clicks stay exact">
-            <SmoothingSelect value={current.cursor.smoothing} />
-          </Row>
-        </>
-      )}
-
-      <div className="section-title">Webcam</div>
-      <Row label="Bubble" inline note={sources.webcam ? undefined : 'no webcam in this take'}>
-        <Toggle checked={current.webcam.enabled} disabled={!sources.webcam} label="Webcam bubble" onChange={(on) => look(['webcam', 'enabled'], on, on ? 'Webcam on' : 'Webcam off')} />
-      </Row>
-      {current.webcam.enabled && sources.webcam && (
-        <>
-          <div className="grid2">
-            <Row label="Shape">
-              <Select value={current.webcam.shape} options={WEBCAM_SHAPES} names={WEBCAM_SHAPE_NAMES} onChange={(shape) => look(['webcam', 'shape'], shape, 'Webcam shape')} />
-            </Row>
-            <Row label="Corner">
-              <Select value={current.webcam.corner} options={WEBCAM_CORNERS} names={CORNER_NAMES} onChange={(corner) => look(['webcam', 'corner'], corner, 'Webcam corner')} />
-            </Row>
-          </div>
-          <Row label="Size" note="% of the output's height">
-            <NumberInput value={current.webcam.size * 100} min={8} max={50} step={1} digits={0} onCommit={(value) => look(['webcam', 'size'], value / 100, 'Webcam size')} />
-          </Row>
-        </>
-      )}
-
-      <div className="section-title">Subtitles</div>
-      <Row label="Subtitles" inline note={sources.transcript ? undefined : 'the take is not transcribed yet'}>
-        <Toggle checked={captions.enabled} label="Subtitles" onChange={(on) => caption('enabled', on, on ? 'Subtitles on' : 'Subtitles off')} testId="captions-enabled" />
-      </Row>
-      {captions.enabled && (
-        <>
-          <div className="grid2">
-            <Row label="Style">
-              <Select value={captions.style} options={CAPTION_STYLES} names={CAPTION_STYLE_NAMES} onChange={(style) => caption('style', style, `Subtitles: ${CAPTION_STYLE_NAMES[style]}`)} testId="captions-style" />
-            </Row>
-            <Row label="Position">
-              <Select value={captions.position} options={TEXT_POSITIONS} names={POSITION_NAMES} onChange={(position) => caption('position', position, 'Subtitles position')} testId="captions-position" />
-            </Row>
-          </div>
-          <div className="grid2">
-            <Row label="Size">
-              <NumberInput value={captions.size} min={0.5} max={2} step={0.1} onCommit={(size) => caption('size', size, 'Subtitles size')} testId="captions-size" />
-            </Row>
-            {captions.style !== 'subtitle' && (
-              <Row label="Spoken word">
-                <ColorInput value={captions.color} label="Spoken word colour" upper toCommand={(color) => ({ type: 'captions', field: 'color', value: color })} />
-              </Row>
-            )}
-          </div>
-        </>
-      )}
-
-      <div className="section-title">Sound and transitions</div>
-      <Row label="Mic" inline>
-        <Toggle checked={current.audio.enabled} label="Mic sound" onChange={(on) => look(['audio', 'enabled'], on, on ? 'Sound on' : 'Sound off')} />
-      </Row>
-      {current.audio.enabled && sources.cleanMic && (
-        <Row label="Clean voice" inline note="less noise">
-          <Toggle checked={current.audio.cleanup} label="Clean voice" onChange={(on) => look(['audio', 'cleanup'], on, on ? 'Clean voice on' : 'Clean voice off')} testId="audio-cleanup" />
-        </Row>
-      )}
-      {current.audio.enabled && (
-        <Row label="Typing sounds" inline note="a click per key">
-          <Toggle checked={current.audio.typing} label="Typing sounds" onChange={(on) => look(['audio', 'typing'], on, on ? 'Typing sounds on' : 'Typing sounds off')} testId="audio-typing" />
-        </Row>
-      )}
-      {current.audio.enabled && current.audio.typing && (
-        <Row label="Typing volume (%)">
-          <NumberInput
-            value={Math.round(current.audio.typingVolume * 100)}
-            min={0}
-            max={100}
-            step={10}
-            digits={0}
-            onCommit={(percent) => look(['audio', 'typingVolume'], percent / 100, 'Typing volume')}
-            testId="audio-typing-volume"
-          />
-        </Row>
-      )}
-      {current.audio.enabled && (
-        <Row label="Sped-up clips" inline>
-          <Toggle checked={current.audio.muteSpedUp} label="Silent when sped up" onChange={(on) => look(['audio', 'muteSpedUp'], on, on ? 'Sped-up clips silent' : 'Sped-up clips heard')} />
-          <em>{current.audio.muteSpedUp ? 'Silent' : 'Heard'}</em>
-        </Row>
-      )}
-      <Row label="Crossfade" inline>
-        <Toggle checked={current.transition.enabled} label="Crossfade at cuts" onChange={(on) => look(['transition', 'enabled'], on, on ? 'Crossfade on' : 'Crossfade off')} />
-      </Row>
-      {current.transition.enabled && (
-        <Row label="Length (s)">
-          <NumberInput value={current.transition.duration} min={0} max={2} step={0.1} onCommit={(value) => look(['transition', 'duration'], value, 'Crossfade length')} />
-        </Row>
-      )}
+        ))}
+      </div>
     </>
+  );
+}
+
+/** A slider: the video follows it while it is dragged (a preview), one edit when it is let go. */
+function RangeInput({ value, min, max, label, toCommand, commitLabel, testId }: { value: number; min: number; max: number; label: string; toCommand: (value: number) => Command; commitLabel: string; testId?: string }) {
+  return (
+    <input
+      key={value}
+      type="range"
+      className="range"
+      min={min}
+      max={max}
+      step={1}
+      defaultValue={value}
+      aria-label={label}
+      onInput={(event) => preview([toCommand(Number((event.target as HTMLInputElement).value))])}
+      onChange={(event) => {
+        preview(undefined);
+        edit([toCommand(Number(event.target.value))], commitLabel);
+      }}
+      data-testid={testId}
+    />
   );
 }

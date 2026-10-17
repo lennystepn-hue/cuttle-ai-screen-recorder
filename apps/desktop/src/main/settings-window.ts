@@ -6,7 +6,7 @@ import { hostname } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 import { app, BrowserWindow, clipboard, dialog, session, shell } from 'electron';
 import { editorLockOf } from '@cuttle/core';
-import type { Motion, SettingsView } from '../shared/ipc';
+import type { Motion, SettingsPage, SettingsView } from '../shared/ipc';
 import { CHECK, HIDDEN } from './check';
 import { bindRequests, send } from './ipc';
 import { APP_ORIGIN, assetPath, bundlePath, serveApp } from './protocols';
@@ -19,8 +19,8 @@ import { bringToFront, guard, lockDown, openEditorOrSay, showPill, titleBar, web
 const BACKGROUND = '#0c0c0f';
 /** As the editor's, so Windows' buttons are the same in both. */
 const TITLE_BAR_HEIGHT = 44;
-/** The settings scroll; the first run fits without (Done stays in sight). */
-const SIZE = { width: 640, height: 720 };
+/** A sidebar and a page that scrolls; the first run fits without (Done stays in sight). */
+const SIZE = { width: 820, height: 620 };
 const WELCOME_SIZE = { width: 640, height: 640 };
 
 let current: BrowserWindow | undefined;
@@ -49,9 +49,10 @@ async function viewNow(): Promise<SettingsView> {
   return { ...view, recent };
 }
 
-/** Shows the settings window (`welcome`: the first run), or brings it forward. */
-export async function openSettings(options: { welcome?: boolean } = {}): Promise<BrowserWindow> {
+/** Shows the settings window (`welcome`: the first run; `page`: at that page), or brings it forward. */
+export async function openSettings(options: { welcome?: boolean; page?: SettingsPage } = {}): Promise<BrowserWindow> {
   if (current && !current.isDestroyed()) {
+    if (options.page) send(current.webContents, 'settings:page', options.page);
     bringToFront(current);
     return current;
   }
@@ -60,7 +61,7 @@ export async function openSettings(options: { welcome?: boolean } = {}): Promise
   serveApp(ses, bundlePath('renderer'));
   const window = new BrowserWindow({
     ...(options.welcome ? WELCOME_SIZE : SIZE),
-    minWidth: 560,
+    minWidth: options.welcome ? 560 : 720,
     minHeight: options.welcome ? 600 : 480,
     show: false,
     backgroundColor: BACKGROUND,
@@ -170,7 +171,7 @@ export async function openSettings(options: { welcome?: boolean } = {}): Promise
   window.on('focus', () => void viewNow().then(changed));
   window.once('ready-to-show', () => bringToFront(window));
   current = window;
-  await window.loadURL(`${APP_ORIGIN}/settings.html${options.welcome ? '#welcome' : ''}`);
+  await window.loadURL(`${APP_ORIGIN}/settings.html${options.welcome ? '#welcome' : options.page ? `#${options.page}` : ''}`);
   return window;
 }
 

@@ -3,10 +3,11 @@ import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rea
 import { rm } from 'node:fs/promises';
 import { createServer, type Server, type ServerResponse } from 'node:http';
 import { createRequire } from 'node:module';
-import { tmpdir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { basename, delimiter, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { PNG } from 'pngjs';
+import { whisperCliPath } from '@cuttle/core';
 import { _electron, type ElectronApplication, type Page } from 'playwright';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { FIXTURE_OUTPUT, makeFixture, makePrivateFixture, makeSpokenFixture } from './fixture';
@@ -35,11 +36,16 @@ const SPOKEN_WORDS = fileURLToPath(new URL('../../../packages/core/test/fixtures
  * The `base` speech model where one is downloaded (`CUTTLE_TEST_MODELS`, else the user's models
  * folder): the check downloads it from a server of its own, so the model can be checked end to end.
  */
-const BASE_MODEL = [process.env.CUTTLE_TEST_MODELS, process.env.LOCALAPPDATA && join(process.env.LOCALAPPDATA, 'Cuttle', 'models')]
+const BASE_MODEL = [
+  process.env.CUTTLE_TEST_MODELS,
+  process.env.LOCALAPPDATA && join(process.env.LOCALAPPDATA, 'Cuttle', 'models'),
+  process.platform === 'darwin' && join(homedir(), 'Library', 'Application Support', 'Cuttle', 'models'),
+]
   .filter((dir): dir is string => !!dir)
   .map((dir) => join(dir, 'ggml-base.bin'))
   .find((path) => existsSync(path));
-const hasWhisper = /\swhisper\s/.test(spawnSync('ffmpeg', ['-hide_banner', '-filters'], { encoding: 'utf8', windowsHide: true }).stdout ?? '');
+/** Whisper as the app finds it: ffmpeg's filter, else whisper.cpp's whisper-cli (macOS). */
+const hasWhisper = /\swhisper\s/.test(spawnSync('ffmpeg', ['-hide_banner', '-filters'], { encoding: 'utf8', windowsHide: true }).stdout ?? '') || whisperCliPath() !== undefined;
 
 interface CheckState {
   t: number;
@@ -86,6 +92,34 @@ async function waitForPage(app: ElectronApplication, test: (page: Page) => Promi
 
 /** Clicks an element in a page without a real mouse (the window is never shown). */
 const click = (page: Page, selector: string) => page.evaluate((target) => (document.querySelector(target) as HTMLElement).click(), selector);
+/**
+ * Picks the option labelled `label` (`prefix`: starting with it) from a select (Select.tsx): a click
+ * opens it, a click on the option picks it. A list closed again before the pick (a scroll still due
+ * from a panel that changed just before, as in a small window) is opened again.
+ */
+async function chooseIn(page: Page, trigger: string, label: string, prefix = false): Promise<void> {
+  for (let attempt = 1; ; attempt++) {
+    // a Playwright selector (it may use :has-text): the element's own click, as in a window never shown
+    await page.locator(trigger).evaluate((element) => (element as HTMLElement).click());
+    await page.waitForSelector('.select-list [role=option]');
+    const result = await page.evaluate(
+      ({ label, prefix }) => {
+        const options = [...document.querySelectorAll('.select-list [role=option]')];
+        if (options.length === 0) return 'closed';
+        const option = options.find((item) => {
+          const text = item.querySelector('.option-label')?.textContent ?? '';
+          return prefix ? text.startsWith(label) : text === label;
+        });
+        if (!option) return 'missing';
+        (option as HTMLElement).click();
+        return 'picked';
+      },
+      { label, prefix },
+    );
+    if (result === 'picked') return;
+    if (result === 'missing' || attempt === 5) throw new Error(`no option "${label}" in ${trigger} (${result})`);
+  }
+}
 
 /** cuttle.json of a project, once `ready` holds for it. */
 async function projectWhen(dir: string, ready: (project: { sources: { screen: string }; scenes: { id?: string }[] }) => boolean, timeout = 60_000) {
@@ -217,7 +251,9 @@ describe.runIf(enabled)('the Cuttle app', () => {
 
   beforeAll(async () => {
     // the real path: macOS's temporary folder is behind a link (/var is /private/var), the app keeps real paths
-    root = realpathSync(mkdtempSync(join(tmpdir(), 'cuttle-app-')));
+    // as the app resolves folders (fs/promises' realpath): macOS's /var is /private/var, and Windows'
+    // short names (C:\Users\RUNNER~1 on GitHub's runners) are written out
+    root = realpathSync.native(mkdtempSync(join(tmpdir(), 'cuttle-app-')));
     project = join(root, 'demo');
     mkdirSync(project);
     makeFixture(project);
@@ -451,17 +487,8 @@ describe.runIf(enabled)('the Cuttle app', () => {
       },
       { selector, by, from: options.from ?? [0.5, 0.5], hold: options.hold ?? false },
     );
-  /** Picks the option labelled `label` from a select (Select.tsx): a click opens it, a click on the option picks it. */
-  const choose = async (trigger: string, label: string) => {
-    // a Playwright selector (it may use :has-text): the element's own click, as in a window never shown
-    await editor.locator(trigger).evaluate((element) => (element as HTMLElement).click());
-    await editor.waitForSelector('.select-list [role=option]');
-    await editor.evaluate((label) => {
-      const option = [...document.querySelectorAll('.select-list [role=option]')].find((item) => item.querySelector('.option-label')?.textContent === label);
-      if (!option) throw new Error(`no option "${label}"`);
-      (option as HTMLElement).click();
-    }, label);
-  };
+  /** Picks the option labelled `label` from a select in the editor. */
+  const choose = (trigger: string, label: string) => chooseIn(editor, trigger, label);
   const release = (by: [number, number]) =>
     editor.evaluate((by) => {
       const at = (window as unknown as { __held: { x: number; y: number } }).__held;
@@ -543,8 +570,9 @@ describe.runIf(enabled)('the Cuttle app', () => {
     await choose('.inspector label.field:has-text("Style") .select-trigger', 'Blur');
     await savedWhen((file) => file.masks.find((item) => item.id === mask.id)!.style === 'blur');
     await shot('08-mask');
-    // the look: a background swatch
+    // the look: a background swatch (its part of the Look tab opened)
     await click(editor, '#tab-look');
+    await click(editor, '[data-testid=look-open-background]');
     await click(editor, '.swatch-button.bg-mesh');
     await savedWhen((file) => (file as unknown as { look: { background: { preset: string } } }).look.background.preset === 'mesh');
     await shot('08-look');
@@ -599,15 +627,19 @@ describe.runIf(enabled)('the Cuttle app', () => {
   it('draws the cursor and frame styles with the engine, and sets them and the cursor’s movement in the Look tab', async () => {
     const original = readFileSync(projectFile(), 'utf8');
     await click(editor, '#tab-look');
-    // the swatches are the engine's own pictures
+    // the swatches are the engine's own pictures: the window's part, then the cursor's
+    await click(editor, '[data-testid=look-open-window]');
     await editor.waitForSelector('[data-testid=frame-mac-light] img', { timeout: 20_000 });
-    await editor.waitForSelector('[data-testid=cursor-ring] img', { timeout: 20_000 });
     await shot('14-look-swatches');
+    await click(editor, '[data-testid=look-open-cursor]');
+    await editor.waitForSelector('[data-testid=cursor-ring] img', { timeout: 20_000 });
     await editor.waitForSelector('[data-testid=cursor-spotlight] img', { timeout: 20_000 });
     await editor.locator('[data-testid=cursor-spotlight]').scrollIntoViewIfNeeded();
     await shot('14b-look-cursors');
+    await click(editor, '[data-testid=look-open-window]');
     await click(editor, '[data-testid=frame-mac-light]');
     await savedWhen((file) => (file as unknown as { look: { frame: { style?: string } } }).look.frame.style === 'mac-light');
+    await click(editor, '[data-testid=look-open-cursor]');
     await choose('[data-testid=cursor-smoothing]', 'Very smooth');
     await savedWhen((file) => (file as unknown as { look: { cursor?: { smoothing?: number } } }).look.cursor?.smoothing === 1);
     await click(editor, '#tab-selection');
@@ -635,6 +667,7 @@ describe.runIf(enabled)('the Cuttle app', () => {
   it("uses Cuttle's own menus, none of the system's: the keys open, move, pick and close them", async () => {
     expect(await editor.evaluate(() => document.querySelectorAll('select').length)).toBe(0);
     await click(editor, '#tab-look');
+    await click(editor, '[data-testid=look-open-video]');
     await editor.focus('[data-testid=output-size]');
     await editor.keyboard.press('ArrowDown');
     await editor.waitForSelector('[data-testid=output-size-list]');
@@ -928,6 +961,32 @@ describe.runIf(enabled)('the Cuttle app', () => {
     await savedWhen((file) => file.scenes.length === 6);
     await undoAll();
   }, 60_000);
+
+  it('moves the webcam bubble on the video, resizes it at a corner, and snaps it back into its corner', async () => {
+    type Webcam = { corner: string; size?: number; position?: { x: number; y: number } };
+    const webcam = () => (onDisk() as unknown as { look: { webcam: Webcam } }).look.webcam;
+    await editor.keyboard.press('Escape');
+    await editor.keyboard.press('v');
+    await editor.waitForSelector('[data-testid=webcam-box]');
+    // anywhere on the video: its centre as a share of it
+    await drag('[data-testid=webcam-box]', [240, -120]);
+    await savedWhen(() => webcam().position !== undefined);
+    expect(webcam().position!.x).toBeGreaterThan(0.1);
+    expect(webcam().position!.y).toBeLessThan(0.9);
+    // a corner's handle makes it larger, around its centre
+    const before = webcam().position!;
+    await drag('[data-testid=webcam-handle-se]', [30, 30]);
+    await savedWhen(() => (webcam().size ?? 0.18) > 0.18);
+    expect(webcam().position).toEqual(before);
+    // a double click opens the camera's part of the Look tab
+    await editor.locator('[data-testid=webcam-box]').evaluate((box) => box.dispatchEvent(new MouseEvent('dblclick', { bubbles: true })));
+    await editor.waitForSelector('[data-testid=look-camera] [data-testid=webcam-shape-circle]');
+    await shot('20-webcam');
+    // dragged back near where it came from: it snaps into its corner, the position goes
+    await drag('[data-testid=webcam-box]', [-240, 120]);
+    await savedWhen(() => webcam().position === undefined && webcam().corner === 'bottom-left');
+    await undoAll();
+  }, 30_000);
 
   it('ends a drawing with Esc: nothing is added', async () => {
     await seek(1);
@@ -1246,6 +1305,12 @@ describe.runIf(enabled)('the Cuttle app', () => {
     const saved = () => JSON.parse(readFileSync(join(root, 'user-data', 'settings.json'), 'utf8')) as { countdown: number; motion: string; launchAtLogin: boolean };
     await click(settings, '[data-testid=countdown] button:nth-child(3)');
     await expect.poll(() => saved().countdown).toBe(5);
+    // one page at a time: Recording first, the rest in the sidebar
+    expect(await settings.locator('[data-testid=launch-at-login]').count()).toBe(0);
+    await shotOf('24-settings', '/settings.html');
+    await click(settings, '[data-testid=settings-page-general]');
+    await settings.waitForSelector('[data-testid=settings-page-general][aria-current=page]');
+    expect(await settings.locator('[data-testid=countdown]').count()).toBe(0);
     // less motion: the editor's transitions are off at once
     await click(settings, '[data-testid=motion] button:nth-child(2)');
     await expect.poll(() => editor.evaluate(() => document.documentElement.dataset.motion)).toBe('reduce');
@@ -1255,9 +1320,13 @@ describe.runIf(enabled)('the Cuttle app', () => {
     // the login item (the check only notes what it would register)
     await click(settings, '[data-testid=launch-at-login]');
     await expect.poll(() => app.evaluate(() => (globalThis as { __loginItem?: boolean }).__loginItem)).toBe(true);
+    // the switch shows it before it is pressed again (a press reads the state it shows)
+    await settings.waitForSelector('[data-testid=launch-at-login][aria-checked=true]');
     await click(settings, '[data-testid=launch-at-login]');
     await expect.poll(() => saved().launchAtLogin).toBe(false);
     // demo is open in its editor: Rename is off there, and the main process refuses it too
+    await click(settings, '[data-testid=settings-page-projects]');
+    await settings.waitForSelector('.recent li');
     const demoRename = await settings.evaluate(() => {
       const row = [...document.querySelectorAll('.recent li')].find((item) => item.querySelector('b')?.textContent === 'demo')!;
       const button = row.querySelector('[data-testid=recent-rename]') as HTMLButtonElement;
@@ -1270,23 +1339,21 @@ describe.runIf(enabled)('the Cuttle app', () => {
     );
     expect(refused.problem).toContain('open in Cuttle');
     expect(existsSync(project)).toBe(true);
+    // the editor asks for a page (its Speech settings button): the open window turns to it
+    await editor.evaluate(() => (window as unknown as { cuttle: { invoke(channel: string, argument: unknown): Promise<void> } }).cuttle.invoke('app:settings', 'speech'));
+    await settings.waitForSelector('[data-testid=settings-page-speech][aria-current=page]');
+    await settings.waitForSelector('[data-testid=speech-line]');
     await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find((window) => window.webContents.getURL().includes('/settings.html'))?.close());
   }, 60_000);
 
   it('downloads a speech model in the settings (checked, cancelled, failed), and transcribes a spoken take from the Auto tab: its filler words and pauses cut as one step', async () => {
     await launchAgain(['--settings']);
-    const settings = await waitForPage(app, async (page) => page.url().includes('/settings.html') && (await page.locator('[data-testid=speech-line]').count()) === 1);
+    const settings = await waitForPage(app, async (page) => page.url().includes('/settings.html') && (await page.locator('[data-testid=settings-page-speech]').count()) === 1);
+    await click(settings, '[data-testid=settings-page-speech]');
+    await settings.waitForSelector('[data-testid=speech-line]');
     const saved = () => JSON.parse(readFileSync(join(root, 'user-data', 'settings.json'), 'utf8')) as { speech?: { model: string; language: string } };
     const line = () => settings.locator('[data-testid=speech-line] .row-hint').textContent();
-    const choose = async (label: string) => {
-      await settings.locator('[data-testid=speech-model]').evaluate((element) => (element as HTMLElement).click());
-      await settings.waitForSelector('.select-list [role=option]');
-      await settings.evaluate((label) => {
-        const option = [...document.querySelectorAll('.select-list [role=option]')].find((item) => item.querySelector('.option-label')?.textContent?.startsWith(label));
-        if (!option) throw new Error(`no option "${label}"`);
-        (option as HTMLElement).click();
-      }, label);
-    };
+    const choose = (label: string) => chooseIn(settings, '[data-testid=speech-model]', label, true);
     // Good (small), the default: not downloaded here; its download breaks off, and says so
     expect(await line()).toBe('German and English, about 5× real time. 488 MB to download, once.');
     await click(settings, '[data-testid=speech-download]');
@@ -1421,25 +1488,28 @@ describe.runIf(enabled)('the Cuttle app', () => {
     await shotOf('28-transcript', '/editor.html', 'subtitled · Cuttle');
     // the Look tab: the subtitles' style, and the clean voice
     await click(page, '#tab-look');
+    await click(page, '[data-testid=look-open-subtitles]');
     await page.waitForSelector('[data-testid=captions-enabled][aria-checked=true]');
-    await page.locator('[data-testid=captions-style]').evaluate((element) => (element as HTMLElement).click());
-    await page.waitForSelector('.select-list [role=option]');
-    await page.evaluate(() => {
-      const option = [...document.querySelectorAll('.select-list [role=option]')].find((item) => item.querySelector('.option-label')?.textContent === 'Karaoke');
-      (option as HTMLElement).click();
-    });
+    await chooseIn(page, '[data-testid=captions-style]', 'Karaoke');
     await expect.poll(() => saved().captions?.style).toBe('karaoke');
+    await click(page, '[data-testid=look-open-sound]');
     await click(page, '[data-testid=audio-cleanup]');
     await expect.poll(() => saved().look?.audio?.cleanup).toBe(false);
-    // the typing sounds: their volume in per cent, and a switch
-    await page.fill('[data-testid=audio-typing-volume]', '30');
-    await page.press('[data-testid=audio-typing-volume]', 'Enter');
+    // the typing sounds: their volume on a slider (let go at 30 %), and a switch
+    await page.locator('[data-testid=audio-typing-volume]').evaluate((element) => {
+      const input = element as HTMLInputElement;
+      // React sees a value set through the element's own setter
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, '30');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+    });
     await expect.poll(() => saved().look?.audio?.typingVolume).toBe(0.3);
     await page.locator('[data-testid=audio-typing]').evaluate((element) => element.scrollIntoView({ block: 'center' }));
     await shotOf('29b-typing-sounds', '/editor.html', 'subtitled · Cuttle');
     await click(page, '[data-testid=audio-typing]');
     await expect.poll(() => saved().look?.audio?.typing).toBe(false);
     await page.waitForSelector('[data-testid=audio-typing-volume]', { state: 'detached' });
+    await click(page, '[data-testid=look-open-subtitles]');
     await page.evaluate((t) => (window as unknown as Hooked).__cuttleCheck.seek(t), words[index('zooms')]!.t + 0.1);
     await page.locator('[data-testid=captions-style]').evaluate((element) => element.scrollIntoView({ block: 'center' }));
     await shotOf('29-subtitles-karaoke', '/editor.html', 'subtitled · Cuttle');
@@ -1461,7 +1531,9 @@ describe.runIf(enabled)('the Cuttle app', () => {
   it.runIf(process.platform === 'win32')('reads the screen after a take when the settings say so, and from the Auto tab: what it shows that is private and the notifications masked as one step', async () => {
     // the settings: reading is off in this check; switched on, each new take is read after its cut
     await launchAgain(['--settings']);
-    const settings = await waitForPage(app, async (page) => page.url().includes('/settings.html') && (await page.locator('[data-testid=privacy-read]').count()) === 1);
+    const settings = await waitForPage(app, async (page) => page.url().includes('/settings.html') && (await page.locator('[data-testid=settings-page-privacy]').count()) === 1);
+    await click(settings, '[data-testid=settings-page-privacy]');
+    await settings.waitForSelector('[data-testid=privacy-read]');
     const saved = () => (JSON.parse(readFileSync(join(root, 'user-data', 'settings.json'), 'utf8')) as { privacy?: { read: boolean; words: string[] } }).privacy;
     await settings.waitForSelector('[data-testid=privacy-read][aria-checked=false]');
     await click(settings, '[data-testid=privacy-read]');

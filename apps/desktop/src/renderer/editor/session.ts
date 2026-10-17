@@ -19,6 +19,9 @@ export type Selection = { kind: 'scene' | OverlayKind | 'cut' | 'crop'; id: stri
 /** The tools: V selects; Z and M draw zooms and masks in the source view; T adds a caption. */
 export type Tool = 'select' | 'zoom' | 'mask' | 'caption' | 'crop';
 
+/** The look's parts, as the Look tab lists them. */
+export type LookSection = 'background' | 'window' | 'cursor' | 'camera' | 'subtitles' | 'sound' | 'video';
+
 export interface EditorState {
   phase: 'loading' | 'ready' | 'failed';
   error?: string;
@@ -32,6 +35,8 @@ export interface EditorState {
   selection?: Selection;
   tool: Tool;
   tab: 'selection' | 'auto' | 'transcript' | 'look';
+  /** The part of the look that is open (one at a time). */
+  lookSection: LookSection;
   /** Ctrl+F asked for the Transcript tab's find field (a new number each time). */
   findRequest?: number;
   /** Snapping on the timeline (Ctrl while dragging turns it off for that drag). */
@@ -58,6 +63,7 @@ export const store = createStore<EditorState>({
   player: { t: 0, playing: false },
   tool: 'select',
   tab: 'selection',
+  lookSection: 'background',
   snap: true,
   mediaState: { seq: -1, proxy: { state: 'none' }, thumbnails: { state: 'none' }, peaks: { state: 'none' } },
   exportOpen: false,

@@ -1,9 +1,9 @@
 // The settings window, and the first run in the same window (#welcome): ffmpeg, the cuttle command
 // and the Claude skill, then the pill. Every change is kept at once; there is no Save.
-import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
-import type { Motion, RequestArgument, SettingsView, SpeechLanguage, SpeechModelName, SpeechStatus, ToolsStatus } from '../../shared/ipc';
+import { useEffect, useLayoutEffect, useRef, useState, type ComponentType, type KeyboardEvent, type ReactNode } from 'react';
+import type { Motion, RequestArgument, SettingsPage, SettingsView, SpeechLanguage, SpeechModelName, SpeechStatus, ToolsStatus } from '../../shared/ipc';
 import { bridge } from '../bridge';
-import { CheckIcon, CloseIcon, CopyIcon, FolderIcon, Mark, WarningIcon } from '../icons';
+import { CheckIcon, CloseIcon, CopyIcon, FolderIcon, GearIcon, Mark, MaskIcon, MicIcon, RecordIcon, TerminalIcon, WarningIcon } from '../icons';
 import { Select } from '../Select';
 import { PrivacySettings } from './PrivacySettings';
 
@@ -38,20 +38,37 @@ function ago(at: number): string {
 /** A request's failure, said in its first line (the rest is for logs). */
 const firstLine = (error: unknown) => (error instanceof Error ? error.message : String(error)).replace(/^Error invoking remote method '[^']+': (Error: )?/, '').split('\n')[0]!;
 
-/** Keys as the editor writes them: one chip per key. */
+/** The modifier keys as a Mac names them. */
+const MAC_KEYS: Record<string, string> = { Ctrl: '⌃', Shift: '⇧', Alt: '⌥', Cmd: '⌘' };
+/** Keys as the editor writes them: one chip per key (the Mac's symbols on a Mac). */
 const Keys = ({ keys }: { keys: string }) => (
   <span className="keys">
     {keys.split('+').map((key) => (
-      <kbd key={key}>{key}</kbd>
+      <kbd key={key}>{MAC ? (MAC_KEYS[key] ?? key) : key}</kbd>
     ))}
   </span>
 );
+/** Where Cuttle waits when its windows are closed. */
+const TRAY = MAC ? 'menu bar' : 'tray';
+
+/** The settings' pages, in the sidebar's order. */
+const PAGES: { id: SettingsPage; title: string; icon: ComponentType<{ size?: number }> }[] = [
+  { id: 'recording', title: 'Recording', icon: RecordIcon },
+  { id: 'speech', title: 'Speech', icon: MicIcon },
+  { id: 'privacy', title: 'Privacy', icon: MaskIcon },
+  { id: 'claude', title: 'Claude Code', icon: TerminalIcon },
+  { id: 'projects', title: 'Projects', icon: FolderIcon },
+  { id: 'general', title: 'General', icon: GearIcon },
+];
 
 export function Settings() {
   const welcome = location.hash === '#welcome';
   const [view, setView] = useState<SettingsView>();
   const [tools, setTools] = useState<ToolsStatus>();
   const [devices, setDevices] = useState<Devices>();
+  // the page asked for in the address (settings.html#speech), then by the main process
+  const [page, setPage] = useState<SettingsPage>(() => PAGES.find(({ id }) => `#${id}` === location.hash)?.id ?? 'recording');
+  useEffect(() => bridge.on('settings:page', setPage), []);
 
   useEffect(() => {
     // the taskbar and Alt+Tab name the window by its page
@@ -87,88 +104,121 @@ export function Settings() {
         {welcome ? (
           <Welcome tools={tools} setTools={setTools} />
         ) : (
-          <>
-            <Section title="Recording">
-              <Row label="Projects folder" hint="Every new recording gets a folder here, named by its date and time." stacked>
-                <div className="path-row">
-                  <span className="path" title={view?.projectsFolder} data-testid="projects-folder">
-                    {view ? middlePath(shortPath(view.projectsFolder)) : ''}
-                  </span>
-                  <button className="ghost" onClick={() => void bridge.invoke('settings:choose-folder').then(setView)} data-testid="choose-folder">
-                    Change…
-                  </button>
-                </div>
-              </Row>
-              <Row label="Countdown" hint="Counts down over the recorded area before recording starts.">
-                <Segmented
-                  value={view?.countdown}
-                  options={[
-                    [0, 'Off'],
-                    [3, '3 s'],
-                    [5, '5 s'],
-                  ]}
-                  onChange={(countdown) => change({ countdown })}
-                  label="Countdown"
-                  testid="countdown"
-                />
-              </Row>
-              <Row label="Camera" hint={devices?.problem ?? 'Shown as a bubble in the corner. The picker can change it for one recording.'}>
-                <DeviceSelect kind="camera" value={view?.camera} devices={devices?.cameras} onChange={(camera) => change({ camera })} />
-              </Row>
-              <Row label="Microphone">
-                <DeviceSelect kind="mic" value={view?.mic} devices={devices?.mics} onChange={(mic) => change({ mic })} />
-              </Row>
-            </Section>
-
-            <Section title="Speech">
-              <SpeechSettings view={view} change={change} />
-            </Section>
-
-            <Section title="Privacy">
-              <PrivacySettings view={view} change={change} />
-            </Section>
-
-            <Section title="To record">
-              <FfmpegLine tools={tools} setTools={setTools} />
-            </Section>
-
-            <Section title="For Claude Code">
-              <ClaudeTools tools={tools} setTools={setTools} />
-            </Section>
-
-            <Section title="App">
-              <Row label="Start Cuttle when you sign in" hint={<>It waits in the tray; <Keys keys="Ctrl+Shift+Alt+R" /> starts a recording.</>}>
-                <button
-                  className="toggle"
-                  role="switch"
-                  aria-checked={view?.launchAtLogin ?? false}
-                  aria-label="Start Cuttle when you sign in"
-                  onClick={() => view && change({ launchAtLogin: !view.launchAtLogin })}
-                  data-testid="launch-at-login"
-                >
-                  <i />
+          <div className="settings-body">
+            <nav className="settings-nav" aria-label="Settings">
+              {PAGES.map(({ id, title, icon: Icon }) => (
+                <button key={id} type="button" aria-current={page === id ? 'page' : undefined} onClick={() => setPage(id)} data-testid={`settings-page-${id}`}>
+                  <Icon size={16} />
+                  {title}
                 </button>
-              </Row>
-              <Row label="Motion" hint="Animations in Cuttle's windows. The video is not affected.">
-                <Segmented<Motion>
-                  value={view?.motion}
-                  options={[
-                    ['system', MAC ? 'Like macOS' : 'Like Windows'],
-                    ['reduce', 'Less'],
-                    ['full', 'Full'],
-                  ]}
-                  onChange={(motion) => change({ motion })}
-                  label="Motion"
-                  testid="motion"
-                />
-              </Row>
-            </Section>
+              ))}
+              <p className="version">Cuttle {view?.version}</p>
+            </nav>
+            <div className="settings-page" data-page={page}>
+              {page === 'recording' && (
+                <>
+                  <Section title="Recording">
+                    <Row label="Projects folder" hint="Every new recording gets a folder here, named by its date and time." stacked>
+                      <div className="path-row">
+                        <span className="path" title={view?.projectsFolder} data-testid="projects-folder">
+                          {view ? middlePath(shortPath(view.projectsFolder)) : ''}
+                        </span>
+                        <button className="ghost" onClick={() => void bridge.invoke('settings:choose-folder').then(setView)} data-testid="choose-folder">
+                          Change…
+                        </button>
+                      </div>
+                    </Row>
+                    <Row label="Countdown" hint="Counts down over the recorded area before recording starts.">
+                      <Segmented
+                        value={view?.countdown}
+                        options={[
+                          [0, 'Off'],
+                          [3, '3 s'],
+                          [5, '5 s'],
+                        ]}
+                        onChange={(countdown) => change({ countdown })}
+                        label="Countdown"
+                        testid="countdown"
+                      />
+                    </Row>
+                    <Row label="Camera" hint={devices?.problem ?? 'Shown as a bubble in the corner. The picker can change it for one recording.'}>
+                      <DeviceSelect kind="camera" value={view?.camera} devices={devices?.cameras} onChange={(camera) => change({ camera })} />
+                    </Row>
+                    <Row label="Microphone">
+                      <DeviceSelect kind="mic" value={view?.mic} devices={devices?.mics} onChange={(mic) => change({ mic })} />
+                    </Row>
+                  </Section>
+                  <Section title="To record">
+                    <FfmpegLine tools={tools} setTools={setTools} />
+                  </Section>
+                </>
+              )}
 
-            <Section title="Recent projects">
-              <Recent view={view} />
-            </Section>
-            <p className="version">Cuttle {view?.version}</p>
-          </>
+              {page === 'speech' && (
+                <>
+                  <Section title="Speech">
+                    <SpeechSettings view={view} change={change} />
+                  </Section>
+                </>
+              )}
+
+              {page === 'privacy' && (
+                <>
+                  <Section title="Privacy">
+                    <PrivacySettings view={view} change={change} />
+                  </Section>
+                </>
+              )}
+
+              {page === 'claude' && (
+                <>
+                  <Section title="For Claude Code">
+                    <ClaudeTools tools={tools} setTools={setTools} />
+                  </Section>
+                </>
+              )}
+
+              {page === 'general' && (
+                <>
+                  <Section title="App">
+                    <Row label="Start Cuttle when you sign in" hint={<>It waits in the {TRAY}; <Keys keys="Ctrl+Shift+Alt+R" /> starts a recording.</>}>
+                      <button
+                        className="toggle"
+                        role="switch"
+                        aria-checked={view?.launchAtLogin ?? false}
+                        aria-label="Start Cuttle when you sign in"
+                        onClick={() => view && change({ launchAtLogin: !view.launchAtLogin })}
+                        data-testid="launch-at-login"
+                      >
+                        <i />
+                      </button>
+                    </Row>
+                    <Row label="Motion" hint="Animations in Cuttle's windows. The video is not affected.">
+                      <Segmented<Motion>
+                        value={view?.motion}
+                        options={[
+                          ['system', MAC ? 'Like macOS' : 'Like Windows'],
+                          ['reduce', 'Less'],
+                          ['full', 'Full'],
+                        ]}
+                        onChange={(motion) => change({ motion })}
+                        label="Motion"
+                        testid="motion"
+                      />
+                    </Row>
+                  </Section>
+                </>
+              )}
+
+              {page === 'projects' && (
+                <>
+                  <Section title="Recent projects">
+                    <Recent view={view} />
+                  </Section>
+                </>
+              )}
+            </div>
+          </div>
         )}
       </main>
     </div>
@@ -628,7 +678,7 @@ function Welcome({ tools, setTools }: { tools: ToolsStatus | undefined; setTools
       </Section>
       <div className="welcome-foot">
         <span className="row-hint">
-          Cuttle waits at the top of your screen and in the tray. <Keys keys="Ctrl+Shift+Alt+R" /> starts a recording from anywhere.
+          Cuttle waits at the top of your screen and in the {TRAY}. <Keys keys="Ctrl+Shift+Alt+R" /> starts a recording from anywhere.
         </span>
         <button className={ready ? 'primary' : 'ghost'} onClick={() => void bridge.invoke('settings:welcomed')} data-testid="welcome-done">
           Done

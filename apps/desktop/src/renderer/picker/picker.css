@@ -394,12 +394,12 @@ body.transparent #root {
   place-items: center;
 }
 .hud {
-  width: 460px;
+  width: 492px;
   height: 48px;
   display: flex;
   align-items: center;
   gap: 4px;
-  padding: 6px 6px 6px 14px;
+  padding: 6px 6px 6px 8px;
   border-radius: 16px;
   background: var(--overlay);
   box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45), 0 0 0 1px rgba(255, 255, 255, 0.07);
@@ -418,6 +418,9 @@ body.transparent #root {
 .hud button:hover {
   background: var(--raised);
   color: var(--text);
+}
+.hud .mark {
+  margin-right: 8px;
 }
 .hud .dot {
   width: 10px;

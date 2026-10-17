@@ -78,7 +78,8 @@ kbd {
   place-items: center;
   flex: none;
   color: #1b0f0a;
-  background: linear-gradient(135deg, #f0956f, #c45a3f);
+  /* as the icons' tile (tools/icons.mjs) */
+  background: linear-gradient(135deg, #f7a985, #e57b55 50%, #b8492f);
 }
 
 ::-webkit-scrollbar {

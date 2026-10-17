@@ -14,7 +14,7 @@ export const TEXT_POSITIONS = ['top', 'center', 'bottom'] as const;
 /** How captions look: classic subtitles on a dark box, the spoken word in colour, or a few big words at a time. */
 export const CAPTION_STYLES = ['subtitle', 'karaoke', 'bold'] as const;
 export const STILL_MOTIONS = ['none', 'kenburns', 'scroll'] as const;
-export const WEBCAM_SHAPES = ['circle', 'rounded'] as const;
+export const WEBCAM_SHAPES = ['circle', 'rounded', 'squircle', 'square'] as const;
 export const WEBCAM_CORNERS = ['top-left', 'top-right', 'bottom-left', 'bottom-right'] as const;
 export const CLICK_EFFECTS = ['ripple', 'none'] as const;
 export const MOUSE_BUTTONS = ['left', 'right', 'middle'] as const;
@@ -98,6 +98,17 @@ const WebcamSchema = z.strictObject({
   shape: z.enum(WEBCAM_SHAPES).default('circle'),
   corner: z.enum(WEBCAM_CORNERS).default('bottom-left'),
   size: z.number().positive().max(0.5).default(0.18),
+  /**
+   * Where the bubble's centre is, as a share of the video's width and height (it stays inside the
+   * video); without it, `corner` places the bubble. A share keeps its place across 16:9, 1:1 and 9:16.
+   */
+  position: z.strictObject({ x: z.number().min(0).max(1), y: z.number().min(0).max(1) }).optional(),
+  /** The white ring around the bubble. */
+  border: z.boolean().default(true),
+  /** The soft shadow under it. */
+  shadow: z.boolean().default(true),
+  /** The camera's picture flipped left to right, as a mirror shows a face. */
+  mirror: z.boolean().default(false),
 });
 
 const AudioSchema = z.strictObject({

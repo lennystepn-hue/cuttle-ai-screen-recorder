@@ -173,6 +173,19 @@ export const SCENARIOS: Scenario[] = [
     t: 1,
     webcam: true,
   },
+  {
+    name: 'webcam-squircle',
+    project: project({ frame: { title: TITLE }, webcam: { enabled: true, shape: 'squircle', corner: 'bottom-right', size: 0.25 } }),
+    t: 1,
+    webcam: true,
+  },
+  {
+    // anywhere on the video, flipped, square, without its ring and shadow
+    name: 'webcam-square-moved',
+    project: project({ frame: { title: TITLE }, webcam: { enabled: true, shape: 'square', size: 0.2, position: { x: 0.62, y: 0.3 }, border: false, shadow: false, mirror: true } }),
+    t: 1,
+    webcam: true,
+  },
 
   // Texts and the speed badge
   textScenario('pill', 'top'),

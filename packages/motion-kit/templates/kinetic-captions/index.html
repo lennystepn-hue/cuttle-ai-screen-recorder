@@ -1,0 +1,120 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Kinetic captions</title>
+    <!-- The spoken words as the video plays them, a short phrase at a time: each word pops in as it
+         is said, the one being said in the accent colour, the phrase lifts away when it is over. -->
+    <script type="application/json" id="cuttle-params">
+      [
+        { "name": "style", "label": "Style", "type": "select", "default": "pop", "options": ["pop", "bold"] },
+        { "name": "place", "label": "Place", "type": "select", "default": "bottom", "options": ["bottom", "center", "top"] },
+        { "name": "size", "label": "Size", "type": "number", "default": 1, "min": 0.5, "max": 2 },
+        { "name": "words", "label": "Words at a time", "type": "number", "default": 4, "min": 1, "max": 8 }
+      ]
+    </script>
+    <style>
+      :root {
+        --u: calc(100vmin / 1080);
+      }
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        overflow: hidden;
+        background: transparent;
+      }
+      .line {
+        position: absolute;
+        left: 6vw;
+        right: 6vw;
+        bottom: 13vh;
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: center;
+        gap: 0 0.28em;
+        font: 800 calc(var(--size) * 70 * var(--u)) / 1.12 'Archivo', var(--cuttle-font);
+        font-stretch: 104%;
+        letter-spacing: -0.01em;
+        color: #fff;
+        text-align: center;
+        paint-order: stroke fill;
+        -webkit-text-stroke: calc(var(--size) * 10 * var(--u)) rgba(10, 10, 14, 0.82);
+        stroke-linejoin: round;
+      }
+      .center .line {
+        bottom: auto;
+        top: 50%;
+        translate: 0 -50%;
+      }
+      .top .line {
+        bottom: auto;
+        top: 11vh;
+      }
+      .bold .line {
+        text-transform: uppercase;
+        font-weight: 900;
+        font-stretch: 116%;
+        font-size: calc(var(--size) * 96 * var(--u));
+      }
+      .line span {
+        display: inline-block;
+        transform-origin: 50% 80%;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="line" id="line"></div>
+    <script type="module">
+      import { at, ease } from 'cuttle';
+
+      const { params, take } = cuttle;
+      document.body.classList.add(params.style === 'bold' ? 'bold' : 'pop', params.place === 'top' ? 'top' : params.place === 'center' ? 'center' : 'bottom');
+      document.documentElement.style.setProperty('--size', String(Number(params.size) || 1));
+      const accent = getComputedStyle(document.documentElement).getPropertyValue('--cuttle-accent').trim() || '#d97757';
+      cuttle.ready(document.fonts.load('800 70px Archivo'));
+
+      // the words where the video plays them (output seconds), in phrases: a few words, broken at
+      // pauses and at the end of a sentence
+      const words = take.words
+        .map((word) => ({ text: word.text, start: take.toOutput(word.t), end: take.toOutput(Math.max(word.t, word.end - 0.001)) }))
+        .filter((word) => word.start !== null && word.end !== null);
+      const most = Math.max(1, Math.round(Number(params.words) || 4));
+      const phrases = [];
+      for (const word of words) {
+        const phrase = phrases.at(-1);
+        const last = phrase?.words.at(-1);
+        if (!phrase || phrase.words.length >= most || word.start - last.end > 0.6 || /[.!?…]$/.test(last.text)) phrases.push({ words: [word] });
+        else phrase.words.push(word);
+      }
+      for (const phrase of phrases) phrase.start = phrase.words[0].start - 0.08;
+      phrases.forEach((phrase, i) => (phrase.end = Math.min(phrase.words.at(-1).end + 0.45, phrases[i + 1]?.start ?? Infinity)));
+
+      const line = document.getElementById('line');
+      let shown;
+      cuttle.onFrame(() => {
+        const now = cuttle.videoTime;
+        const phrase = phrases.find((candidate) => now >= candidate.start && now < candidate.end);
+        if (phrase !== shown) {
+          shown = phrase;
+          line.innerHTML = '';
+          for (const word of phrase?.words ?? []) {
+            const span = document.createElement('span');
+            span.textContent = word.text;
+            line.append(span);
+          }
+        }
+        if (!phrase) return;
+        const leave = at(now, phrase.end - 0.18, 0.18, ease.in);
+        [...line.children].forEach((span, i) => {
+          const word = phrase.words[i];
+          const p = at(now, word.start - 0.06, 0.22, ease.outBack);
+          const speaking = now >= word.start && now < word.end + 0.08;
+          span.style.opacity = String(Math.min(1, p * 1.6) * (1 - leave));
+          span.style.transform = `translateY(${(1 - p) * 0.35 - leave * 0.25}em) scale(${(0.7 + 0.3 * p) * (speaking ? 1.06 : 1)})`;
+          span.style.color = speaking ? accent : '#ffffff';
+        });
+      });
+    </script>
+  </body>
+</html>

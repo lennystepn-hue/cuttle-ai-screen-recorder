@@ -1,0 +1,177 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Code typing</title>
+    <!-- A code editor that types a file: syntax colours, line numbers, the current line lit, a caret
+         that blinks once it is done, and the view scrolling along with the caret. -->
+    <script type="application/json" id="cuttle-params">
+      [
+        {
+          "name": "code",
+          "label": "Code",
+          "type": "text",
+          "default": "import { record } from 'cuttle';\n\n// one take, edited by itself\nconst take = await record({ until: 'claude' });\nawait take.suggest({ length: 45 });\nawait take.render('16:9');\n"
+        },
+        { "name": "language", "label": "Language", "type": "select", "default": "ts", "options": ["ts", "js", "python", "bash", "json", "html", "css", "go", "rust", "sql"] },
+        { "name": "file", "label": "File name", "type": "text", "default": "demo.ts" },
+        { "name": "cps", "label": "Characters a second", "type": "number", "default": 34, "min": 5, "max": 200 },
+        { "name": "background", "label": "Own background", "type": "bool", "default": true }
+      ]
+    </script>
+    <style>
+      :root {
+        --u: calc(100vmin / 1080);
+      }
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        overflow: hidden;
+      }
+      body {
+        display: grid;
+        place-items: center;
+        font-family: var(--cuttle-font);
+        color: #e6e6eb;
+      }
+      body.own {
+        background: radial-gradient(120% 90% at 20% 0%, color-mix(in srgb, var(--cuttle-accent) 28%, var(--cuttle-bg)) 0%, var(--cuttle-bg) 55%, color-mix(in srgb, var(--cuttle-bg) 70%, black) 100%);
+      }
+      .window {
+        width: min(88vw, calc(1500 * var(--u)));
+        height: min(78vh, calc(860 * var(--u)));
+        border-radius: calc(18 * var(--u));
+        background: #17171c;
+        box-shadow: 0 calc(40 * var(--u)) calc(120 * var(--u)) rgba(0, 0, 0, 0.55), 0 0 0 calc(1 * var(--u)) rgba(255, 255, 255, 0.08);
+        overflow: hidden;
+        display: flex;
+        flex-direction: column;
+      }
+      .bar {
+        height: calc(56 * var(--u));
+        flex: none;
+        display: flex;
+        align-items: center;
+        gap: calc(10 * var(--u));
+        padding: 0 calc(22 * var(--u));
+        background: #1f1f25;
+        border-bottom: calc(1 * var(--u)) solid rgba(255, 255, 255, 0.06);
+      }
+      .bar i {
+        width: calc(14 * var(--u));
+        height: calc(14 * var(--u));
+        border-radius: 50%;
+      }
+      .tab {
+        margin-left: calc(26 * var(--u));
+        display: flex;
+        align-items: center;
+        gap: calc(10 * var(--u));
+        padding: calc(8 * var(--u)) calc(16 * var(--u));
+        border-radius: calc(8 * var(--u));
+        background: #17171c;
+        font: 500 calc(22 * var(--u)) / 1 var(--cuttle-font);
+        color: #c9c9d1;
+      }
+      .tab b {
+        width: calc(9 * var(--u));
+        height: calc(9 * var(--u));
+        border-radius: 50%;
+        background: var(--cuttle-accent);
+      }
+      .view {
+        position: relative;
+        flex: 1;
+        overflow: hidden;
+      }
+      .scroll {
+        position: absolute;
+        left: 0;
+        right: 0;
+        top: calc(28 * var(--u));
+      }
+      .row {
+        display: flex;
+        height: calc(46 * var(--u));
+        align-items: center;
+        font: 400 calc(29 * var(--u)) / 1 var(--cuttle-mono);
+        white-space: pre;
+      }
+      .row.current {
+        background: rgba(255, 255, 255, 0.045);
+      }
+      .row .n {
+        width: calc(84 * var(--u));
+        flex: none;
+        text-align: right;
+        padding-right: calc(30 * var(--u));
+        color: #5c5c68;
+      }
+      .row.current .n {
+        color: #b9b9c4;
+      }
+      .caret {
+        display: inline-block;
+        width: calc(3 * var(--u));
+        height: 1.15em;
+        margin-left: calc(1 * var(--u));
+        vertical-align: -0.2em;
+        background: var(--cuttle-accent);
+        box-shadow: 0 0 calc(12 * var(--u)) var(--cuttle-accent);
+      }
+    </style>
+    <style id="tokens"></style>
+  </head>
+  <body>
+    <div class="window" id="window">
+      <div class="bar">
+        <i style="background: #ff5f57"></i><i style="background: #febc2e"></i><i style="background: #28c840"></i>
+        <div class="tab"><b></b><span id="file"></span></div>
+      </div>
+      <div class="view" id="view"><div class="scroll" id="scroll"></div></div>
+    </div>
+    <script type="module">
+      import { HIGHLIGHT_CSS, at, ease, highlight, typed, typedUntil } from 'cuttle';
+
+      const { params, duration } = cuttle;
+      if (params.background) document.body.classList.add('own');
+      document.getElementById('tokens').textContent = HIGHLIGHT_CSS;
+      document.getElementById('file').textContent = params.file || 'file';
+      const code = String(params.code ?? '').replace(/\r\n/g, '\n');
+      const cps = Number(params.cps) || 34;
+      const start = 0.55;
+      const done = typedUntil(code, { start, cps });
+      const scroll = document.getElementById('scroll');
+      const view = document.getElementById('view');
+      const win = document.getElementById('window');
+      const rowHeight = () => scroll.firstElementChild?.getBoundingClientRect().height || 46;
+
+      // when the caret reaches each line: the view scrolls as it goes past the last row that fits
+      const lineStarts = [0];
+      for (let i = 0; i < code.length; i++) if (code[i] === '\n') lineStarts.push(i + 1);
+      const reached = lineStarts.map((index) => typedUntil(code.slice(0, index), { start, cps }));
+
+      cuttle.onFrame((t) => {
+        // the window comes in and leaves at the end
+        const enter = at(t, 0, 0.6, ease.outExpo);
+        const leave = at(t, duration - 0.45, 0.45, ease.in);
+        win.style.opacity = enter * (1 - leave);
+        win.style.transform = `translateY(${(1 - enter) * 30 - leave * 20}px) scale(${0.965 + 0.035 * enter})`;
+        // the typed part, coloured, one row per line, the caret at its end
+        const text = typed(code, t, { start, cps });
+        const lines = highlight(text, params.language || 'ts').split('\n');
+        const caretOn = t < done + 0.1 || Math.floor((t - done) * 1.8) % 2 === 0;
+        scroll.innerHTML = lines
+          .map((html, i) => `<div class="row${i === lines.length - 1 ? ' current' : ''}"><span class="n">${i + 1}</span><span>${html}${i === lines.length - 1 && caretOn ? '<span class="caret"></span>' : ''}</span></div>`)
+          .join('');
+        const rows = Math.max(1, Math.floor((view.clientHeight - 56) / rowHeight()));
+        let shift = 0;
+        reached.forEach((when, line) => {
+          if (line >= rows) shift += at(t, when, 0.28, ease.out);
+        });
+        scroll.style.transform = `translateY(${-shift * rowHeight()}px)`;
+      });
+    </script>
+  </body>
+</html>

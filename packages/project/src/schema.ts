@@ -13,6 +13,8 @@ export const MASK_STYLES = ['fill', 'blur'] as const;
 export const TEXT_POSITIONS = ['top', 'center', 'bottom'] as const;
 /** How captions look: classic subtitles on a dark box, the spoken word in colour, or a few big words at a time. */
 export const CAPTION_STYLES = ['subtitle', 'karaoke', 'bold'] as const;
+/** The fonts a theme's headings may be in: the motion kit's display faces, and its text face. */
+export const THEME_FONTS = ['Archivo', 'Inter', 'Space Grotesk', 'Fraunces', 'Instrument Serif', 'Bebas Neue'] as const;
 export const STILL_MOTIONS = ['none', 'kenburns', 'scroll'] as const;
 export const WEBCAM_SHAPES = ['circle', 'rounded', 'squircle', 'square'] as const;
 export const WEBCAM_CORNERS = ['top-left', 'top-right', 'bottom-left', 'bottom-right'] as const;
@@ -27,7 +29,7 @@ export const AUTO_KINDS = ['crop', 'privacy', 'notification', 'retake', 'filler'
 // z.number() already rejects Infinity and NaN in zod 4.
 const seconds = z.number().nonnegative();
 const positiveSeconds = z.number().positive();
-const hexColor = z.string().regex(/^#[0-9a-fA-F]{6}$/, 'expected a hex color like #0c0c0c');
+export const hexColor = z.string().regex(/^#[0-9a-fA-F]{6}$/, 'expected a hex color like #0c0c0c');
 
 export const RectSchema = z.tuple([z.number(), z.number(), z.number().positive(), z.number().positive()]);
 
@@ -60,7 +62,7 @@ const SourcesSchema = z.strictObject({
 
 // Cross-field checks live on the object they belong to, so zod reports them in the same pass
 // as every other issue (a root superRefine is skipped when any other issue exists).
-const BackgroundSchema = z
+export const BackgroundSchema = z
   .strictObject({
     preset: z.enum(BACKGROUND_PRESETS),
     color: hexColor.optional(),
@@ -281,6 +283,26 @@ const MaskSchema = z
   });
 
 /** The privacy guard's words: masked wherever the screen shows them (a name, an address). */
+/**
+ * The project's brand: what its motion pages read for titles, end cards, lower thirds and every
+ * colour (`--cuttle-accent`, `--cuttle-display`, `cuttle.theme.logo`). A brand kit sets it with a click.
+ */
+export const ThemeSchema = z.strictObject({
+  /** The product's name and address, for titles and end cards. */
+  name: z.string().max(80).optional(),
+  url: z.string().max(200).optional(),
+  /** The logo: an image in the project (`brand/logo.png`). */
+  logo: z.string().min(1).optional(),
+  /** The brand's colour (without one, the cursor's), the text's, and the tone pages draw their own background in (without one, the background's). */
+  accent: hexColor.optional(),
+  foreground: hexColor.default('#FFFFFF'),
+  background: hexColor.optional(),
+  /** The headings' font. */
+  font: z.enum(THEME_FONTS).default('Archivo'),
+  /** The brand kit it was set from, by name. */
+  kit: z.string().max(80).optional(),
+});
+
 const PrivacySchema = z.strictObject({
   words: z.array(z.string().trim().min(1).max(100)).default([]),
 });
@@ -398,6 +420,7 @@ export const ProjectSchema = z
     autoEdits: AutoEditsSchema.prefault({}),
     captions: CaptionsSchema.prefault({}),
     privacy: PrivacySchema.prefault({}),
+    theme: ThemeSchema.prefault({}),
   })
   // Runs once everything else is valid (see the note above BackgroundSchema).
   .superRefine((project, ctx) => {
@@ -476,4 +499,6 @@ export type Cut = CuttleProject['cuts'][number];
 export type AutoKind = (typeof AUTO_KINDS)[number];
 export type AutoEdits = CuttleProject['autoEdits'];
 export type Captions = CuttleProject['captions'];
+export type Theme = CuttleProject['theme'];
+export type ThemeFont = (typeof THEME_FONTS)[number];
 export type CaptionFix = Captions['fixes'][number];

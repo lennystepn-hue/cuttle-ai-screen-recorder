@@ -366,3 +366,20 @@ describe('motion', () => {
     expect(pathsOf({ ...minimal, texts: [{ id: 'o1', at: 1, duration: 2, text: 'Hi' }], overlays: [{ id: 'o1', src: 'a.html', at: 1, duration: 2 }] })).toEqual(['overlays.0.id']);
   });
 });
+
+describe('the theme (the brand)', () => {
+  it('has white text and the Archivo headings by default, and nothing else', () => {
+    expect(ProjectSchema.parse(minimal).theme).toEqual({ foreground: '#FFFFFF', font: 'Archivo' });
+  });
+
+  it('reads a name, URL, logo, colours, a heading font and its kit', () => {
+    const theme = { name: 'Acme', url: 'acme.dev', logo: 'brand/acme.svg', accent: '#3366FF', foreground: '#F0F0F0', background: '#0A0A14', font: 'Instrument Serif', kit: 'Acme' };
+    expect(ProjectSchema.parse({ ...minimal, theme }).theme).toEqual(theme);
+  });
+
+  it('refuses a colour that is no hex colour, a font of none of the kit\'s faces and an unknown key', () => {
+    expect(pathsOf({ ...minimal, theme: { accent: 'blue' } })).toEqual(['theme.accent']);
+    expect(pathsOf({ ...minimal, theme: { font: 'Comic Sans' } })).toEqual(['theme.font']);
+    expect(pathsOf({ ...minimal, theme: { colour: '#000000' } })).toEqual(['theme']);
+  });
+});

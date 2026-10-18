@@ -65,7 +65,7 @@ export interface MotionInit {
   /** `16:9`, `9:16`, `1:1` or the output's own size. */
   format: string;
   params: Record<string, unknown>;
-  /** CSS variables set on the page's root (`--cuttle-accent`…). */
+  /** The theme: CSS variables set on the page's root (`--cuttle-accent`…), and the brand's `name`, `url`, `logo` and `font`. */
   theme: Record<string, string>;
   /** Seeds `Math.random`, so the item looks the same in every render. */
   seed: number;
@@ -131,6 +131,10 @@ export interface CuttleApi {
   readonly size: { width: number; height: number };
   readonly format: string;
   readonly params: Record<string, unknown>;
+  /**
+   * The project's theme: its CSS variables (`--cuttle-accent`, `--cuttle-display`…, also set on the
+   * page's root) and the brand's `name`, `url`, `font` (the headings') and `logo` (its URL, or "").
+   */
   readonly theme: Record<string, string>;
   /**
    * Calls `draw(seconds)` for every frame, before it is drawn (also after a seek): the surest way to
@@ -243,7 +247,8 @@ export function motionRuntime(init: MotionInit): void {
     (font) =>
       `@font-face { font-family: "${font.family}"; font-weight: ${font.weight}; font-style: ${font.style};${font.stretch ? ` font-stretch: ${font.stretch};` : ''} font-display: block; src: url("${font.src}") format("woff2"); }`,
   );
-  sheet.replaceSync([...faces, `:root { ${Object.entries(init.theme).map(([name, value]) => `${name}: ${value};`).join(' ')} }`].join('\n'));
+  const variables = Object.entries(init.theme).filter(([name]) => name.startsWith('--'));
+  sheet.replaceSync([...faces, `:root { ${variables.map(([name, value]) => `${name}: ${value};`).join(' ')} }`].join('\n'));
   document.adoptedStyleSheets = [...document.adoptedStyleSheets, sheet];
 
   // the take

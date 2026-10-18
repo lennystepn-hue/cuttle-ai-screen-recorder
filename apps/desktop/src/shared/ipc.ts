@@ -2,6 +2,8 @@
 // what a window may send. The main process checks each request against it; the preloads expose only
 // their window's channels.
 import { z } from 'zod';
+import type { ParamDeclaration } from '@cuttle/export/motion-params';
+import { MOTION_TEMPLATES } from '@cuttle/motion-kit';
 import type { LengthReport } from './media-jobs';
 import type { PickedTarget, PickerDisplay, PickerWindow, RecordChoices } from './recording';
 
@@ -181,7 +183,52 @@ export interface SettingsView {
   version: string;
 }
 
+/** The params a motion page declares (its `cuttle-params`), and what is wrong with the declaration. */
+export interface MotionParams {
+  params: ParamDeclaration[];
+  issues: string[];
+}
+
+/** What a motion item's page is doing in the editor's preview, and what it said (as @cuttle/export's MotionStatus). */
+export interface MotionStatusView {
+  /** `scenes[2]` or `overlays[0]`. */
+  item: string;
+  src: string;
+  state: 'loading' | 'ready' | 'failed';
+  failure?: string;
+  errors: string[];
+  console: string[];
+}
+
+/** A motion frame for the player: the number of what drew it, and its pixels (none when the player's own copy is still right). */
+export type MotionFrameAnswer = { id: number; pixels?: { width: number; height: number; data: Uint8Array } } | null;
+
+/** Frames across a motion scene for its block on the timeline (none when the editor's strip is still right). */
+export type MotionStripAnswer = { id: number; frames?: { width: number; height: number; data: Uint8Array }[] } | null;
+
+/** The motion templates the editor offers (as @cuttle/motion-kit has them). */
+export const MOTION_TEMPLATE_NAMES = MOTION_TEMPLATES.map((template) => template.name) as [string, ...string[]];
+
 const rect = z.strictObject({ x: z.number().finite(), y: z.number().finite(), width: z.number().finite().positive(), height: z.number().finite().positive() });
+const box = z.tuple([z.number().finite(), z.number().finite(), z.number().finite(), z.number().finite()]);
+/** A motion frame the player asks for (as @cuttle/export's MotionFrameRequest). */
+const motionRequest = z.strictObject({
+  key: z.string().min(1).max(200),
+  kind: z.enum(['scene', 'overlay']),
+  index: z.number().int().nonnegative().max(100_000),
+  frame: z.number().int().nonnegative().max(100_000_000),
+  start: z.number().finite().nonnegative(),
+  duration: z.number().finite().positive(),
+  screen: z.strictObject({ width: z.number().int().positive().max(32_768), height: z.number().int().positive().max(32_768) }),
+  view: z
+    .strictObject({
+      source: z.number().finite().nullable(),
+      zoom: box.nullable(),
+      content: box.nullable(),
+      cursor: z.strictObject({ x: z.number().finite(), y: z.number().finite() }).nullable(),
+    })
+    .optional(),
+});
 const deviceName = z.string().min(1).max(512);
 
 /** Requests (window → main), each with the schema of its argument. */
@@ -300,6 +347,38 @@ export const REQUESTS = {
   'project:read-screen': z.undefined(),
   /** Fits the video to this many seconds where it rests, or takes the fit out (null). */
   'project:fit-length': z.strictObject({ seconds: z.number().positive().max(36_000).nullable() }),
+  /** The project as the editor shows it now, numbered: motion frames are asked for by that number. */
+  'motion:project': z
+    .strictObject({ version: z.number().int().nonnegative(), raw: z.record(z.string(), z.unknown()) })
+    .refine((value) => JSON.stringify(value.raw).length <= MAX_PROJECT_BYTES, 'the project is too large'),
+  /**
+   * A frame of a motion item at the player's size: `mode` `seek` while paused, `play` while playing;
+   * `have`: the number of the player's own copy of that frame.
+   */
+  'motion:frame': z.strictObject({
+    version: z.number().int().nonnegative(),
+    request: motionRequest,
+    width: z.number().int().min(8).max(8192),
+    height: z.number().int().min(8).max(8192),
+    mode: z.enum(['seek', 'play']),
+    have: z.number().int().positive().optional(),
+  }),
+  /** Frames across a motion scene for its block on the timeline, small. */
+  'motion:strip': z.strictObject({
+    version: z.number().int().nonnegative(),
+    request: motionRequest,
+    frames: z.array(z.number().int().nonnegative().max(100_000_000)).min(1).max(16),
+    width: z.number().int().min(8).max(512),
+    height: z.number().int().min(8).max(512),
+    have: z.number().int().positive().optional(),
+  }),
+  /** The params a page declares (a page in the project, as an item's `src`). */
+  'motion:params': z.string().min(1).max(4096),
+  'motion:statuses': z.undefined(),
+  /** Loads an item's page again (`scenes[2]`, `overlays[0]`). */
+  'motion:reload': z.string().regex(/^(scenes|overlays)\[\d{1,6}\]$/),
+  /** Copies a template of the motion kit into the project's `motion/` folder. */
+  'motion:add-template': z.enum(MOTION_TEMPLATE_NAMES),
 } as const;
 
 export type Request = keyof typeof REQUESTS;
@@ -375,6 +454,14 @@ export interface Responses {
   'project:read-screen': { started: true } | { problem: string };
   /** What the fit did, once it is done, or why it could not. */
   'project:fit-length': { report: LengthReport } | { problem: string };
+  'motion:project': void;
+  'motion:frame': MotionFrameAnswer;
+  'motion:strip': MotionStripAnswer;
+  'motion:params': MotionParams;
+  'motion:statuses': MotionStatusView[];
+  'motion:reload': void;
+  /** The page's path in the project (`motion/title/index.html`). */
+  'motion:add-template': { src: string };
 }
 
 /** A version of cuttle.json: as written, and the SHA-256 of its bytes. */
@@ -424,6 +511,10 @@ export interface Events {
   'speech:status': SpeechStatus;
   /** Every window: how motion is set now (`data-motion` on the page's root). */
   'app:motion': Motion;
+  /** The motion items' pages in the editor's preview: loading, ready or failed, and what they said. */
+  'motion:status': MotionStatusView[];
+  /** The project's files changed (a page edited): motion frames are drawn anew. Counts the changes. */
+  'motion:changed': { files: number };
 }
 
 export type Event = keyof Events;

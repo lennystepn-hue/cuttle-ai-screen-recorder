@@ -24,8 +24,27 @@ export const WINDOW_CHANNELS = {
       'project:closed',
       'project:undo-restart',
       'app:settings',
+      'motion:project',
+      'motion:frame',
+      'motion:strip',
+      'motion:params',
+      'motion:statuses',
+      'motion:reload',
+      'motion:add-template',
     ],
-    events: ['media:state', 'export:progress', 'export:end', 'project:status', 'project:file', 'project:closing', 'project:restarted', 'project:note', 'app:motion'],
+    events: [
+      'media:state',
+      'export:progress',
+      'export:end',
+      'project:status',
+      'project:file',
+      'project:closing',
+      'project:restarted',
+      'project:note',
+      'app:motion',
+      'motion:status',
+      'motion:changed',
+    ],
   },
   pill: {
     requests: ['pill:recent', 'pill:open', 'pill:hide', 'pill:menu', 'pill:record'],
@@ -71,4 +90,4 @@ export const WINDOW_CHANNELS = {
 export type WindowKind = keyof typeof WINDOW_CHANNELS;
 
 /** Events that are news, not a state: the preload does not replay them to a listener that comes late. */
-export const STREAM_EVENTS: ReadonlySet<string> = new Set<Event>(['export:progress', 'export:end', 'project:closing']);
+export const STREAM_EVENTS: ReadonlySet<string> = new Set<Event>(['export:progress', 'export:end', 'project:closing', 'motion:changed']);

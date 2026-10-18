@@ -1,8 +1,8 @@
-import { cp, stat } from 'node:fs/promises';
+import { stat } from 'node:fs/promises';
 import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { readProjectFile, writeProjectFile } from '@cuttle/core';
 import { MOTION_TEMPLATES, type MotionTemplate } from '@cuttle/motion-kit';
-import { templatesFolder } from '@cuttle/motion-kit/files';
+import { copyTemplate, MissingTemplateError } from '@cuttle/motion-kit/files';
 import { newId, usedIds, type MotionScene } from '@cuttle/project';
 import { occurrences, sceneSpans } from '@cuttle/timeline';
 import { CliError } from '../errors';
@@ -167,12 +167,14 @@ export async function motionNewCommand(projectDir: string, template: string, arg
   const clips = file.project.scenes.filter((scene) => scene.type === 'clip');
   if (info.kind === 'overlay' && clips.length === 0) throw new CliError('invalid-project', `${file.path} has no clips: an overlay goes over a clip`);
   // a folder of its own, beside any page there already
-  let folder = name;
-  for (let n = 2; await stat(join(file.dir, 'motion', folder)).then(() => true, () => false); n++) folder = `${name}-${n}`;
-  const from = join(templatesFolder(import.meta.url), template);
-  if (!(await stat(from).then((info) => info.isDirectory(), () => false))) throw new CliError('missing-file', `the template ${template} is missing from the motion kit (${from}): build the CLI again`);
-  await cp(from, join(file.dir, 'motion', folder), { recursive: true });
-  const src = `motion/${folder}/index.html`;
+  let src: string;
+  try {
+    src = await copyTemplate(file.dir, template, name, import.meta.url);
+  } catch (error) {
+    if (error instanceof MissingTemplateError) throw new CliError('missing-file', `${error.message}: build the CLI again`);
+    throw error;
+  }
+  const folder = src.split('/')[1]!;
   const taken = usedIds(file.project);
   let item: Record<string, unknown>;
   if (info.kind === 'scene') {

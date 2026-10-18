@@ -7,7 +7,7 @@ import { takeKey } from './take';
 
 export type Raw = Record<string, unknown>;
 export type ListName = IdList;
-export type OverlayList = 'zooms' | 'masks' | 'texts';
+export type OverlayList = 'zooms' | 'masks' | 'texts' | 'overlays';
 type Item = Record<string, unknown>;
 
 /** What a command may need to clamp to: the take's length and the screen's size. */
@@ -73,7 +73,7 @@ const clampNumber = (value: number, min: number, max: number) => Math.min(Math.m
 
 /** Gives every scene, overlay and cut without an id one (`s3`, `z1` …); returns the same object when all have one. */
 export function ensureIds(raw: Raw): Raw {
-  const lists = (['scenes', 'zooms', 'masks', 'texts', 'cuts'] as const).filter((list) => items(raw, list).some((item) => typeof item.id !== 'string'));
+  const lists = (['scenes', 'zooms', 'masks', 'texts', 'overlays', 'cuts'] as const).filter((list) => items(raw, list).some((item) => typeof item.id !== 'string'));
   if (lists.length === 0) return raw;
   const next = structuredClone(raw);
   const taken = usedIds(next);
@@ -225,8 +225,8 @@ export function applyCommand(raw: Raw, command: Command, limits: EditLimits = {}
       if ((to - from) / speed < 1 / (limits.fps ?? 30) - 1e-9) throw new DocumentError('invalid', `the clip is too short for ${round(speed)}×`);
       item.speed = round(speed);
       touched.push(['scenes', item]);
-      // Zooms and captions inside the clip keep their output length: a 3 s caption stays 3 s at 12×.
-      for (const name of ['zooms', 'texts'] as const) {
+      // Zooms, captions and motion overlays inside the clip keep their output length: a 3 s caption stays 3 s at 12×.
+      for (const name of ['zooms', 'texts', 'overlays'] as const) {
         for (const overlay of items(next, name)) {
           const at = Number(overlay.at);
           const duration = Number(overlay.duration);
@@ -425,9 +425,9 @@ export function describeChange(before: CuttleProject, after: CuttleProject): str
   return changeParts(before, after).join(' · ') || 'no visible change';
 }
 
-/** The first item added or changed between two versions (scenes, then zooms, masks, captions, cuts), to show it. */
+/** The first item added or changed between two versions (scenes, then zooms, masks, captions, motion overlays, cuts), to show it. */
 export function firstChanged(before: CuttleProject, after: CuttleProject): { list: ListName; id: string } | undefined {
-  for (const list of ['scenes', 'zooms', 'masks', 'texts', 'cuts'] as const) {
+  for (const list of ['scenes', 'zooms', 'masks', 'texts', 'overlays', 'cuts'] as const) {
     const old = new Map(before[list].map((item) => [item.id, JSON.stringify(item)]));
     const found = after[list].find((item) => item.id !== undefined && old.get(item.id) !== JSON.stringify(item));
     if (found?.id) return { list, id: found.id };
@@ -437,7 +437,7 @@ export function firstChanged(before: CuttleProject, after: CuttleProject): { lis
 
 function changeParts(before: CuttleProject, after: CuttleProject): string[] {
   const parts: string[] = [];
-  for (const list of ['scenes', 'zooms', 'masks', 'texts', 'cuts'] as const) {
+  for (const list of ['scenes', 'zooms', 'masks', 'texts', 'overlays', 'cuts'] as const) {
     const key = (item: { id?: string }, index: number) => item.id ?? `#${index}`;
     const old = new Map(before[list].map((item, index) => [key(item, index), JSON.stringify(item)]));
     const now = new Map(after[list].map((item, index) => [key(item, index), JSON.stringify(item)]));

@@ -30,6 +30,13 @@ SVG, WebGL, Three.js or all of them at once. Make it look like the work of a gre
    Read the sheet; fix every error; check single moments with `--at 0.4 --at 1.2` (seconds into it).
 4. Look at it in the video with `cuttle preview --at …`, and render.
 
+**With the project open in the Cuttle app,** the user watches you work: every page you save shows
+in its editor at once (it plays and scrubs them as the export draws them), with what a page threw
+and logged in its inspector, and they can change the params you declared there. So declare a param
+for what they may want to set themselves (a text, a colour, a side), with a clear `label`; and say
+which page you changed, so they can look. The app adds templates too (+ Motion): you may find a
+page in `motion/` you did not write.
+
 ## The page's world
 
 - **The clock is the video's.** `performance.now`, `Date`, `setTimeout`, `setInterval`,

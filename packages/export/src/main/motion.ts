@@ -9,7 +9,7 @@ import { readFile } from 'node:fs/promises';
 import { extname, isAbsolute, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { KIT_FOLDER, withImportMap } from '@cuttle/motion-kit';
-import { BrowserWindow, session, type NativeImage, type Session } from 'electron';
+import { BrowserWindow, screen, session, type NativeImage, type Session } from 'electron';
 import { motionRuntime, type MotionInit, type MotionView } from '../motion/runtime';
 
 export const MOTION_SCHEME = 'cuttle-motion';
@@ -23,6 +23,8 @@ export const MOTION_SCHEME_PRIVILEGES: Electron.CustomScheme = {
 /** Longest wait for one frame, and for the page to load (its fonts, images and `cuttle.ready`), in ms. */
 export const FRAME_TIMEOUT_MS = 5_000;
 export const LOAD_TIMEOUT_MS = 30_000;
+/** A frame whose paint has not come in this long is drawn again (ms). */
+const REDRAW_MS = 400;
 /** At most this many console lines are kept per page. */
 const MAX_LOG_LINES = 200;
 
@@ -53,6 +55,8 @@ export interface MotionPageOptions {
   kitDir?: string;
   /** Motion blur: each frame the average of `samples` moments over `shutter` of a frame, centred on it. */
   motionBlur?: { samples: number; shutter: number };
+  /** The size frames come out at (the editor's preview): the page is laid out and drawn at its own size, then scaled. */
+  frameSize?: { width: number; height: number };
 }
 
 /** The motion kit next to the bundle that contains this code (each build copies it there). */
@@ -185,6 +189,9 @@ export class MotionPage {
   private latest: NativeImage | undefined;
   private waiting: (() => void) | undefined;
   private readonly logs: string[] = [];
+  /** Paints so far, and how many of them were empty (to say why a frame never showed). */
+  private paints = 0;
+  private emptyPaints = 0;
   private failure: string | undefined;
 
   private constructor(
@@ -194,8 +201,12 @@ export class MotionPage {
   ) {
     const contents = win.webContents;
     contents.on('paint', (_event, _dirty, image) => {
+      this.paints++;
       // an invalidate answers at once with an empty paint; the frame comes after it
-      if (image.isEmpty()) return;
+      if (image.isEmpty()) {
+        this.emptyPaints++;
+        return;
+      }
       this.latest = image;
       this.waiting?.();
     });
@@ -218,8 +229,13 @@ export class MotionPage {
   static async open(options: MotionPageOptions): Promise<MotionPage> {
     const { width, height } = options.init;
     const ses = takeSession(options.root, options.network === true, MotionPage.kitOf(options));
+    // On the primary display: Windows puts a new window on the display of the window in front, and a
+    // display of another scale sizes it a pixel or two off (seen with three displays of three scales).
+    const origin = screen.getPrimaryDisplay().workArea;
     const win = new BrowserWindow({
       show: false,
+      x: origin.x,
+      y: origin.y,
       // a few rows more than the page: the frame marker sits below it (Electron rounds small heights up)
       width,
       height: height + 4,
@@ -241,6 +257,12 @@ export class MotionPage {
     // A new window is kept inside the screen's work area (a 9:16 page is taller than most screens);
     // a resize afterwards is not, and the paint follows the window.
     win.setContentSize(width, height + 4);
+    // and kept at that size should anything resize it
+    let corrections = 0;
+    win.on('resize', () => {
+      const [w, h] = win.getContentSize();
+      if ((w !== width || h !== height + 4) && corrections++ < 3) win.setContentSize(width, height + 4);
+    });
     const contents = win.webContents;
     contents.setFrameRate(240);
     contents.setAudioMuted(true);
@@ -285,15 +307,32 @@ export class MotionPage {
 
   /** Whether the latest paint shows draw `draw`: its marker pixel (BGRA), `scale` image pixels a CSS pixel. */
   private shows(draw: number): boolean {
+    const marker = this.marker();
+    return marker !== undefined && marker[2] === (draw & 255) && marker[1] === ((draw >> 8) & 255) && marker[0] === 200;
+  }
+
+  /** The latest paint's marker pixel (BGRA), or undefined when it has none where the marker goes. */
+  private marker(): Uint8Array | undefined {
     const image = this.latest;
-    if (!image) return false;
+    if (!image) return undefined;
     const { width, height } = image.getSize();
     const scale = width / this.options.init.width;
     const row = Math.floor((this.options.init.height + 1) * scale);
-    if (row >= height || width < 2) return false;
-    const bitmap = image.toBitmap();
+    if (row >= height || width < 2) return undefined;
     const at = (row * width + Math.floor(scale)) * 4;
-    return bitmap[at + 2] === (draw & 255) && bitmap[at + 1] === ((draw >> 8) & 255) && bitmap[at] === 200;
+    return image.toBitmap().subarray(at, at + 4);
+  }
+
+  /** What the page painted, for an error: how often since `since`, and what its last paint shows. */
+  private paintReport(since: { paints: number; empty: number }): string {
+    const paints = this.paints - since.paints;
+    const empty = this.emptyPaints - since.empty;
+    const image = this.latest;
+    const last = image ? `the last ${image.getSize().width}×${image.getSize().height}` : 'none before';
+    const marker = this.marker();
+    const shows = marker ? `, its marker ${marker[2]! + 256 * marker[1]!} (blue ${marker[0]})` : image ? ', without the marker' : '';
+    const [cw, ch] = this.win.getContentSize();
+    return `${paints} paint${paints === 1 ? '' : 's'} since the draw, ${empty} empty; ${last}${shows}; the window ${cw}×${ch}`;
   }
 
   /**
@@ -313,14 +352,15 @@ export class MotionPage {
     else {
       // the moments centred on the frame (never before 0): a frame's last comes before the next frame's first
       const moments = Array.from({ length: blur.samples }, (_, k) => Math.max(0, ((n + ((k + 0.5) / blur.samples - 0.5) * blur.shutter) * 1000) / fps));
-      const sum = new Uint32Array(this.options.init.width * this.options.init.height * 4);
+      const { width, height } = this.size;
+      const sum = new Uint32Array(width * height * 4);
       for (const ms of moments) {
         const { data } = await this.paint(ms, view, n);
         for (let i = 0; i < data.length; i++) sum[i] = sum[i]! + data[i]!;
       }
       const data = new Uint8Array(sum.length);
       for (let i = 0; i < sum.length; i++) data[i] = Math.round(sum[i]! / moments.length);
-      frame = { width: this.options.init.width, height: this.options.init.height, data };
+      frame = { width, height, data };
     }
     this.drawn = n;
     this.last = frame;
@@ -332,27 +372,42 @@ export class MotionPage {
     const { init } = this.options;
     const ms = this.options.frameTimeout ?? FRAME_TIMEOUT_MS;
     const script = `window.__cuttleDraw(${at}${view ? `, ${JSON.stringify(view)}` : ''})`;
-    const draw = await this.timed(this.win.webContents.executeJavaScript(script) as Promise<number>, ms, `to draw frame ${n}`);
+    const drawn = () => this.timed(this.win.webContents.executeJavaScript(script) as Promise<number>, ms, `to draw frame ${n}`);
+    let draw = await drawn();
     const deadline = Date.now() + ms;
+    const since = { paints: this.paints, empty: this.emptyPaints };
     let asked = false;
+    let redrawAt = Date.now() + REDRAW_MS;
     while (!this.shows(draw)) {
       if (this.failure) throw new Error(this.failure);
-      if (Date.now() > deadline) throw new Error(`the motion page's frame ${n} was never painted`);
+      if (Date.now() > deadline) throw new Error(`the motion page's frame ${n} was never painted (draw ${draw}: ${this.paintReport(since)})`);
+      // Now and then a draw never reaches the paints: they go on showing the page as it was, and
+      // asking for a paint repaints that. The same moment drawn again (a new marker) gets through.
+      // A page drawn from its time looks the same; one counting its frames sees one more.
+      if (Date.now() > redrawAt) {
+        draw = await drawn();
+        redrawAt = Date.now() + REDRAW_MS;
+        asked = false;
+        continue;
+      }
       const painted = new Promise<void>((done) => (this.waiting = done));
       if (!asked) this.win.webContents.invalidate();
       asked = true;
       await Promise.race([painted, pause(50)]);
       this.waiting = undefined;
     }
-    let image = this.latest!;
-    const { width } = image.getSize();
-    if (width === init.width) image = image.crop({ x: 0, y: 0, width: init.width, height: init.height });
-    else {
-      // a display scale the override did not reach: the page drawn larger, brought back to its size
-      const scale = width / init.width;
-      image = image.crop({ x: 0, y: 0, width, height: Math.round(init.height * scale) }).resize({ width: init.width, height: init.height, quality: 'best' });
-    }
-    return { width: init.width, height: init.height, data: toRgba(new Uint8Array(image.toBitmap())) };
+    const { width } = this.latest!.getSize();
+    const size = this.size;
+    // the page without the marker rows below it, at a display scale the override did not reach too
+    let image = this.latest!.crop({ x: 0, y: 0, width, height: Math.round((init.height * width) / init.width) });
+    // brought to its size (drawn larger), or to a preview's
+    if (width !== size.width) image = image.resize({ width: size.width, height: size.height, quality: this.options.frameSize ? 'good' : 'best' });
+    return { width: size.width, height: size.height, data: toRgba(new Uint8Array(image.toBitmap())) };
+  }
+
+  /** The size frames come out at. */
+  private get size(): { width: number; height: number } {
+    return this.options.frameSize ?? { width: this.options.init.width, height: this.options.init.height };
   }
 
   /** What went wrong in the page so far (uncaught errors and rejections), and its console. */

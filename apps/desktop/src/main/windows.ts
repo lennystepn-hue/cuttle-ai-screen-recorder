@@ -13,6 +13,7 @@ import { CHECK, CHECK_IMAGE, HIDDEN } from './check';
 import { ExportRun, exportPath } from './export-service';
 import { bindRequests, send } from './ipc';
 import { ProjectMedia } from './media-service';
+import { EditorMotion } from './motion-service';
 import { LockedError, lockProject, openProjectFile, projectInfo } from './project';
 import { importImage, ProjectFileWatch } from './project-watch';
 import { APP_ORIGIN, assetPath, bundlePath, serveApp, serveMedia } from './protocols';
@@ -86,6 +87,8 @@ interface Editor {
   /** Its webContents, kept: a closed window's `webContents` getter throws. */
   contents: WebContents;
   media: ProjectMedia;
+  /** The preview of its motion scenes and overlays. */
+  motion: EditorMotion;
   /** cuttle.json on disk: the editor's saves and the changes others make. */
   watch: ProjectFileWatch;
   release: () => Promise<void>;
@@ -139,6 +142,7 @@ async function createEditor(dir: string, key: string, force: boolean): Promise<B
     if (editor) {
       editors.delete(key);
       editor.media.dispose();
+      editor.motion.dispose();
       if (!editor.window.isDestroyed()) editor.window.destroy();
     }
     await release();
@@ -165,7 +169,11 @@ async function editorWindow(dir: string, key: string, file: ProjectFile, release
   });
   const contents = window.webContents;
   guard(contents);
-  const editor: Editor = { window, contents, media: newMedia(file.project), release, watch: new ProjectFileWatch(dir, (event) => onFileChange(event)) };
+  const motion = new EditorMotion(dir, {
+    status: (statuses) => send(contents, 'motion:status', statuses),
+    changed: (files) => send(contents, 'motion:changed', { files }),
+  });
+  const editor: Editor = { window, contents, media: newMedia(file.project), motion, release, watch: new ProjectFileWatch(dir, (event) => onFileChange(event)) };
   editors.set(key, editor);
   function newMedia(project: ProjectFile['project']): ProjectMedia {
     return new ProjectMedia(dir, project, (state) => send(contents, 'media:state', state));
@@ -227,6 +235,13 @@ async function editorWindow(dir: string, key: string, file: ProjectFile, release
     // contents.reload() from here is not a navigation the page started (guard() refuses those)
     'project:reload': () => contents.reload(),
     'project:closed': () => closeNow(),
+    'motion:project': ({ version, raw }) => motion.project(version, raw),
+    'motion:frame': ({ version, request, width, height, mode, have }) => motion.frame(version, request, { width, height }, mode, have),
+    'motion:strip': ({ version, request, frames, width, height, have }) => motion.strip(version, request, frames, { width, height }, have),
+    'motion:params': (src) => motion.params(src),
+    'motion:statuses': () => motion.statuses(),
+    'motion:reload': (item) => motion.reload(item),
+    'motion:add-template': async (template) => ({ src: await motion.addTemplate(template) }),
     'project:import-image': async ({ purpose }) => {
       const chosen =
         CHECK_IMAGE ??
@@ -266,6 +281,7 @@ async function editorWindow(dir: string, key: string, file: ProjectFile, release
     if (editors.get(key) === editor) editors.delete(key);
     editor.watch.close();
     editor.media.dispose();
+    editor.motion.dispose();
     editor.run?.cancel();
     void release();
     // Closing the last editor returns to the pill (not while an editor is reopened on a new take).

@@ -7,6 +7,7 @@
 // scenes after move. The wheel scrolls along, Shift+wheel up and down, Ctrl+wheel zooms.
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import { createPortal } from 'react-dom';
+import { MOTION_TEMPLATES } from '@cuttle/motion-kit';
 import type { CuttleProject, MarkerKind } from '@cuttle/project';
 import { applyCaptionFixes, captionCues, captionWords, sceneSpans } from '@cuttle/timeline';
 import type { Command, OverlayList } from '../../shared/document';
@@ -28,11 +29,12 @@ import {
 } from '../../shared/timeline-model';
 import { FitIcon } from '../icons';
 import { Select } from '../Select';
-import { addCard, addMask, addPage, addZoom, overlayBlocked, selectedOrCurrentClip, setSpeed, split, SPEEDS } from './actions';
+import { addCard, addMask, addMotion, addPage, addZoom, overlayBlocked, selectedOrCurrentClip, setSpeed, split, SPEEDS, templateLabel } from './actions';
 import { audible } from './audio';
 import { edit, fitLength, preview } from './doc';
 import { beginGesture } from './gesture';
 import { mediaUrl } from './media';
+import type { MotionStrip } from './motion';
 import { currentPlayer, select, setTool, shownProject, store, type Selection } from './session';
 import { useStore } from './store';
 
@@ -44,13 +46,15 @@ const LANES: { kind: OverlayKind; name: string; list: OverlayList }[] = [
   { kind: 'zoom', name: 'Zoom', list: 'zooms' },
   { kind: 'mask', name: 'Mask', list: 'masks' },
   { kind: 'caption', name: 'Caption', list: 'texts' },
+  { kind: 'motion', name: 'Motion', list: 'overlays' },
 ];
-const NOUN: Record<OverlayKind, string> = { zoom: 'zoom', mask: 'mask', caption: 'caption' };
+const NOUN: Record<OverlayKind, string> = { zoom: 'zoom', mask: 'mask', caption: 'caption', motion: 'motion overlay' };
 /** What an empty lane says: its key, and how to fill it. */
 const LANE_HINTS: Record<OverlayKind, [string, string]> = {
   zoom: ['Z', 'and draw on the video: the part to zoom in on'],
   mask: ['M', 'and draw over what no one should see (a token, an address)'],
   caption: ['T', 'and type on the video'],
+  motion: ['+ Motion', 'a lower third, rings on the clicks, word-by-word captions, or a page Claude writes'],
 };
 const TICKS = [0.1, 0.2, 0.5, 1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 1800];
 const MAX_PPS = 400;
@@ -81,8 +85,9 @@ function layoutOf(model: TimelineModel | undefined): Layout {
     zoom: 8 + ROW * (model?.lanes.zoom.rows ?? 1),
     mask: 8 + ROW * (model?.lanes.mask.rows ?? 1),
     caption: 8 + ROW * (model?.lanes.caption.rows ?? 1),
+    motion: 8 + ROW * (model?.lanes.motion.rows ?? 1),
   };
-  const order = ['markers', 'ruler', 'video', 'zoom', 'mask', 'caption', 'mic', 'input'] as const;
+  const order = ['markers', 'ruler', 'video', 'zoom', 'mask', 'caption', 'motion', 'mic', 'input'] as const;
   const tops = {} as Layout['tops'];
   let y = 0;
   for (const row of order) {
@@ -111,6 +116,7 @@ export function Timeline() {
   useStore(store, (state) => state.format);
   const pps = useStore(store, (state) => state.pxPerSecond);
   const selection = useStore(store, (state) => state.selection);
+  const motionStatus = useStore(store, (state) => state.motionStatus);
   const snapOn = useStore(store, (state) => state.snap);
   const peaksState = useStore(store, (state) => state.mediaState.peaks.state);
   const peaksPath = useStore(store, (state) => state.mediaState.peaks.path);
@@ -490,6 +496,7 @@ export function Timeline() {
                       </span>
                     )}
                     {model.lanes[lane.kind].blocks.map((block, index, blocks) => {
+                      const failed = lane.kind === 'motion' && motionStatus.some((entry) => entry.item === `overlays[${block.item}]` && entry.state === 'failed');
                       const blockLeft = block.start * pps;
                       const blockWidth = Math.max(6, (block.end - block.start) * pps);
                       const inset = Math.max(0, Math.min(view.left - blockLeft, blockWidth - LABEL_MIN_PX));
@@ -497,7 +504,7 @@ export function Timeline() {
                         <button
                           // by the overlay and which of its blocks: a block keeps its element while it is dragged
                           key={`${block.id}#${blocks.slice(0, index).filter((other) => other.id === block.id).length}`}
-                          className={`item ${lane.kind}${block.enabled ? '' : ' off'}${isSelected(selection, lane.kind, block.id) ? ' selected' : ''}${hovered === block.id ? ' linked' : ''}`}
+                          className={`item ${lane.kind}${block.enabled ? '' : ' off'}${isSelected(selection, lane.kind, block.id) ? ' selected' : ''}${hovered === block.id ? ' linked' : ''}${failed ? ' failed' : ''}`}
                           onPointerEnter={() => setHovered(block.id)}
                           onPointerLeave={() => setHovered((id) => (id === block.id ? undefined : id))}
                           style={{ left: blockLeft, width: blockWidth, top: 4 + block.row * ROW }}
@@ -625,6 +632,19 @@ function TimelineBar({ status, duration, fit, zoomValue, onScale }: { status: st
       <button className="act" onClick={() => void addPage()} disabled={broken} title="A page (an image, scrolled through) after the scene under the playhead">
         + Page
       </button>
+      <Select
+        value={undefined}
+        options={MOTION_TEMPLATES.map((template) => ({ value: template.name, label: templateLabel(template.name), note: template.kind === 'scene' ? 'scene' : template.whole ? 'over the take' : 'overlay' }))}
+        onChange={(name) => void addMotion(name)}
+        label="Add a motion template"
+        variant="bare"
+        disabled={broken}
+        className="act motion-add"
+        testId="add-motion"
+        title="Motion from the kit's templates: a scene after the scene under the playhead, or an overlay on the video. Claude can change its page, or write one of its own."
+      >
+        + Motion
+      </Select>
       <span className="tl-status">{status}</span>
       {duration !== undefined && <LengthControl duration={duration} />}
       <div className="grow" />
@@ -788,8 +808,33 @@ const Ruler = memo(function Ruler({ duration, pps, view, top }: { duration: numb
   );
 });
 
+/**
+ * Frames across a motion scene for its block, drawn by its page: asked for again a moment after the
+ * project or its files change (an unchanged scene answers at once, with nothing to draw).
+ */
+function useMotionStrip(scene: SceneBlock, project: CuttleProject, height: number): MotionStrip | undefined {
+  const files = useStore(store, (state) => state.motionFiles);
+  const [strip, setStrip] = useState<{ id: string; strip: MotionStrip }>();
+  const motion = scene.kind === 'motion';
+  useEffect(() => {
+    if (!motion) return;
+    let live = true;
+    const timer = setTimeout(() => {
+      void currentPlayer()
+        ?.motionStrip(scene.index, height)
+        .then((next) => live && next && setStrip({ id: scene.id, strip: next }), () => {});
+    }, 300);
+    return () => {
+      live = false;
+      clearTimeout(timer);
+    };
+  }, [motion, scene.index, scene.id, project, files, height]);
+  return strip?.id === scene.id ? strip.strip : undefined;
+}
+
 function Scene(props: { scene: SceneBlock; project: CuttleProject; pps: number; view: { left: number; width: number }; selected: boolean; moving: boolean; onPointerDown: (event: ReactPointerEvent<HTMLElement>) => void }) {
   const { scene, project, pps, view, selected, onPointerDown } = props;
+  const failed = useStore(store, (state) => (scene.kind === 'motion' ? state.motionStatus.find((entry) => entry.item === `scenes[${scene.index}]` && entry.state === 'failed') : undefined));
   const thumbState = useStore(store, (state) => state.mediaState.thumbnails.state);
   const thumbPath = useStore(store, (state) => state.mediaState.thumbnails.path);
   const interval = useStore(store, (state) => state.mediaState.thumbnails.interval);
@@ -816,6 +861,22 @@ function Scene(props: { scene: SceneBlock; project: CuttleProject; pps: number; 
       tiles.push({ x: i * tileWidth, index: Math.min(count - 1, Math.max(0, Math.floor(source / interval!))) });
     }
   }
+  // a motion scene: its page's frames, each tile the frame nearest its time
+  const strip = useMotionStrip(scene, project, tileHeight * 2);
+  const motionTiles: { x: number; width: number; url: string }[] = [];
+  if (strip && width > 0) {
+    const tile = Math.max(8, Math.round((tileHeight * project.output.width) / project.output.height));
+    const from = Math.max(0, Math.floor((view.left - left) / tile));
+    const to = Math.min(Math.ceil(width / tile), Math.ceil((view.left + view.width - left) / tile) + 1);
+    for (let i = from; i < to; i++) {
+      const frame = (((i + 0.5) * tile) / pps) * project.output.fps;
+      let nearest = 0;
+      strip.frames.forEach((candidate, k) => {
+        if (Math.abs(candidate - frame) < Math.abs(strip.frames[nearest]! - frame)) nearest = k;
+      });
+      motionTiles.push({ x: i * tile, width: tile, url: strip.urls[nearest]! });
+    }
+  }
   const kindClass = scene.kind === 'clip' ? '' : ` ${scene.kind}`;
   const speed = scene.speed !== undefined && scene.speed !== 1 ? `${Math.round(scene.speed * 10) / 10}×` : '';
   const name = [speed, scene.title].filter(Boolean).join(' ');
@@ -823,13 +884,20 @@ function Scene(props: { scene: SceneBlock; project: CuttleProject; pps: number; 
   const scale = tileHeight / thumbHeight;
   return (
     <button
-      className={`scene${kindClass}${selected ? ' selected' : ''}${props.moving ? ' moving' : ''}`}
+      className={`scene${kindClass}${selected ? ' selected' : ''}${props.moving ? ' moving' : ''}${failed ? ' failed' : ''}`}
       style={{ left, width: Math.max(4, width - 2) }}
-      title={`${name} · ${scene.detail} · drag to move, edges to trim`}
+      title={failed ? `${name} · its page cannot draw: ${failed.failure ?? 'it failed'}` : `${name} · ${scene.detail} · drag to move, edges to trim`}
       data-id={scene.id}
       onPointerDown={onPointerDown}
       onKeyDown={(event) => event.key === 'Enter' && select({ kind: 'scene', id: scene.id })}
     >
+      {motionTiles.length > 0 && (
+        <span className="thumbs">
+          {motionTiles.map((tile) => (
+            <i key={tile.x} style={{ left: tile.x, width: tile.width, backgroundImage: `url("${tile.url}")`, backgroundSize: 'cover', backgroundPosition: 'center' }} />
+          ))}
+        </span>
+      )}
       {ready && tiles.length > 0 && (
         <span className="thumbs">
           {tiles.map((tile) => (

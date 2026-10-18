@@ -1,7 +1,24 @@
 // Everything the editor can do by name, with its keys: the command menu (Ctrl+K) lists these, and
 // the keyboard runs them. Keys are written as the menu shows them.
+import { MOTION_TEMPLATES } from '@cuttle/motion-kit';
 import { bridge } from '../bridge';
-import { addCard, addMask, addPage, addZoom, autoZoomClicks, cycleSpeed, deleteSelection, duplicateSelection, overlayBlocked, selectedOrCurrentClip, setSpeed, showRawTake, split } from './actions';
+import {
+  addCard,
+  addMask,
+  addMotion,
+  addPage,
+  addZoom,
+  autoZoomClicks,
+  cycleSpeed,
+  deleteSelection,
+  duplicateSelection,
+  overlayBlocked,
+  selectedOrCurrentClip,
+  setSpeed,
+  showRawTake,
+  split,
+  templateLabel,
+} from './actions';
 import { redo, undo } from './doc';
 import { currentPlayer, openExport, select, setTool, store } from './session';
 
@@ -42,6 +59,15 @@ export function editorCommands(): EditorCommand[] {
     { id: 'add-caption', name: 'Add a caption at the playhead (type it on the video)', group: 'Add', run: () => setTool('caption'), blocked: () => overlayBlocked() },
     { id: 'add-card', name: 'Add a title card', group: 'Add', run: addCard },
     { id: 'add-page', name: 'Add a page (an image)…', group: 'Add', run: () => void addPage() },
+    ...MOTION_TEMPLATES.map(
+      (template): EditorCommand => ({
+        id: `add-motion-${template.name}`,
+        name: `Add motion: ${templateLabel(template.name)}${template.kind === 'scene' ? '' : ' (over the video)'}`,
+        keywords: `motion template animation ${template.kind} ${template.description}`,
+        group: 'Add',
+        run: () => void addMotion(template.name),
+      }),
+    ),
     { id: 'tool-select', name: 'Select tool', keys: 'V', group: 'Tools', run: () => setTool('select') },
     { id: 'tool-zoom', name: 'Zoom tool: draw a zoom on the video', keys: 'Z', group: 'Tools', run: () => setTool('zoom'), blocked: () => overlayBlocked() },
     { id: 'tool-mask', name: 'Mask tool: draw a mask on the video', keys: 'M', group: 'Tools', run: () => setTool('mask'), blocked: () => overlayBlocked() },

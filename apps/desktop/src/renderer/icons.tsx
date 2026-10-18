@@ -79,6 +79,13 @@ export const CardIcon = icon(
     <path d="M5 7h6M6 9.5h4" />
   </>,
 );
+/** Motion: a spark, and a small one. */
+export const MotionIcon = icon(
+  <>
+    <path d="M6.5 2.2 7.8 5.7l3.5 1.3-3.5 1.3-1.3 3.5-1.3-3.5L1.7 7l3.5-1.3z" />
+    <path d="m12.2 10.2.6 1.5 1.5.6-1.5.6-.6 1.5-.6-1.5-1.5-.6 1.5-.6z" />
+  </>,
+);
 export const PageIcon = icon(<path d="M4 2h5.5L12 4.5V14H4zM9.5 2v2.5H12M6 7.5h4M6 10h4" />);
 export const MicIcon = icon(
   <>

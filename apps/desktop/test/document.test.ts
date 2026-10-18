@@ -82,6 +82,20 @@ describe('the document', () => {
     expect(() => applyCommand(raw, { type: 'delete', list: 'zooms', id: 'z1' }, limits)).toThrow(DocumentError);
   });
 
+  it('edits motion overlays as the other overlays: ids, a shift, a drag, their params, and the speed of their clip', () => {
+    const raw = ensureIds({ ...base, overlays: [{ src: 'motion/bar/index.html', at: 4, duration: 2 }] });
+    expect((raw.overlays as { id: string }[])[0]!.id).toBe('o1');
+    let next = applyCommand(raw, { type: 'shift', list: 'overlays', id: 'o1', by: 1 }, limits);
+    expect((next.overlays as { at: number }[])[0]!.at).toBe(5);
+    next = applyCommand(next, { type: 'set', list: 'overlays', id: 'o1', fields: { ...rangeFields('overlays', 4, 5), params: { name: 'Lena' } } }, limits);
+    expect(next.overlays).toEqual([{ src: 'motion/bar/index.html', at: 4, duration: 1, id: 'o1', params: { name: 'Lena' } }]);
+    expect(describeChange(project(raw), project(next))).toBe('1 motion overlay changed');
+    expect(firstChanged(project(raw), project(next))).toEqual({ list: 'overlays', id: 'o1' });
+    // inside the 4× clip (3–8 s): 2 source s are 0.5 s of video, and stay so at 8×
+    const faster = applyCommand(raw, { type: 'speed', id: 's2', speed: 8 }, limits);
+    expect((faster.overlays as { duration: number }[])[0]!.duration).toBe(4);
+  });
+
   it('shifts overlays in source seconds, never before 0', () => {
     const next = applyCommand(base, { type: 'shift', list: 'zooms', id: 'z1', by: -10 }, limits);
     expect((next.zooms as { at: number }[])[0]!.at).toBe(0);

@@ -5,6 +5,7 @@
 // page's transparency kept, the same on every render. The motion kit (Three.js, lottie-web, fonts,
 // Cuttle's helpers) is served at cuttle-motion://kit/, and every page of the project gets an
 // import map for its bare names (`three`, `cuttle`).
+import { randomUUID } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import { readFile, stat } from 'node:fs/promises';
 import { extname, isAbsolute, relative, resolve, sep } from 'node:path';
@@ -112,6 +113,9 @@ function inside(base: string, path: string): boolean {
   return rel !== '' && rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel);
 }
 
+/** The frames a transition page is drawing from, by `<page id>/from` and `/to`: served at cuttle-motion://frames/. */
+const handed = new Map<string, MotionFrame>();
+
 let sessions = 0;
 /**
  * Sessions no page uses, by project folder, network switch and kit. Electron keeps every session for the
@@ -142,6 +146,12 @@ function pageSession(root: string, network: boolean, kitDir: string): Session {
   const policy = contentPolicy(network);
   ses.protocol.handle(MOTION_SCHEME, async (request) => {
     const url = new URL(request.url);
+    // a transition's two frames, as raw RGBA at the page's size
+    if (url.host === 'frames') {
+      const frame = handed.get(decodeURIComponent(url.pathname).replace(/^\/+/, ''));
+      if (!frame) return new Response('not found', { status: 404 });
+      return new Response(frame.data as Uint8Array<ArrayBuffer>, { headers: { 'Content-Type': 'application/octet-stream', 'Content-Security-Policy': policy, 'Cache-Control': 'no-store' } });
+    }
     const base = bases[url.host];
     const path = base === undefined ? undefined : resolve(base, decodeURIComponent(url.pathname).replace(/^\/+/, ''));
     if (base === undefined || path === undefined || !inside(base, path)) return new Response('not found', { status: 404 });
@@ -202,6 +212,8 @@ export class MotionPage {
   private latest: NativeImage | undefined;
   private waiting: (() => void) | undefined;
   private readonly logs: string[] = [];
+  /** Names this page's handed frames. */
+  private readonly id = randomUUID();
   /** Paints so far, and how many of them were empty (to say why a frame never showed). */
   private paints = 0;
   private emptyPaints = 0;
@@ -353,15 +365,20 @@ export class MotionPage {
    * and the paint that shows it comes back; with motion blur, the average of the paints while the
    * shutter is open around it.
    */
-  async frame(n: number, view?: MotionView): Promise<MotionFrame> {
+  async frame(n: number, view?: MotionView, between?: { from: MotionFrame; to: MotionFrame }): Promise<MotionFrame> {
     if (!Number.isInteger(n) || n < 0) throw new Error(`a motion frame is a whole number from 0, not ${n}`);
     if (n < this.drawn) throw new Error(`the motion page is past frame ${n} (it drew ${this.drawn}); open it again to go back`);
     if (n === this.drawn && this.last) return this.last;
     if (this.failure) throw new Error(this.failure);
     const { fps } = this.options.init;
     const blur = this.options.motionBlur;
+    // a transition's two frames: the page fetches them before it draws
+    if (between) {
+      handed.set(`${this.id}/from`, between.from);
+      handed.set(`${this.id}/to`, between.to);
+    }
     let frame: MotionFrame;
-    if (!blur) frame = await this.paint((n * 1000) / fps, view, n);
+    if (!blur) frame = await this.paint((n * 1000) / fps, view, n, between !== undefined);
     else {
       // the moments centred on the frame (never before 0): a frame's last comes before the next frame's first
       const moments = Array.from({ length: blur.samples }, (_, k) => Math.max(0, ((n + ((k + 0.5) / blur.samples - 0.5) * blur.shutter) * 1000) / fps));
@@ -381,10 +398,11 @@ export class MotionPage {
   }
 
   /** The page drawn at `ms` on its clock, from the paint whose marker shows that draw. */
-  private async paint(at: number, view: MotionView | undefined, n: number): Promise<MotionFrame> {
+  private async paint(at: number, view: MotionView | undefined, n: number, between = false): Promise<MotionFrame> {
     const { init } = this.options;
     const ms = this.options.frameTimeout ?? FRAME_TIMEOUT_MS;
-    const script = `window.__cuttleDraw(${at}${view ? `, ${JSON.stringify(view)}` : ''})`;
+    const frames = between ? { from: `${MOTION_SCHEME}://frames/${this.id}/from`, to: `${MOTION_SCHEME}://frames/${this.id}/to` } : undefined;
+    const script = `window.__cuttleDraw(${at}${view || frames ? `, ${JSON.stringify(view ?? null)}` : ''}${frames ? `, ${JSON.stringify(frames)}` : ''})`;
     const drawn = () => this.timed(this.win.webContents.executeJavaScript(script) as Promise<number>, ms, `to draw frame ${n}`);
     let draw = await drawn();
     const deadline = Date.now() + ms;
@@ -438,6 +456,8 @@ export class MotionPage {
   }
 
   close(): void {
+    handed.delete(`${this.id}/from`);
+    handed.delete(`${this.id}/to`);
     if (this.win.isDestroyed()) return;
     this.win.destroy();
     giveBack(this.ses, this.options.root, this.options.network === true, MotionPage.kitOf(this.options));

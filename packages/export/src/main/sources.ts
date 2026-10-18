@@ -82,7 +82,7 @@ async function existing(projectDir: string, relative: string, what: string, medi
  */
 export async function motionPages(projectDir: string, project: CuttleProject): Promise<MotionPages | undefined> {
   const root = resolve(projectDir);
-  const pages: MotionPages = { root, scenes: {}, overlays: {} };
+  const pages: MotionPages = { root, scenes: {}, overlays: {}, transitions: {} };
   const page = async (src: string, name: string): Promise<string> => {
     const rel = relative(root, resolve(root, src));
     if (rel === '' || rel === '..' || rel.startsWith(`..${sep}`) || isAbsolute(rel)) {
@@ -92,9 +92,11 @@ export async function motionPages(projectDir: string, project: CuttleProject): P
   };
   for (const [index, scene] of project.scenes.entries()) {
     if (scene.type === 'motion') pages.scenes[index] = await page(scene.src, `scenes[${index}]`);
+    if (scene.transition?.enabled) pages.transitions[index] = await page(scene.transition.src, `scenes[${index}].transition`);
   }
   for (const [index, overlay] of project.overlays.entries()) pages.overlays[index] = await page(overlay.src, `overlays[${index}]`);
-  return Object.keys(pages.scenes).length + Object.keys(pages.overlays).length > 0 ? pages : undefined;
+  const count = Object.keys(pages.scenes).length + Object.keys(pages.overlays).length + Object.keys(pages.transitions).length;
+  return count > 0 ? pages : undefined;
 }
 
 /**

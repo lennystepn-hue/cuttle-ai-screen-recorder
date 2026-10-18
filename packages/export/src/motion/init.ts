@@ -1,4 +1,4 @@
-import type { BackgroundPreset, CuttleProject, MotionOverlay, MotionScene } from '@cuttle/project';
+import type { BackgroundPreset, CuttleProject, MotionOverlay, MotionScene, SceneTransition } from '@cuttle/project';
 import { TAKE_WORKER, type MotionInit } from './runtime';
 
 /** A dark tone of each background preset, for pages that draw their own background. */
@@ -43,6 +43,8 @@ export interface MotionContext {
   take: MotionInit['take'];
   fonts: MotionInit['fonts'];
   defaults: Record<string, unknown>;
+  /** A transition page (it is given the frames it goes between). */
+  transition?: boolean;
 }
 
 /**
@@ -51,7 +53,7 @@ export interface MotionContext {
  */
 export function motionInit(
   project: CuttleProject,
-  item: MotionScene | MotionOverlay,
+  item: MotionScene | MotionOverlay | SceneTransition,
   name: string,
   showing: { start: number; duration: number },
   context: MotionContext,
@@ -66,9 +68,10 @@ export function motionInit(
     format: formatName(project.output),
     params: { ...context.defaults, ...item.params },
     theme: motionTheme(project),
-    seed: motionSeed(item.id ?? name),
+    seed: motionSeed(('id' in item ? item.id : undefined) ?? name),
     fonts: context.fonts,
     take: context.take,
     takeWorker: TAKE_WORKER,
+    ...(context.transition && { transition: true }),
   };
 }

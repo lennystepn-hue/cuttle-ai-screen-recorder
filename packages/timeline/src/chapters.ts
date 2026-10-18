@@ -2,6 +2,7 @@
 // output seconds, named by the step's title. Pure: the export writes them into the video file, the
 // CLI and the editor list them as YouTube reads them in a description.
 import type { Marker, ScriptStep } from '@cuttle/project';
+import { stepMoves } from './steps';
 import { totalDuration, type SceneSpan } from './time';
 
 /** A chapter: from `at` to `end` (output seconds), named after a step of the script (`step`, its id). */
@@ -11,9 +12,6 @@ export interface Chapter {
   title: string;
   step: string;
 }
-
-/** A move to a step undone within this many seconds (the step key pressed by mistake, then back) is no chapter. */
-export const CHAPTER_SLIP_SECONDS = 2;
 
 /**
  * What YouTube asks of a description's chapters: the first at 0:00 (the chapters here always start
@@ -39,24 +37,17 @@ function shownAt(spans: readonly SceneSpan[], t: number): number | undefined {
 }
 
 /**
- * The chapters of a video from the take's `step` markers: one where the take reached each step,
- * named by the step's title. A move undone right away is left out; a step reached again later (after
- * another) starts a chapter again. The first chapter starts at 0, with what comes before the first
+ * The chapters of a video from the take's `step` markers: one where the take reached each step
+ * (`stepMoves`: a move undone right away is none; a step reached again later starts a chapter
+ * again), named by the step's title. The first chapter starts at 0, with what comes before the first
  * clip; each ends where the next begins, the last at the video's end. A step no longer in the
  * script makes none, nor does one shown no earlier than the chapter before it.
  */
 export function stepChapters(script: readonly ScriptStep[], markers: readonly Marker[], spans: readonly SceneSpan[]): Chapter[] {
-  const moves = markers.filter((marker) => marker.kind === 'step' && marker.label !== undefined).sort((a, b) => a.t - b.t);
-  // a slip: a move that the next one undoes (back to the step before it) within the slip time
-  for (let i = 1; i + 1 < moves.length; ) {
-    if (moves[i + 1]!.label === moves[i - 1]!.label && moves[i + 1]!.t - moves[i]!.t < CHAPTER_SLIP_SECONDS) moves.splice(i, 2);
-    else i++;
-  }
   const starts: Omit<Chapter, 'end'>[] = [];
-  for (const move of moves) {
-    const step = script.find((item) => item.id === move.label);
-    const at = step && shownAt(spans, move.t);
-    if (!step || at === undefined) continue;
+  for (const { step, t } of stepMoves(script, markers)) {
+    const at = shownAt(spans, t);
+    if (at === undefined) continue;
     const last = starts.at(-1);
     if (last?.step === step.id) continue;
     // steps reached in a stretch the video leaves out start where it goes on: the last of them is what it shows

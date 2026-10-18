@@ -120,8 +120,13 @@ for (const click of cuttle.take.clicks) {
   125% expanded, animatable), `Space Grotesk`, `Bebas Neue`, `Fraunces` (a variable display serif)
   and `Instrument Serif` (upright and italic). Call `cuttle.ready(document.fonts.load('900 200px
   Archivo'))` before you measure text.
-- The theme as CSS variables: `--cuttle-accent`, `--cuttle-bg`, `--cuttle-fg`, `--cuttle-font`,
-  `--cuttle-mono`. Use them to match the project's look, or set your own palette.
+- The theme, the project's brand (project.md, `theme`), as CSS variables: `--cuttle-accent`,
+  `--cuttle-bg`, `--cuttle-fg`, `--cuttle-font`, `--cuttle-display` (the brand's heading font),
+  `--cuttle-mono`; and `cuttle.theme.name`, `url`, `logo` (a URL, or `""`) and `font`. Use them so
+  one brand set once reaches every page: headings in `var(--cuttle-display)`, loaded with
+  ``document.fonts.load(`800 100px "${cuttle.theme.font}"`)``, with `font-synthesis: none` (Bebas Neue
+  and Instrument Serif have one weight: they are not made bold); the name, URL and logo where a param
+  is left empty, as the templates do. Or set your own palette where the page asks for one.
 
 ## The take (what was recorded)
 

@@ -81,6 +81,26 @@ screen showed where; never edit it.
 | `audio` | `enabled` (`true`), `muteSpedUp` (`true`: sped-up clips are silent), `cleanup` (`true`: the cleaned-up mic plays, where there is one), `typing` (`true`: a key click for each key typed, where the clip is heard), `typingVolume` (`0.5`, 0 to 1), `effects` (`true`: the `sounds` and the music page's effects), `effectsVolume` (`0.8`, 0 to 1) |
 | `transition` | `enabled` (`true`: a crossfade between scenes), `duration` (`0.3` s, up to 2) |
 
+`theme` is the project's brand, which its motion pages read (every field is optional): `name` and
+`url` (the product's, for titles and end cards), `logo` (an image in the project, e.g.
+`brand/logo.svg`: copy a file the user gives you into `brand/` first), `accent` (the brand's
+colour; without it the cursor's), `foreground` (`#FFFFFF`: the text's), `background` (the tone pages
+draw their own background in; without it a dark tone of the look's background), `font` (the
+headings': `Archivo`, `Inter`, `Space Grotesk`, `Fraunces`, `Instrument Serif`, `Bebas Neue`) and
+`kit` (the brand kit it came from). The title, end card, lower third and captions templates use it:
+an empty title shows the name, and an end card without its own URL or logo shows the brand's.
+
+**Brand kits** keep a brand for the next video:
+- `cuttle --json brand list` lists them.
+- `cuttle -C "<project>" --json brand save "<name>"` keeps the project's theme, background, frame
+  style and cursor style and colour, with copies of the logo and background image.
+- `cuttle -C "<project>" --json brand apply "<name>"` sets them and copies the files into `brand/`
+  (cuttle.json.bak keeps the version before).
+- `cuttle --json brand remove "<name>"` removes one.
+
+When the user has kits, ask which one the video wears before you set the look by hand; the app's
+Look tab applies them too.
+
 Two clips where the second starts where the first ends (within 1 ms), as `suggest`'s speed-ups and
 any split make, are one continuous piece: no crossfade, zooms and texts run on across the cut, and
 the sound runs on where the speed stays the same (a speed change gets a 10 ms fade against clicks).
@@ -189,8 +209,10 @@ recording.
   after a jump: draw everything from `t` there and the frame is always right), and
   `ready(promise)` (the first frame waits for it: data, a model, images it loads late; fonts and
   `<img>`s are waited for anyway).
-- **The look** as CSS variables: `--cuttle-accent` (the cursor colour), `--cuttle-bg`,
-  `--cuttle-fg`, `--cuttle-font`, `--cuttle-mono`.
+- **The brand and the look** as CSS variables: `--cuttle-accent` (the brand's colour, else the
+  cursor's), `--cuttle-bg`, `--cuttle-fg`, `--cuttle-font`, `--cuttle-display` (the brand's heading
+  font), `--cuttle-mono`; and in `cuttle.theme`: `name`, `url`, `logo` (its URL in the page, or `""`)
+  and `font`.
 - **Transparent by default.** Where the page draws nothing, a scene shows the look's background and
   an overlay the video. A scene that wants its own background sets one on `body`.
 - **The size is the output's**: 1920×1080 for 16:9, 1080×1920 for 9:16. Lay out in `%`, `vw` and

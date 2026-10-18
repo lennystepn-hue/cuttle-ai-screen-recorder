@@ -96,6 +96,43 @@ describe('the document', () => {
     expect((faster.overlays as { duration: number }[])[0]!.duration).toBe(4);
   });
 
+  it('edits sounds as overlays of a moment: ids, a shift, a drag that sets only their moment, a copy, their level kept in 0–1', () => {
+    const raw = ensureIds({ ...base, sounds: [{ sound: 'whoosh', at: 4 }, { sound: 'pop', at: 0.5, scene: 's3' }] });
+    expect((raw.sounds as { id: string }[]).map((sound) => sound.id)).toEqual(['a1', 'a2']);
+    let next = applyCommand(raw, { type: 'shift', list: 'sounds', id: 'a1', by: -5 }, limits);
+    expect((next.sounds as { at: number }[])[0]!.at).toBe(0);
+    next = applyCommand(next, { type: 'set', list: 'sounds', id: 'a1', fields: { ...rangeFields('sounds', 4.5, 4.5), volume: 1.4 } }, limits);
+    expect((next.sounds as unknown[])[0]).toEqual({ sound: 'whoosh', at: 4.5, id: 'a1', volume: 1 });
+    next = applyCommand(next, { type: 'duplicate', list: 'sounds', id: 'a2', shift: 0.25 }, limits);
+    expect((next.sounds as { id: string; at: number; scene?: string }[]).map((sound) => [sound.id, sound.at, sound.scene])).toEqual([
+      ['a1', 4.5, undefined],
+      ['a2', 0.5, 's3'],
+      ['a3', 0.75, 's3'],
+    ]);
+    expect(describeChange(project(raw), project(next))).toBe('1 sound added · 1 sound changed');
+    expect(firstChanged(project(raw), project(next))).toEqual({ list: 'sounds', id: 'a1' });
+    // a scene takes its sounds along
+    const without = applyCommand(raw, { type: 'delete', list: 'scenes', id: 's3' }, limits);
+    expect((without.sounds as { id: string }[]).map((sound) => sound.id)).toEqual(['a1']);
+    expect(describeChange(project(raw), project(without))).toBe('1 scene removed · 1 sound removed');
+  });
+
+  it('sets the music: fields merged, levels kept in range, and removed', () => {
+    let next = applyCommand(base, { type: 'music', fields: { src: 'music/pulse/index.html' } }, limits);
+    expect(next.music).toEqual({ src: 'music/pulse/index.html' });
+    expect(describeChange(project(base), project(next))).toBe('music added');
+    next = applyCommand(next, { type: 'music', fields: { volume: 1.7, duck: 99, params: { bpm: 118 } } }, limits);
+    expect(next.music).toEqual({ src: 'music/pulse/index.html', volume: 1, duck: 40, params: { bpm: 118 } });
+    const off = applyCommand(next, { type: 'music', fields: { enabled: false, params: undefined } }, limits);
+    expect(off.music).toEqual({ src: 'music/pulse/index.html', volume: 1, duck: 40, enabled: false });
+    expect(describeChange(project(next), project(off))).toBe('the music changed');
+    const gone = applyCommand(off, { type: 'music', fields: null }, limits);
+    expect(gone.music).toBeUndefined();
+    expect(describeChange(project(off), project(gone))).toBe('the music removed');
+    // a music without its page does not parse
+    expect(() => applyCommand(base, { type: 'music', fields: { volume: 0.5 } }, limits)).toThrow(DocumentError);
+  });
+
   it('shifts overlays in source seconds, never before 0', () => {
     const next = applyCommand(base, { type: 'shift', list: 'zooms', id: 'z1', by: -10 }, limits);
     expect((next.zooms as { at: number }[])[0]!.at).toBe(0);

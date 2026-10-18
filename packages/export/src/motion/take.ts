@@ -14,13 +14,23 @@ export interface TakeInputs {
   markers: readonly Marker[];
 }
 
+/**
+ * A file of the project as a motion page reaches it (its session serves the project at
+ * `cuttle-motion://project/`), or null for one outside the project.
+ */
+export function projectFileUrl(path: string): string | null {
+  const parts = path.replace(/\\/g, '/').split('/').filter((part) => part !== '' && part !== '.');
+  if (/^([a-z]:|[\\/])/i.test(path) || parts.length === 0 || parts.includes('..')) return null;
+  return `cuttle-motion://project/${parts.map(encodeURIComponent).join('/')}`;
+}
+
 const tenth = (value: number) => Math.round(value * 10) / 10;
 const milli = (value: number) => Math.round(value * 1000) / 1000;
 
 /**
  * The take as a motion page sees it (`cuttle.take`): its input, words and markers, the project's
- * zooms and masks, where its clips are in the video, and the pointer's path as the video draws it.
- * `window` is an overlay's stretch of the take (source seconds).
+ * zooms and masks, where its clips are in the video, the pointer's path as the video draws it, and
+ * the screen recording's URL for its frames. `window` is an overlay's stretch of the take (source seconds).
  */
 export function takeData(project: CuttleProject, inputs: TakeInputs, screen: { width: number; height: number }, window: { from: number; to: number } | null): TakeData {
   const events: TakeData['events'] = [];
@@ -43,10 +53,11 @@ export function takeData(project: CuttleProject, inputs: TakeInputs, screen: { w
     words: applyCaptionFixes(inputs.words, project.captions.fixes).map(({ t, end, text }) => ({ t, end, text })),
     markers: inputs.markers.map(({ t, kind, label }) => ({ t, kind, ...(label !== undefined && { label }) })),
     zooms: project.zooms.filter((zoom) => zoom.enabled).map(({ at, duration, rect, label }) => ({ at, duration, rect, ...(label !== undefined && { label }) })),
-    masks: project.masks.filter((mask) => mask.enabled).map(({ from, to, rect }) => ({ from, to, rect })),
+    masks: project.masks.filter((mask) => mask.enabled).map(({ from, to, rect, style, moves }) => ({ from, to, rect, style, ...(moves?.length && { moves: moves.map(({ at, rect }) => ({ at, rect })) }) })),
     clips,
     cursor: cursorPath(inputs.events, project.look.cursor.smoothing),
     window,
+    recording: project.sources.screen === undefined ? null : projectFileUrl(project.sources.screen),
   };
 }
 

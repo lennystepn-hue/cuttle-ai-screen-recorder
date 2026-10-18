@@ -27,14 +27,20 @@ export interface TakeData {
   /** Claude's prompt, tools and answer, the marker key, slips. */
   markers: { t: number; kind: string; label?: string }[];
   zooms: { at: number; duration: number; rect: Rect; label?: string }[];
-  masks: { from: number; to: number; rect: Rect }[];
+  /** The privacy masks: `fill` or `blur`; one that follows text moves to each move's rect in turn. */
+  masks: { from: number; to: number; rect: Rect; style: string; moves?: { at: number; rect: Rect }[] }[];
   /** The clips as the video plays them: output seconds `start`–`end` show source `from`–`to` at `speed`. */
   clips: { start: number; end: number; from: number; to: number; speed: number }[];
   /** The pointer as the video draws it (smoothed), every 1/fps source second from `start`: x, y, x, y, … */
   cursor: { fps: number; start: number; points: number[] } | null;
   /** An overlay's stretch of the take (source seconds); null for a scene. */
   window: { from: number; to: number } | null;
+  /** The screen recording's URL in the page (for `frame`), or null without one. */
+  recording: string | null;
 }
+
+/** Where the take's frames are read: the kit's worker. */
+export const TAKE_WORKER = 'cuttle-motion://kit/take-worker.js';
 
 /** Where the frame being drawn shows the take: set before each frame of an overlay, empty for a scene. */
 export interface MotionView {
@@ -66,6 +72,8 @@ export interface MotionInit {
   /** Fonts every page has (the kit's): family, weight (a range for a variable font), style, width range and URL. */
   fonts: { family: string; weight: string; style: string; stretch?: string; src: string }[];
   take: TakeData | null;
+  /** The script that reads the take's frames (`TAKE_WORKER`; a test gives its own). */
+  takeWorker?: string;
 }
 
 /** A point of the screen recording in the frame: output px, and whether the frame shows it. */
@@ -85,6 +93,13 @@ export interface CuttleTake extends Omit<TakeData, 'cursor'> {
   toSource(output: number): number | null;
   /** The pointer at source second `source` (source px), as the video draws it, or null. */
   cursorAt(source: number): { x: number; y: number } | null;
+  /**
+   * The screen recording's frame at source second `source`, with the project's privacy masks drawn
+   * over it, `width` px wide (the recording's own size without): for a screen in 3D, a freeze, a lens.
+   * Await it in `onFrame` (the frame waits for an async draw); close a bitmap once it is drawn.
+   * Frames read forward fastest.
+   */
+  frame(source: number, options?: { width?: number }): Promise<ImageBitmap>;
   /** A point of the screen recording (source px) in this frame (output px), with the window, crop and zoom; null in a scene. */
   toScreen(x: number, y: number): ScreenPoint | null;
   /** The source second shown under the overlay now; null in a scene. */
@@ -115,8 +130,11 @@ export interface CuttleApi {
   readonly format: string;
   readonly params: Record<string, unknown>;
   readonly theme: Record<string, string>;
-  /** Calls `draw(seconds)` for every frame, before it is drawn (also after a seek): the surest way to animate. */
-  onFrame(draw: (seconds: number) => void): void;
+  /**
+   * Calls `draw(seconds)` for every frame, before it is drawn (also after a seek): the surest way to
+   * animate. A draw that returns a promise (it awaits a frame of the take) is waited for.
+   */
+  onFrame(draw: (seconds: number) => void | Promise<unknown>): void;
   /** Holds the first frame until `promise` settles (fonts, images, models). */
   ready(promise: Promise<unknown>): void;
   /** The take (empty lists when the item has no take). */
@@ -137,7 +155,7 @@ export function motionRuntime(init: MotionInit): void {
   let nextId = 1;
   const timers = new Map<number, Timer>();
   const frames = new Map<number, FrameRequestCallback>();
-  const drawers: ((seconds: number) => void)[] = [];
+  const drawers: ((seconds: number) => void | Promise<unknown>)[] = [];
   const holds: Promise<unknown>[] = [];
   const errors: string[] = [];
   page.__cuttleErrors = errors;
@@ -197,13 +215,16 @@ export function motionRuntime(init: MotionInit): void {
   const sight = () => {
     for (const animation of document.getAnimations()) if (!started.has(animation)) started.set(animation, now);
   };
-  const call = (fn: unknown, args: unknown[]) => {
+  /** Calls `fn`, noting what it throws; what it returns (a draw's promise). */
+  const call = (fn: unknown, args: unknown[]): unknown => {
+    let result: unknown;
     try {
-      if (typeof fn === 'function') fn(...args);
+      if (typeof fn === 'function') result = fn(...args);
     } catch (error) {
       note(error);
     }
     sight();
+    return result;
   };
 
   // the theme, as CSS variables on the root, and the kit's fonts (a constructed sheet works before the page is parsed)
@@ -216,7 +237,7 @@ export function motionRuntime(init: MotionInit): void {
   document.adoptedStyleSheets = [...document.adoptedStyleSheets, sheet];
 
   // the take
-  const data: TakeData = init.take ?? { screen: { width: init.width, height: init.height }, events: [], words: [], markers: [], zooms: [], masks: [], clips: [], cursor: null, window: null };
+  const data: TakeData = init.take ?? { screen: { width: init.width, height: init.height }, events: [], words: [], markers: [], zooms: [], masks: [], clips: [], cursor: null, window: null, recording: null };
   let view: MotionView = { source: null, zoom: null, content: null, cursor: null };
   const toScreen = (x: number, y: number): ScreenPoint | null => {
     const { zoom, content } = view;
@@ -225,6 +246,41 @@ export function motionRuntime(init: MotionInit): void {
     const sy = content[1] + ((y - zoom[1]) * content[3]) / zoom[3];
     return { x: sx, y: sy, inside: sx >= content[0] && sx <= content[0] + content[2] && sy >= content[1] && sy <= content[1] + content[3] };
   };
+  // the recording's frames: read in the kit's worker (off the page's clock), one request at a time
+  let reader: Worker | undefined;
+  let readerFailure: string | undefined;
+  let asked = 0;
+  const replies = new Map<number, { resolve: (bitmap: ImageBitmap) => void; reject: (error: Error) => void }>();
+  const failAll = (message: string) => {
+    readerFailure = message;
+    for (const reply of replies.values()) reply.reject(new Error(message));
+    replies.clear();
+  };
+  const frameOf = (source: number, options: { width?: number } = {}): Promise<ImageBitmap> => {
+    if (!data.recording || !init.takeWorker) return Promise.reject(new Error('this item has no screen recording to take frames from'));
+    if (readerFailure) return Promise.reject(new Error(readerFailure));
+    if (!reader) {
+      // a worker must come from the page's own origin: a module of the page's that imports the kit's
+      const boot = URL.createObjectURL(new Blob([`import ${JSON.stringify(init.takeWorker)};`], { type: 'text/javascript' }));
+      reader = new Worker(boot, { type: 'module' });
+      reader.onmessage = (event: MessageEvent<{ id: number; bitmap?: ImageBitmap; error?: string }>) => {
+        const { id, bitmap, error } = event.data;
+        const reply = replies.get(id);
+        replies.delete(id);
+        if (bitmap) reply?.resolve(bitmap);
+        else reply?.reject(new Error(error ?? 'no frame'));
+      };
+      reader.onerror = (event) => failAll(`the take's frames could not be read: ${event.message || 'the reader failed'}`);
+      reader.postMessage({ type: 'open', url: data.recording, masks: data.masks, screen: data.screen });
+    }
+    const id = ++asked;
+    const width = options.width === undefined ? undefined : Math.max(1, Math.round(Number(options.width)));
+    return new Promise((resolve, reject) => {
+      replies.set(id, { resolve, reject });
+      reader!.postMessage({ type: 'frame', id, source: Number(source), width });
+    });
+  };
+
   const { cursor: path, ...takeFields } = data;
   const take: CuttleTake = {
     ...takeFields,
@@ -247,6 +303,7 @@ export function motionRuntime(init: MotionInit): void {
       const p = path.points;
       return { x: p[2 * i]! + (p[2 * j]! - p[2 * i]!) * f, y: p[2 * i + 1]! + (p[2 * j + 1]! - p[2 * i + 1]!) * f };
     },
+    frame: frameOf,
     toScreen,
     get source() {
       return view.source;
@@ -321,13 +378,12 @@ export function motionRuntime(init: MotionInit): void {
 
   let frame = 0;
   /**
-   * Moves the clock to `ms` (never back) and draws: due timers in order, one animation frame, every
-   * animation to its time. `next` is the frame's view of the take (an overlay's). Answers with the
-   * draw's number, which the marker shows.
+   * Moves the clock to `ms` (never back) and draws: due timers in order, one animation frame (and
+   * the draws it returns promises for), every animation to its time. `next` is the frame's view of
+   * the take (an overlay's). Answers with the draw's number, which the marker shows.
    */
   page.__cuttleDraw = (ms: number, next?: MotionView): Promise<number> => {
     if (next) view = next;
-    mark(++frame);
     sight();
     const target = Math.max(now, ms);
     for (let fired = 0; ; fired++) {
@@ -345,14 +401,25 @@ export function motionRuntime(init: MotionInit): void {
       call(timer.fn, timer.args);
     }
     now = target;
-    for (const draw of drawers) call(draw, [now / 1000]);
+    // a draw that returns a promise (it awaits a frame of the take) is waited for, the clock held
+    const waits: Promise<unknown>[] = [];
+    const awaited = (result: unknown) => {
+      if (result && typeof (result as Promise<unknown>).then === 'function') waits.push(Promise.resolve(result).catch(note));
+    };
+    for (const draw of drawers) awaited(call(draw, [now / 1000]));
     const callbacks = [...frames.values()];
     frames.clear();
-    for (const fn of callbacks) call(fn, [now]);
-    for (const animation of document.getAnimations()) {
-      animation.pause();
-      animation.currentTime = (now - (started.get(animation) ?? now)) * (animation.playbackRate || 1);
-    }
-    return new Promise((resolve) => realFrame(() => realFrame(() => resolve(frame))));
+    for (const fn of callbacks) awaited(call(fn, [now]));
+    // the marker changes with the drawing, once it is all drawn: no paint before shows the new number
+    const settle = () => {
+      mark(++frame);
+      sight();
+      for (const animation of document.getAnimations()) {
+        animation.pause();
+        animation.currentTime = (now - (started.get(animation) ?? now)) * (animation.playbackRate || 1);
+      }
+      return new Promise<number>((resolve) => realFrame(() => realFrame(() => resolve(frame))));
+    };
+    return waits.length === 0 ? settle() : Promise.all(waits).then(settle);
   };
 }

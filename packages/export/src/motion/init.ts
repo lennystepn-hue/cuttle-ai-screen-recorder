@@ -1,5 +1,5 @@
 import type { BackgroundPreset, CuttleProject, MotionOverlay, MotionScene } from '@cuttle/project';
-import type { MotionInit } from './runtime';
+import { TAKE_WORKER, type MotionInit } from './runtime';
 
 /** A dark tone of each background preset, for pages that draw their own background. */
 const BACKGROUND_TONES: Record<BackgroundPreset, string> = {
@@ -69,5 +69,6 @@ export function motionInit(
     seed: motionSeed(item.id ?? name),
     fonts: context.fonts,
     take: context.take,
+    takeWorker: TAKE_WORKER,
   };
 }

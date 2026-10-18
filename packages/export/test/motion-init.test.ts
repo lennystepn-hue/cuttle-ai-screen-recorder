@@ -52,6 +52,8 @@ describe('motion pages are told', () => {
       seed: motionSeed('scenes[0]'),
       fonts,
       take: null,
+      // the take's frames are read by the kit's worker
+      takeWorker: 'cuttle-motion://kit/take-worker.js',
     });
     expect(motionInit(p, { ...scene, id: 's7' }, 'scenes[0]', { start: 0, duration: 2 }, context).seed).toBe(motionSeed('s7'));
   });

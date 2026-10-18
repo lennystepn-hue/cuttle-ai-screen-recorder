@@ -94,12 +94,20 @@ export const CONTINUOUS_CUT_SECONDS = 1e-3;
 /**
  * Half the crossfade between neighbouring spans `a` and `b`, in output seconds: half the look's
  * transition, but at most half of either span; none at a continuous cut, at a cut (`cuts`), or
- * with transitions off.
+ * with transitions off. A scene with a transition page of its own (`b.scene.transition`) is gone
+ * into with that page, as long as it says, also with the look's crossfades off.
  * The picture and the export's sound share it.
  */
 export function crossfadeHalf(a: SceneSpan, b: SceneSpan, transition: { enabled: boolean; duration: number }): number {
-  if (!transition.enabled || b.cutBefore || isContinuousCut(a.scene, b.scene)) return 0;
-  return Math.min(transition.duration / 2, (a.end - a.start) / 2, (b.end - b.start) / 2);
+  if (b.cutBefore || isContinuousCut(a.scene, b.scene)) return 0;
+  const own = b.scene.transition?.enabled ? b.scene.transition : undefined;
+  if (!own && !transition.enabled) return 0;
+  return Math.min((own ?? transition).duration / 2, (a.end - a.start) / 2, (b.end - b.start) / 2);
+}
+
+/** Whether the way from span `a` into span `b` is the page of `b`'s transition (not a crossfade). */
+export function pageTransition(a: SceneSpan, b: SceneSpan, transition: { enabled: boolean; duration: number }): boolean {
+  return b.scene.transition?.enabled === true && crossfadeHalf(a, b, transition) > 0;
 }
 
 /**

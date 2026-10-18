@@ -152,10 +152,32 @@ const named = {
 
 const autoKind = z.enum(AUTO_KINDS).optional();
 
+/** A page (HTML, in the project) as a value its params may hold: text, a number, a switch, a colour, a path. */
+const ParamValue = z.union([z.string(), z.number(), z.boolean(), z.null()]);
+
+/**
+ * A page that takes the place of the crossfade into its scene (a fold, a wipe, a zoom through): it is
+ * given the outgoing and the incoming frame for each of its frames and draws the frame between them.
+ * It lasts `duration` seconds around the cut, half before and half after, also with crossfades off.
+ */
+const SceneTransitionSchema = z.strictObject({
+  /** The page: an HTML file in the project (`motion/fold/index.html`). */
+  src: z.string().min(1),
+  /** The values of the params the page declares. */
+  params: z.record(z.string(), ParamValue).default({}),
+  /** Let the page reach https: (off: only the project's files). */
+  network: z.boolean().default(false),
+  duration: z.number().positive().max(4).default(0.8),
+  enabled: z.boolean().default(true),
+});
+
+/** What every scene may have: an id, a label, and a page for the way into it. */
+const sceneFields = { ...named, transition: SceneTransitionSchema.optional() };
+
 const ClipSceneSchema = z
   .strictObject({
     type: z.literal('clip'),
-    ...named,
+    ...sceneFields,
     from: seconds,
     to: seconds,
     speed: z.number().positive().max(64).default(1),
@@ -167,7 +189,7 @@ const ClipSceneSchema = z
 
 const StillSceneSchema = z.strictObject({
   type: z.literal('still'),
-  ...named,
+  ...sceneFields,
   image: z.string().min(1),
   duration: positiveSeconds,
   motion: z.enum(STILL_MOTIONS).default('none'),
@@ -176,14 +198,11 @@ const StillSceneSchema = z.strictObject({
 
 const CardSceneSchema = z.strictObject({
   type: z.literal('card'),
-  ...named,
+  ...sceneFields,
   title: z.string().min(1),
   subtitle: z.string().optional(),
   duration: positiveSeconds,
 });
-
-/** A page (HTML, in the project) as a value its params may hold: text, a number, a switch, a colour, a path. */
-const ParamValue = z.union([z.string(), z.number(), z.boolean(), z.null()]);
 
 /** What a motion page gets: the page (a path in the project), its params, and whether it may reach the network. */
 const motionPage = {
@@ -208,7 +227,7 @@ const motionPage = {
 /** A page Claude or the person wrote, rendered frame by frame as a scene (an intro, an end card, a 3D shot). */
 const MotionSceneSchema = z.strictObject({
   type: z.literal('motion'),
-  ...named,
+  ...sceneFields,
   ...motionPage,
   duration: positiveSeconds,
 });
@@ -445,6 +464,7 @@ export type StillScene = Extract<Scene, { type: 'still' }>;
 export type CardScene = Extract<Scene, { type: 'card' }>;
 export type MotionScene = Extract<Scene, { type: 'motion' }>;
 export type MotionOverlay = CuttleProject['overlays'][number];
+export type SceneTransition = NonNullable<Scene['transition']>;
 export type Music = NonNullable<CuttleProject['music']>;
 export type Sound = CuttleProject['sounds'][number];
 export type Zoom = CuttleProject['zooms'][number];

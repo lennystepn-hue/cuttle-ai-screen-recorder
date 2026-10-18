@@ -4,6 +4,7 @@ export {
   MIN_PIECE_SECONDS,
   clipPieces,
   crossfadeHalf,
+  pageTransition,
   isContinuousCut,
   sceneDuration,
   sceneSpans,
@@ -17,7 +18,7 @@ export { occurrences, rampAmount, type Occurrence } from './occurrences';
 export { ZOOM_MOVE_SECONDS, ZOOM_RAMP_SECONDS, fitZoomRect, zoomRectAt, zoomTargetAt } from './zoom';
 export { TEXT_FADE_SECONDS, activeMasks, activeTexts, badgeFor, maskRectAt, type ActiveText } from './overlays';
 export { CLICK_EFFECT_SECONDS, createCursorTrack, cursorAt, smoothedPath, type CursorFrame, type CursorTrack } from './cursor';
-export { createTimeline, type ActiveOverlay, type RenderState, type SceneFrame, type Timeline, type TimelineOptions } from './frame';
+export { createTimeline, type ActiveOverlay, type ActiveTransition, type RenderState, type SceneFrame, type Timeline, type TimelineOptions } from './frame';
 export {
   CAPTION_RULES,
   applyCaptionFixes,

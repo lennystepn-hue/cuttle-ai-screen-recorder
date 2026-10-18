@@ -120,6 +120,10 @@ const AudioSchema = z.strictObject({
   typing: z.boolean().default(true),
   /** The clicks' volume, 0 to 1. */
   typingVolume: z.number().min(0).max(1).default(0.5),
+  /** The sounds (`sounds`) and the music page's effects. */
+  effects: z.boolean().default(true),
+  /** Their volume, 0 to 1. */
+  effectsVolume: z.number().min(0).max(1).default(0.8),
 });
 
 const TransitionSchema = z.strictObject({
@@ -325,6 +329,39 @@ const MotionOverlaySchema = z.strictObject({
   enabled: z.boolean().default(true),
 });
 
+/**
+ * The video's music: a page that composes it in WebAudio for this video (`music/<name>/index.html`),
+ * from the video's scenes, cuts, clicks, typing and words. It is rendered as long as the video,
+ * follows every edit, and goes down under speech.
+ */
+const MusicSchema = z.strictObject({
+  /** The page: an HTML file in the project. */
+  src: z.string().min(1),
+  /** The values of the params the page declares. */
+  params: z.record(z.string(), ParamValue).default({}),
+  /** Let the page reach https: (off: only the project's files). */
+  network: z.boolean().default(false),
+  /** Its level, 0 to 1. */
+  volume: z.number().min(0).max(1).default(0.8),
+  /** How far it goes down under speech, in dB (0: it does not). */
+  duck: z.number().min(0).max(40).default(12),
+  enabled: z.boolean().default(true),
+});
+
+/**
+ * A sound at a moment: a built-in sound (`whoosh`, `pop`; `cuttle sound list`) or a file in the
+ * project (`sounds/ding.wav`). At a source second it plays wherever the video shows that moment (and
+ * not where it is cut); with `scene` (an id) it plays `at` seconds into that scene.
+ */
+const SoundSchema = z.strictObject({
+  ...named,
+  sound: z.string().min(1),
+  at: seconds,
+  scene: z.string().regex(ID_PATTERN).optional(),
+  volume: z.number().min(0).max(1).default(0.8),
+  enabled: z.boolean().default(true),
+});
+
 export const ProjectSchema = z
   .strictObject({
     version: z.literal(CURRENT_VERSION),
@@ -337,6 +374,8 @@ export const ProjectSchema = z
     texts: z.array(TextSchema).default([]),
     overlays: z.array(MotionOverlaySchema).default([]),
     cuts: z.array(CutSchema).default([]),
+    music: MusicSchema.optional(),
+    sounds: z.array(SoundSchema).default([]),
     autoEdits: AutoEditsSchema.prefault({}),
     captions: CaptionsSchema.prefault({}),
     privacy: PrivacySchema.prefault({}),
@@ -344,7 +383,7 @@ export const ProjectSchema = z
   // Runs once everything else is valid (see the note above BackgroundSchema).
   .superRefine((project, ctx) => {
     const seen = new Map<string, string>();
-    for (const list of ['scenes', 'zooms', 'masks', 'texts', 'overlays', 'cuts'] as const) {
+    for (const list of ['scenes', 'zooms', 'masks', 'texts', 'overlays', 'cuts', 'sounds'] as const) {
       project[list].forEach((item: { id?: string }, index) => {
         if (item.id === undefined) return;
         const first = seen.get(item.id);
@@ -352,6 +391,11 @@ export const ProjectSchema = z
         else ctx.addIssue({ code: 'custom', message: `the id "${item.id}" is already used by ${first}`, path: [list, index, 'id'] });
       });
     }
+    project.sounds.forEach((sound, index) => {
+      if (sound.scene !== undefined && !project.scenes.some((scene) => scene.id === sound.scene)) {
+        ctx.addIssue({ code: 'custom', message: `no scene has the id "${sound.scene}"`, path: ['sounds', index, 'scene'] });
+      }
+    });
   });
 
 // One line of events.jsonl. Times are source seconds (seconds since the screen track started).
@@ -401,6 +445,8 @@ export type StillScene = Extract<Scene, { type: 'still' }>;
 export type CardScene = Extract<Scene, { type: 'card' }>;
 export type MotionScene = Extract<Scene, { type: 'motion' }>;
 export type MotionOverlay = CuttleProject['overlays'][number];
+export type Music = NonNullable<CuttleProject['music']>;
+export type Sound = CuttleProject['sounds'][number];
 export type Zoom = CuttleProject['zooms'][number];
 export type ZoomMove = NonNullable<Zoom['moves']>[number];
 export type WindowKind = (typeof WINDOW_KINDS)[number];

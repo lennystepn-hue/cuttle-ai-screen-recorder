@@ -29,13 +29,36 @@ describe('ProjectSchema', () => {
     expect(p.look.frame).toEqual({ enabled: true, style: 'mac-dark', title: '', radius: 14, shadow: true });
     expect(p.look.cursor).toEqual({ enabled: true, style: 'system', size: 1, color: '#D97757', clickEffect: 'ripple', smoothing: 0.5 });
     expect(p.look.webcam).toEqual({ enabled: false, shape: 'circle', corner: 'bottom-left', size: 0.18, border: true, shadow: true, mirror: false });
-    expect(p.look.audio).toEqual({ enabled: true, muteSpedUp: true, cleanup: true, typing: true, typingVolume: 0.5 });
+    expect(p.look.audio).toEqual({ enabled: true, muteSpedUp: true, cleanup: true, typing: true, typingVolume: 0.5, effects: true, effectsVolume: 0.8 });
     expect(p.look.transition).toEqual({ enabled: true, duration: 0.3 });
     expect(p.scenes).toEqual([]);
     expect(p.zooms).toEqual([]);
     expect(p.masks).toEqual([]);
     expect(p.texts).toEqual([]);
     expect(p.overlays).toEqual([]);
+    expect(p.music).toBeUndefined();
+    expect(p.sounds).toEqual([]);
+  });
+
+  it("takes the video's music and its sounds, with their defaults", () => {
+    const p = ProjectSchema.parse({
+      ...minimal,
+      scenes: [{ type: 'card', id: 's1', title: 'Hi', duration: 2 }],
+      music: { src: 'music/pulse/index.html', params: { key: 'E', bpm: 0, hits: true } },
+      sounds: [{ id: 'a1', sound: 'whoosh', at: 3.5 }, { sound: 'sounds/ding.wav', at: 0.4, scene: 's1', volume: 0.5, label: 'Done' }],
+    });
+    expect(p.music).toEqual({ src: 'music/pulse/index.html', params: { key: 'E', bpm: 0, hits: true }, network: false, volume: 0.8, duck: 12, enabled: true });
+    expect(p.sounds).toEqual([
+      { id: 'a1', sound: 'whoosh', at: 3.5, volume: 0.8, enabled: true },
+      { sound: 'sounds/ding.wav', at: 0.4, scene: 's1', volume: 0.5, label: 'Done', enabled: true },
+    ]);
+  });
+
+  it("rejects a sound in a scene that does not exist, a sound's id used elsewhere, and levels out of range", () => {
+    expect(pathsOf({ ...minimal, sounds: [{ sound: 'pop', at: 1, scene: 's9' }] })).toEqual(['sounds.0.scene']);
+    expect(pathsOf({ ...minimal, scenes: [{ type: 'card', id: 'x', title: 'Hi', duration: 2 }], sounds: [{ id: 'x', sound: 'pop', at: 1 }] })).toEqual(['sounds.0.id']);
+    expect(pathsOf({ ...minimal, music: { src: 'm.html', volume: 2, duck: -1 } })).toEqual(['music.volume', 'music.duck']);
+    expect(pathsOf({ ...minimal, music: { volume: 0.5 } })).toEqual(['music.src']);
   });
 
   it('parses the spec example and applies item defaults', () => {

@@ -1,8 +1,9 @@
-import { clipView, type FrameSources } from '@cuttle/engine';
+import type { FrameSources } from '@cuttle/engine';
 import type { CuttleProject } from '@cuttle/project';
-import type { RenderState, SceneFrame, SceneSpan } from '@cuttle/timeline';
+import type { RenderState, SceneSpan } from '@cuttle/timeline';
 import type { FramePlan, OverlayPlan, ScenePlan } from '../frame-plan';
 import type { MotionFrameRequest, MotionPixels } from '../job';
+import { motionNeeds, type MotionNeed } from '../motion/requests';
 import type { MotionView } from '../motion/runtime';
 import { host, PageError } from './host';
 import { loadImage } from './images';
@@ -89,7 +90,6 @@ export class SceneSources {
   /** Motion overlays' showings, by `ActiveOverlay.key`. */
   private readonly overlays = new Map<string, { plan: OverlayPlan; source: MotionSource }>();
   private readonly pendingOverlays: OverlayPlan[];
-  private readonly fps: number;
   /** The last frame of the video (or of the stills). */
   private readonly lastFrame: number;
   private readonly sources: FrameSources = { screens: new Map(), webcams: new Map(), stills: new Map(), motion: new Map(), overlays: new Map() };
@@ -102,26 +102,18 @@ export class SceneSources {
   ) {
     this.pending = [...plan.scenes];
     this.pendingOverlays = [...plan.overlays].sort((a, b) => a.firstFrame - b.firstFrame);
-    this.fps = plan.fps;
     this.lastFrame = Math.max(0, ...plan.scenes.map((scene) => scene.lastFrame));
   }
 
-  /** A clip layer's view of the take, for its overlays: where the take is in the frame. */
-  private viewOf(layer: SceneFrame): MotionView {
-    const { project } = this.motion;
-    const { zoom, content } = clipView(project.output, project.look, layer, this.screenSize);
-    return { source: layer.sourceTime ?? null, zoom, content, cursor: layer.cursor ? { x: layer.cursor.x, y: layer.cursor.y } : null };
+  /** The open showing a motion frame comes from. */
+  private sourceOf(need: MotionNeed): MotionSource | undefined {
+    return need.request.kind === 'scene' ? this.open.get(need.request.index)?.motion : this.overlays.get(need.request.key.slice('overlay:'.length))?.source;
   }
 
-  /** Each motion item's frame on output frame `frame`, with its view: `each(source, n, view)`. */
-  private eachMotion(frame: number, each: (source: MotionSource, n: number, view: MotionView | undefined) => void): void {
-    for (const layer of this.motion.stateAt(frame).layers) {
-      const scene = this.open.get(layer.sceneIndex)?.motion;
-      if (scene) each(scene, Math.round(layer.local * this.fps), undefined);
-      for (const overlay of layer.overlays) {
-        const open = this.overlays.get(overlay.key);
-        if (open) each(open.source, Math.round(overlay.local * this.fps), this.viewOf(layer));
-      }
+  /** Asks each motion item on output frame `frame` for that frame, ahead of time. */
+  private askAhead(frame: number): void {
+    for (const need of motionNeeds(this.motion.project, this.motion.spans, this.motion.stateAt(frame), this.screenSize)) {
+      this.sourceOf(need)?.ahead(need.request.frame, need.request.view);
     }
   }
 
@@ -186,7 +178,7 @@ export class SceneSources {
       opened.add(plan.firstFrame);
     }
     // a motion item's page opens and draws its first frame while the frames before it are made
-    for (const first of opened) if (first > frame) this.eachMotion(first, (source, n, view) => source.ahead(n, view));
+    for (const first of opened) if (first > frame) this.askAhead(first);
     const { screens, webcams, stills, motion, overlays } = this.sources;
     screens.clear();
     webcams.clear();
@@ -211,17 +203,17 @@ export class SceneSources {
         if (webcamFrame) webcams.set(layer.index, webcamFrame);
       } else if (scene.still) {
         stills.set(layer.index, await scene.still);
-      } else if (scene.motion) {
-        motion.set(layer.index, await scene.motion.frame(Math.round(layer.local * this.fps), undefined));
-      }
-      for (const overlay of layer.overlays) {
-        const open = this.overlays.get(overlay.key);
-        if (!open) throw new Error(`overlays[${overlay.index}] shows on frame ${frame}, outside its planned frames`);
-        overlays.set(overlay.key, await open.source.frame(Math.round(overlay.local * this.fps), this.viewOf(layer)));
       }
     }
+    for (const need of motionNeeds(this.motion.project, this.motion.spans, state, this.screenSize)) {
+      const source = this.sourceOf(need);
+      if (!source) throw new Error(`${need.request.kind === 'scene' ? 'scenes' : 'overlays'}[${need.request.index}] shows on frame ${frame}, outside its planned frames`);
+      const pixels = await source.frame(need.request.frame, need.request.view);
+      if (need.target.kind === 'scene') motion.set(need.target.layer, pixels);
+      else overlays.set(need.target.key, pixels);
+    }
     // the pages draw the next frame while this one is drawn and encoded
-    if (this.motion.ahead && frame < this.lastFrame) this.eachMotion(frame + 1, (source, n, view) => source.ahead(n, view));
+    if (this.motion.ahead && frame < this.lastFrame) this.askAhead(frame + 1);
     return this.sources;
   }
 

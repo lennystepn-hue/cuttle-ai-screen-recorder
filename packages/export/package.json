@@ -7,7 +7,9 @@
     ".": "./src/index.ts",
     "./frame-plan": "./src/frame-plan.ts",
     "./track-reader": "./src/page/track-reader.ts",
-    "./formats": "./src/formats.ts"
+    "./formats": "./src/formats.ts",
+    "./motion-requests": "./src/motion/requests.ts",
+    "./motion-params": "./src/motion/params.ts"
   },
   "dependencies": {
     "@cuttle/engine": "workspace:*",

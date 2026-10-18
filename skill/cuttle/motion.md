@@ -8,8 +8,9 @@ SVG, WebGL, Three.js or all of them at once. Make it look like the work of a gre
 
 ## Two kinds of video
 
-- **Over a recording:** motion scenes between the clips (an intro, a chapter card, an end card) and
-  overlays over them (a lower third, callouts on the clicks, captions on the words).
+- **Over a recording:** motion scenes between the clips (an intro, a chapter card, an end card),
+  overlays over them (a lower third, callouts on the clicks, captions on the words), and
+  transitions between scenes (a fold, a wipe, a zoom through) in place of the crossfade.
 - **Without a recording:** a promo, a showreel, an explainer made only of motion scenes. Run
   `cuttle init "<folder>"`, write the pages, add them as `motion` scenes, render. A project without
   clips needs no take.
@@ -19,8 +20,8 @@ SVG, WebGL, Three.js or all of them at once. Make it look like the work of a gre
 1. Write the page in the project: `motion/<name>/index.html`, with its scripts, images and data next
    to it (or shared, `motion/shared.js`, imported as `../shared.js`). Or start from a template:
    `cuttle -C "<project>" --json motion new <template>` (title, end-card, code-typing, device-3d,
-   lower-third, click-callouts, kinetic-captions; `cuttle --json motion templates` says what each
-   shows); it
+   fold, lower-third, click-callouts, kinetic-captions; `cuttle --json motion templates` says what
+   each shows; a transition takes `--into <scene id>`); it
    copies the page and adds it to cuttle.json. Then change the copy as much as you like. Most
    templates make their sounds (a whoosh with the title, a pop on each callout, keys while code
    types); their `sounds` param switches them off.
@@ -64,6 +65,23 @@ page in `motion/` you did not write.
   `"network": true`. Image params are paths in the project folder: use them as `/<path>`.
 - **Sound by asking:** a page plays nothing itself (no `<audio>`, no WebAudio); it asks Cuttle for
   sounds, which play with the project's (see below).
+
+## Transitions between scenes
+
+A transition is a page on the scene it leads into, `"transition": { "src": "motion/fold/index.html",
+"duration": 0.9 }`. It plays around the cut, half before and half after, in place of the crossfade
+(also with crossfades off). Each frame it is given the two scenes as the video draws them, the
+look, the window and the cursor in:
+
+- `cuttle.from` and `cuttle.to`: the outgoing and the incoming frame, `ImageBitmap`s at the output's
+  size (a Three.js texture: `flipY = false`); new ones every frame, so do not close them;
+- `cuttle.progress`: 0 to 1 through the transition.
+
+Draw the whole frame from them: at 0 it should look like `from`, at 1 like `to`, so the cut is
+seamless. `fold` turns the outgoing frame over its middle like a page. `motion check` shows a
+transition in the video, between its two scenes. A first scene, or one right after a cut, has
+nothing to go between. The editor shows a crossfade where a transition is, for now; the export
+and `cuttle preview` draw the page.
 
 ## Sounds from the page
 
@@ -149,7 +167,8 @@ cuttle.onFrame(() => {
 ## Motion that feels designed
 
 - Hard cuts between full scenes are strong (set `look.transition.enabled: false` for a reel);
-  crossfades suit calmer videos.
+  crossfades suit calmer videos; a transition page marks a real change (into the result, into
+  the end card). One or two a video, not at every cut.
 - Give fast motion **motion blur**: `"motionBlur": { "samples": 8, "shutter": 0.5 }` on the item
   renders 8 moments per frame while the shutter is open (8× the time) and averages them.
 - Ease everything (`ease.outExpo` in, `ease.in` out), stagger groups, let shapes overshoot

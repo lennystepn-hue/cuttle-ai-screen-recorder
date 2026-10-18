@@ -143,6 +143,11 @@ sets both on what it makes (`s1`, `z1`; "Prompt", "Claude at work", "Waiting", "
 them when you edit an item; give a new item an id no other item uses (`s7`, `m2`, `c3`) and a
 short label.
 
+Every scene may also have a `transition`: the page it is gone into with, in place of the crossfade,
+`{ "src": "motion/fold/index.html", "duration": 0.9 }` with `params`, `network` (`false`) and
+`enabled` (`true`); `duration` (`0.8`, up to 4 s) is around the cut, half before and half after,
+also with the look's crossfades off. [motion.md](motion.md) has how such a page is written.
+
 **Automatic items.** Cuttle tags what it makes on its own with `auto` (on a zoom, mask, cut or a
 clip's `crop`): `answer` and `click` zooms from `suggest`, and later `crop`, `privacy`,
 `notification`, `retake`, `filler`, `pause`, `length`, `typing` and `dialog`. A rerun replaces
@@ -167,7 +172,7 @@ sounds as they render (`cuttle.sound`, motion.md); those are not in `sounds`.
 
 ## Motion pages
 
-A motion scene or overlay is a web page in the project folder, usually `motion/<name>/index.html`
+A motion scene, overlay or transition is a web page in the project folder, usually `motion/<name>/index.html`
 with its own CSS, scripts, images and fonts next to it. Anything a browser draws works: HTML and
 CSS, SVG, a canvas, WebGL, Three.js and Lottie from the kit. Cuttle renders it frame by frame, the
 same in every render. [motion.md](motion.md) is the guide: the kit, the take as a page sees it

@@ -1,6 +1,9 @@
 {
   "name": "cuttle",
   "private": true,
+  "description": "Cuttle, the AI screen recorder that edits itself: record your screen or Claude Code at work, get a polished demo video.",
+  "license": "MIT",
+  "repository": "github:lennystepn-hue/cuttle-ai-screen-recorder",
   "type": "module",
   "packageManager": "pnpm@11.20.0",
   "scripts": {

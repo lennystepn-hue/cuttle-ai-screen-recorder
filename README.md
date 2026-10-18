@@ -115,7 +115,8 @@ that is open in the app ("Record again" records it there).
 **Recording.** "New recording" on the pill, in the tray (the menu bar on macOS), or Ctrl+Shift+Alt+R
 (Ctrl+Shift+Option+R on a Mac) shows a picker over every display: the window under the pointer lights up (the display where there is none), a drag draws a
 region, and the bar sets the camera, the mic and when to stop (your stop, Claude's answer, an idle
-screen). After the countdown only a small HUD remains, which never appears in the video;
+screen). After the countdown only a small HUD remains, which never appears in the video; with a
+mic, its bars show the mic's level, so a mic that hears nothing shows at once;
 Ctrl+Shift+Alt+S stops and Ctrl+Shift+Alt+M sets a marker. The bar's Script holds the steps of
 the demo (a title each, and what to say; a pasted list becomes steps). While recording, a prompter
 by the HUD shows the step now, its note and the step after it, never in the video:

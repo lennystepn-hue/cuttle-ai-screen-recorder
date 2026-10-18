@@ -10,7 +10,8 @@
     "./formats": "./src/formats.ts",
     "./motion-requests": "./src/motion/requests.ts",
     "./motion-params": "./src/motion/params.ts",
-    "./music-duck": "./src/music/duck.ts"
+    "./music-duck": "./src/music/duck.ts",
+    "./svg": "./src/svg.ts"
   },
   "dependencies": {
     "@cuttle/engine": "workspace:*",

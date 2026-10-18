@@ -95,6 +95,7 @@ export async function renderStills(opts: StillsOptions): Promise<StillsResult> {
     ...(sources.transcript && { transcript: sources.transcript }),
     stills: sources.stills,
     backgroundImage: sources.backgroundImage,
+    watermarkImage: sources.watermarkImage,
     ...(motionFiles && { motion: motionFiles }),
     times: opts.times,
     ...(columns !== undefined && { sheet: { columns } }),
@@ -111,7 +112,7 @@ export async function renderStills(opts: StillsOptions): Promise<StillsResult> {
 
   const cancel = whenCancelled(opts.signal);
   const guard = watchdog();
-  const images = [...Object.values(sources.stills), ...(sources.backgroundImage ? [sources.backgroundImage] : [])];
+  const images = [...Object.values(sources.stills), ...[sources.backgroundImage, sources.watermarkImage].filter((path): path is string => path !== undefined)];
   // Reads only: stills mode writes PNGs through writeStill, never into a video file.
   const host = new FileHost([...(sources.screen ? [sources.screen] : []), ...(sources.webcam ? [sources.webcam.path] : [])], join(outDir, '.unused'), images);
   let window: ExportWindow | undefined;

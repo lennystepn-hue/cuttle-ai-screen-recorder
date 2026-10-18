@@ -1,3 +1,4 @@
+import { isSvg, svgBitmap } from '../svg';
 import { host, PageError } from './host';
 
 /**
@@ -5,7 +6,10 @@ import { host, PageError } from './host';
  * `maxSize` on its longer side (the GPU's MAX_TEXTURE_SIZE) when it is larger.
  */
 export async function loadImage(path: string, maxSize: number, what: string): Promise<ImageBitmap> {
-  const blob = new Blob([(await host().readFile(path)) as Uint8Array<ArrayBuffer>]);
+  const bytes = (await host().readFile(path)) as Uint8Array<ArrayBuffer>;
+  // an SVG (a logo): drawn by an image, at a size of its own
+  if (isSvg(path)) return svgBitmap(bytes).catch((error: Error) => Promise.reject(new PageError('invalid-media', `${what} is not an SVG this build can draw (${error.message}): ${path}`)));
+  const blob = new Blob([bytes]);
   const options: ImageBitmapOptions = { premultiplyAlpha: 'premultiply', imageOrientation: 'from-image' };
   let bitmap: ImageBitmap;
   try {

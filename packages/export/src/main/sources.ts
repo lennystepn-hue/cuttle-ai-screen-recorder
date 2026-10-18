@@ -35,6 +35,8 @@ export interface ProjectSources {
   transcript?: TranscriptWord[];
   stills: Record<number, string>;
   backgroundImage?: string;
+  /** The watermark's image, when it is on: its own, else the brand's logo. */
+  watermarkImage?: string;
   /** The motion items' pages, when the project has any, and the take as they see it. */
   motion?: MotionPages;
   motionTake?: TakeInputs;
@@ -169,7 +171,7 @@ export async function loadSources(projectDir: string): Promise<ProjectSources> {
   const take = takeFile?.take;
   // Every file the project names, including sources the look switches off: the output must not
   // replace a recording just because this export does not read it.
-  const named = [sources.screen, sources.webcam, sources.mic, sources.cleanMic, sources.events, sources.markers, sources.transcript, look.background.image].filter((path) => path !== undefined);
+  const named = [sources.screen, sources.webcam, sources.mic, sources.cleanMic, sources.events, sources.markers, sources.transcript, look.background.image, look.watermark.image, project.theme.logo].filter((path) => path !== undefined);
   const inputs = [resolve(projectPath), ...(screen ? [join(dirname(screen), TAKE_FILE)] : []), ...named.map((path) => resolve(projectDir, path))];
   const result: ProjectSources = { project, ...(screen && { screen }), stills: {}, inputs, warnings: takeFile?.warning ? [takeFile.warning] : [] };
 
@@ -208,6 +210,8 @@ export async function loadSources(projectDir: string): Promise<ProjectSources> {
   if (look.background.preset === 'image' && look.background.image) {
     result.backgroundImage = await existing(projectDir, look.background.image, 'background image (look.background.image)');
   }
+  const mark = look.watermark.enabled ? (look.watermark.image ?? project.theme.logo) : undefined;
+  if (mark) result.watermarkImage = await existing(projectDir, mark, look.watermark.image ? 'watermark image (look.watermark.image)' : 'the brand logo (theme.logo), shown as the watermark');
   const motion = await motionPages(projectDir, project);
   if (motion) {
     result.motion = motion;

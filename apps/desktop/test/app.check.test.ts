@@ -95,6 +95,27 @@ async function waitForPage(app: ElectronApplication, test: (page: Page) => Promi
 /** Clicks an element in a page without a real mouse (the window is never shown). */
 const click = (page: Page, selector: string) => page.evaluate((target) => (document.querySelector(target) as HTMLElement).click(), selector);
 /**
+ * What in the inspector reaches past the right edge of its box (a Look part's card, else the panel
+ * inside its padding): a text or a control running out of its panel. Each as its tag, classes and
+ * text, with how far it reaches out.
+ */
+const outsideItsPanel = (page: Page) =>
+  page.evaluate(() => {
+    const found: string[] = [];
+    for (const panel of document.querySelectorAll<HTMLElement>('.inspector .panel-body')) {
+      const style = getComputedStyle(panel);
+      const panelRight = panel.getBoundingClientRect().left + panel.clientWidth - parseFloat(style.paddingRight);
+      for (const element of panel.querySelectorAll<HTMLElement>('*')) {
+        const rect = element.getBoundingClientRect();
+        if (rect.width === 0 || rect.height === 0) continue;
+        const card = element.closest('.look-part');
+        const right = card && card !== element ? card.getBoundingClientRect().right : panelRight;
+        if (rect.right > right + 0.5) found.push(`${element.tagName.toLowerCase()}${[...element.classList].map((name) => `.${name}`).join('')} "${(element.textContent ?? '').trim().slice(0, 40)}" by ${Math.round(rect.right - right)} px`);
+      }
+    }
+    return found;
+  });
+/**
  * Picks the option labelled `label` (`prefix`: starting with it) from a select (Select.tsx): a click
  * opens it, a click on the option picks it. A list closed again before the pick (a scroll still due
  * from a panel that changed just before, as in a small window), or before it was seen at all, is
@@ -233,6 +254,13 @@ describe.runIf(enabled)('the Cuttle app', () => {
   };
   /** A screenshot of the window whose URL has `part` and whose title is `title` (when given). */
   const shotOf = async (name: string, part: string, title?: string) => {
+    // what an editor shows here stays inside its inspector, screenshots taken or not
+    if (part === '/editor.html') {
+      for (const page of app.windows()) {
+        if (!page.url().includes(part) || (title !== undefined && (await page.title().catch(() => '')) !== title)) continue;
+        expect({ shot: name, outside: await outsideItsPanel(page) }).toEqual({ shot: name, outside: [] });
+      }
+    }
     if (!SHOTS) return;
     const png = await app.evaluate(
       async ({ BrowserWindow }, { part, title }) => {
@@ -2168,6 +2196,41 @@ describe.runIf(enabled)('the Cuttle app', () => {
     await shotOf('44b-watermark', '/editor.html', 'frames · Cuttle');
     await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find((window) => window.getTitle() === 'frames · Cuttle')?.close());
   }, 240_000);
+
+  it('keeps every part of the Look tab inside the inspector, each with all its rows shown', async () => {
+    const dir = join(root, 'looks');
+    makeFixture(dir);
+    // a transcript and a clean voice, so the subtitles' and the sound's rows all show; a watermark on
+    const take = join(dir, 'takes', '1');
+    writeFileSync(join(take, 'transcript.json'), JSON.stringify({ version: 1, language: 'en', model: 'small', words: [{ t: 1, end: 1.4, text: 'Hello' }] }));
+    cpSync(join(take, 'mic.m4a'), join(take, 'mic.clean.m4a'));
+    const path = join(dir, 'cuttle.json');
+    const raw = JSON.parse(readFileSync(path, 'utf8')) as { sources: Record<string, string>; look: Record<string, unknown> };
+    raw.sources = { ...raw.sources, transcript: 'takes/1/transcript.json', cleanMic: 'takes/1/mic.clean.m4a' };
+    raw.look = { ...raw.look, watermark: { enabled: true } };
+    writeFileSync(path, JSON.stringify(raw, null, 2));
+    const page = await openEditor(dir);
+    await click(page, '#tab-look');
+    const parts = await page.$$eval('.look-part', (sections) => sections.map((section) => (section as HTMLElement).dataset.testid!.replace(/^look-/, '')));
+    expect(parts).toEqual(['brand', 'watermark', 'background', 'window', 'cursor', 'camera', 'subtitles', 'sound', 'video']);
+    const outside: Record<string, string[]> = {};
+    const look = async (part: string) => {
+      const found = await outsideItsPanel(page);
+      if (found.length > 0) outside[part] = found;
+    };
+    await look('closed');
+    for (const part of parts) {
+      await click(page, `[data-testid=look-open-${part}]`);
+      await page.waitForSelector(`[data-testid=look-${part}] .look-body`);
+      // a moment for what a part loads (the frames' and cursors' pictures, the kits)
+      await page.waitForTimeout(400);
+      await look(part);
+    }
+    expect(outside).toEqual({});
+    await click(page, '[data-testid=look-open-sound]');
+    await shotOf('45-sound', '/editor.html', 'looks · Cuttle');
+    await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find((window) => window.getTitle() === 'looks · Cuttle')?.close());
+  }, 120_000);
 
   it('had no unhandled rejection in the main process, and no error in the editor', async () => {
     expect(await app.evaluate(() => (globalThis as unknown as { __rejections: string[] }).__rejections)).toEqual([]);

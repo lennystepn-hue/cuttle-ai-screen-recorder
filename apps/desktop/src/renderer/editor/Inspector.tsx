@@ -142,12 +142,21 @@ export function Inspector() {
  */
 function Row({ label, children, note, wide, plain, inline }: { label: string; children: ReactNode; note?: ReactNode; wide?: boolean; plain?: boolean; inline?: boolean }) {
   const Tag = plain ? 'div' : 'label';
+  const said = note !== undefined && <em title={typeof note === 'string' ? note : undefined}>{note}</em>;
   return (
     <Tag className={`field${wide ? ' wide' : ''}${inline ? ' inline' : ''}`}>
-      <span className="field-label">{label}</span>
+      {inline && said ? (
+        // beside a switch the note goes under the name: the switches line up, and a long note wraps
+        <span className="field-text">
+          <span className="field-label">{label}</span>
+          {said}
+        </span>
+      ) : (
+        <span className="field-label">{label}</span>
+      )}
       <span className="field-input">
         {children}
-        {note !== undefined && <em title={typeof note === 'string' ? note : undefined}>{note}</em>}
+        {!inline && said}
       </span>
     </Tag>
   );
@@ -1999,9 +2008,8 @@ function LookPanel() {
           </Row>
         )}
         {current.audio.enabled && (
-          <Row label="Sped-up clips" inline>
+          <Row label="Sped-up clips" inline note={current.audio.muteSpedUp ? 'silent' : 'heard'}>
             <Toggle checked={current.audio.muteSpedUp} label="Silent when sped up" onChange={(on) => look(['audio', 'muteSpedUp'], on, on ? 'Sped-up clips silent' : 'Sped-up clips heard')} />
-            <em>{current.audio.muteSpedUp ? 'Silent' : 'Heard'}</em>
           </Row>
         )}
       </LookPart>

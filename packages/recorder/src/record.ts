@@ -9,7 +9,7 @@ import { EventsWriter } from './events';
 import { spawnCapture, type CaptureProcess } from './ffmpeg';
 import { captureHelper, helperArgs, helperInput } from './mac-capture';
 import { startInput, type InputSource } from './input';
-import { levelMeter } from './level';
+import { levelMeter, wholeSamples } from './level';
 import { FPS as JOIN_FPS, joinSegments, mediaInfo, renameWhenFree } from './join';
 import { areaGeometry, checkDevice, deviceClock, micInput, micLatency, platformFor, resolveArea, screenFilter, screenInput, screenLatency, webcamInput, type CameraMode, type Platform, type ScreenArea } from './sources';
 import type { Bounds, RawInput, RecordOptions, Recording, RecorderEvent, StopOptions, StopReason, Take } from './types';
@@ -324,6 +324,7 @@ async function recordTake({ options, control, platform, area, cameraMode, projec
   };
 
   let micWarned = false;
+  let audioFailed = false;
   // macOS: ScreenCaptureKit through the helper, which leaves out the app's own windows; avfoundation without it
   const helper = platform === 'macos' ? captureHelper() : undefined;
   // macOS: the camera's and the mic's starts are their capture times on the host clock, mapped to the wall clock
@@ -340,9 +341,23 @@ async function recordTake({ options, control, platform, area, cameraMode, projec
       ? spawnCapture('screen', screenArgs(helperInput(area), file(FILES.screen), options.stop.untilIdleSeconds), { command: helper, args: helperArgs(area, drawMouse, options.hideWindowsOf ?? []) })
       : spawnCapture('screen', screenArgs(screenInput(platform, area, drawMouse), file(FILES.screen), options.stop.untilIdleSeconds, screenFilter(platform, area)));
     const webcam = options.webcam === undefined ? undefined : spawnCapture('webcam', webcamArgs(webcamInput(platform, options.webcam, cameraMode), file(FILES.webcam), !ownStamps));
-    // the mic's level, told while the take records
+    // the mic's level and its samples, while the take records (whole samples per capture: one that
+    // stops at a pause may end inside a sample)
     const level = levelMeter((heard) => capturing && reporter.emit({ type: 'level', ...heard }));
-    const mic = options.mic === undefined ? undefined : spawnCapture('mic', micArgs(micInput(platform, options.mic), file(FILES.mic), !ownStamps), undefined, level);
+    const samples = wholeSamples((heard) => {
+      if (!capturing || audioFailed || !options.onAudio) return;
+      try {
+        options.onAudio(heard);
+      } catch (error) {
+        audioFailed = true;
+        reporter.warn(`onAudio failed: ${message(error)}`);
+      }
+    });
+    const sound = (chunk: Uint8Array) => {
+      level(chunk);
+      samples(chunk);
+    };
+    const mic = options.mic === undefined ? undefined : spawnCapture('mic', micArgs(micInput(platform, options.mic), file(FILES.mic), !ownStamps), undefined, sound);
     // Rejects with the first capture that fails; `exited` only resolves after stop() was called.
     const failed: Promise<never> = Promise.race([screen, webcam, mic].filter((capture) => capture !== undefined).map((capture) => capture.exited)).then(() => new Promise<never>(() => {}));
     failed.catch(() => {});

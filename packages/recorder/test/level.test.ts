@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { levelMeter, PCM_RATE, type MicLevel } from '../src/level';
+import { levelMeter, PCM_RATE, wholeSamples, type MicLevel } from '../src/level';
 
 /** `seconds` of a sine at `amplitude` (of full scale) as 16-bit little-endian samples. */
 function sine(seconds: number, amplitude: number): Uint8Array {
@@ -9,6 +9,19 @@ function sine(seconds: number, amplitude: number): Uint8Array {
   for (let i = 0; i < count; i++) view.setInt16(i * 2, Math.round(Math.sin((2 * Math.PI * 440 * i) / PCM_RATE) * amplitude * 32767), true);
   return bytes;
 }
+
+describe('wholeSamples', () => {
+  it("hands on whole samples only, keeping a chunk's odd byte for the next", () => {
+    const sound = sine(0.01, 1 / 2);
+    const handed: Uint8Array[] = [];
+    const align = wholeSamples((samples) => handed.push(samples.slice()));
+    // three bytes at a time, and an empty chunk
+    for (let i = 0; i < sound.length; i += 3) align(sound.subarray(i, i + 3));
+    align(new Uint8Array(0));
+    expect(handed.every((samples) => samples.length > 0 && samples.length % 2 === 0)).toBe(true);
+    expect(Buffer.concat(handed)).toEqual(Buffer.from(sound));
+  });
+});
 
 describe('levelMeter', () => {
   it('tells the RMS and the peak in dBFS for every tenth of a second', () => {

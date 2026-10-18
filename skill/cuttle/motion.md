@@ -80,8 +80,8 @@ look, the window and the cursor in:
 Draw the whole frame from them: at 0 it should look like `from`, at 1 like `to`, so the cut is
 seamless. `fold` turns the outgoing frame over its middle like a page. `motion check` shows a
 transition in the video, between its two scenes. A first scene, or one right after a cut, has
-nothing to go between. The editor shows a crossfade where a transition is, for now; the export
-and `cuttle preview` draw the page.
+nothing to go between. The export, `cuttle preview` and the Cuttle app draw the page (the app
+makes its frames a moment after an edit, and crossfades until then).
 
 ## Sounds from the page
 

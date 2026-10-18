@@ -123,6 +123,15 @@ describe('audioFilterGraph', () => {
     ]);
   });
 
+  it('mixes a soundtrack in stereo under the mic, then keeps the sum below full scale', () => {
+    const parts = audioFilterGraph(plan({ scenes }), 0.5, 1, undefined, 2).split(';');
+    expect(parts.slice(-3)).toEqual([
+      '[s0][s1][s2][s3]concat=n=4:v=0:a=1,pan=stereo|c0=c0|c1=c0[voice]',
+      '[2:a]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,apad,atrim=end_sample=288000,asetpts=N/SR/TB[sound]',
+      '[voice][sound]amix=inputs=2:duration=first:normalize=0,aresample=192000,alimiter=limit=0.89:attack=1:release=60:level=false,aresample=48000[aout]',
+    ]);
+  });
+
   it('needs no mic input when every segment is silent', () => {
     const graph = audioFilterGraph(plan({ scenes }, 6, false));
     expect(graph).not.toContain('[1:a]');
@@ -139,6 +148,7 @@ describe('muxArgs', () => {
     expect(muxArgs({ video: 'v.mp4', graph: 'G', out: 'o.mp4' })).not.toContain('m.m4a');
     // the typing sounds' track comes after the mic
     expect(muxArgs({ video: 'v.mp4', mic: 'm.m4a', typing: 't.wav', graph: 'G', out: 'o.mp4' }).join(' ')).toContain('-i v.mp4 -i m.m4a -i t.wav -filter_complex G');
+    expect(muxArgs({ video: 'v.mp4', sound: 's.wav', graph: 'G', out: 'o.mp4' }).join(' ')).toContain('-i v.mp4 -i s.wav -filter_complex G');
   });
 
   it('reads a long graph from a file (Windows limits a command line to 32 767 characters)', () => {

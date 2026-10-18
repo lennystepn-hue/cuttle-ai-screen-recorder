@@ -9,6 +9,8 @@ import { describe, expect, it } from 'vitest';
 import { audioFilterGraph, planAudio } from '../../src/audio';
 import { ffmpegPath } from '../../src/main/ffmpeg';
 import { writeTypingTrack } from '../../src/main/typing-track';
+import { writeSoundTrack } from '../../src/main/soundtrack';
+import type { MusicStems } from '../../src/main/music';
 
 const hasFfmpeg = spawnSync(ffmpegPath(), ['-version'], { windowsHide: true }).status === 0;
 
@@ -114,6 +116,43 @@ describe.runIf(hasFfmpeg)('export audio through ffmpeg', () => {
       const over = mix(['-f', 'lavfi', '-i', SINE, '-i', wav], true, 1);
       expect(peak(over, at, at + 4800)).toBeGreaterThan(peak(over, 48_000 * 2, 48_000 * 2.5) + 0.2);
       expect(peak(over, 48_000 * 2, 48_000 * 2.5)).toBeCloseTo(0.125, 2);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('mixes a stereo soundtrack under the mic, both ears kept, and limits a sum that would clip', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'cuttle-sound-mix-'));
+    try {
+      const parsed = parseProject({ version: 1, sources: { screen: 's.mp4', mic: 'm.m4a' }, scenes: [{ type: 'clip', from: 0, to: 3 }], look: { transition: { enabled: false } } });
+      if (!parsed.ok) throw new Error('invalid');
+      const spans = sceneSpans(parsed.project.scenes);
+      // a soundtrack: 0.3 left and 0.1 right for 2 s, then 0.95 in both (with the mic, past full scale)
+      const frames = 3 * 48_000;
+      const music = new Float32Array(frames * 2);
+      for (let i = 0; i < frames; i++) {
+        const loud = i >= 2 * 48_000;
+        music[i * 2] = loud ? 0.95 : 0.3;
+        music[i * 2 + 1] = loud ? 0.95 : 0.1;
+      }
+      const wav = join(dir, 'sound.wav');
+      await writeSoundTrack(wav, { seconds: 3, stems: { rate: 48_000, music, effects: new Float32Array(frames * 2) } as MusicStems, music: { volume: 1, duck: 0 }, effectsVolume: 1 });
+      const segments = planAudio({ spans, look: parsed.project.look, mic: true, seconds: 3 });
+      const result = spawnSync(ffmpegPath(), ['-v', 'error', '-f', 'lavfi', '-i', SINE, '-i', wav, '-filter_complex', audioFilterGraph(segments, 0, 0, undefined, 1), '-map', '[aout]', '-f', 'f32le', '-'], {
+        maxBuffer: 64 * 1024 * 1024,
+        windowsHide: true,
+      });
+      if (result.status !== 0) throw new Error(result.stderr.toString());
+      const stereo = new Float32Array(result.stdout.buffer, result.stdout.byteOffset, result.stdout.byteLength / 4);
+      expect(stereo.length).toBe(frames * 2);
+      const left = stereo.filter((_, i) => i % 2 === 0);
+      const right = stereo.filter((_, i) => i % 2 === 1);
+      // the mic (a 0.125 sine) rides on each ear's level
+      expect(peak(left, 48_000, 48_000 * 1.5)).toBeCloseTo(0.3 + 0.125, 2);
+      expect(peak(right, 48_000, 48_000 * 1.5)).toBeCloseTo(0.1 + 0.125, 2);
+      // 0.95 + 0.125 would clip: the limiter holds it near 0.89
+      expect(peak(left, Math.round(48_000 * 2.2), frames)).toBeLessThan(0.9);
+      expect(peak(left, Math.round(48_000 * 2.2), frames)).toBeGreaterThan(0.8);
     } finally {
       await rm(dir, { recursive: true, force: true });
     }

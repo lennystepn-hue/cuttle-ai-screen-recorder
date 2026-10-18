@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { mkdir, mkdtemp, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { basename, dirname, join, resolve } from 'node:path';
+import { basename, dirname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { applyCaptionFixes, captionCues, captionWords, sceneSpans, toSrt, toVtt, typingClicks } from '@cuttle/timeline';
 import { app } from 'electron';
@@ -12,7 +12,9 @@ import { CHANNELS, type EncoderPreference, type ExportJob, type PageResult, type
 import { checkFfmpeg, runFfmpeg } from './ffmpeg';
 import { FileHost } from './files';
 import { MotionHost, motionWarnings, serveMotion, type MotionItemReport } from './motion-host';
-import { loadSources, samePath } from './sources';
+import { loadSources, motionTake, samePath } from './sources';
+import { planSoundtrack, renderSoundtrack, writeSoundTrack, type SoundtrackPlan } from './soundtrack';
+import type { MusicStems } from './music';
 import { writeTypingTrack } from './typing-track';
 import { openExportWindow, type ExportWindow } from './window';
 
@@ -61,8 +63,43 @@ export interface ExportResult {
   subtitles?: string[];
   /** What the motion items' pages said (errors and console), when the project has any. */
   motion?: MotionItemReport[];
+  /** The music and sounds, when the project has any: what the page made and said, and sounds that could not play. */
+  music?: SoundtrackReport;
   stats: ExportStats;
 }
+
+/** What rendering a project's music and sounds came to. */
+export interface SoundtrackReport {
+  /** The music page, relative to the project folder (none: the sounds alone). */
+  src?: string;
+  /** What the page told about its music (bpm, key, sections). */
+  info: MusicStems['result']['info'];
+  /** Each stem's highest sample before its level. */
+  peaks: MusicStems['result']['peaks'];
+  nodes: number;
+  renderMs: number;
+  /** Sounds that could not play. */
+  skipped: string[];
+  errors: string[];
+  console: string[];
+}
+
+/** The report of a rendered soundtrack. */
+export function soundtrackReport(projectDir: string, plan: SoundtrackPlan, stems: MusicStems): SoundtrackReport {
+  const { result, report } = stems;
+  return {
+    ...(plan.page && { src: relativeSrc(projectDir, plan.page) }),
+    info: result.info,
+    peaks: result.peaks,
+    nodes: result.nodes,
+    renderMs: result.renderMs,
+    skipped: result.skipped,
+    errors: report.errors,
+    console: report.console,
+  };
+}
+
+const relativeSrc = (projectDir: string, page: string) => relative(resolve(projectDir), page).split(sep).join('/');
 
 /** Without a newly rendered frame for this long the export counts as stalled (a hung encoder or decoder). */
 const STALL_SECONDS = 60;
@@ -237,6 +274,9 @@ export async function exportProject(opts: ExportOptions): Promise<ExportResult> 
   let files: FileHost | undefined;
   let window: ExportWindow | undefined;
   const motion = sources.motion && sources.motionTake ? new MotionHost(project, sources.motion, sources.motionTake) : undefined;
+  // the music and sounds render beside the frames, in a page of their own
+  const soundPlan = await planSoundtrack(projectDir, project, sources.motionTake ?? (await motionTake(projectDir, project)));
+  let soundtrack: Promise<MusicStems> | undefined;
   try {
     work = await mkdtemp(join(tmpdir(), WORK_PREFIX));
     const video = join(work, 'video.mp4');
@@ -262,6 +302,8 @@ export async function exportProject(opts: ExportOptions): Promise<ExportResult> 
       opts.onProgress?.(done, total);
     });
     serveMotion(ipc, motion, guard.alive);
+    soundtrack = soundPlan ? renderSoundtrack(projectDir, soundPlan) : undefined;
+    soundtrack?.catch(() => {});
 
     const page = await runPage<PageSuccess>(window, guard.stalled, cancel.promise);
     guard.stop();
@@ -277,12 +319,34 @@ export async function exportProject(opts: ExportOptions): Promise<ExportResult> 
     const usesMic = segments.some((segment) => segment.mic !== undefined);
     // the typing sounds: a track of their own on the video's timeline, mixed in after the mic
     const clicks = typingClicks(spans, sources.keys ?? [], project.look.audio);
-    const typing = clicks.length > 0 ? join(work, 'typing.wav') : undefined;
-    if (typing) await writeTypingTrack(typing, clicks, project.look.audio.typingVolume, seconds);
-    const graph = audioFilterGraph(segments, sources.mic?.offset ?? 0, 1, typing ? (usesMic ? 2 : 1) : undefined);
+    // with music or sounds, one stereo soundtrack holds them and the typing clicks; else the clicks alone
+    const stems = soundtrack ? await soundtrack.catch((error: Error) => {
+      throw new ExportError('render', `the music could not be rendered: ${error.message}`, { cause: error });
+    }) : undefined;
+    let musicReport: SoundtrackReport | undefined;
+    let typing: string | undefined;
+    let sound: string | undefined;
+    if (stems && soundPlan) {
+      musicReport = soundtrackReport(projectDir, soundPlan, stems);
+      for (const warning of [...musicReport.errors, ...musicReport.skipped]) console.warn(`warning: music${musicReport.src ? ` (${musicReport.src})` : ''}: ${warning}`);
+      sound = join(work, 'sound.wav');
+      await writeSoundTrack(sound, {
+        seconds,
+        stems,
+        ...(project.music?.enabled && { music: { volume: project.music.volume, duck: project.music.duck } }),
+        speech: soundPlan.video.speech,
+        effectsVolume: project.look.audio.effects ? project.look.audio.effectsVolume : 0,
+        ...(clicks.length > 0 && { typing: { clicks, volume: project.look.audio.typingVolume } }),
+      });
+    } else if (clicks.length > 0) {
+      typing = join(work, 'typing.wav');
+      await writeTypingTrack(typing, clicks, project.look.audio.typingVolume, seconds);
+    }
+    const extra = usesMic ? 2 : 1;
+    const graph = audioFilterGraph(segments, sources.mic?.offset ?? 0, 1, typing ? extra : undefined, sound ? extra : undefined);
     const graphFile = graph.length > INLINE_GRAPH_LIMIT ? join(work, 'audio.graph') : undefined;
     if (graphFile) await writeFile(graphFile, graph);
-    await runFfmpeg(muxArgs({ video, mic: usesMic ? sources.mic?.path : undefined, typing, graph, graphFile, out: partial }), signal);
+    await runFfmpeg(muxArgs({ video, mic: usesMic ? sources.mic?.path : undefined, typing, sound, graph, graphFile, out: partial }), signal);
     throwIfCancelled();
     try {
       await rename(partial, out);
@@ -306,6 +370,7 @@ export async function exportProject(opts: ExportOptions): Promise<ExportResult> 
       seconds,
       ...(written.length > 0 && { subtitles: written }),
       ...(said && { motion: said }),
+      ...(musicReport && { music: musicReport }),
       stats: {
         gpu: page.gpu,
         codec: page.codec,

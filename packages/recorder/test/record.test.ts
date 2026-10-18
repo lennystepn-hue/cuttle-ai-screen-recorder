@@ -28,6 +28,9 @@ function probe(file: string) {
   return { ...streams[0], duration: Number(format.duration) };
 }
 
+/** A spoken sentence, for the spoken test mic. */
+const SPEECH = join(import.meta.dirname, '..', '..', 'core', 'test', 'fixtures', 'speech', 'en.m4a');
+
 const read = (projectDir: string, file: string) => readFileSync(join(projectDir, file), 'utf8');
 
 function markersOf(projectDir: string, file: string) {
@@ -202,6 +205,65 @@ describe.concurrent('record (test backend)', () => {
     // its level says so too: digital silence
     expect(levels.length).toBeGreaterThan(0);
     expect(new Set(levels)).toEqual(new Set([-90]));
+  }, SLOW);
+
+  it("hands the mic's samples to onAudio while it records: whole samples, as long as the take", async () => {
+    const projectDir = project();
+    const chunks: Uint8Array[] = [];
+    let recordingSeen = false;
+    let early = 0;
+    const take = await record({
+      ...test,
+      projectDir,
+      mic: 'Test Microphone',
+      stop: { maxSeconds: 1.5 },
+      onEvent: (event) => {
+        if (event.type === 'recording') recordingSeen = true;
+      },
+      onAudio: (samples) => {
+        if (!recordingSeen) early++;
+        chunks.push(samples.slice());
+      },
+    }).done;
+    expect(early).toBe(0);
+    expect(chunks.every((samples) => samples.length % 2 === 0)).toBe(true);
+    const seconds = chunks.reduce((sum, samples) => sum + samples.length, 0) / 2 / 16_000;
+    expect(seconds).toBeGreaterThan(take.seconds - 0.5);
+    expect(seconds).toBeLessThan(take.seconds + 0.5);
+  }, SLOW);
+
+  it('stops handing samples to an onAudio that throws, with a warning, and keeps the take', async () => {
+    let calls = 0;
+    const take = await record({
+      ...test,
+      projectDir: project(),
+      mic: 'Test Microphone',
+      stop: { maxSeconds: 1.5 },
+      onAudio: () => {
+        calls++;
+        throw new Error('listener bug');
+      },
+    }).done;
+    expect(calls).toBe(1);
+    expect(take.mic).toBe('takes/1/mic.m4a');
+    expect(take.warnings).toEqual(['onAudio failed: listener bug']);
+  }, SLOW);
+
+  it('records the spoken test mic: the sound file CUTTLE_TEST_SPEECH names, looped', async () => {
+    process.env.CUTTLE_TEST_SPEECH = SPEECH;
+    const levels: number[] = [];
+    const take = await record({
+      ...test,
+      projectDir: project(),
+      mic: 'Spoken Test Microphone',
+      stop: { maxSeconds: 2 },
+      onEvent: (event) => event.type === 'level' && levels.push(event.rms),
+    }).done;
+    expect(take.warnings).toEqual([]);
+    expect(take.mic).toBe('takes/1/mic.m4a');
+    // speech: loud and quiet tenths of a second
+    expect(Math.max(...levels)).toBeGreaterThan(-35);
+    expect(Math.min(...levels)).toBeLessThan(Math.max(...levels) - 10);
   }, SLOW);
 
   it('turns a throwing onEvent into a warning instead of a failed take', async () => {

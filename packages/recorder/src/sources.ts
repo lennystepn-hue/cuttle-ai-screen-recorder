@@ -16,6 +16,7 @@ export function platformFor(backend: Backend = 'auto'): Platform {
 /**
  * The test backend's devices. Monitor 0 shows a moving test pattern; monitor 1 moves for 1 s and
  * then stands still (for `untilIdleSeconds`). "Silent Test Microphone" delivers digital silence;
+ * "Spoken Test Microphone" plays the sound file CUTTLE_TEST_SPEECH names, over and over;
  * "Failing Test Camera" ends after 1 s, like a camera that is unplugged.
  */
 export const TEST_DEVICES: Devices = {
@@ -25,7 +26,7 @@ export const TEST_DEVICES: Devices = {
   ],
   windows: [{ id: 1001, pid: 4242, className: 'TestWindow', title: 'Test Window', bounds: { x: 100, y: 60, width: 640, height: 360 }, monitor: 0 }],
   cameras: ['Test Camera', 'Failing Test Camera'],
-  mics: ['Test Microphone', 'Silent Test Microphone'],
+  mics: ['Test Microphone', 'Silent Test Microphone', 'Spoken Test Microphone'],
 };
 
 /** What the screen track captures: a monitor, optionally cropped (monitor pixels, even sizes). */
@@ -205,8 +206,16 @@ export function micLatency(platform: Platform): number {
 /** Whether the camera and the mic keep the device's own timestamps (macOS) instead of the wall clock's at arrival. */
 export const deviceClock = (platform: Platform) => platform === 'macos';
 
+/** The spoken test mic: the file CUTTLE_TEST_SPEECH names, in real time and looped. */
+function spokenInput(): string[] {
+  const file = process.env.CUTTLE_TEST_SPEECH;
+  if (!file) throw new RecorderError('device-not-found', 'the Spoken Test Microphone plays the sound file CUTTLE_TEST_SPEECH names, and it is not set');
+  return ['-re', '-stream_loop', '-1', '-i', file];
+}
+
 export function micInput(platform: Platform, name: string): string[] {
   if (platform === 'test') {
+    if (name === 'Spoken Test Microphone') return spokenInput();
     const source = name === 'Silent Test Microphone' ? 'anullsrc=r=48000:cl=mono' : 'sine=frequency=440:sample_rate=48000';
     return ['-f', 'lavfi', '-i', `${source},arealtime`];
   }

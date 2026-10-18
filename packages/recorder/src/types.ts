@@ -102,6 +102,12 @@ export interface RecordOptions {
    */
   steps?: string[];
   onEvent?: (event: RecorderEvent) => void;
+  /**
+   * The mic's sound while the take records (nothing while paused), as it comes: 16 kHz mono 16-bit
+   * little-endian samples, whole samples. Live captions read it. One that throws gets no more, and
+   * the take says so in its warnings.
+   */
+  onAudio?: (samples: Uint8Array) => void;
 }
 
 export type StopReason = 'stop' | 'hotkey' | 'max-seconds' | 'file' | 'idle' | 'claude';

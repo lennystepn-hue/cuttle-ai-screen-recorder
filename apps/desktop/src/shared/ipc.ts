@@ -115,6 +115,8 @@ export interface HudState {
   tone?: 'warn' | 'info';
   /** The take records a mic: the HUD shows its level (`hud:level`). */
   mic?: boolean;
+  /** The take has live captions: the HUD shows them under its bar (`hud:caption`); `failed` says why they stopped. */
+  captions?: { failed?: string };
 }
 
 /** What the main process is doing to a project, shown in its editor's title bar. */
@@ -182,8 +184,8 @@ export interface SettingsView {
   mic?: string;
   launchAtLogin: boolean;
   motion: Motion;
-  /** Transcribing a take after its cut: the model (or off) and the language spoken. */
-  speech: { model: SpeechModelName | 'off'; language: SpeechLanguage };
+  /** Transcribing a take after its cut: the model (or off) and the language spoken; `live`: captions in the HUD while it records. */
+  speech: { model: SpeechModelName | 'off'; language: SpeechLanguage; live: boolean };
   /** After a take's cut: read the screen's text to mask what it showed, and the words always masked. */
   privacy: { read: boolean; words: string[] };
   /** `open`: the project is open in Cuttle, here (`here`) or on the computer named. */
@@ -423,6 +425,7 @@ export const REQUESTS = {
     motion: z.enum(MOTIONS).optional(),
     speechModel: z.enum(['off', ...SPEECH_MODEL_NAMES]).optional(),
     speechLanguage: z.enum(SPEECH_LANGUAGES).optional(),
+    speechLive: z.boolean().optional(),
     privacyRead: z.boolean().optional(),
     privacyWords: z.array(z.string().trim().min(1).max(PRIVACY_WORD_MAX)).max(PRIVACY_WORDS_MAX).optional(),
   }),
@@ -640,6 +643,8 @@ export interface Events {
   'hud:state': HudState;
   /** The mic's level now (dBFS), ten times a second while the take records. */
   'hud:level': { rms: number; peak: number };
+  /** Words the live captions heard since they last told, oldest first. */
+  'hud:caption': { words: string[] };
   /** What the main process is doing to the project (cutting the take), or nothing. */
   'project:status': ProjectStatus;
   'project:file': ProjectFileEvent;

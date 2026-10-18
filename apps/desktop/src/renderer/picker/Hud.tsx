@@ -1,6 +1,6 @@
 // The recording HUD: the time, the mic's level, a warning when there is one, restart, the mistake
-// key, a marker, pause and Stop. It
-// is never in the video (content protection), never takes the focus (the recorded window keeps it),
+// key, a marker, pause and Stop, and under them the live captions when the take has them. It is
+// never in the video (content protection), never takes the focus (the recorded window keeps it),
 // and its area is a dead zone for the input log. Its width is fixed, so Stop never moves under the
 // pointer. Restart asks for a press held 600 ms, so a stray click does not put a take aside.
 import { useEffect, useRef, useState } from 'react';
@@ -120,6 +120,53 @@ export function Hud() {
           <i />
         </button>
       </div>
+      {state.captions && <Captions failed={state.captions.failed} live={state.phase === 'recording'} />}
+    </div>
+  );
+}
+
+/** The live captions keep this many words: more than one line holds. */
+const LINE_WORDS = 24;
+
+/**
+ * The live captions: what the mic heard last, in one line under the bar, the newest words at its
+ * right end and the older ones fading out at its left. "Listening…" until the first words; dimmed
+ * while the take does not record.
+ */
+function Captions({ failed, live }: { failed: string | undefined; live: boolean }) {
+  // the last words heard, and the number of the first of them (a word keeps its number as the line
+  // moves on, so only new words fade in)
+  const [line, setLine] = useState<{ first: number; words: string[] }>({ first: 0, words: [] });
+  useEffect(
+    () =>
+      bridge.on('hud:caption', ({ words: heard }) =>
+        setLine((before) => {
+          const words = [...before.words, ...heard];
+          const dropped = Math.max(0, words.length - LINE_WORDS);
+          return { first: before.first + dropped, words: words.slice(dropped) };
+        }),
+      ),
+    [],
+  );
+  const { first, words } = line;
+  return (
+    <div className={`captions${live ? '' : ' resting'}${failed ? ' failed' : ''}`} role="log" aria-live="polite" aria-label="Live captions" title={failed ? `The live captions stopped: ${failed}` : 'What the mic hears, as Cuttle understands it (not saved)'} data-testid="hud-captions">
+      <span className="line">
+        {failed ? (
+          <span className="said">
+            <WarningIcon size={13} />
+            Live captions stopped
+          </span>
+        ) : words.length === 0 ? (
+          <span className="said waiting">Listening…</span>
+        ) : (
+          <span className="said">
+            {words.map((word, i) => (
+              <span key={first + i}>{word} </span>
+            ))}
+          </span>
+        )}
+      </span>
     </div>
   );
 }

@@ -1,6 +1,7 @@
 // The mic's level while it records, from its sound as 16 kHz mono 16-bit samples (the mic's capture
 // writes them to its stdout beside the track): how loud it is (RMS) and its loudest sample, in dB
-// below full scale, every tenth of a second. Pure.
+// below full scale, every tenth of a second. The samples themselves go to whoever listens (live
+// captions) as whole samples. Pure.
 
 /** The rate of the samples the mic's capture gives (16 kHz mono, as speech recognition takes them too). */
 export const PCM_RATE = 16_000;
@@ -19,6 +20,26 @@ export interface MicLevel {
 const decibels = (value: number) => (value <= 0 ? LEVEL_FLOOR : Math.max(LEVEL_FLOOR, Math.round(20 * Math.log10(value) * 10) / 10));
 
 /**
+ * Hands on the samples as whole samples: a chunk from a pipe may end inside one, so its odd byte is
+ * kept for the next chunk. `onSamples` gets each chunk's whole samples (none for an empty chunk).
+ */
+export function wholeSamples(onSamples: (samples: Uint8Array) => void): (chunk: Uint8Array) => void {
+  let half: number | undefined;
+  return (chunk) => {
+    let bytes = chunk;
+    if (half !== undefined && chunk.length > 0) {
+      bytes = new Uint8Array(chunk.length + 1);
+      bytes[0] = half;
+      bytes.set(chunk, 1);
+      half = undefined;
+    }
+    const even = bytes.length - (bytes.length % 2);
+    if (even < bytes.length) half = bytes[even];
+    if (even > 0) onSamples(bytes.subarray(0, even));
+  };
+}
+
+/**
  * Takes the samples as they come (a chunk may end inside a sample) and calls `onLevel` once for each
  * tenth of a second of them.
  */
@@ -27,25 +48,16 @@ export function levelMeter(onLevel: (level: MicLevel) => void): (chunk: Uint8Arr
   let sum = 0;
   let peak = 0;
   let count = 0;
-  let half: number | undefined;
-  return (chunk) => {
-    let i = 0;
-    const take = (sample: number) => {
-      const value = sample / 32768;
+  return wholeSamples((samples) => {
+    for (let i = 0; i < samples.length; i += 2) {
+      const value = ((((samples[i + 1]! << 8) | samples[i]!) << 16) >> 16) / 32768;
       sum += value * value;
       peak = Math.max(peak, Math.abs(value));
-      if (++count < size) return;
+      if (++count < size) continue;
       onLevel({ rms: decibels(Math.sqrt(sum / count)), peak: decibels(peak) });
       sum = 0;
       peak = 0;
       count = 0;
-    };
-    if (half !== undefined && chunk.length > 0) {
-      take(((chunk[0]! << 8) | half) << 16 >> 16);
-      half = undefined;
-      i = 1;
     }
-    for (; i + 1 < chunk.length; i += 2) take(((chunk[i + 1]! << 8) | chunk[i]!) << 16 >> 16);
-    if (i < chunk.length) half = chunk[i]!;
-  };
+  });
 }

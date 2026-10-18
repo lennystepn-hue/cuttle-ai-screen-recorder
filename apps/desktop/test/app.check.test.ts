@@ -1828,10 +1828,28 @@ describe.runIf(enabled)('the Cuttle app', () => {
     await page.fill('[data-testid=transition-duration]', '0.6');
     await page.press('[data-testid=transition-duration]', 'Enter');
     await expect.poll(() => clipOf()?.transition?.duration).toBe(0.6);
-    // the editor shows a crossfade where the export draws the page: the frame draws, nothing fails
-    await seekTo(4.5);
+    // stopped at the cut: the page's frame, as the export draws it
+    const cut = 4.5;
+    await flushPage();
+    const foldStill = spawnSync('node', [CLI, '--json', '-C', dir, 'preview', '--at', String(cut), '-o', join(root, 'fold-stills')], { encoding: 'utf8', timeout: 120_000 });
+    expect(foldStill.status, foldStill.stderr).toBe(0);
+    const foldFrame = PNG.sync.read(readFileSync((JSON.parse(foldStill.stdout) as { stills: { file: string }[] }).stills[0]!.file));
+    await seekTo(cut);
+    await expect.poll(async () => difference(await view(), foldFrame).mean, { timeout: 30_000 }).toBeLessThan(1.5);
     expect((await now()).error).toBeUndefined();
     await shotOf('39c-transition', '/editor.html', 'motion-editor · Cuttle');
+    // a moment later its frames are made for playing: playing through the cut shows them
+    type Made = { motion?: { made: number }; transitions: number };
+    const playback = () => page.evaluate(() => (window as unknown as Hooked).__cuttleCheck.playback() as unknown as Made);
+    // 0.6 s at 30 fps, the frame on its very start a crossfade's
+    await expect.poll(async () => (await playback()).motion?.made, { timeout: 60_000 }).toBeGreaterThanOrEqual(17);
+    await seekTo(4);
+    await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+    await click(page, 'button.play');
+    await page.waitForTimeout(1300);
+    const played = await playback();
+    await click(page, 'button.play');
+    expect(played.transitions).toBeGreaterThan(8);
     await click(page, '[data-testid=transition-remove]');
     await expect.poll(() => clipOf()?.transition).toBeUndefined();
     await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find((window) => window.getTitle() === 'motion-editor · Cuttle')?.close());

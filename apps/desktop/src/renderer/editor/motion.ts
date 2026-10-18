@@ -52,8 +52,12 @@ async function imageUrl(pixels: MotionPixels): Promise<string> {
   return URL.createObjectURL(await canvas.convertToBlob({ type: 'image/png' }));
 }
 
-/** Whether the project has motion scenes or overlays (without, nothing is asked of the main process). */
-export const hasMotion = (project: CuttleProject) => project.overlays.length > 0 || project.scenes.some((scene) => scene.type === 'motion');
+/** Whether the project has motion scenes, overlays or transitions (without, nothing is asked of the main process). */
+export const hasMotion = (project: CuttleProject) =>
+  project.overlays.length > 0 || project.scenes.some((scene) => scene.type === 'motion' || scene.transition?.enabled === true);
+
+/** Transition frames kept (this version's, at the player's size): about two transitions of a second at 30 fps. */
+const KEEP_BETWEEN = 72;
 
 export class MotionFrames {
   private version = 0;
@@ -193,12 +197,79 @@ export class MotionFrames {
     return changed;
   }
 
+  /** The transitions' frames made for this version (`key@frame`), oldest first, and the version they are of. */
+  private readonly between = new Map<string, MotionPixels>();
+  private betweenVersion = -1;
+
+  /** Where `state`'s transition frame is kept, or undefined without one. */
+  private betweenKey(state: RenderState): string | undefined {
+    const active = state.transition;
+    if (!active) return undefined;
+    if (this.betweenVersion !== this.version) {
+      this.between.clear();
+      this.betweenVersion = this.version;
+    }
+    return `${active.key}@${Math.round(active.local * this.project.output.fps)}`;
+  }
+
+  /** Whether `state`'s transition frame is made (true without a transition). */
+  hasTransition(state: RenderState): boolean {
+    const key = this.betweenKey(state);
+    return key === undefined || this.between.has(key);
+  }
+
+  /**
+   * Puts `state`'s transition frame into `sources` when it is made (the engine crossfades without);
+   * true when it was there or the frame has no transition.
+   */
+  fillTransition(state: RenderState, sources: FrameSources): boolean {
+    const key = this.betweenKey(state);
+    sources.transitions?.clear();
+    if (key === undefined) return true;
+    const pixels = this.between.get(key);
+    if (!pixels) return false;
+    (sources.transitions ??= new Map()).set(state.transition!.key, pixels);
+    return true;
+  }
+
+  /**
+   * Makes `state`'s transition frame: the main process draws its page from the two layers (`layers`
+   * reads them from the renderer). Kept for playing; undefined when it is no longer wanted.
+   */
+  async transition(state: RenderState, layers: () => [MotionPixels, MotionPixels], mode: 'seek' | 'play'): Promise<MotionPixels | undefined> {
+    const key = this.betweenKey(state);
+    const active = state.transition;
+    if (key === undefined || !active || !this.active) return undefined;
+    const kept = this.between.get(key);
+    if (kept) return kept;
+    const version = this.version;
+    const [from, to] = layers();
+    const { width, height } = this.size();
+    const request = {
+      key: active.key,
+      kind: 'transition' as const,
+      index: active.sceneIndex,
+      frame: Math.round(active.local * this.project.output.fps),
+      start: active.start,
+      duration: active.duration,
+      screen: this.screen,
+      between: { from, to },
+    };
+    const answer = await bridge.invoke('motion:frame', { version, request, width, height, mode });
+    if (!answer?.pixels || version !== this.version) return undefined;
+    this.between.set(key, answer.pixels);
+    while (this.between.size > KEEP_BETWEEN) this.between.delete(this.between.keys().next().value!);
+    return answer.pixels;
+  }
+
   /** Frames that came while playing (since it started), and how long one took (ms, a running mean of every item). */
   private received = 0;
 
-  stats(): { frames: number; took: number } {
+  /** The motion frames that came while playing and how long one took, and the transition frames made for this version. */
+  stats(): { frames: number; took: number; made: number } {
     const times = [...this.took.values()];
-    return { frames: this.received, took: times.length > 0 ? Math.round(times.reduce((sum, time) => sum + time, 0) / times.length) : 0 };
+    const made = this.betweenVersion === this.version ? this.between.size : 0;
+    return { frames: this.received, took: times.length > 0 ? Math.round(times.reduce((sum, time) => sum + time, 0) / times.length) : 0, made };
   }
 
   /** The strips of the scenes' blocks, by item, with the number of what drew them. */

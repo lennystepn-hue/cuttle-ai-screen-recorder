@@ -259,10 +259,14 @@ export type SoundtrackAnswer = {
 
 const rect = z.strictObject({ x: z.number().finite(), y: z.number().finite(), width: z.number().finite().positive(), height: z.number().finite().positive() });
 const box = z.tuple([z.number().finite(), z.number().finite(), z.number().finite(), z.number().finite()]);
-/** A motion frame the player asks for (as @cuttle/export's MotionFrameRequest). */
+/** A frame (premultiplied RGBA, top row first) whose bytes fit its size. */
+const pixels = z
+  .strictObject({ width: z.number().int().positive().max(8192), height: z.number().int().positive().max(8192), data: z.custom<Uint8Array>((value) => value instanceof Uint8Array, 'bytes') })
+  .refine((frame) => frame.data.byteLength === frame.width * frame.height * 4, { message: 'the bytes do not fit the size' });
+/** A motion frame the player asks for (as @cuttle/export's MotionFrameRequest); a transition's comes with the two frames it goes between. */
 const motionRequest = z.strictObject({
   key: z.string().min(1).max(200),
-  kind: z.enum(['scene', 'overlay']),
+  kind: z.enum(['scene', 'overlay', 'transition']),
   index: z.number().int().nonnegative().max(100_000),
   frame: z.number().int().nonnegative().max(100_000_000),
   start: z.number().finite().nonnegative(),
@@ -276,6 +280,7 @@ const motionRequest = z.strictObject({
       cursor: z.strictObject({ x: z.number().finite(), y: z.number().finite() }).nullable(),
     })
     .optional(),
+  between: z.strictObject({ from: pixels, to: pixels }).optional(),
 });
 const deviceName = z.string().min(1).max(512);
 

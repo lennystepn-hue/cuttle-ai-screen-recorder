@@ -2,6 +2,8 @@ export {
   AUTO_KINDS,
   BACKGROUND_PRESETS,
   CAPTION_STYLES,
+  COLOURED_BACKGROUNDS,
+  GRADIENT_KINDS,
   THEME_FONTS,
   CLICK_EFFECTS,
   CURRENT_VERSION,
@@ -25,6 +27,8 @@ export {
   type AutoEdits,
   type AutoKind,
   type BackgroundPreset,
+  type ColouredBackground,
+  type GradientKind,
   type CaptionFix,
   type Captions,
   type Theme,
@@ -89,4 +93,5 @@ export {
   type MarkersParseResult,
 } from './markers';
 export { BRAND_VERSION, BrandKitSchema, parseBrandKitJson, type BrandKit, type BrandKitParseResult } from './brand';
-export { backgroundTone } from './theme';
+export { BACKGROUND_FIELDS, BACKGROUND_PALETTES, SOLID_DEFAULT, backgroundColors, isColouredBackground, switchBackground } from './backgrounds';
+export { backgroundTone, darkTone } from './theme';

@@ -383,3 +383,25 @@ describe('the theme (the brand)', () => {
     expect(pathsOf({ ...minimal, theme: { colour: '#000000' } })).toEqual(['theme']);
   });
 });
+
+describe('backgrounds', () => {
+  it('read a gradient, the quiet ones in colours of their own, and a softened, darker image', () => {
+    const gradient = { preset: 'gradient', colors: ['#0B132B', '#3A506B', '#5BC0BE'], angle: 90, kind: 'radial' };
+    expect(ProjectSchema.parse({ ...minimal, look: { background: gradient } }).look.background).toEqual(gradient);
+    for (const preset of ['flow', 'bokeh', 'dots', 'mesh']) expect(pathsOf({ ...minimal, look: { background: { preset, colors: ['#000000', '#FFFFFF'] } } })).toEqual([]);
+    expect(pathsOf({ ...minimal, look: { background: { preset: 'flow' } } })).toEqual([]);
+    expect(pathsOf({ ...minimal, look: { background: { preset: 'image', image: 'images/wallpaper.jpg', blur: 0.6, dim: 0.3 } } })).toEqual([]);
+  });
+
+  it('refuse a gradient without colours, too few or too many, an angle past 360, an unknown shape, and too much blur or dark', () => {
+    const issues = (background: Record<string, unknown>) => pathsOf({ ...minimal, look: { background } });
+    expect(issues({ preset: 'gradient' })).toEqual(['look.background.colors']);
+    expect(issues({ preset: 'gradient', colors: ['#000000'] })).toEqual(['look.background.colors']);
+    expect(issues({ preset: 'flow', colors: ['#000000', '#111111', '#222222', '#333333', '#444444'] })).toEqual(['look.background.colors']);
+    expect(issues({ preset: 'gradient', colors: ['#000000', 'red'] })).toEqual(['look.background.colors.1']);
+    expect(issues({ preset: 'gradient', colors: ['#000000', '#FFFFFF'], angle: 400 })).toEqual(['look.background.angle']);
+    expect(issues({ preset: 'gradient', colors: ['#000000', '#FFFFFF'], kind: 'conic' })).toEqual(['look.background.kind']);
+    expect(issues({ preset: 'image', image: 'a.png', blur: 1.5 })).toEqual(['look.background.blur']);
+    expect(issues({ preset: 'image', image: 'a.png', dim: 0.9 })).toEqual(['look.background.dim']);
+  });
+});

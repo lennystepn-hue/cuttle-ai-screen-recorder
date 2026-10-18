@@ -32,6 +32,12 @@ reveal, the end card). Two videos should never sound the same.
 4. Render. The music renders beside the frames and is mixed with the mic, the typing and the sounds,
    limited below full scale.
 
+**With the project open in the Cuttle app,** the user hears your music in its editor as they play the
+video: the Music lane shows its waveform and the parts your page returned, its panel the params you
+declared (declare a param for what they may want to set: the key, the tempo, how hard it drives),
+its volume and how far it goes down under speech. Each page you save renders and plays there a
+moment later; the user adds music from the templates and sounds at the playhead too.
+
 Aim for about -16 LUFS for the music alone (`music check`), true peak below -1 dBFS; a quiet
 walkthrough with a voice -20 or lower. `music.volume` (0–1) and `music.duck` (dB under speech,
 default 12) set it in the mix without a new render of the page.

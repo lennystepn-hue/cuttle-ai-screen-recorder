@@ -1800,6 +1800,84 @@ describe.runIf(enabled)('the Cuttle app', () => {
     await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find((window) => window.getTitle() === 'motion-editor · Cuttle')?.close());
   }, 240_000);
 
+  it('plays music made for the video: + Music renders it (its lane, its parts), a param renders it anew, it plays and goes into the export; + Sound puts a sound at the playhead, moved on its lane', async () => {
+    const dir = join(root, 'music-editor');
+    makeMotionFixture(dir);
+    const page = await openEditor(dir);
+    await page.waitForFunction(() => '__cuttleCheck' in window);
+    type Sound = { status: { state: string; key?: string; info?: { bpm?: number; sections?: unknown[] } | null; errors: string[] }; track?: string; seconds: number };
+    const seekTo = (t: number) => page.evaluate((time) => (window as unknown as Hooked).__cuttleCheck.seek(time), t);
+    const now = () => page.evaluate(() => (window as unknown as Hooked).__cuttleCheck.state() as CheckState & { sound: Sound });
+    const saved = () => JSON.parse(readFileSync(join(dir, 'cuttle.json'), 'utf8')) as { music?: { src: string; volume?: number; params?: Record<string, unknown> }; sounds?: { id: string; sound: string; at: number; scene?: string }[] };
+
+    // + Music: the template copied into music/, the music set, rendered for the video, its lane and its panel
+    await seekTo(0.5);
+    await chooseIn(page, '[data-testid=add-music]', 'Pulse');
+    await expect.poll(() => saved().music?.src).toBe('music/pulse/index.html');
+    expect(existsSync(join(dir, 'music', 'pulse', 'index.html'))).toBe(true);
+    await expect.poll(async () => (await now()).sound.status.state, { timeout: 90_000 }).toBe('ready');
+    await expect.poll(async () => (await now()).sound.track, { timeout: 20_000 }).toBe((await now()).sound.status.key);
+    const first = (await now()).sound;
+    expect(first.status.errors).toEqual([]);
+    expect(first.seconds).toBeCloseTo((await now()).duration, 1);
+    expect(first.status.info?.bpm).toBeGreaterThanOrEqual(114);
+    expect(first.status.info?.sections?.length).toBeGreaterThan(0);
+    await page.waitForSelector('[data-testid=music-lane] .music-part');
+    expect(await page.locator('[data-testid=music-state]').textContent()).toContain('Ready');
+    await shotOf('40-music-editor', '/editor.html', 'music-editor · Cuttle');
+
+    // a param: the music renders again with it
+    await page.fill('[data-testid=param-bpm]', '100');
+    await page.press('[data-testid=param-bpm]', 'Enter');
+    await expect.poll(() => saved().music?.params).toEqual({ bpm: 100 });
+    await expect.poll(async () => (await now()).sound.status.info?.bpm, { timeout: 90_000 }).toBe(100);
+    await expect.poll(async () => (await now()).sound.track, { timeout: 20_000 }).not.toBe(first.track);
+
+    // it plays with the video: the music and the effects start (the param's field gives the keys back first)
+    await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+    await seekTo(1);
+    await click(page, 'button.play');
+    await page.waitForTimeout(1200);
+    const stats = await page.evaluate(() => (window as unknown as Hooked).__cuttleCheck.playback() as { soundtrack?: number });
+    expect((await now()).playing).toBe(true);
+    await click(page, 'button.play');
+    expect(stats.soundtrack).toBe(2);
+
+    // + Sound at the playhead: on the clip at the source second it shows, its chip on the lane, its panel
+    await seekTo(3);
+    await chooseIn(page, '[data-testid=add-sound]', 'Whoosh');
+    await expect.poll(() => saved().sounds).toEqual([{ id: 'a1', sound: 'whoosh', at: 2 }]);
+    const chip = page.locator('.item.sound[data-id=a1]');
+    await chip.waitFor();
+    expect(await page.locator('[data-testid=sound-volume]').count()).toBe(1);
+    // dragged half a second later on its lane
+    const box = (await chip.boundingBox())!;
+    const pps = await page.evaluate(() => (window as unknown as { __cuttleCheck: { pps(): number } }).__cuttleCheck.pps());
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(box.x + box.width / 2 + pps * 0.25, box.y + box.height / 2, { steps: 4 });
+    await page.mouse.move(box.x + box.width / 2 + pps * 0.5, box.y + box.height / 2, { steps: 4 });
+    await page.mouse.up();
+    await expect.poll(() => saved().sounds?.[0]?.at).toBeGreaterThan(2.3);
+    // and in the intro (a motion scene): seconds into it
+    await seekTo(0.4);
+    await chooseIn(page, '[data-testid=add-sound]', 'Pop');
+    await expect.poll(() => saved().sounds?.find((sound) => sound.id === 'a2')).toEqual({ id: 'a2', sound: 'pop', at: 0.4, scene: 's1' });
+    await expect.poll(async () => (await now()).sound.status.state, { timeout: 90_000 }).toBe('ready');
+    await shotOf('41-music-sounds', '/editor.html', 'music-editor · Cuttle');
+
+    // the export has the music (the take has no mic: what is heard is the music and the sounds)
+    await page.keyboard.press('Control+E');
+    await page.waitForSelector('[data-testid=export-sheet]');
+    await page.click('[data-testid=export-start]');
+    await exported(page);
+    const meter = spawnSync('ffmpeg', ['-hide_banner', '-nostats', '-i', join(dir, 'out', 'export.mp4'), '-map', '0:a', '-af', 'ebur128', '-f', 'null', '-'], { encoding: 'utf8', windowsHide: true }).stderr;
+    const lufs = Number(/I:\s+(-?[\d.]+) LUFS/.exec(meter.slice(meter.lastIndexOf('Summary:')))?.[1]);
+    expect(lufs).toBeGreaterThan(-30);
+    await page.keyboard.press('Escape');
+    await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find((window) => window.getTitle() === 'music-editor · Cuttle')?.close());
+  }, 300_000);
+
   it('had no unhandled rejection in the main process, and no error in the editor', async () => {
     expect(await app.evaluate(() => (globalThis as unknown as { __rejections: string[] }).__rejections)).toEqual([]);
     expect(pageErrors).toEqual([]);

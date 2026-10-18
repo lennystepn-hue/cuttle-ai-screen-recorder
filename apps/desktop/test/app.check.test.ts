@@ -172,6 +172,14 @@ function difference(a: PNG, b: PNG): { mean: number; max: number } {
   return { mean: sum / ((a.data.length / 4) * 3), max };
 }
 
+/** Waits for an export to be written; when it is not, the error says what the export sheet shows. */
+async function exported(page: Page): Promise<void> {
+  await page.waitForSelector('[data-testid=export-file]', { timeout: 120_000 }).catch(async (error: Error) => {
+    const sheet = await page.locator('[data-testid=export-sheet]').innerText().catch(() => '(no export sheet)');
+    throw new Error(`${error.message}\nThe export sheet says: ${sheet}`);
+  });
+}
+
 describe.runIf(enabled)('the Cuttle app', () => {
   let root: string;
   let project: string;
@@ -453,7 +461,7 @@ describe.runIf(enabled)('the Cuttle app', () => {
     expect(await editor.locator('.format').first().textContent()).toContain('640×360');
     await shot('05-export-sheet');
     await editor.click('[data-testid=export-start]');
-    await editor.waitForSelector('[data-testid=export-file]', { timeout: 120_000 });
+    await exported(editor);
     await shot('06-exported');
     const out = join(project, 'out', 'export.mp4');
     const probe = spawnSync('ffprobe', ['-v', 'error', '-show_entries', 'stream=codec_name,width,height', '-of', 'csv=p=0', out], { encoding: 'utf8' }).stdout.trim().split(/\r?\n/);
@@ -1546,7 +1554,7 @@ describe.runIf(enabled)('the Cuttle app', () => {
     await page.waitForSelector('[data-testid=export-srt][aria-pressed=true]');
     await shotOf('30-export-subtitles', '/editor.html', 'subtitled · Cuttle');
     await click(page, '[data-testid=export-start]');
-    await page.waitForSelector('[data-testid=export-file]', { timeout: 120_000 });
+    await exported(page);
     expect(await page.locator('[data-testid=export-file] small').textContent()).toContain('with .srt');
     const srt = readFileSync(join(dir, 'out', 'export.srt'), 'utf8');
     expect(srt.startsWith('1\n00:00:00,100 --> ')).toBe(true);
@@ -1680,7 +1688,7 @@ describe.runIf(enabled)('the Cuttle app', () => {
     await page.keyboard.press('Control+E');
     await page.waitForSelector('[data-testid=export-sheet]');
     await page.click('[data-testid=export-start]');
-    await page.waitForSelector('[data-testid=export-file]', { timeout: 120_000 });
+    await exported(page);
     // a pixel of the video (rgb24 from ffmpeg; a crop of 2×2, since 4:2:0 video crops in pairs)
     const pixel = (seconds: number, x: number, y: number) => [
       ...spawnSync('ffmpeg', ['-v', 'error', '-ss', String(seconds), '-i', join(dir, 'out', 'export.mp4'), '-frames:v', '1', '-vf', `crop=2:2:${x}:${y}`, '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-'], { windowsHide: true }).stdout.subarray(0, 3),
@@ -1693,6 +1701,104 @@ describe.runIf(enabled)('the Cuttle app', () => {
     expect(near(pixel(2.5, 320, 100), [0, 255, 0])).toBe(false);
     await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find((window) => window.getTitle() === 'motion · Cuttle')?.close());
   }, 180_000);
+
+  it('edits motion in the editor: + Motion adds a template drawn as the export draws it, a param and an edited page show at once, a page that throws says so', async () => {
+    const dir = join(root, 'motion-editor');
+    makeMotionFixture(dir);
+    const page = await openEditor(dir);
+    // the hook comes once the first frame is drawn
+    await page.waitForFunction(() => '__cuttleCheck' in window);
+    type Motion = { status: { item: string; src: string; state: string; errors: string[] }[]; files: number };
+    const seekTo = (t: number) => page.evaluate((time) => (window as unknown as Hooked).__cuttleCheck.seek(time), t);
+    const view = async () => decode(await page.evaluate(() => (window as unknown as Hooked).__cuttleCheck.pixels()));
+    const now = () => page.evaluate(() => (window as unknown as Hooked).__cuttleCheck.state() as CheckState & { motion: Motion });
+    const flushPage = () => page.evaluate(() => (window as unknown as Hooked).__cuttleCheck.flush());
+    const saved = () => JSON.parse(readFileSync(join(dir, 'cuttle.json'), 'utf8')) as { scenes: { type: string; src?: string; params?: Record<string, unknown> }[]; overlays: { id: string }[] };
+    const titleAt = 2.2;
+
+    // + Motion: the title after the scene under the playhead, its page copied into motion/, the playhead on it
+    await seekTo(0.5);
+    await chooseIn(page, '[data-testid=add-motion]', 'Title');
+    await expect.poll(() => saved().scenes.map((scene) => scene.src ?? scene.type)).toEqual(['motion/intro/index.html', 'motion/title/index.html', 'clip']);
+    expect(existsSync(join(dir, 'motion', 'title', 'index.html'))).toBe(true);
+    await expect.poll(async () => (await now()).t).toBe(1);
+    // its block on the timeline shows frames of its page
+    await page.waitForSelector('.scene.motion .thumbs i', { timeout: 30_000 });
+
+    // the editor draws the scenes and the overlay as the export does (`cuttle preview`), pixel for pixel
+    await flushPage();
+    const times = [0.5, titleAt, 6];
+    const stills = join(root, 'motion-stills');
+    const result = spawnSync('node', [CLI, '--json', '-C', dir, 'preview', ...times.flatMap((t) => ['--at', String(t)]), '-o', stills], { encoding: 'utf8', timeout: 120_000 });
+    expect(result.status, result.stderr).toBe(0);
+    const files = (JSON.parse(result.stdout) as { stills: { file: string }[] }).stills.map((still) => still.file);
+    for (const [i, t] of times.entries()) {
+      await seekTo(t);
+      const { mean, max } = difference(await view(), PNG.sync.read(readFileSync(files[i]!)));
+      expect(mean, `t = ${t}: mean difference`).toBeLessThan(0.5);
+      expect(max, `t = ${t}: largest difference`).toBeLessThanOrEqual(24);
+    }
+    expect((await now()).motion.status.map((status) => [status.src, status.state])).toEqual(
+      expect.arrayContaining([
+        ['motion/title/index.html', 'ready'],
+        ['motion/bar/index.html', 'ready'],
+      ]),
+    );
+
+    // a param, set in the inspector, on the video at once
+    await seekTo(titleAt);
+    const before = await view();
+    await page.fill('[data-testid=param-title]', 'Edited in Cuttle');
+    await page.press('[data-testid=param-title]', 'Enter');
+    await expect.poll(() => saved().scenes[1]!.params).toEqual({ title: 'Edited in Cuttle' });
+    await expect.poll(async () => (await seekTo(titleAt), difference(await view(), before).mean), { timeout: 20_000 }).toBeGreaterThan(1);
+    await shotOf('38-motion-editor', '/editor.html', 'motion-editor · Cuttle');
+
+    // Claude edits the page: the editor draws it again
+    const changes = (await now()).motion.files;
+    const html = join(dir, 'motion', 'title', 'index.html');
+    writeFileSync(html, readFileSync(html, 'utf8').replace('</head>', '<style>* { color: #00ff00 !important; }</style></head>'));
+    await expect.poll(async () => (await now()).motion.files, { timeout: 10_000 }).toBeGreaterThan(changes);
+    const green = (png: PNG) => {
+      let count = 0;
+      for (let i = 0; i < png.data.length; i += 4) if (png.data[i + 1]! > 200 && png.data[i]! < 90 && png.data[i + 2]! < 90) count++;
+      return count;
+    };
+    await expect.poll(async () => (await seekTo(titleAt), green(await view())), { timeout: 20_000 }).toBeGreaterThan(500);
+
+    // the export has the edited param and the edited page (the param's field gives the keys back first)
+    await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+    await page.keyboard.press('Control+E');
+    await page.waitForSelector('[data-testid=export-sheet]');
+    await page.click('[data-testid=export-start]');
+    await exported(page);
+    const exportedFrame = spawnSync('ffmpeg', ['-v', 'error', '-ss', String(titleAt), '-i', join(dir, 'out', 'export.mp4'), '-frames:v', '1', '-f', 'image2pipe', '-vcodec', 'png', '-'], { windowsHide: true }).stdout;
+    expect(green(PNG.sync.read(exportedFrame))).toBeGreaterThan(500);
+    await page.keyboard.press('Escape');
+
+    // playing draws the motion frames as they come (the param's field has the keys: the button plays)
+    await seekTo(1);
+    await click(page, 'button.play');
+    await page.waitForTimeout(1500);
+    const stats = await page.evaluate(() => (window as unknown as Hooked).__cuttleCheck.playback() as { motion?: { frames: number } });
+    expect((await now()).playing).toBe(true);
+    await click(page, 'button.play');
+    expect(stats.motion?.frames).toBeGreaterThan(5);
+
+    // a page that throws, added from outside: its error in the inspector
+    mkdirSync(join(dir, 'motion', 'oops'), { recursive: true });
+    writeFileSync(join(dir, 'motion', 'oops', 'index.html'), '<!doctype html><body><script>cuttle.onFrame((t) => { if (t > 0.2) undefinedThing.go(); });</script></body>');
+    await flushPage();
+    const raw = JSON.parse(readFileSync(join(dir, 'cuttle.json'), 'utf8'));
+    writeFileSync(join(dir, 'cuttle.json'), `${JSON.stringify({ ...raw, overlays: [...raw.overlays, { id: 'o9', src: 'motion/oops/index.html', at: 1, duration: 2 }] }, null, 2)}\n`);
+    await page.waitForSelector('.item.motion[data-id=o9]', { timeout: 20_000 });
+    await page.evaluate(() => (window as unknown as Hooked).__cuttleCheck.select({ kind: 'motion', id: 'o9' }));
+    await seekTo(6);
+    await expect.poll(async () => (await page.locator('[data-testid=motion-errors]').textContent().catch(() => '')) ?? '', { timeout: 20_000 }).toContain('ReferenceError');
+    expect(await page.locator('[data-testid=motion-state]').textContent()).toContain('threw an error');
+    await shotOf('39-motion-errors', '/editor.html', 'motion-editor · Cuttle');
+    await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find((window) => window.getTitle() === 'motion-editor · Cuttle')?.close());
+  }, 240_000);
 
   it('had no unhandled rejection in the main process, and no error in the editor', async () => {
     expect(await app.evaluate(() => (globalThis as unknown as { __rejections: string[] }).__rejections)).toEqual([]);

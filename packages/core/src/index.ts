@@ -1,7 +1,7 @@
 // @cuttle/core: what the CLI and the app do to a project folder, in Node: read and write cuttle.json
 // as written (with backups), point the project at a take, suggest scenes, recover a take, grab a
-// frame, run ffmpeg, transcribe the mic (the speech models, whisper, the speech edits), keep brand kits,
-// and read a product's colours and the desktop's wallpaper for a background.
+// frame, run ffmpeg, transcribe the mic (the speech models, whisper, live captions, the speech
+// edits), keep brand kits, and read a product's colours and the desktop's wallpaper for a background.
 export { CoreError, type CoreErrorCode } from './errors';
 export { EDITOR_LOCK, editorLockOf, type EditorLock } from './editor-lock';
 export { ffmpegPath, runFfmpeg } from './ffmpeg';
@@ -18,6 +18,7 @@ export { gaps, length, union, type Span } from './suggest/spans';
 export { transcriptMarkers } from './suggest/transcript';
 export { DEFAULT_MODEL, MODEL_NAMES, SPEECH_MODELS, chooseModel, downloadFile, downloadModel, installedModels, modelInstalled, modelPath, modelUrl, modelsDir, removeModel, speechModel, type DownloadOptions, type ModelName, type SpeechModel } from './speech/models';
 export { filterValue, hasWhisper, NO_WHISPER, parseWhisperCliJson, parseWhisperLines, runWhisper, whisperCliPath, whisperEngine, type HeardWord, type WhisperEngine, type WhisperOptions } from './speech/whisper';
+export { LIVE_RATE, LIVE_RULES, liveCaptions, liveModel, quietestCut, withoutEchoes, type LiveCaptions, type LiveMode, type LiveOptions } from './speech/live';
 export { LEVEL_SECONDS, SPEECH_RULES, micLevels, speechStretches } from './speech/levels';
 export { ALIGN_RULES, alignWords, guessLanguage, type Alignment } from './speech/align';
 export { SPEECH_EDIT_RULES, fillerCuts, fillerWords, inputSpans, mergeCuts, pauseCuts, restingAt, speechCuts, type RawCut, type SpeechCut, type SpeechEditInput } from './speech/edits';

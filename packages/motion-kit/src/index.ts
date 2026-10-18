@@ -4,8 +4,10 @@
 //   motion.js            Cuttle's helpers (easing, tweens, text, code)
 //   sound.js             Cuttle's sound kit for music pages (instruments, effects, harmony, the video's parts)
 //   blank.html           the page a video's sounds render in when it has no music page
+//   take-worker.js       reads the screen recording's frames for `cuttle.take.frame`, its masks painted (take.js)
 //   three/               Three.js (three.module.js, three.core.js) and its addons (three/addons/)
 //   lottie/              lottie-web: lottie.mjs (a module) and lottie.min.js (a script)
+//   mediabunny/          mediabunny.min.mjs: reads video files for the take's frames
 //   fonts/               Inter, JetBrains Mono and display faces (woff2, Latin; see KIT_FONTS)
 //   templates/<name>/    the pages `cuttle motion new` copies into a project
 //   licenses/            the licenses of what it bundles
@@ -77,6 +79,7 @@ export const MOTION_TEMPLATES: readonly MotionTemplate[] = [
   { name: 'title', kind: 'scene', duration: 3.5, description: 'a kinetic title: the words rise out of a blur with a whoosh, an accent line draws under them' },
   { name: 'end-card', kind: 'scene', duration: 4, description: 'the end card: a logo or monogram that lands with a hit, a line, the URL in a pill that types itself (keys, a ding), a call to action' },
   { name: 'code-typing', kind: 'scene', duration: 6, description: 'a code editor that types a file with syntax colours, line by line, keys clattering' },
+  { name: 'device-3d', kind: 'scene', duration: 5, description: 'a laptop or tablet in 3D whose screen plays the take: it turns in as the lid opens, then flies into the screen' },
   { name: 'lower-third', kind: 'overlay', duration: 4, description: 'a name and a role in a bar that wipes in (a swoosh) and out' },
   { name: 'click-callouts', kind: 'overlay', duration: 0, whole: true, description: 'a ring, a number and a pop at every click the video shows, on the click' },
   { name: 'kinetic-captions', kind: 'overlay', duration: 0, whole: true, description: 'the spoken words, word by word, the current one in the accent colour' },

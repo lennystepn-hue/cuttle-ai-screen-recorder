@@ -247,7 +247,7 @@ export async function addPage(): Promise<void> {
 }
 
 /** "lower-third" (or "lower-third-2", a second copy) as a label: "Lower third". */
-export const templateLabel = (name: string) => `${name.charAt(0).toUpperCase()}${name.slice(1).replace(/-\d+$/, '').replace(/-/g, ' ')}`;
+export const templateLabel = (name: string) => `${name.charAt(0).toUpperCase()}${name.slice(1).replace(/-\d+$/, '').replace(/-/g, ' ')}`.replace(/ 3d\b/, ' 3D');
 
 /**
  * A motion template of the kit: its page is copied into the project's `motion/` folder, and it goes

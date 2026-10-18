@@ -4,7 +4,8 @@
     <meta charset="utf-8" />
     <title>Code typing</title>
     <!-- A code editor that types a file: syntax colours, line numbers, the current line lit, a caret
-         that blinks once it is done, and the view scrolling along with the caret. -->
+         that blinks once it is done, and the view scrolling along with the caret. Keys clatter while
+         it types (the "sounds" param). -->
     <script type="application/json" id="cuttle-params">
       [
         {
@@ -16,7 +17,8 @@
         { "name": "language", "label": "Language", "type": "select", "default": "ts", "options": ["ts", "js", "python", "bash", "json", "html", "css", "go", "rust", "sql"] },
         { "name": "file", "label": "File name", "type": "text", "default": "demo.ts" },
         { "name": "cps", "label": "Characters a second", "type": "number", "default": 34, "min": 5, "max": 200 },
-        { "name": "background", "label": "Own background", "type": "bool", "default": true }
+        { "name": "background", "label": "Own background", "type": "bool", "default": true },
+        { "name": "sounds", "label": "Sounds", "type": "bool", "default": true }
       ]
     </script>
     <style>
@@ -142,6 +144,8 @@
       const cps = Number(params.cps) || 34;
       const start = 0.55;
       const done = typedUntil(code, { start, cps });
+      // the keys: a burst every 0.6 s while it types
+      if (params.sounds !== false) for (let key = start; key < done - 0.1; key += 0.6) cuttle.sound('type-burst', { at: key, volume: 0.8 });
       const scroll = document.getElementById('scroll');
       const view = document.getElementById('view');
       const win = document.getElementById('window');

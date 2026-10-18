@@ -4,13 +4,15 @@
     <meta charset="utf-8" />
     <title>Click callouts</title>
     <!-- At every click the video shows: a dot that pops, two rings that leave it, and a numbered
-         badge on a short stem; on the click itself, wherever the window, crop and zoom put it. -->
+         badge on a short stem; on the click itself, wherever the window, crop and zoom put it. A pop
+         on each (the "sounds" param). -->
     <script type="application/json" id="cuttle-params">
       [
         { "name": "numbered", "label": "Numbers", "type": "bool", "default": true },
         { "name": "label", "label": "Word after the number", "type": "text", "default": "" },
         { "name": "color", "label": "Colour (empty: the accent)", "type": "color", "default": null },
-        { "name": "size", "label": "Size", "type": "number", "default": 1, "min": 0.5, "max": 2 }
+        { "name": "size", "label": "Size", "type": "number", "default": 1, "min": 0.5, "max": 2 },
+        { "name": "sounds", "label": "Sounds", "type": "bool", "default": true }
       ]
     </script>
     <style>
@@ -49,6 +51,8 @@
         .filter((click) => click.at !== null)
         .sort((a, b) => a.at - b.at)
         .map((click, i) => ({ ...click, number: i + 1 }));
+      // a pop on each click, at the second the video shows it
+      if (params.sounds !== false) for (const click of clicks) cuttle.sound('pop', { videoTime: click.at, volume: 0.5 });
 
       function callout(click, age) {
         const point = take.toScreen(click.x, click.y);

@@ -4,13 +4,15 @@
     <meta charset="utf-8" />
     <title>Lower third</title>
     <!-- A name and a role over the video: an accent bar grows, a glass card wipes open from it, the
-         name and the role rise out of their masks; at the end it all folds back. -->
+         name and the role rise out of their masks; at the end it all folds back. A short swoosh as
+         the name lands (the "sounds" param). -->
     <script type="application/json" id="cuttle-params">
       [
         { "name": "name", "label": "Name", "type": "text", "default": "Lena Müller" },
         { "name": "role", "label": "Role", "type": "text", "default": "Founder · Cuttle" },
         { "name": "side", "label": "Side", "type": "select", "default": "left", "options": ["left", "right"] },
-        { "name": "place", "label": "Place", "type": "select", "default": "bottom", "options": ["bottom", "top"] }
+        { "name": "place", "label": "Place", "type": "select", "default": "bottom", "options": ["bottom", "top"] },
+        { "name": "sounds", "label": "Sounds", "type": "bool", "default": true }
       ]
     </script>
     <style>
@@ -100,6 +102,7 @@
       const name = document.getElementById('name');
       const role = document.getElementById('role-line');
       const right = params.side === 'right';
+      if (params.sounds !== false) cuttle.sound('swoosh-in', { at: 0.4, volume: 0.6 });
 
       cuttle.onFrame((t) => {
         // out: the last 0.7 s, in the reverse order

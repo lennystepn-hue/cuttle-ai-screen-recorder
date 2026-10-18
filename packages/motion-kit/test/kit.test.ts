@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { copyTemplate, MissingTemplateError } from '../src/files';
-import { KIT_FONTS, KIT_IMPORTS, KIT_ORIGIN, MOTION_TEMPLATES, MUSIC_TEMPLATES, importMapTag, withImportMap } from '../src/index';
+import { BUILT_IN_SOUNDS, KIT_FONTS, KIT_IMPORTS, KIT_ORIGIN, MOTION_TEMPLATES, MUSIC_TEMPLATES, importMapTag, withImportMap } from '../src/index';
 
 const TEMPLATES = fileURLToPath(new URL('../templates/', import.meta.url));
 
@@ -37,6 +37,23 @@ describe('the motion kit', () => {
       expect(readFileSync(file, 'utf8'), template.name).toMatch(/^<!doctype html>/);
       expect(template.whole === true || template.duration > 0, template.name).toBe(true);
     }
+  });
+
+  it('makes sounds in the templates that move, built-in ones, behind a sounds param that is on', () => {
+    const names = new Set(BUILT_IN_SOUNDS.map(([name]) => name));
+    const making: string[] = [];
+    for (const template of MOTION_TEMPLATES) {
+      const html = readFileSync(`${TEMPLATES}${template.name}/index.html`, 'utf8');
+      const asked = [...html.matchAll(/cuttle\.sound\('([^']+)'/g)].map((match) => match[1]!);
+      if (asked.length === 0) continue;
+      making.push(template.name);
+      const declared = html.split('id="cuttle-params">')[1]?.split('</' + 'script>')[0];
+      const params = JSON.parse(declared ?? 'null') as { name: string; type: string; default: unknown }[];
+      expect(params.find((param) => param.name === 'sounds'), template.name).toMatchObject({ type: 'bool', default: true });
+      expect(html, template.name).toContain('params.sounds !== false');
+      for (const name of asked) expect(names.has(name), `${template.name}: ${name}`).toBe(true);
+    }
+    expect(making).toEqual(['title', 'end-card', 'code-typing', 'lower-third', 'click-callouts']);
   });
 
   it('has a page for every music template that composes with cuttle.music and declares its params', () => {

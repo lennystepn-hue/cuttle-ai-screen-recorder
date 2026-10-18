@@ -3,7 +3,10 @@ import { isFact, type AutoKind, type CuttleProject, type InputEvent, type Marker
 import { occurrences, type SceneSpan } from '@cuttle/timeline';
 import { formatDuration } from './format';
 
-export type OverlayKind = 'zoom' | 'mask' | 'caption' | 'motion';
+export type OverlayKind = 'zoom' | 'mask' | 'caption' | 'motion' | 'sound';
+
+/** How long a sound's chip is on the timeline (output seconds): a sound is a moment. */
+export const SOUND_CHIP_SECONDS = 0.5;
 
 export interface SceneBlock {
   /** The scene's index in the project's `scenes`. */
@@ -47,7 +50,7 @@ export interface CutNotch {
 
 export interface OverlayBlock {
   kind: OverlayKind;
-  /** Index in the project's `zooms`, `masks`, `texts` or `overlays`. */
+  /** Index in the project's `zooms`, `masks`, `texts`, `overlays` or `sounds`. */
   item: number;
   /** The item's id (`#<index>` for one without). */
   id: string;
@@ -85,11 +88,20 @@ export interface MarkerPin {
   label?: string;
 }
 
+/** The video's music, on a lane of its own over the whole video. */
+export interface MusicBlock {
+  /** Its page's name (`music/pulse/index.html` is "pulse"). */
+  title: string;
+  src: string;
+  enabled: boolean;
+}
+
 export interface TimelineModel {
   duration: number;
   scenes: SceneBlock[];
   cuts: CutNotch[];
   lanes: Record<OverlayKind, OverlayLane>;
+  music?: MusicBlock;
   markers: MarkerPin[];
 }
 
@@ -169,6 +181,45 @@ function lane<T extends { enabled: boolean; label?: string; id?: string }>(
   return { blocks, cutOut: cutOutItems.length, cutOutItems, rows: Math.max(1, ends.length) };
 }
 
+/**
+ * The sounds, one chip each time the video plays one: a sound at a source second wherever a clip shows
+ * that moment, a sound in a scene that many seconds into it. One that never plays is cut out.
+ */
+function soundLane(project: CuttleProject, spans: readonly SceneSpan[], duration: number): OverlayLane {
+  const blocks: OverlayBlock[] = [];
+  const cutOutItems: OverlayLane['cutOutItems'] = [];
+  project.sounds.forEach((sound, index) => {
+    const id = sound.id ?? `#${index}`;
+    const title = sound.label ?? soundName(sound.sound);
+    const times: number[] = [];
+    if (sound.scene !== undefined) {
+      const sceneIndex = project.scenes.findIndex((scene) => scene.id === sound.scene);
+      const span = spans.find((candidate) => candidate.sceneIndex === sceneIndex);
+      if (span && sound.at <= span.end - span.start) times.push(span.start + sound.at);
+    } else times.push(...outputTimesOf(spans, sound.at));
+    if (times.length === 0) cutOutItems.push({ id, title });
+    for (const t of times) {
+      const span = Math.max(0, spans.findIndex((candidate) => t >= candidate.start - 1e-9 && t < candidate.end));
+      blocks.push({ kind: 'sound', item: index, id, start: t, end: Math.min(duration, t + SOUND_CHIP_SECONDS), span, enabled: sound.enabled, title, row: 0 });
+    }
+  });
+  blocks.sort((a, b) => a.start - b.start);
+  const ends: number[] = [];
+  for (const block of blocks) {
+    let row = ends.findIndex((end) => end <= block.start + 1e-9);
+    if (row < 0) row = ends.length < MAX_LANE_ROWS ? ends.length : MAX_LANE_ROWS - 1;
+    ends[row] = Math.max(ends[row] ?? 0, block.end);
+    block.row = row;
+  }
+  return { blocks, cutOut: cutOutItems.length, cutOutItems, rows: Math.max(1, ends.length) };
+}
+
+/** A sound's name: a built-in's own, a file's without its folder and extension. */
+export function soundName(sound: string): string {
+  const file = sound.split(/[\\/]/).at(-1) ?? sound;
+  return file.replace(/\.[a-z0-9]+$/i, '');
+}
+
 /** The source second a clip block shows at output second `t` (past its last piece: on at its speed). */
 export function blockSourceAt(block: SceneBlock, t: number): number {
   const pieces = block.pieces ?? [];
@@ -242,7 +293,9 @@ export function timelineModel(project: CuttleProject, spans: readonly SceneSpan[
       mask: lane('mask', project.masks, spans, (mask) => [mask.from, mask.to], () => 'Mask', (mask) => (mask.moves ?? []).map((move) => move.at)),
       caption: lane('caption', project.texts, spans, (text) => [text.at, text.at + text.duration], (text) => text.text),
       motion: lane('motion', project.overlays, spans, (overlay) => [overlay.at, overlay.at + overlay.duration], (overlay) => motionName(overlay.src)),
+      sound: soundLane(project, spans, spans.at(-1)?.end ?? 0),
     },
+    ...(project.music && { music: { title: motionName(project.music.src), src: project.music.src, enabled: project.music.enabled } }),
     markers: markers
       .flatMap((marker) => outputTimesOf(spans, marker.t).map((t) => ({ t, source: marker.t, kind: marker.kind, ...(marker.label !== undefined && { label: marker.label }) })))
       .sort((a, b) => a.t - b.t),
@@ -351,7 +404,7 @@ export function waveformColumns(peaks: Peaks, spans: readonly SceneSpan[], from:
 
 const count = (n: number, one: string) => `${n} ${one}${n === 1 ? '' : 's'}`;
 /** What people call an overlay of each lane. */
-const OVERLAY_NOUNS: Record<OverlayKind, string> = { zoom: 'zoom', mask: 'mask', caption: 'caption', motion: 'motion overlay' };
+const OVERLAY_NOUNS: Record<OverlayKind, string> = { zoom: 'zoom', mask: 'mask', caption: 'caption', motion: 'motion overlay', sound: 'sound' };
 const list = (items: readonly string[]) => (items.length < 2 ? items.join('') : `${items.slice(0, -1).join(', ')} and ${items.at(-1)}`);
 
 /**
@@ -364,7 +417,7 @@ export function exportChecks(project: CuttleProject, spans: readonly SceneSpan[]
   const checks: string[] = [];
   const off = project.masks.filter((mask) => !mask.enabled).length;
   if (off > 0) checks.push(`${count(off, 'mask')} ${off === 1 ? 'is off: what it covers shows' : 'are off: what they cover shows'} in the video.`);
-  const cut = (['zoom', 'mask', 'caption', 'motion'] as const).filter((kind) => model.lanes[kind].cutOut > 0);
+  const cut = (['zoom', 'mask', 'caption', 'motion', 'sound'] as const).filter((kind) => model.lanes[kind].cutOut > 0);
   const cutTotal = cut.reduce((sum, kind) => sum + model.lanes[kind].cutOut, 0);
   if (cutTotal > 0) {
     checks.push(`${list(cut.map((kind) => count(model.lanes[kind].cutOut, OVERLAY_NOUNS[kind])))} ${cutTotal === 1 ? 'is cut out: no clip shows it' : 'are cut out: no clip shows them'}.`);

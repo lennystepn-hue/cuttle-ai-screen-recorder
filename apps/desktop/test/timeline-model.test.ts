@@ -113,6 +113,37 @@ describe('timelineModel', () => {
     expect(exportChecks(motion, motionSpans)).toEqual(['1 motion overlay is cut out: no clip shows it.']);
   });
 
+  it('draws sounds as chips where the video plays them, in a scene that far in, and the music over the whole video', () => {
+    const sounds = project({
+      scenes: [
+        { type: 'card', id: 'c1', title: 'Hi', duration: 2 },
+        { type: 'clip', from: 0, to: 4 },
+        { type: 'clip', from: 2, to: 6, speed: 2 },
+      ],
+      sounds: [
+        { id: 'a1', sound: 'whoosh', at: 3 },
+        { id: 'a2', sound: 'sounds/ding.wav', at: 1.5, scene: 'c1', label: 'Hello' },
+        { id: 'a3', sound: 'pop', at: 9 },
+        { id: 'a4', sound: 'tick', at: 3, enabled: false },
+      ],
+      music: { src: 'music/pulse/index.html', enabled: false },
+    });
+    const model = timelineModel(sounds, sceneSpans(sounds.scenes), []);
+    // 3 s is in both clips: at 2 + 3 and at 6 + (3 − 2) / 2
+    expect(model.lanes.sound.blocks.map((block) => [block.id, block.title, block.start, block.end - block.start, block.enabled])).toEqual([
+      ['a2', 'Hello', 1.5, 0.5, true],
+      ['a1', 'whoosh', 5, 0.5, true],
+      ['a4', 'tick', 5, 0.5, false],
+      ['a1', 'whoosh', 6.5, 0.5, true],
+      ['a4', 'tick', 6.5, 0.5, false],
+    ]);
+    expect(model.lanes.sound.rows).toBe(2);
+    expect(model.lanes.sound.cutOutItems).toEqual([{ id: 'a3', title: 'pop' }]);
+    expect(model.music).toEqual({ title: 'pulse', src: 'music/pulse/index.html', enabled: false });
+    expect(timelineModel(demo, spans, []).music).toBeUndefined();
+    expect(exportChecks(sounds, sceneSpans(sounds.scenes))).toEqual(['1 sound is cut out: no clip shows it.']);
+  });
+
   it('pins markers where a clip shows them; a cut-out marker has no pin', () => {
     expect(model.markers.map((pin) => [pin.t, pin.kind])).toEqual([
       [2.5, 'prompt'],

@@ -2,7 +2,7 @@
 // left or Enter is pressed (text also every 2 s while typing); each save is one step to undo.
 // Output times read m:ss.t, take seconds "54.4 s into the take", lengths "2.5 s". While cuttle.json
 // does not parse, every field is off (editing waits).
-import { useEffect, useRef, useState, type ComponentType, type KeyboardEvent, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ComponentType, type CSSProperties, type KeyboardEvent, type ReactNode } from 'react';
 import { EXPORT_FORMATS } from '@cuttle/export/formats';
 import {
   BACKGROUND_PRESETS,
@@ -26,7 +26,10 @@ import {
   type Music,
   type Rect,
   type ThemeFont,
+  backgroundColors,
   backgroundTone,
+  isColouredBackground,
+  SOLID_DEFAULT,
 } from '@cuttle/project';
 import type { ParamDeclaration } from '@cuttle/export/motion-params';
 import { sceneSpans, type SceneSpan } from '@cuttle/timeline';
@@ -82,6 +85,7 @@ import { useStore } from './store';
 import { PrivacyNote } from './PrivacyNote';
 import { SpeechNote, TranscriptPanel } from './Transcript';
 import { applyBrandKit, removeBrandKit, saveBrandKit } from './brand';
+import { colorsFrom, switchTo, wallpaperBehind } from './background';
 
 const TABS = [
   { id: 'selection', name: 'Selection' },
@@ -1598,6 +1602,58 @@ function BrandFields({ project }: { project: CuttleProject }) {
   );
 }
 
+/**
+ * The swatch of the current gradient or mesh in its own colours (a gradient as laid out); the
+ * others keep their picture.
+ */
+function swatchStyle(background: CuttleProject['look']['background'], preset: (typeof BACKGROUND_PRESETS)[number]): CSSProperties | undefined {
+  if ((preset !== 'gradient' && preset !== 'mesh') || !background.colors || background.preset !== preset) return undefined;
+  const stops = background.colors.join(', ');
+  if (preset === 'mesh') return { backgroundImage: `linear-gradient(135deg in oklab, ${stops})` };
+  return { backgroundImage: background.kind === 'radial' ? `radial-gradient(circle, ${stops})` : `linear-gradient(${background.angle ?? 135}deg in oklab, ${stops})` };
+}
+
+/**
+ * The colours of a gradient (its stops, first to last) or the tints of mesh, flow, bokeh and dots:
+ * a well each (2 to 4, one more with +, one fewer with its ×), and the colours of the take's screen
+ * or of the brand's logo with a click.
+ */
+function BackgroundColors({ background, logo }: { background: CuttleProject['look']['background']; logo: boolean }) {
+  const colors = [...backgroundColors(background)];
+  const setColors = (next: string[], label: string) => look(['background', 'colors'], next, label);
+  return (
+    <>
+      <Row label={background.preset === 'gradient' ? 'Colours, first to last' : 'Colours'} plain note={background.colors ? undefined : 'its own'}>
+        <span className="color-stops" data-testid="bg-colors">
+          {colors.map((color, i) => (
+            <span key={i} className="color-stop">
+              <ColorInput value={color} label={`Colour ${i + 1}`} upper toCommand={(value) => ({ type: 'look', path: ['background', 'colors'], value: colors.map((other, j) => (j === i ? value : other)) }) as Command} />
+              {colors.length > 2 && (
+                <button type="button" className="stop-remove" aria-label={`Remove colour ${i + 1}`} title="Remove this colour" onClick={() => setColors(colors.filter((_, j) => j !== i), 'Background: a colour fewer')}>
+                  <CloseIcon size={9} />
+                </button>
+              )}
+            </span>
+          ))}
+          {colors.length < 4 && (
+            <button type="button" className="ghost small stop-add" aria-label="Add a colour" title="Add a colour" onClick={() => setColors([...colors, colors.at(-1)!], 'Background: a colour more')} data-testid="bg-color-add">
+              +
+            </button>
+          )}
+        </span>
+      </Row>
+      <Row label="Take colours from" plain>
+        <button type="button" className="ghost small" title="The clearest colours the take shows" onClick={() => void colorsFrom('take')} data-testid="bg-from-take">
+          The take
+        </button>
+        <button type="button" className="ghost small" disabled={!logo} title={logo ? undefined : 'Choose a logo under Brand first'} onClick={() => void colorsFrom('logo')} data-testid="bg-from-logo">
+          The logo
+        </button>
+      </Row>
+    </>
+  );
+}
+
 /** What each heading font is like, in the font list. */
 const FONT_NOTES: Record<ThemeFont, string> = {
   Archivo: 'wide, bold',
@@ -1618,7 +1674,14 @@ function LookPanel() {
   const theme = project.theme;
   const summaries: Record<LookSection, string> = {
     brand: theme.kit ? `Kit · ${theme.kit}` : [theme.name, theme.font !== 'Archivo' && theme.font].filter(Boolean).join(' · ') || 'None set',
-    background: current.background.preset === 'solid' ? `Solid · ${(current.background.color ?? '#1c1c22').toUpperCase()}` : BACKGROUND_NAMES[current.background.preset],
+    background:
+      current.background.preset === 'solid'
+        ? `Solid · ${(current.background.color ?? SOLID_DEFAULT).toUpperCase()}`
+        : current.background.preset === 'image'
+          ? ['Image', current.background.blur && 'soft', current.background.dim && 'darker'].filter(Boolean).join(' · ')
+          : current.background.preset === 'gradient'
+            ? `Gradient · ${current.background.colors?.length ?? 2} colours${current.background.kind === 'radial' ? ' · radial' : ''}`
+            : `${BACKGROUND_NAMES[current.background.preset]}${current.background.colors ? ' · your colours' : ''}`,
     window: current.frame.enabled ? [FRAME_NAMES[current.frame.style], current.frame.title].filter(Boolean).join(' · ') : 'No frame',
     cursor: current.cursor.enabled ? `${CURSOR_NAMES[current.cursor.style]} · ${current.cursor.size}×` : 'Hidden',
     camera: !sources.webcam
@@ -1647,10 +1710,9 @@ function LookPanel() {
               className={`swatch-button bg-${preset}`}
               aria-pressed={current.background.preset === preset}
               title={BACKGROUND_NAMES[preset]}
-              onClick={() => {
-                if (preset === 'image') return void chooseImage('background');
-                look(['background'], preset === 'solid' ? { preset, color: current.background.color ?? '#1c1c22' } : { preset }, `Background: ${BACKGROUND_NAMES[preset]}`);
-              }}
+              style={swatchStyle(current.background, preset)}
+              onClick={() => (preset === 'image' ? void chooseImage('background') : switchTo(preset))}
+              data-testid={`bg-${preset}`}
             >
               <span>{BACKGROUND_NAMES[preset]}</span>
             </button>
@@ -1658,19 +1720,68 @@ function LookPanel() {
         </div>
         {current.background.preset === 'solid' && (
           <Row label="Colour">
-            <ColorInput value={current.background.color ?? '#1c1c22'} path={['background', 'color']} label="Background colour" />
+            <ColorInput value={current.background.color ?? SOLID_DEFAULT} path={['background', 'color']} label="Background colour" />
           </Row>
         )}
         {current.background.preset === 'image' && current.background.image && (
-          <Row label="Image" plain>
-            <span className="path" title={current.background.image}>
-              {current.background.image}
-            </span>
-            <button type="button" className="ghost small" onClick={() => void chooseImage('background')}>
-              Replace…
-            </button>
-          </Row>
+          <>
+            <Row label="Image" plain>
+              <span className="path" title={current.background.image}>
+                {current.background.image}
+              </span>
+              <button type="button" className="ghost small" onClick={() => void chooseImage('background')}>
+                Replace…
+              </button>
+            </Row>
+            <div className="grid2">
+              <Row label={`Soft · ${Math.round((current.background.blur ?? 0) * 100)} %`}>
+                <RangeInput
+                  value={Math.round((current.background.blur ?? 0) * 100)}
+                  min={0}
+                  max={100}
+                  label="How soft the image is"
+                  toCommand={(value) => ({ type: 'look', path: ['background', 'blur'], value: value > 0 ? value / 100 : undefined }) as Command}
+                  commitLabel="Background softness"
+                  testId="bg-blur"
+                />
+              </Row>
+              <Row label={`Darker · ${Math.round((current.background.dim ?? 0) * 100)} %`}>
+                <RangeInput
+                  value={Math.round((current.background.dim ?? 0) * 100)}
+                  min={0}
+                  max={80}
+                  label="How much darker the image is"
+                  toCommand={(value) => ({ type: 'look', path: ['background', 'dim'], value: value > 0 ? value / 100 : undefined }) as Command}
+                  commitLabel="Background darker"
+                  testId="bg-dim"
+                />
+              </Row>
+            </div>
+          </>
         )}
+        {isColouredBackground(current.background.preset) && <BackgroundColors background={current.background} logo={Boolean(project.theme.logo)} />}
+        {current.background.preset === 'gradient' && (
+          <div className="grid2">
+            <Row label="Angle (°)" note={current.background.kind === 'radial' ? 'radial: none' : undefined}>
+              <NumberInput value={current.background.angle ?? 135} min={0} max={360} step={15} digits={0} onCommit={(angle) => look(['background', 'angle'], angle, 'Gradient angle')} testId="bg-angle" />
+            </Row>
+            <Row label="Shape" plain>
+              <div className="seg" role="group" aria-label="Gradient shape">
+                <button type="button" aria-pressed={current.background.kind !== 'radial'} onClick={() => look(['background', 'kind'], undefined, 'Gradient: linear')}>
+                  Linear
+                </button>
+                <button type="button" aria-pressed={current.background.kind === 'radial'} onClick={() => look(['background', 'kind'], 'radial', 'Gradient: radial')} data-testid="bg-radial">
+                  Radial
+                </button>
+              </div>
+            </Row>
+          </div>
+        )}
+        <Row label="Your desktop" plain>
+          <button type="button" className="ghost small" title="The desktop's wallpaper behind the window, softened" onClick={() => void wallpaperBehind()} data-testid="bg-wallpaper">
+            Use its wallpaper
+          </button>
+        </Row>
       </LookPart>
 
       <LookPart id="window" summary={summaries.window}>

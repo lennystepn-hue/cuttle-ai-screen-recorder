@@ -261,7 +261,7 @@ export type SoundtrackAnswer = {
 export interface BrandView {
   name: string;
   accent: string;
-  background: { preset: string; color?: string };
+  background: { preset: string; color?: string; colors?: string[] };
   font: string;
 }
 
@@ -374,6 +374,10 @@ export const REQUESTS = {
   /** Copies a kit's files into the project and answers what applying it sets (the page makes it one edit). */
   'brand:apply': z.string().trim().min(1).max(80),
   'brand:remove': z.string().trim().min(1).max(80),
+  /** The colours of the take's screen or of the brand's logo, for the background. */
+  'background:palette': z.strictObject({ from: z.enum(['take', 'logo']), logo: z.string().min(1).max(4096).optional() }),
+  /** The desktop's wallpaper, copied into the project's images/ for the background. */
+  'background:wallpaper': z.undefined(),
   'project:draft': z.strictObject({ raw: z.record(z.string(), z.unknown()) }).refine((value) => JSON.stringify(value.raw).length <= MAX_PROJECT_BYTES, 'cuttle.json is too large'),
   /** The page asks to be loaded anew (another take): a page cannot reload itself (navigation is refused). */
   'project:reload': z.undefined(),
@@ -519,6 +523,9 @@ export interface Responses {
   'brand:save': { brands: BrandView[] } | { problem: string };
   'brand:apply': BrandApplied | { problem: string };
   'brand:remove': { brands: BrandView[] } | { problem: string };
+  'background:palette': { colors: string[] } | { problem: string };
+  /** The wallpaper's path in the project, or why there is none. */
+  'background:wallpaper': { path: string } | { problem: string };
   /** The person's version a save conflict could not carry over, written to cuttle.json.draft. */
   'project:draft': void;
   'project:reload': void;

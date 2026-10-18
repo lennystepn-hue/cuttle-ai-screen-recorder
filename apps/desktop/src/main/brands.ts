@@ -14,7 +14,7 @@ function root(): string {
 const view = ({ kit }: Brand): BrandView => ({
   name: kit.name,
   accent: kit.theme.accent ?? kit.look.cursor.color,
-  background: { preset: kit.look.background.preset, ...(kit.look.background.color && { color: kit.look.background.color }) },
+  background: { preset: kit.look.background.preset, ...(kit.look.background.color && { color: kit.look.background.color }), ...(kit.look.background.colors && { colors: kit.look.background.colors }) },
   font: kit.theme.font,
 });
 

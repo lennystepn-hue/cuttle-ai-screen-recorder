@@ -23,6 +23,8 @@ export const WINDOW_CHANNELS = {
       'brand:save',
       'brand:apply',
       'brand:remove',
+      'background:palette',
+      'background:wallpaper',
       'project:draft',
       'project:reload',
       'project:closed',

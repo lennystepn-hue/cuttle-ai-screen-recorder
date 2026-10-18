@@ -6,3 +6,5 @@ export type { EncoderPreference, ExportErrorCode } from './job';
 export { renderStills, stillName, type StillsOptions, type StillsResult } from './main/stills';
 export { MOTION_SCHEME_PRIVILEGES } from './main/motion';
 export type { MotionItemReport } from './main/motion-host';
+export { MotionPreview, type MotionPreviewOptions, type MotionStatus, type PreviewMode } from './main/motion-preview';
+export type { MotionFrameRequest, MotionPixels } from './job';

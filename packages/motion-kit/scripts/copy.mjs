@@ -1,7 +1,7 @@
 // Builds the motion kit's folder for a bundle (see src/index.ts for what is where):
 //   node packages/motion-kit/scripts/copy.mjs <folder>
 // The folder is replaced. Everything comes from this package: its own kit/ and templates/, and the
-// files of its dependencies (Three.js, lottie-web, the fonts) with their licenses.
+// files of its dependencies (Three.js, lottie-web, mediabunny, the fonts) with their licenses.
 import { cpSync, mkdirSync, readdirSync, rmSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -24,6 +24,9 @@ copy(join(modules, 'three', 'LICENSE'), 'licenses/three.js.txt');
 copy(join(modules, 'lottie-web', 'build', 'player', 'esm', 'lottie.min.js'), 'lottie/lottie.mjs');
 copy(join(modules, 'lottie-web', 'build', 'player', 'lottie.min.js'), 'lottie/lottie.min.js');
 copy(join(modules, 'lottie-web', 'LICENSE.md'), 'licenses/lottie-web.txt');
+// the take's frames are read with it (take-worker.js), unchanged: its licence is the MPL 2.0
+copy(join(modules, 'mediabunny', 'dist', 'bundles', 'mediabunny.min.mjs'), 'mediabunny/mediabunny.min.mjs');
+copy(join(modules, 'mediabunny', 'LICENSE'), 'licenses/mediabunny.txt');
 
 // the Latin faces KIT_FONTS (src/index.ts) names, each family with its licence
 const FONTS = [

@@ -1,0 +1,317 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Device 3D</title>
+    <!-- A laptop (or a tablet) in 3D whose screen plays the take: the camera turns in as the lid opens
+         and the screen comes on, drifts while the take plays, and at the end flies into the screen
+         until the recording fills the frame (the clip after it takes over). Whooshes on the way in
+         and into the screen (the "sounds" param). -->
+    <script type="application/json" id="cuttle-params">
+      [
+        { "name": "device", "label": "Device", "type": "select", "default": "laptop", "options": ["laptop", "tablet"] },
+        { "name": "from", "label": "Plays from (take s, empty: the first clip's start)", "type": "number", "default": null, "min": 0 },
+        { "name": "speed", "label": "Speed of the take", "type": "number", "default": 1, "min": 0.25, "max": 20 },
+        { "name": "push", "label": "Into the screen at the end", "type": "bool", "default": true },
+        { "name": "background", "label": "Own background", "type": "bool", "default": true },
+        { "name": "sounds", "label": "Sounds", "type": "bool", "default": true }
+      ]
+    </script>
+    <style>
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        overflow: hidden;
+      }
+      body.own {
+        background:
+          radial-gradient(ellipse 60% 55% at 28% 22%, color-mix(in srgb, var(--cuttle-accent) 38%, transparent), transparent 70%),
+          radial-gradient(ellipse 55% 50% at 78% 82%, #6b7cff40, transparent 70%),
+          var(--cuttle-bg);
+      }
+      canvas {
+        display: block;
+      }
+    </style>
+  </head>
+  <body>
+    <script type="module">
+      import * as THREE from 'three';
+      import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
+      import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+      import { at, clamp, ease, lerp } from 'cuttle';
+
+      const { params, size, duration, take } = cuttle;
+      if (params.background) document.body.classList.add('own');
+      const tablet = params.device === 'tablet';
+
+      // what the screen plays: the take from where its first clip starts (or `from`), at `speed`
+      const first = take.clips[0]?.from ?? 0;
+      const from = typeof params.from === 'number' ? params.from : first;
+      const speed = Number(params.speed) || 1;
+      const last = take.clips.length ? Math.max(...take.clips.map((clip) => clip.to)) : from + duration * speed;
+      const sourceAt = (t) => clamp(from + t * speed, 0, Math.max(0, last - 0.02));
+      const aspect = take.screen.width / take.screen.height || 16 / 10;
+      // the frames as wide as the output shows them at most (the screen fills it at the end)
+      const frameWidth = Math.round(Math.min(take.screen.width || size.width, size.width));
+
+      // the renderer
+      const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true });
+      renderer.setPixelRatio(1);
+      renderer.setSize(size.width, size.height);
+      renderer.setClearColor(0x000000, 0);
+      renderer.outputColorSpace = THREE.SRGBColorSpace;
+      renderer.toneMapping = THREE.ACESFilmicToneMapping;
+      renderer.toneMappingExposure = 0.92;
+      document.body.appendChild(renderer.domElement);
+
+      const scene = new THREE.Scene();
+      const pmrem = new THREE.PMREMGenerator(renderer);
+      scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+      const key = new THREE.DirectionalLight(0xffffff, 1.1);
+      key.position.set(-3, 6, 5);
+      const rim = new THREE.DirectionalLight(0x9fb4ff, 0.9);
+      rim.position.set(4, 2, -5);
+      scene.add(key, rim, new THREE.AmbientLight(0xffffff, 0.12));
+      const camera = new THREE.PerspectiveCamera(30, size.width / size.height, 0.01, 100);
+
+      const aluminium = new THREE.MeshStandardMaterial({ color: 0x9da3ac, metalness: 0.92, roughness: 0.36, envMapIntensity: 0.75 });
+      const dark = new THREE.MeshStandardMaterial({ color: 0xffffff, metalness: 0, roughness: 0.75, envMapIntensity: 0.25 });
+      const glass = new THREE.MeshStandardMaterial({ color: 0x020203, metalness: 0, roughness: 0.22, envMapIntensity: 0.12 });
+
+      // the keyboard: rows of dark keys on the deck
+      const keysCanvas = document.createElement('canvas');
+      keysCanvas.width = 1024;
+      keysCanvas.height = 400;
+      const kg = keysCanvas.getContext('2d');
+      kg.fillStyle = '#08090c';
+      kg.fillRect(0, 0, 1024, 400);
+      const rows = [14, 14, 13, 12, 11];
+      rows.forEach((count, row) => {
+        const gap = 8;
+        const keyW = (1024 - 40 - gap * (count - 1)) / count;
+        for (let i = 0; i < count; i++) {
+          const x = 20 + i * (keyW + gap);
+          const y = 18 + row * 64;
+          kg.fillStyle = '#17191f';
+          kg.beginPath();
+          kg.roundRect(x, y, keyW, 54, 7);
+          kg.fill();
+          kg.fillStyle = 'rgba(255,255,255,0.05)';
+          kg.fillRect(x + 3, y + 2, keyW - 6, 2);
+        }
+      });
+      kg.fillStyle = '#17191f';
+      kg.beginPath();
+      kg.roundRect(300, 338, 424, 50, 7);
+      kg.fill();
+      const keys = new THREE.CanvasTexture(keysCanvas);
+      keys.colorSpace = THREE.SRGBColorSpace;
+      keys.anisotropy = renderer.capabilities.getMaxAnisotropy();
+
+      /** A rounded rectangle in the XY plane, `w`×`h`, with UVs for a frame whose top row is v = 0 (an ImageBitmap). */
+      function screenGeometry(w, h, r) {
+        const shape = new THREE.Shape();
+        const x = -w / 2;
+        const y = -h / 2;
+        shape.moveTo(x + r, y);
+        shape.lineTo(x + w - r, y);
+        shape.quadraticCurveTo(x + w, y, x + w, y + r);
+        shape.lineTo(x + w, y + h - r);
+        shape.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+        shape.lineTo(x + r, y + h);
+        shape.quadraticCurveTo(x, y + h, x, y + h - r);
+        shape.lineTo(x, y + r);
+        shape.quadraticCurveTo(x, y, x + r, y);
+        const geometry = new THREE.ShapeGeometry(shape, 12);
+        const position = geometry.attributes.position;
+        const uv = geometry.attributes.uv;
+        for (let i = 0; i < position.count; i++) uv.setXY(i, (position.getX(i) + w / 2) / w, (h / 2 - position.getY(i)) / h);
+        return geometry;
+      }
+
+      // the screen's picture: the take's frames (or, without a recording, a calm stand-in)
+      const picture = new THREE.Texture();
+      picture.colorSpace = THREE.SRGBColorSpace;
+      picture.flipY = false;
+      picture.anisotropy = renderer.capabilities.getMaxAnisotropy();
+      const screenMaterial = new THREE.MeshBasicMaterial({ map: picture, color: 0x000000, toneMapped: false });
+
+      // the device: a model whose screen faces +z
+      const device = new THREE.Group();
+      scene.add(device);
+      let lid;
+      let screenW;
+      let screenH;
+      if (!tablet) {
+        screenW = 2.8;
+        screenH = screenW / aspect;
+        const lidW = screenW + 0.2;
+        const lidH = screenH + 0.24;
+        const depth = 2.05;
+        const base = new THREE.Mesh(new RoundedBoxGeometry(lidW, 0.09, depth, 4, 0.035), aluminium);
+        base.position.y = 0.045;
+        dark.map = keys;
+        const deck = new THREE.Mesh(new THREE.PlaneGeometry(lidW - 0.36, depth * 0.42), dark);
+        deck.rotation.x = -Math.PI / 2;
+        deck.position.set(0, 0.0905, -depth * 0.12);
+        const pad = new THREE.Mesh(new RoundedBoxGeometry(lidW * 0.36, 0.004, depth * 0.27, 2, 0.002), new THREE.MeshStandardMaterial({ color: 0x8a9099, metalness: 0.6, roughness: 0.55, envMapIntensity: 0.6 }));
+        pad.position.set(0, 0.091, depth * 0.27);
+        device.add(base, deck, pad);
+        // the lid turns about the hinge at the base's back edge
+        lid = new THREE.Group();
+        lid.position.set(0, 0.09, -depth / 2 + 0.03);
+        const shell = new THREE.Mesh(new RoundedBoxGeometry(lidW, lidH, 0.032, 4, 0.014), aluminium);
+        shell.position.set(0, lidH / 2, 0);
+        const bezel = new THREE.Mesh(new RoundedBoxGeometry(lidW - 0.02, lidH - 0.02, 0.006, 2, 0.003), glass);
+        bezel.position.set(0, lidH / 2, 0.0175);
+        const screen = new THREE.Mesh(screenGeometry(screenW, screenH, 0.02), screenMaterial);
+        screen.position.set(0, 0.13 + screenH / 2, 0.021);
+        lid.add(shell, bezel, screen);
+        lid.userData.screen = screen;
+        device.add(lid);
+        device.position.y = -0.55;
+      } else {
+        // a tablet held sideways, the take's shape
+        screenW = 2.9;
+        screenH = screenW / aspect;
+        const body = new THREE.Mesh(new RoundedBoxGeometry(screenW + 0.26, screenH + 0.26, 0.11, 8, 0.12), aluminium);
+        const front = new THREE.Mesh(new RoundedBoxGeometry(screenW + 0.2, screenH + 0.2, 0.004, 4, 0.1), glass);
+        front.position.z = 0.056;
+        const screen = new THREE.Mesh(screenGeometry(screenW, screenH, 0.08), screenMaterial);
+        screen.position.z = 0.059;
+        lid = new THREE.Group();
+        lid.add(body, front, screen);
+        lid.userData.screen = screen;
+        device.add(lid);
+      }
+      const screenMesh = lid.userData.screen;
+
+      // a soft shadow under it
+      const shadowCanvas = document.createElement('canvas');
+      shadowCanvas.width = shadowCanvas.height = 256;
+      const sg = shadowCanvas.getContext('2d');
+      const blot = sg.createRadialGradient(128, 128, 0, 128, 128, 128);
+      blot.addColorStop(0, 'rgba(0,0,0,0.7)');
+      blot.addColorStop(1, 'rgba(0,0,0,0)');
+      sg.fillStyle = blot;
+      sg.fillRect(0, 0, 256, 256);
+      const shadow = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(shadowCanvas), transparent: true, depthWrite: false }));
+      shadow.rotation.x = -Math.PI / 2;
+      shadow.scale.set(tablet ? 4.2 : 4.6, tablet ? 1.6 : 3.2, 1);
+      shadow.position.y = tablet ? -1.35 : -0.56;
+      scene.add(shadow);
+
+      // a glint that slides over the glass
+      const glintCanvas = document.createElement('canvas');
+      glintCanvas.width = 512;
+      glintCanvas.height = 8;
+      const gg = glintCanvas.getContext('2d');
+      const band = gg.createLinearGradient(0, 0, 512, 0);
+      band.addColorStop(0, 'rgba(255,255,255,0)');
+      band.addColorStop(0.5, 'rgba(255,255,255,0.22)');
+      band.addColorStop(1, 'rgba(255,255,255,0)');
+      gg.fillStyle = band;
+      gg.fillRect(0, 0, 512, 8);
+      const glint = new THREE.Mesh(screenGeometry(screenW, screenH, 0.02), new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(glintCanvas), transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false }));
+      glint.position.copy(screenMesh.position);
+      glint.position.z += 0.001;
+      glint.material.map.wrapS = THREE.ClampToEdgeWrapping;
+      screenMesh.parent.add(glint);
+
+      // without a recording: a dark editor with a few lines, in the theme's accent
+      const standIn = async () => {
+        const canvas = document.createElement('canvas');
+        canvas.width = 1280;
+        canvas.height = Math.round(1280 / aspect);
+        const g = canvas.getContext('2d');
+        g.fillStyle = '#0e1016';
+        g.fillRect(0, 0, canvas.width, canvas.height);
+        g.fillStyle = '#1a1d26';
+        g.fillRect(0, 0, canvas.width, 40);
+        const accent = getComputedStyle(document.documentElement).getPropertyValue('--cuttle-accent').trim() || '#d97757';
+        const colors = [accent, '#7ec8e3', '#c9c9d6', '#7ee0a5', '#c9c9d6'];
+        for (let i = 0; i < 14; i++) {
+          g.fillStyle = colors[i % colors.length];
+          g.globalAlpha = 0.85;
+          g.fillRect(80 + (i % 3) * 40, 90 + i * 46, 220 + ((i * 97) % 520), 16);
+        }
+        return createImageBitmap(canvas);
+      };
+      // the take's frames, or the stand-in where there is no recording to read
+      let still = take.recording ? undefined : standIn();
+      cuttle.ready(Promise.resolve(still));
+      const pictureAt = async (t) => {
+        if (still) return still;
+        try {
+          return await take.frame(sourceAt(t), { width: frameWidth });
+        } catch (error) {
+          console.warn(`the screen shows a stand-in: ${error.message}`);
+          still = standIn();
+          return still;
+        }
+      };
+
+      // its sounds: a whoosh as it turns in, and one into the screen
+      const pushFrom = Math.max(duration * 0.55, duration - 1.1);
+      if (params.sounds !== false) {
+        cuttle.sound('whoosh', { at: 0.45, volume: 0.6 });
+        if (params.push) cuttle.sound('whoosh', { at: Math.min(duration - 0.05, pushFrom + 0.6), volume: 0.75 });
+      }
+
+      const target = new THREE.Vector3();
+      const orbit = new THREE.Vector3();
+      const center = new THREE.Vector3();
+      const normal = new THREE.Vector3();
+      const fill = new THREE.Vector3();
+      const fov = THREE.MathUtils.degToRad(camera.fov);
+      let shown;
+
+      cuttle.onFrame(async (t) => {
+        // the picture first: the frame waits for it
+        const bitmap = await pictureAt(t);
+        if (bitmap !== shown) {
+          if (shown && shown !== (await still)) shown.close();
+          shown = bitmap;
+          picture.image = bitmap;
+          picture.needsUpdate = true;
+        }
+
+        // the lid opens and the screen comes on; a tablet turns up from flat
+        if (!tablet) lid.rotation.x = lerp(1.48, -0.24, at(t, 0.05, 1.3, ease.inOutExpo));
+        else lid.rotation.x = lerp(-1.1, 0, at(t, 0, 1.2, ease.outExpo));
+        screenMaterial.color.setScalar(at(t, 0.55, 0.6, ease.out));
+        glint.material.map.offset.x = lerp(0.9, -0.9, at(t, 0.9, 1.8, ease.inOut));
+
+        // the camera: turns in around the device, drifts, then flies into the screen
+        const turn = at(t, 0, 1.6, ease.outExpo);
+        // after the turn it keeps moving: round towards the front and a little closer
+        const drift = at(t, 1.2, Math.max(0.1, duration - 1.2), ease.inOut);
+        const yaw = lerp(-0.85, -0.32, turn) + 0.26 * drift;
+        const pitch = lerp(0.55, tablet ? 0.1 : 0.24, turn) - 0.06 * drift;
+        const distance = lerp(11.5, tablet ? 6.6 : 7.4, turn) - 0.7 * drift;
+        device.updateMatrixWorld(true);
+        screenMesh.getWorldPosition(center);
+        target.set(0, tablet ? 0 : 0.25, 0).lerp(center, 0.6);
+        orbit.set(Math.sin(yaw) * Math.cos(pitch), Math.sin(pitch), Math.cos(yaw) * Math.cos(pitch)).multiplyScalar(distance).add(target);
+        const p = params.push ? at(t, pushFrom, duration - pushFrom - 1 / cuttle.fps, ease.inOutExpo) : 0;
+        if (p > 0) {
+          // the screen fills the frame: straight on, as far off as covers the output
+          normal.set(0, 0, 1).transformDirection(screenMesh.matrixWorld);
+          const visible = Math.min(screenH, screenW / camera.aspect) * 0.995;
+          fill.copy(center).addScaledVector(normal, visible / 2 / Math.tan(fov / 2));
+          camera.position.copy(orbit).lerp(fill, p);
+          camera.up.set(0, 1, 0).lerp(new THREE.Vector3(0, 1, 0).transformDirection(screenMesh.matrixWorld), p);
+          camera.lookAt(target.lerp(center, p));
+        } else {
+          camera.position.copy(orbit);
+          camera.up.set(0, 1, 0);
+          camera.lookAt(target);
+        }
+        shadow.material.opacity = 1 - p;
+        renderer.render(scene, camera);
+      });
+    </script>
+  </body>
+</html>

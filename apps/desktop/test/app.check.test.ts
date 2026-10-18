@@ -1803,6 +1803,20 @@ describe.runIf(enabled)('the Cuttle app', () => {
     await expect.poll(async () => (await page.locator('[data-testid=motion-errors]').textContent().catch(() => '')) ?? '', { timeout: 20_000 }).toContain('ReferenceError');
     expect(await page.locator('[data-testid=motion-state]').textContent()).toContain('threw an error');
     await shotOf('39-motion-errors', '/editor.html', 'motion-editor · Cuttle');
+
+    // + Motion → Device 3D after the clip: the take plays on its screen, drawn as the export draws it
+    await chooseIn(page, '[data-testid=add-motion]', 'Device 3D');
+    await expect.poll(() => saved().scenes.map((scene) => scene.src ?? scene.type)).toEqual(['motion/intro/index.html', 'motion/title/index.html', 'clip', 'motion/device-3d/index.html']);
+    await expect.poll(async () => (await now()).motion.status.find((status) => status.src === 'motion/device-3d/index.html')?.state, { timeout: 60_000 }).toBe('ready');
+    const deviceAt = 12;
+    await flushPage();
+    const deviceStill = spawnSync('node', [CLI, '--json', '-C', dir, 'preview', '--at', String(deviceAt), '-o', join(root, 'device-stills')], { encoding: 'utf8', timeout: 120_000 });
+    expect(deviceStill.status, deviceStill.stderr).toBe(0);
+    await seekTo(deviceAt);
+    const shown = difference(await view(), PNG.sync.read(readFileSync((JSON.parse(deviceStill.stdout) as { stills: { file: string }[] }).stills[0]!.file)));
+    expect(shown.mean, 'the device: mean difference').toBeLessThan(1.5);
+    expect((await now()).motion.status.find((status) => status.src === 'motion/device-3d/index.html')?.errors).toEqual([]);
+    await shotOf('39b-device-3d', '/editor.html', 'motion-editor · Cuttle');
     await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find((window) => window.getTitle() === 'motion-editor · Cuttle')?.close());
   }, 240_000);
 

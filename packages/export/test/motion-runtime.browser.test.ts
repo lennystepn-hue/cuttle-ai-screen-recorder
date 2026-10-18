@@ -121,6 +121,7 @@ describe('the motion runtime', () => {
       ],
       cursor: { fps: 10, start: 10, points: [0, 0, 10, 20, 20, 40] },
       window: { from: 11, to: 16 },
+      recording: null,
     };
     const win = page('', '', { ...INIT, start: 3, take });
     const { take: api } = win.cuttle;
@@ -139,6 +140,65 @@ describe('the motion runtime', () => {
     expect(api.toScreen(500, 250)).toEqual({ x: 500, y: 250, inside: true });
     expect(api.toScreen(1500, 250)).toEqual({ x: 1300, y: 250, inside: false });
     expect(api.cursor).toEqual({ x: 500, y: 250, inside: true });
+  });
+
+  it('hands the page frames of the recording from the take worker, and waits for a draw that awaits one', async () => {
+    // a stand-in for the kit's worker: a frame `width` px wide whose red is a tenth of the second asked
+    const worker = URL.createObjectURL(
+      new Blob(
+        [
+          `let opened;
+          self.onmessage = (event) => {
+            const message = event.data;
+            if (message.type === 'open') return void (opened = message);
+            if (message.source < 0) return self.postMessage({ id: message.id, error: 'no frame at ' + message.source });
+            const canvas = new OffscreenCanvas(message.width ?? opened.screen.width, 4);
+            const g = canvas.getContext('2d');
+            g.fillStyle = 'rgb(' + Math.round(message.source * 10) + ', 0, ' + opened.masks.length + ')';
+            g.fillRect(0, 0, canvas.width, 4);
+            const bitmap = canvas.transferToImageBitmap();
+            self.postMessage({ id: message.id, bitmap }, [bitmap]);
+          };`,
+        ],
+        { type: 'text/javascript' },
+      ),
+    );
+    const take: TakeData = {
+      screen: { width: 32, height: 18 },
+      events: [],
+      words: [],
+      markers: [],
+      zooms: [],
+      masks: [{ from: 0, to: 9, rect: [0, 0, 4, 4], style: 'fill' }],
+      clips: [],
+      cursor: null,
+      window: null,
+      recording: 'cuttle-motion://project/takes/1/screen.mp4',
+    };
+    const win = page(
+      '',
+      `const marker = () => [...document.documentElement.children].find((element) => element.style.top === '180px')?.style.background ?? 'none';
+       cuttle.onFrame(async (t) => {
+         const bitmap = await cuttle.take.frame(10 + t, t > 1 ? { width: 8 } : undefined);
+         const g = new OffscreenCanvas(1, 1).getContext('2d');
+         g.drawImage(bitmap, 0, 0);
+         seen.push({ t, width: bitmap.width, red: g.getImageData(0, 0, 1, 1).data[0], masks: g.getImageData(0, 0, 1, 1).data[2], marker: marker() });
+       });`,
+      { ...INIT, take, takeWorker: worker },
+    );
+    expect(await win.__cuttleDraw(500)).toBe(1);
+    expect(await win.__cuttleDraw(1500)).toBe(2);
+    // each draw answered once the frame was drawn, and the marker moved on only then
+    expect(win.seen).toEqual([
+      { t: 0.5, width: 32, red: 105, masks: 1, marker: 'none' },
+      { t: 1.5, width: 8, red: 115, masks: 1, marker: 'rgb(1, 0, 200)' },
+    ]);
+    const marker = [...win.document.documentElement.children].find((element) => (element as HTMLElement).style.top === '180px') as HTMLElement;
+    expect(marker.style.background).toBe('rgb(2, 0, 200)');
+    // what the worker could not do, the page is told
+    await expect(win.cuttle.take.frame(-1)).rejects.toThrow('no frame at -1');
+    // without a recording there is nothing to read
+    await expect(page('', '').cuttle.take.frame(1)).rejects.toThrow('no screen recording');
   });
 
   it('seeds Math.random: the same seed gives the same numbers', () => {

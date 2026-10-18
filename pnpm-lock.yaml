@@ -198,6 +198,9 @@ importers:
       lottie-web:
         specifier: 5.13.0
         version: 5.13.0
+      mediabunny:
+        specifier: 1.61.0
+        version: 1.61.0
       three:
         specifier: 0.186.1
         version: 0.186.1

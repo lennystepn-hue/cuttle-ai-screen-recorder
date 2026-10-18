@@ -144,8 +144,8 @@ export interface MotionNewResult {
 
 const NAME = /^[a-z0-9][a-z0-9-]{0,47}$/;
 
-/** "end-card" as a label: "End card". */
-const labelOf = (name: string) => `${name.charAt(0).toUpperCase()}${name.slice(1).replace(/-/g, ' ')}`;
+/** "end-card" as a label: "End card" (and "device-3d": "Device 3D"). */
+const labelOf = (name: string) => `${name.charAt(0).toUpperCase()}${name.slice(1).replace(/-/g, ' ')}`.replace(/ 3d\b/, ' 3D');
 
 /** `cuttle motion templates`: the templates `motion new` copies. */
 export async function motionTemplatesCommand(output: Output): Promise<{ templates: readonly MotionTemplate[] }> {

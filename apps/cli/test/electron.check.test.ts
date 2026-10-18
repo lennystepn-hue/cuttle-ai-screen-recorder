@@ -267,6 +267,66 @@ describe.runIf(enabled)('cuttle in Electron', () => {
     }
   }, 180_000);
 
+  it('hands pages frames of the take, its masks painted over them, and shows the take on a device in 3D', () => {
+    const dir = join(mkdtempSync(join(tmpdir(), 'cuttle-frames-')), 'frames');
+    cpSync(project, dir, { recursive: true });
+    try {
+      // a page that draws the take's frame at 1.5 s, at its own size, in the corner
+      mkdirSync(join(dir, 'motion', 'exact'), { recursive: true });
+      writeFileSync(
+        join(dir, 'motion', 'exact', 'index.html'),
+        `<!doctype html><body style="margin:0"><canvas id="c" width="1280" height="720"></canvas><script>
+        const g = document.getElementById('c').getContext('2d');
+        cuttle.onFrame(async () => { const frame = await cuttle.take.frame(1.5); g.drawImage(frame, 0, 0); frame.close(); });
+        </script></body>`,
+      );
+      const read = (file: string) => PNG.sync.read(readFileSync(file));
+      const drawn = () => {
+        const checked = cuttle('-C', dir, 'motion', 'check', 'motion/exact/index.html', '--at', '0.1', '-o', join(dir, 'drawn'));
+        expect(checked.json.errors).toEqual([]);
+        return read((checked.json.stills as { file: string }[])[0]!.file);
+      };
+      const raw = read(cuttle('-C', dir, 'frame', '1.5', '-o', join(dir, 'raw.png')).json.file as string);
+      const next = read(cuttle('-C', dir, 'frame', '1.55', '-o', join(dir, 'next.png')).json.file as string);
+      const meanDifference = (a: PNG, b: PNG) => {
+        let sum = 0;
+        for (let y = 0; y < 720; y++) for (let x = 0; x < 1280; x++) for (let c = 0; c < 3; c++) sum += Math.abs(a.data[(y * a.width + x) * 4 + c]! - b.data[(y * b.width + x) * 4 + c]!);
+        return sum / (1280 * 720 * 3);
+      };
+      // the frame asked for, not its neighbour (WebCodecs and ffmpeg turn YUV into RGB a little differently)
+      const page = drawn();
+      expect(meanDifference(page, raw)).toBeLessThan(3);
+      expect(meanDifference(page, next)).toBeGreaterThan(meanDifference(page, raw));
+
+      // the project's masks are on the frames: a fill is one colour, a blur has no edges left
+      const file = join(dir, 'cuttle.json');
+      const raw0 = JSON.parse(readFileSync(file, 'utf8')) as Record<string, unknown>;
+      writeFileSync(file, JSON.stringify({ ...raw0, masks: [{ from: 1, to: 2, rect: [100, 100, 300, 200] }, { from: 1, to: 2, rect: [600, 300, 400, 250], style: 'blur' }] }));
+      const masked = drawn();
+      const at = (png: PNG, x: number, y: number) => [...png.data.subarray((y * png.width + x) * 4, (y * png.width + x) * 4 + 3)];
+      const fill = at(masked, 100, 100);
+      for (let y = 100; y < 300; y += 7) for (let x = 100; x < 400; x += 7) expect(at(masked, x, y)).toEqual(fill);
+      const steepest = (png: PNG) => {
+        let most = 0;
+        for (let y = 305; y < 545; y += 5) for (let x = 605; x < 995; x++) most = Math.max(most, ...[0, 1, 2].map((c) => Math.abs(png.data[(y * png.width + x) * 4 + c]! - png.data[(y * png.width + x + 1) * 4 + c]!)));
+        return most;
+      };
+      expect(steepest(raw)).toBeGreaterThan(150);
+      expect(steepest(masked)).toBeLessThan(40);
+
+      // the device template plays the take on its screen and flies into it: no errors, and it moves
+      expect(cuttle('-C', dir, 'motion', 'new', 'device-3d', '--first').code).toBe(0);
+      const device = cuttle('-C', dir, 'motion', 'check', 'motion/device-3d/index.html', '-o', join(dir, 'device'));
+      expect(device.json.errors).toEqual([]);
+      const stills = (device.json.stills as { file: string }[]).map((still) => read(still.file));
+      const meanOf = (png: PNG) => png.data.reduce((sum, value, i) => (i % 4 === 3 ? sum : sum + value), 0) / (png.width * png.height * 3);
+      // the take fills the last frame: far brighter than the dark scene the device turns in on
+      expect(meanOf(stills.at(-1)!)).toBeGreaterThan(meanOf(stills[0]!) + 40);
+    } finally {
+      rmSync(dirname(dir), { recursive: true, force: true });
+    }
+  }, 180_000);
+
   it('blurs fast motion: the moments while the shutter is open, averaged', () => {
     const dir = join(mkdtempSync(join(tmpdir(), 'cuttle-blur-')), 'blur');
     try {

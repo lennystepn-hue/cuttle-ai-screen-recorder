@@ -185,7 +185,10 @@ function stillThere(selection: Selection, project: CuttleProject): boolean {
  * own, or ones its motion pages ask for.
  */
 const hasSound = (project: CuttleProject) =>
-  project.music !== undefined || project.sounds.length > 0 || project.overlays.length > 0 || project.scenes.some((scene) => scene.type === 'motion');
+  project.music !== undefined ||
+  project.sounds.length > 0 ||
+  project.overlays.length > 0 ||
+  project.scenes.some((scene) => scene.type === 'motion' || scene.transition !== undefined);
 
 /** The document's project goes to the main process at each edit: it renders its music and sounds a moment later. */
 function followSound(): void {

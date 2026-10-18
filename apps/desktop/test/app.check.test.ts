@@ -1817,6 +1817,23 @@ describe.runIf(enabled)('the Cuttle app', () => {
     expect(shown.mean, 'the device: mean difference').toBeLessThan(1.5);
     expect((await now()).motion.status.find((status) => status.src === 'motion/device-3d/index.html')?.errors).toEqual([]);
     await shotOf('39b-device-3d', '/editor.html', 'motion-editor · Cuttle');
+
+    // Claude adds a fold into the clip: the clip's panel shows it, its length is set there, and it goes again
+    const folded = spawnSync('node', [CLI, '--json', '-C', dir, 'motion', 'new', 'fold', '--into', 's2'], { encoding: 'utf8', timeout: 60_000 });
+    expect(folded.status, folded.stderr).toBe(0);
+    type Transitioned = { scenes: { id?: string; transition?: { src: string; duration: number } }[] };
+    const clipOf = () => (saved() as unknown as Transitioned).scenes.find((scene) => scene.id === 's2');
+    await page.evaluate(() => (window as unknown as Hooked).__cuttleCheck.select({ kind: 'scene', id: 's2' }));
+    await page.waitForSelector('[data-testid=transition-in]', { timeout: 20_000 });
+    await page.fill('[data-testid=transition-duration]', '0.6');
+    await page.press('[data-testid=transition-duration]', 'Enter');
+    await expect.poll(() => clipOf()?.transition?.duration).toBe(0.6);
+    // the editor shows a crossfade where the export draws the page: the frame draws, nothing fails
+    await seekTo(4.5);
+    expect((await now()).error).toBeUndefined();
+    await shotOf('39c-transition', '/editor.html', 'motion-editor · Cuttle');
+    await click(page, '[data-testid=transition-remove]');
+    await expect.poll(() => clipOf()?.transition).toBeUndefined();
     await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find((window) => window.getTitle() === 'motion-editor · Cuttle')?.close());
   }, 240_000);
 

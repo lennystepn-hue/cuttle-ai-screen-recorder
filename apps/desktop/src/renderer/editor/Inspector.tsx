@@ -15,6 +15,7 @@ import {
   STILL_MOTIONS,
   TEXT_POSITIONS,
   TEXT_STYLES,
+  THEME_FONTS,
   WEBCAM_CORNERS,
   WEBCAM_SHAPES,
   type AutoEdits,
@@ -24,11 +25,13 @@ import {
   type MotionScene,
   type Music,
   type Rect,
+  type ThemeFont,
+  backgroundTone,
 } from '@cuttle/project';
 import type { ParamDeclaration } from '@cuttle/export/motion-params';
 import { sceneSpans, type SceneSpan } from '@cuttle/timeline';
 import type { Command, ListName } from '../../shared/document';
-import type { MotionParams, MotionStatusView, SoundStatusView } from '../../shared/ipc';
+import { MEDIA_ORIGIN, type BrandView, type MotionParams, type MotionStatusView, type SoundStatusView } from '../../shared/ipc';
 import { formatDuration, formatSource, formatSpeed, formatTime } from '../../shared/format';
 import {
   BACKGROUND_NAMES,
@@ -48,10 +51,12 @@ import { motionName, outputTimesOf, soundName } from '../../shared/timeline-mode
 import { BUILT_IN_SOUNDS } from '@cuttle/motion-kit';
 import {
   BackgroundIcon,
+  BrandIcon,
   CameraIcon,
   CardIcon,
   CheckIcon,
   ChevronIcon,
+  CloseIcon,
   CopyIcon,
   CropIcon,
   FilmIcon,
@@ -76,6 +81,7 @@ import { isColoured, swatch, type SwatchKey } from './swatches';
 import { useStore } from './store';
 import { PrivacyNote } from './PrivacyNote';
 import { SpeechNote, TranscriptPanel } from './Transcript';
+import { applyBrandKit, removeBrandKit, saveBrandKit } from './brand';
 
 const TABS = [
   { id: 'selection', name: 'Selection' },
@@ -1429,6 +1435,7 @@ const SIZES = [
 
 /** The look's parts, in the order the tab lists them. */
 const LOOK_PARTS: { id: LookSection; title: string; icon: ComponentType<{ size?: number }> }[] = [
+  { id: 'brand', title: 'Brand', icon: BrandIcon },
   { id: 'background', title: 'Background', icon: BackgroundIcon },
   { id: 'window', title: 'Window', icon: WindowIcon },
   { id: 'cursor', title: 'Cursor', icon: SelectIcon },
@@ -1461,6 +1468,146 @@ function LookPart({ id, summary, children }: { id: LookSection; summary: string;
   );
 }
 
+/** The theme's fields as one step to undo (`undefined` removes one). */
+const setTheme = (fields: Record<string, unknown>, label: string) => edit([{ type: 'theme', fields }], label);
+
+/** A kit's chip: its background as a tile with its accent on it, and its name. */
+function KitTone({ kit }: { kit: BrandView }) {
+  return (
+    <i className={`kit-tone bg-${kit.background.preset}`} style={kit.background.preset === 'solid' && kit.background.color ? { background: kit.background.color } : undefined}>
+      <b style={{ background: kit.accent }} />
+    </i>
+  );
+}
+
+/**
+ * The project's brand, which its motion pages read (titles, end cards, lower thirds, every colour):
+ * the saved kits as chips that apply with one click, then the name, URL, logo, colours and heading
+ * font, and saving it all as a kit for the next video.
+ */
+function BrandFields({ project }: { project: CuttleProject }) {
+  const { theme, look: current } = project;
+  const [kits, setKits] = useState<BrandView[]>();
+  const [removing, setRemoving] = useState<string>();
+  const [kitName, setKitName] = useState('');
+  useEffect(() => {
+    let live = true;
+    void bridge.invoke('brand:list').then((list) => live && setKits(list));
+    return () => {
+      live = false;
+    };
+  }, []);
+  const save = async () => {
+    const name = (kitName || theme.name || '').trim();
+    if (!name) return;
+    const brands = await saveBrandKit(name);
+    if (!brands) return;
+    setKits(brands);
+    setKitName('');
+  };
+  const remove = async (name: string) => {
+    setRemoving(undefined);
+    const brands = await removeBrandKit(name);
+    if (brands) setKits(brands);
+  };
+  return (
+    <>
+      {kits && kits.length > 0 && (
+        <div className="kits" role="group" aria-label="Brand kits">
+          {kits.map((kit) => (
+            <span key={kit.name} className="kit">
+              <button type="button" className="chip" aria-pressed={theme.kit === kit.name} title={`Apply ${kit.name}: its brand, background, frame and cursor`} onClick={() => void applyBrandKit(kit.name)} data-testid="brand-kit">
+                <KitTone kit={kit} />
+                {kit.name}
+              </button>
+              <button type="button" className="kit-remove" aria-label={`Remove the kit ${kit.name}`} title="Remove this kit" onClick={() => setRemoving(kit.name)}>
+                <CloseIcon size={10} />
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
+      {removing && (
+        <div className="kit-confirm" role="alert">
+          <span>
+            Remove the kit “{removing}”? Projects keep what it set.
+          </span>
+          <button type="button" className="ghost small" onClick={() => setRemoving(undefined)}>
+            Keep
+          </button>
+          <button type="button" className="primary small danger" onClick={() => void remove(removing)}>
+            Remove
+          </button>
+        </div>
+      )}
+      {kits && kits.length === 0 && <p className="hint">No brand kits yet: set the brand below, then save it as a kit to use it in the next video with one click.</p>}
+      <div className="grid2">
+        <Row label="Name">
+          <TextInput value={theme.name ?? ''} placeholder="the product" onCommit={(name) => setTheme({ name: name.trim() || undefined }, 'Brand name')} testId="brand-name" />
+        </Row>
+        <Row label="URL">
+          <TextInput value={theme.url ?? ''} placeholder="example.com" onCommit={(url) => setTheme({ url: url.trim() || undefined }, 'Brand URL')} testId="brand-url" />
+        </Row>
+      </div>
+      <Row label="Logo" plain>
+        {theme.logo ? (
+          <>
+            <img className="logo-thumb" src={`${MEDIA_ORIGIN}/${theme.logo.split('/').map(encodeURIComponent).join('/')}`} alt="" />
+            <span className="path" title={theme.logo}>
+              {theme.logo.split('/').pop()}
+            </span>
+            <button type="button" className="ghost small" onClick={() => setTheme({ logo: undefined }, 'No logo')}>
+              Remove
+            </button>
+          </>
+        ) : (
+          <span className="path">none: end cards show the name’s first letter</span>
+        )}
+        <button type="button" className="ghost small" onClick={() => void chooseImage('logo')} data-testid="brand-logo">
+          {theme.logo ? 'Replace…' : 'Choose…'}
+        </button>
+      </Row>
+      <div className="grid2">
+        <Row label="Accent" note={theme.accent ? undefined : 'the cursor’s colour'}>
+          <ColorInput value={theme.accent ?? current.cursor.color} label="Accent colour" upper toCommand={(accent) => ({ type: 'theme', fields: { accent } })} />
+        </Row>
+        <Row label="Text">
+          <ColorInput value={theme.foreground} label="Text colour" upper toCommand={(foreground) => ({ type: 'theme', fields: { foreground } })} />
+        </Row>
+      </div>
+      <Row label="Headings">
+        <StyledSelect value={theme.font} options={THEME_FONTS.map((font) => ({ value: font, label: font, note: FONT_NOTES[font] }))} onChange={(font) => setTheme({ font }, `Headings: ${font}`)} label="Heading font" testId="brand-font" />
+      </Row>
+      <Row label="Pages’ background" note={theme.background ? undefined : 'a dark tone of the background'}>
+        <ColorInput value={theme.background ?? backgroundTone(current.background)} label="Pages’ background" upper toCommand={(background) => ({ type: 'theme', fields: { background } })} />
+        {theme.background && (
+          <button type="button" className="ghost small" onClick={() => setTheme({ background: undefined }, 'Pages’ background from the background')}>
+            Reset
+          </button>
+        )}
+      </Row>
+      <Row label="Save as a kit" plain>
+        <span className="kit-save" title="The brand, the background, the frame and the cursor, for the next video; a kit of the same name is replaced">
+          <input type="text" value={kitName} placeholder={theme.name || 'a name'} onChange={(event) => setKitName(event.target.value)} onKeyDown={(event) => event.key === 'Enter' && void save()} aria-label="The kit's name" data-testid="brand-kit-name" />
+          <button type="button" className="ghost small" disabled={!(kitName || theme.name || '').trim()} onClick={() => void save()} data-testid="brand-save">
+            Save
+          </button>
+        </span>
+      </Row>
+    </>
+  );
+}
+
+/** What each heading font is like, in the font list. */
+const FONT_NOTES: Record<ThemeFont, string> = {
+  Archivo: 'wide, bold',
+  Inter: 'plain',
+  'Space Grotesk': 'technical',
+  Fraunces: 'warm serif',
+  'Instrument Serif': 'editorial serif',
+  'Bebas Neue': 'tall capitals',
+};
+
 function LookPanel() {
   const project = useStore(store, (state) => state.doc?.project);
   const raw = useStore(store, (state) => state.doc?.raw);
@@ -1468,7 +1615,9 @@ function LookPanel() {
   const { look: current, output, sources, captions } = project;
   const size = SIZES.find((item) => item.width === output.width && item.height === output.height);
   const webcam = current.webcam;
+  const theme = project.theme;
   const summaries: Record<LookSection, string> = {
+    brand: theme.kit ? `Kit · ${theme.kit}` : [theme.name, theme.font !== 'Archivo' && theme.font].filter(Boolean).join(' · ') || 'None set',
     background: current.background.preset === 'solid' ? `Solid · ${(current.background.color ?? '#1c1c22').toUpperCase()}` : BACKGROUND_NAMES[current.background.preset],
     window: current.frame.enabled ? [FRAME_NAMES[current.frame.style], current.frame.title].filter(Boolean).join(' · ') : 'No frame',
     cursor: current.cursor.enabled ? `${CURSOR_NAMES[current.cursor.style]} · ${current.cursor.size}×` : 'Hidden',
@@ -1485,6 +1634,10 @@ function LookPanel() {
   };
   return (
     <div className="look-parts">
+      <LookPart id="brand" summary={summaries.brand}>
+        <BrandFields project={project} />
+      </LookPart>
+
       <LookPart id="background" summary={summaries.background}>
         <div className="swatches" role="group" aria-label="Background">
           {BACKGROUND_PRESETS.map((preset) => (

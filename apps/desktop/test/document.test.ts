@@ -133,6 +133,17 @@ describe('the document', () => {
     expect(() => applyCommand(base, { type: 'music', fields: { volume: 0.5 } }, limits)).toThrow(DocumentError);
   });
 
+  it('sets the theme: fields merged and removed, or replaced as a whole (a brand kit)', () => {
+    let next = applyCommand(base, { type: 'theme', fields: { name: 'Acme', accent: '#3366FF' } }, limits);
+    expect(next.theme).toEqual({ name: 'Acme', accent: '#3366FF' });
+    expect(describeChange(project(base), project(next))).toBe('the brand changed');
+    next = applyCommand(next, { type: 'theme', fields: { accent: undefined, font: 'Bebas Neue' } }, limits);
+    expect(next.theme).toEqual({ name: 'Acme', font: 'Bebas Neue' });
+    const kit = applyCommand(next, { type: 'theme', fields: { url: 'acme.dev', kit: 'Acme', logo: undefined }, replace: true }, limits);
+    expect(kit.theme).toEqual({ url: 'acme.dev', kit: 'Acme' });
+    expect(() => applyCommand(base, { type: 'theme', fields: { font: 'Comic Sans' } }, limits)).toThrow(DocumentError);
+  });
+
   it('shifts overlays in source seconds, never before 0', () => {
     const next = applyCommand(base, { type: 'shift', list: 'zooms', id: 'z1', by: -10 }, limits);
     expect((next.zooms as { at: number }[])[0]!.at).toBe(0);

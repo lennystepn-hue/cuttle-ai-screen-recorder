@@ -60,10 +60,11 @@ describe('mediaFile', () => {
   });
 
   it('serves the media types the editor reads', () => {
-    expect(['a.mp4', 'b.M4A', 'c.png', 'd.jsonl', 'e.bin', 'f.exe'].map(mediaType)).toEqual([
+    expect(['a.mp4', 'b.M4A', 'c.png', 'logo.svg', 'd.jsonl', 'e.bin', 'f.exe'].map(mediaType)).toEqual([
       'video/mp4',
       'audio/mp4',
       'image/png',
+      'image/svg+xml',
       'application/x-ndjson',
       'application/octet-stream',
       'application/octet-stream',

@@ -395,6 +395,86 @@ button.chip-status:hover {
   gap: 10px;
   padding: 2px 12px 12px;
 }
+/* the Brand part: saved kits as chips (a tile of the kit's background with its accent on it), each
+   with a quiet remove button that asks first */
+.kits {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.kit {
+  display: inline-flex;
+  align-items: center;
+  position: relative;
+}
+.kit .chip {
+  padding: 0 24px 0 5px;
+  gap: 7px;
+}
+.kit-tone {
+  position: relative;
+  width: 18px;
+  height: 18px;
+  border-radius: 9px;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.18);
+  overflow: hidden;
+}
+.kit-tone b {
+  position: absolute;
+  right: 3px;
+  bottom: 3px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.35);
+}
+.kit-remove {
+  position: absolute;
+  right: 5px;
+  width: 16px;
+  height: 16px;
+  border-radius: 8px;
+  display: grid;
+  place-items: center;
+  color: var(--faint);
+}
+.kit-remove:hover {
+  color: var(--text);
+  background: var(--raised-hover);
+}
+.kit-confirm {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 8px 8px 10px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--danger) 10%, transparent);
+  font-size: var(--size-s);
+}
+.kit-confirm span {
+  flex: 1;
+}
+.primary.danger {
+  background: var(--danger);
+  color: #1a0b0b;
+}
+.primary.danger:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--danger) 85%, white);
+}
+.logo-thumb {
+  width: 28px;
+  height: 28px;
+  flex: none;
+  object-fit: contain;
+  border-radius: 6px;
+  background: repeating-conic-gradient(var(--raised-hover) 0 25%, var(--raised) 0 50%) 0 0 / 8px 8px;
+}
+.kit-save {
+  display: flex;
+  gap: 6px;
+  min-width: 0;
+  flex: 1;
+}
 /* switches that read as words: on is filled, with a tick */
 .chips {
   display: flex;

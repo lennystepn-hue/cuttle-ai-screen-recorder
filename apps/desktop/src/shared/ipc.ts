@@ -257,6 +257,22 @@ export type SoundtrackAnswer = {
   speech: { start: number; end: number }[];
 } | null;
 
+/** A saved brand kit, as the Look tab lists it: its name, and its accent, background and heading font for its chip. */
+export interface BrandView {
+  name: string;
+  accent: string;
+  background: { preset: string; color?: string };
+  font: string;
+}
+
+/** What applying a kit sets, its files already copied into the project: the whole theme, and the look's brand parts. */
+export interface BrandApplied {
+  theme: Record<string, unknown>;
+  background: Record<string, unknown>;
+  frame: { style: string };
+  cursor: { style: string; color: string };
+}
+
 const rect = z.strictObject({ x: z.number().finite(), y: z.number().finite(), width: z.number().finite().positive(), height: z.number().finite().positive() });
 const box = z.tuple([z.number().finite(), z.number().finite(), z.number().finite(), z.number().finite()]);
 /** A frame (premultiplied RGBA, top row first) whose bytes fit its size. */
@@ -348,7 +364,16 @@ export const REQUESTS = {
       base: z.string().regex(/^[0-9a-f]{64}$/),
     })
     .refine((value) => JSON.stringify(value.raw).length <= MAX_PROJECT_BYTES, 'cuttle.json is too large'),
-  'project:import-image': z.strictObject({ purpose: z.enum(['still', 'background']) }),
+  'project:import-image': z.strictObject({ purpose: z.enum(['still', 'background', 'logo']) }),
+  /** The brand kits saved on this computer. */
+  'brand:list': z.undefined(),
+  /** Saves the project's brand, as this version of it has it, as a kit (a kit of that name is replaced). */
+  'brand:save': z
+    .strictObject({ name: z.string().trim().min(1).max(80), raw: z.record(z.string(), z.unknown()) })
+    .refine((value) => JSON.stringify(value.raw).length <= MAX_PROJECT_BYTES, 'cuttle.json is too large'),
+  /** Copies a kit's files into the project and answers what applying it sets (the page makes it one edit). */
+  'brand:apply': z.string().trim().min(1).max(80),
+  'brand:remove': z.string().trim().min(1).max(80),
   'project:draft': z.strictObject({ raw: z.record(z.string(), z.unknown()) }).refine((value) => JSON.stringify(value.raw).length <= MAX_PROJECT_BYTES, 'cuttle.json is too large'),
   /** The page asks to be loaded anew (another take): a page cannot reload itself (navigation is refused). */
   'project:reload': z.undefined(),
@@ -489,6 +514,11 @@ export interface Responses {
   'project:save': { hash: string } | { conflict: ProjectVersion & { origin: ChangeOrigin } } | { problem: string };
   /** An image chosen by the person, copied into the project when it lay outside (a path inside the project). */
   'project:import-image': { path: string } | undefined;
+  'brand:list': BrandView[];
+  /** The kits after the change, or why it could not be made. */
+  'brand:save': { brands: BrandView[] } | { problem: string };
+  'brand:apply': BrandApplied | { problem: string };
+  'brand:remove': { brands: BrandView[] } | { problem: string };
   /** The person's version a save conflict could not carry over, written to cuttle.json.draft. */
   'project:draft': void;
   'project:reload': void;

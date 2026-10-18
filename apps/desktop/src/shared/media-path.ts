@@ -70,6 +70,8 @@ const TYPES: Record<string, string> = {
   '.jpg': 'image/jpeg',
   '.jpeg': 'image/jpeg',
   '.webp': 'image/webp',
+  // a brand's logo (shown in an <img>, where an SVG runs no script)
+  '.svg': 'image/svg+xml',
   '.json': 'application/json',
   '.jsonl': 'application/x-ndjson',
   '.bin': 'application/octet-stream',

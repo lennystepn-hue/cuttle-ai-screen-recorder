@@ -1,4 +1,5 @@
 import { Command, CommanderError, InvalidArgumentError, Option } from 'commander';
+import { brandApplyCommand, brandListCommand, brandRemoveCommand, brandSaveCommand } from './commands/brand';
 import { capturePageCommand } from './commands/capture-page';
 import { devices } from './commands/devices';
 import { fitCommand } from './commands/fit';
@@ -257,6 +258,24 @@ export async function runCli(argv: readonly string[], streams?: Streams): Promis
     .option('--src <page>', 'check this page instead of the project\'s music')
     .option('-o, --out <dir>', 'folder for music.wav and music.png (default: preview/ in the project)')
     .action(action((output, project, options: { src?: string; out?: string }) => withSignal(output, (signal) => musicCheckCommand(project, options, output, signal))));
+
+  const brand = program.command('brand').description('brand kits: a project\'s theme (name, URL, logo, colours, heading font), background, frame and cursor, saved once and applied with one command');
+  brand
+    .command('list', { isDefault: true })
+    .description('the saved brand kits, and where they are kept')
+    .action(action((output) => brandListCommand(output)));
+  brand
+    .command('save <name>')
+    .description('save the project\'s brand as a kit (replaces a kit of that name), with copies of its logo and background image')
+    .action(action((output, project, name: string) => brandSaveCommand(project, name, output)));
+  brand
+    .command('apply <name>')
+    .description('set a kit\'s theme, background, frame style and cursor in the project (its files are copied into brand/)')
+    .action(action((output, project, name: string) => brandApplyCommand(project, name, output)));
+  brand
+    .command('remove <name>')
+    .description('remove a saved kit (projects keep what it set)')
+    .action(action((output, _project, name: string) => brandRemoveCommand(name, output)));
 
   const sound = program.command('sound').description('sounds at moments of the video: built-in effects or files of the project');
   sound

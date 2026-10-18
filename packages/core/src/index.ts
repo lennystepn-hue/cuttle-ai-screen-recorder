@@ -1,6 +1,6 @@
 // @cuttle/core: what the CLI and the app do to a project folder, in Node: read and write cuttle.json
 // as written (with backups), point the project at a take, suggest scenes, recover a take, grab a
-// frame, run ffmpeg, and transcribe the mic (the speech models, whisper, the speech edits).
+// frame, run ffmpeg, transcribe the mic (the speech models, whisper, the speech edits), and keep brand kits.
 export { CoreError, type CoreErrorCode } from './errors';
 export { EDITOR_LOCK, editorLockOf, type EditorLock } from './editor-lock';
 export { ffmpegPath, runFfmpeg } from './ffmpeg';
@@ -33,3 +33,4 @@ export { READ_RULES, SCREEN_TEXT_FILE, framesToRead, readFrames, writeScreenText
 export { applyPrivacy, readScreenTake, readScreenText, withPrivacyMasks, type PrivacyInput, type PrivacyMasksResult, type PrivacyResult, type RawMask } from './privacy/apply';
 export { NOTIFICATION_RULES, notificationMasks, type NotificationMask } from './privacy/notifications';
 export { CLEAN_MIC_FILE, cleanMic, cleanupFilter, denoiseLatency } from './speech/cleanup';
+export { BRAND_FILE, PROJECT_BRAND_DIR, applyBrand, brandFields, brandSlug, brandsDir, findBrand, listBrands, removeBrand, saveBrand, type Brand, type BrandFields } from './brands';

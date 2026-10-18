@@ -8,6 +8,7 @@ import { barPlacement, bubblePlacement, bubbleSize, dragRect, labelPlacement, ma
 import { bridge } from '../bridge';
 import { FolderIcon, MicIcon, WarningIcon } from '../icons';
 import { Select } from '../Select';
+import { hotkey } from '../keys';
 import { ScriptIcon, ScriptPanel, writtenSteps } from './Script';
 
 type Mode = 'auto' | 'screen' | 'window' | 'region';
@@ -323,7 +324,7 @@ export function Picker() {
             </span>
             <span>drag for a region</span>
             <span>
-              <kbd>Ctrl+Shift+Alt+S</kbd> stops
+              <kbd>{hotkey('Ctrl+Shift+Alt+S')}</kbd> stops
             </span>
           </div>
           {choices.camera && bubbleAt && <CameraBubble name={choices.camera} size={bubble} left={bubbleAt.left} top={bubbleAt.top} />}

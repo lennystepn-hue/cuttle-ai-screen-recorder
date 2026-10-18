@@ -5,6 +5,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { PrompterState } from '../../shared/ipc';
 import { bridge } from '../bridge';
+import { hotkey } from '../keys';
 
 /** The window's margin around the card (its shadow), as the main process places it. */
 const MARGIN = 10;
@@ -47,7 +48,7 @@ export function Prompter() {
             className="back"
             onClick={() => void bridge.invoke('prompter:previous')}
             disabled={!state.live || state.index === 0}
-            title="The step before (Ctrl+Shift+Alt+B)"
+            title={`The step before (${hotkey('Ctrl+Shift+Alt+B')})`}
             aria-label="The step before"
             data-testid="prompter-back"
           >
@@ -59,7 +60,7 @@ export function Prompter() {
             className="next"
             onClick={() => void bridge.invoke('prompter:next')}
             disabled={!state.live || !next}
-            title="The next step (Ctrl+Shift+Alt+N)"
+            title={`The next step (${hotkey('Ctrl+Shift+Alt+N')})`}
             data-testid="prompter-next"
           >
             Next

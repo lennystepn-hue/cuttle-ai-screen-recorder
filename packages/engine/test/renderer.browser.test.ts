@@ -62,7 +62,7 @@ describe('createRenderer', () => {
   it('compiles every background preset', async () => {
     const { background } = await fixtures();
     for (const preset of BACKGROUND_PRESETS) {
-      const project = parse({ look: { background: { preset, color: '#000000', image: 'bg.png' } } });
+      const project = parse({ look: { background: { preset, color: '#000000', image: 'bg.png', colors: ['#000000', '#FFFFFF'] } } });
       createRenderer(new OffscreenCanvas(1, 1), project, { assets, screenSize: SCREEN, backgroundImage: background }).dispose();
     }
   });

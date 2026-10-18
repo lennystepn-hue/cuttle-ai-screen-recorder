@@ -185,7 +185,9 @@ Then refine `cuttle.json` ([project.md](project.md)) and preview again:
   `cuttle -C "<project>" --json brand apply "<name>"`: the brand (name, URL, logo, colours, heading
   font) for the motion pages, the background, frame and cursor. Without one, set `theme` (project.md)
   and offer to keep it with `brand save`. Set `look.frame.title` (e.g. `claude · ~/demo`) and a
-  background preset, and add a `texts` caption where a step is not obvious. Typing clicks softly, a click per key where the clip
+  background: `cuttle -C "<project>" --json background gradient --from take` takes the product's own
+  colours, `background --wallpaper` puts the desktop's wallpaper behind the window, softened;
+  `flow`, `bokeh` and `dots` move quietly. Add a `texts` caption where a step is not obvious. Typing clicks softly, a click per key where the clip
   is heard (`look.audio.typing`, `typingVolume`); switch it off when the user wants a quiet video.
 - **Pages.** `cuttle -C "<project>" --json capture-page <url or file> --scroll --add` appends a
   scrolling still of a web page (the result the agent built); add `--wait 2500` for slow maps or

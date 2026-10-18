@@ -3,7 +3,10 @@ import { z } from 'zod';
 // The cuttle.json format version this build reads and writes.
 export const CURRENT_VERSION = 1;
 
-export const BACKGROUND_PRESETS = ['sunset-sky', 'aurora', 'mesh', 'solid', 'image'] as const;
+export const BACKGROUND_PRESETS = ['sunset-sky', 'aurora', 'mesh', 'solid', 'image', 'gradient', 'flow', 'bokeh', 'dots'] as const;
+/** The backgrounds drawn in colours of their own (`background.colors`): a gradient's, and the tints of the others. */
+export const COLOURED_BACKGROUNDS = ['gradient', 'mesh', 'flow', 'bokeh', 'dots'] as const;
+export const GRADIENT_KINDS = ['linear', 'radial'] as const;
 export const FRAME_STYLES = ['mac-dark', 'mac-light', 'browser-light', 'none'] as const;
 export const TEXT_STYLES = ['pill', 'lower-third', 'caption'] as const;
 export const CURSOR_STYLES = ['system', 'arrow-white', 'arrow-black', 'dot', 'ring', 'spotlight'] as const;
@@ -67,6 +70,14 @@ export const BackgroundSchema = z
     preset: z.enum(BACKGROUND_PRESETS),
     color: hexColor.optional(),
     image: z.string().min(1).optional(),
+    /** The colours of a gradient (its stops, first to last) and the tints of mesh, flow, bokeh and dots; without them, their own. */
+    colors: z.array(hexColor).min(2).max(4).optional(),
+    /** A gradient's direction, as in CSS: 0 to the top, 90 to the right (default 135); and `radial`, from the centre out. */
+    angle: z.number().min(0).max(360).optional(),
+    kind: z.enum(GRADIENT_KINDS).optional(),
+    /** An image softened (0 sharp, 1 a wash of its colours: a wallpaper behind the window) and darkened (0 to 0.8). */
+    blur: z.number().min(0).max(1).optional(),
+    dim: z.number().min(0).max(0.8).optional(),
   })
   .superRefine((background, ctx) => {
     if (background.preset === 'solid' && background.color === undefined) {
@@ -74,6 +85,9 @@ export const BackgroundSchema = z
     }
     if (background.preset === 'image' && background.image === undefined) {
       ctx.addIssue({ code: 'custom', message: 'the "image" background needs an "image" path', path: ['image'] });
+    }
+    if (background.preset === 'gradient' && background.colors === undefined) {
+      ctx.addIssue({ code: 'custom', message: 'the "gradient" background needs its "colors" (2 to 4)', path: ['colors'] });
     }
   });
 
@@ -473,6 +487,8 @@ export type MaskStyle = (typeof MASK_STYLES)[number];
 export type TextPosition = (typeof TEXT_POSITIONS)[number];
 export type StillMotion = (typeof STILL_MOTIONS)[number];
 export type BackgroundPreset = (typeof BACKGROUND_PRESETS)[number];
+export type ColouredBackground = (typeof COLOURED_BACKGROUNDS)[number];
+export type GradientKind = (typeof GRADIENT_KINDS)[number];
 export type FrameStyle = (typeof FRAME_STYLES)[number];
 export type TextStyle = (typeof TEXT_STYLES)[number];
 export type CaptionStyle = (typeof CAPTION_STYLES)[number];

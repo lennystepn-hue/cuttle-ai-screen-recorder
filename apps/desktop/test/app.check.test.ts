@@ -287,6 +287,8 @@ describe.runIf(enabled)('the Cuttle app', () => {
     mkdirSync(join(root, 'user-data'));
     // The screen is read after a take's cut only where the check asks for it (it says so in the settings).
     writeFileSync(join(root, 'user-data', 'settings.json'), JSON.stringify({ projectsFolder: join(root, 'projects'), privacy: { read: false } }));
+    // the desktop's wallpaper the check gives the app
+    spawnSync('ffmpeg', ['-v', 'error', '-y', '-f', 'lavfi', '-i', 'testsrc2=s=1280x720', '-frames:v', '1', join(root, 'wallpaper.png')], { windowsHide: true });
     // the logo the brand's file dialog picks
     writeFileSync(join(root, 'nimbus.svg'), '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120"><rect width="120" height="120" rx="28" fill="#7C5CFF"/><path d="M34 86V34h12l28 34V34h12v52H74L46 52v34z" fill="#fff"/></svg>');
     models = createServer((request, response) => {
@@ -319,6 +321,8 @@ describe.runIf(enabled)('the Cuttle app', () => {
         // the brand kits in a folder of the check's own, and the image a file dialog picks
         CUTTLE_BRANDS_DIR: join(root, 'brands'),
         CUTTLE_CHECK_IMAGE: join(root, 'nimbus.svg'),
+        // the desktop's wallpaper, the check's own (never this computer's)
+        CUTTLE_WALLPAPER: join(root, 'wallpaper.png'),
       },
     });
     // Unhandled rejections in the main process are bugs: collect them for the last test.
@@ -2037,6 +2041,75 @@ describe.runIf(enabled)('the Cuttle app', () => {
     await second.page.waitForSelector('[data-testid=brand-kit]', { state: 'detached' });
     expect(saved(second.dir).theme?.kit).toBe('Nimbus');
     await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find((window) => window.getTitle() === 'brand-second · Cuttle')?.close());
+  }, 240_000);
+
+  it('builds a gradient in the Look tab from the take’s colours, puts the desktop’s wallpaper behind the window, softened and darker, and draws the quiet ones as the export does', async () => {
+    const dir = join(root, 'backgrounds');
+    makeFixture(dir);
+    const page = await openEditor(dir);
+    await page.waitForFunction(() => '__cuttleCheck' in window);
+    const seekTo = (t: number) => page.evaluate((time) => (window as unknown as Hooked).__cuttleCheck.seek(time), t);
+    const view = async () => decode(await page.evaluate(() => (window as unknown as Hooked).__cuttleCheck.pixels()));
+    type Background = { preset: string; colors?: string[]; angle?: number; kind?: string; image?: string; blur?: number; dim?: number };
+    const saved = () => (JSON.parse(readFileSync(join(dir, 'cuttle.json'), 'utf8')) as { look: { background: Background } }).look.background;
+    /** The editor's frame at `t` against `cuttle preview`'s (the window over the background, in the first clip). */
+    const asExported = async (t: number, name: string) => {
+      await page.evaluate(() => (window as unknown as Hooked).__cuttleCheck.flush());
+      const still = spawnSync('node', [CLI, '--json', '-C', dir, 'preview', '--at', String(t), '-o', join(root, `bg-${name}`)], { encoding: 'utf8', timeout: 120_000 });
+      expect(still.status, still.stderr).toBe(0);
+      const exported = PNG.sync.read(readFileSync((JSON.parse(still.stdout) as { stills: { file: string }[] }).stills[0]!.file));
+      await expect.poll(async () => (await seekTo(t), difference(await view(), exported).mean), { timeout: 20_000, message: `${name}: the editor against the export` }).toBeLessThan(0.6);
+    };
+    const setRange = (testId: string, value: number) =>
+      page.locator(`[data-testid=${testId}]`).evaluate((element, to) => {
+        const input = element as HTMLInputElement;
+        Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, String(to));
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+        input.dispatchEvent(new Event('change', { bubbles: true }));
+      }, value);
+    await click(page, '#tab-look');
+    await click(page, '[data-testid=look-open-background]');
+
+    // a gradient: its own colours first, then the take's, a third stop, an angle, then radial
+    await click(page, '[data-testid=bg-gradient]');
+    await expect.poll(saved).toEqual({ preset: 'gradient', colors: ['#7C5CFF', '#FF7AB6'] });
+    await click(page, '[data-testid=bg-from-take]');
+    await expect.poll(() => saved().colors, { timeout: 30_000 }).not.toEqual(['#7C5CFF', '#FF7AB6']);
+    const taken = saved().colors!;
+    expect(taken.length).toBeGreaterThanOrEqual(2);
+    if (taken.length < 4) {
+      await click(page, '[data-testid=bg-color-add]');
+      await expect.poll(() => saved().colors?.length).toBe(taken.length + 1);
+    }
+    await page.fill('[data-testid=bg-angle]', '90');
+    await page.press('[data-testid=bg-angle]', 'Enter');
+    await expect.poll(() => saved().angle).toBe(90);
+    await asExported(1, 'gradient');
+    await shotOf('43-background-gradient', '/editor.html', 'backgrounds · Cuttle');
+    await click(page, '[data-testid=bg-radial]');
+    await expect.poll(() => saved().kind).toBe('radial');
+    await asExported(1, 'radial');
+
+    // the desktop's wallpaper (the check's own), softened; then darker
+    await click(page, '[data-testid=bg-wallpaper]');
+    await expect.poll(saved).toEqual({ preset: 'image', image: 'images/wallpaper.png', blur: 0.6 });
+    expect(existsSync(join(dir, 'images', 'wallpaper.png'))).toBe(true);
+    await page.waitForSelector('[data-testid=bg-dim]');
+    await setRange('bg-dim', 30);
+    await expect.poll(() => saved().dim).toBe(0.3);
+    await asExported(1, 'wallpaper');
+    await shotOf('43b-background-wallpaper', '/editor.html', 'backgrounds · Cuttle');
+
+    // the quiet ones, each as the export draws it; flow in the gradient's colours (they stay)
+    await click(page, '[data-testid=bg-flow]');
+    await expect.poll(saved).toEqual({ preset: 'flow' });
+    for (const preset of ['flow', 'bokeh', 'dots']) {
+      await click(page, `[data-testid=bg-${preset}]`);
+      await expect.poll(() => saved().preset).toBe(preset);
+      await asExported(1, preset);
+      if (preset === 'dots') await shotOf('43c-background-dots', '/editor.html', 'backgrounds · Cuttle');
+    }
+    await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find((window) => window.getTitle() === 'backgrounds · Cuttle')?.close());
   }, 240_000);
 
   it('had no unhandled rejection in the main process, and no error in the editor', async () => {

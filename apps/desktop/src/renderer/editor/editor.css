@@ -2387,6 +2387,65 @@ button.chip-status:hover {
 .bg-image {
   background: repeating-linear-gradient(45deg, var(--raised) 0 6px, var(--raised-hover) 6px 12px);
 }
+.bg-gradient {
+  background: linear-gradient(135deg in oklab, #7c5cff, #ff7ab6);
+}
+.bg-flow {
+  background:
+    radial-gradient(ellipse at 30% 40%, #d6457f 0, transparent 55%),
+    radial-gradient(ellipse at 78% 72%, #f3a55b 0, transparent 50%),
+    radial-gradient(ellipse at 72% 18%, #5b3fc0 0, transparent 60%),
+    #1a1446;
+}
+.bg-bokeh {
+  background:
+    radial-gradient(circle at 24% 30%, rgba(58, 109, 240, 0.6) 0 9%, transparent 10%),
+    radial-gradient(circle at 68% 58%, rgba(164, 92, 240, 0.5) 0 13%, transparent 14%),
+    radial-gradient(circle at 42% 82%, rgba(245, 107, 155, 0.45) 0 8%, transparent 9%),
+    radial-gradient(circle at 86% 24%, rgba(245, 178, 107, 0.45) 0 6%, transparent 7%),
+    linear-gradient(180deg, #111830, #070b1a);
+}
+.bg-dots {
+  background:
+    radial-gradient(circle at 40% 45%, rgba(124, 92, 255, 0.45), transparent 60%),
+    radial-gradient(circle, rgba(255, 255, 255, 0.4) 0 0.8px, transparent 1.3px) 0 0 / 6px 6px,
+    #0b0d12;
+}
+/* a coloured background's colours: a well each, a remove button on hover, + for one more */
+.color-stops {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+.color-stop {
+  position: relative;
+  display: inline-flex;
+}
+.stop-remove {
+  position: absolute;
+  top: -6px;
+  right: -7px;
+  width: 16px;
+  height: 16px;
+  border-radius: 8px;
+  display: grid;
+  place-items: center;
+  background: var(--raised-hover);
+  color: var(--muted);
+  box-shadow: 0 0 0 1px var(--line-strong);
+  opacity: 0;
+  transition: opacity var(--fast);
+}
+.color-stop:hover .stop-remove,
+.stop-remove:focus-visible {
+  opacity: 1;
+}
+.stop-add {
+  width: 28px;
+  padding: 0;
+  justify-content: center;
+}
 .path {
   flex: 1;
   min-width: 0;

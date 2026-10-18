@@ -10,6 +10,7 @@ import type { Event, Events, ExportEnd, ProjectFileEvent, ProjectStatus } from '
 import { isInside } from '../shared/media-path';
 import { takeKey } from '../shared/take';
 import { CHECK, CHECK_IMAGE, HIDDEN } from './check';
+import { backgroundPalette, projectWallpaper } from './background';
 import { applyProjectBrand, brandViews, removeProjectBrand, saveProjectBrand } from './brands';
 import { ExportRun, exportPath } from './export-service';
 import { bindRequests, send } from './ipc';
@@ -270,6 +271,8 @@ async function editorWindow(dir: string, key: string, file: ProjectFile, release
     'brand:save': ({ name, raw }) => saveProjectBrand(dir, name, raw),
     'brand:apply': (name) => applyProjectBrand(dir, name),
     'brand:remove': (name) => removeProjectBrand(name),
+    'background:palette': ({ from, logo }) => backgroundPalette(dir, from, logo),
+    'background:wallpaper': () => projectWallpaper(dir),
   });
   editor.watch.start(file.hash);
   contents.on('did-finish-load', () => send(contents, 'project:status', editor.status ?? {}));

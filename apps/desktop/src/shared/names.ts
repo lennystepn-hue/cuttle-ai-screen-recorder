@@ -16,7 +16,17 @@ import type {
 
 type Names<T extends readonly string[]> = Record<T[number], string>;
 
-export const BACKGROUND_NAMES: Names<typeof BACKGROUND_PRESETS> = { 'sunset-sky': 'Sunset sky', aurora: 'Aurora', mesh: 'Mesh', solid: 'Solid colour', image: 'Image' };
+export const BACKGROUND_NAMES: Names<typeof BACKGROUND_PRESETS> = {
+  'sunset-sky': 'Sunset sky',
+  aurora: 'Aurora',
+  mesh: 'Mesh',
+  solid: 'Solid colour',
+  image: 'Image',
+  gradient: 'Gradient',
+  flow: 'Flow',
+  bokeh: 'Bokeh',
+  dots: 'Dots',
+};
 export const FRAME_NAMES: Names<typeof FRAME_STYLES> = { 'mac-dark': 'Mac, dark', 'mac-light': 'Mac, light', 'browser-light': 'Browser, light', none: 'No title bar' };
 export const CURSOR_NAMES: Names<typeof CURSOR_STYLES> = {
   system: 'System',

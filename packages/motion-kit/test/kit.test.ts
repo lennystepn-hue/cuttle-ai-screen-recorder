@@ -1,9 +1,9 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { copyTemplate, MissingTemplateError } from '../src/files';
+import { copyTemplate, MissingTemplateError, templatePage } from '../src/files';
 import { BUILT_IN_SOUNDS, KIT_FONTS, KIT_IMPORTS, KIT_ORIGIN, MOTION_TEMPLATES, MUSIC_TEMPLATES, importMapTag, withImportMap } from '../src/index';
 
 const TEMPLATES = fileURLToPath(new URL('../templates/', import.meta.url));
@@ -89,6 +89,20 @@ describe('the motion kit', () => {
       expect(await copyTemplate(dir, 'title', 'title', import.meta.url)).toBe('motion/title-2/index.html');
       expect(readFileSync(join(dir, 'motion', 'title-2', 'index.html'), 'utf8')).toBe(readFileSync(`${TEMPLATES}title/index.html`, 'utf8'));
       await expect(copyTemplate(dir, 'nope', 'nope', import.meta.url)).rejects.toThrow(MissingTemplateError);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("gives the project's page of a template for items that share one: the one there, else a copy", async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'cuttle-kit-'));
+    try {
+      expect(await templatePage(dir, 'lower-third', import.meta.url)).toBe('motion/lower-third/index.html');
+      writeFileSync(join(dir, 'motion', 'lower-third', 'index.html'), 'changed by the person');
+      expect(await templatePage(dir, 'lower-third', import.meta.url)).toBe('motion/lower-third/index.html');
+      expect(readFileSync(join(dir, 'motion', 'lower-third', 'index.html'), 'utf8')).toBe('changed by the person');
+      expect(existsSync(join(dir, 'motion', 'lower-third-2'))).toBe(false);
+      expect(await templatePage(dir, 'nope', import.meta.url)).toBeUndefined();
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

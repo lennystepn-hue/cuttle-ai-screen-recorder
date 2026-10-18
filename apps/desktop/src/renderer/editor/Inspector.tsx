@@ -366,13 +366,16 @@ function CutDetails({ project, id }: { project: CuttleProject; id: string }) {
 function TransitionInto({ project, index }: { project: CuttleProject; index: number }) {
   const scene = project.scenes[index];
   const transition = scene?.transition;
+  const name = `scenes[${index}].transition`;
+  const status = useStore(store, (state) => state.motionStatus.find((entry) => entry.item === name && entry.src === transition?.src));
   if (!scene?.id || !transition || index === 0) return null;
   const id = scene.id;
   const change = (fields: Partial<typeof transition>, label: string) => set('scenes', id, { transition: { ...transition, ...fields } }, label);
   return (
     <div className="transition-in" data-testid="transition-in">
       <Row label="Into this scene">{motionName(transition.src)}</Row>
-      <p className="hint">The export draws its page between the two scenes; the editor shows a crossfade there for now.</p>
+      {status && <MotionState status={status} />}
+      <p className="hint">Its page draws the frames between the two scenes from them. The player shows them once they are made, a moment after you stop on the timeline; until then, a crossfade.</p>
       <div className="grid2">
         <Row label="Length (s)">
           <NumberInput value={transition.duration} min={0.1} max={4} step={0.1} onCommit={(duration) => change({ duration }, 'Transition length')} testId="transition-duration" />

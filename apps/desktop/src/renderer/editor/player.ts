@@ -4,7 +4,7 @@
 import { createRenderer, type DrawnText, type EngineAssets, type FrameSources, type Renderer } from '@cuttle/engine';
 import { planStills } from '@cuttle/export/frame-plan';
 import type { CuttleProject } from '@cuttle/project';
-import { createTimeline, type RenderState, type Timeline } from '@cuttle/timeline';
+import { createTimeline, crossfadeHalf, pageTransition, type RenderState, type Timeline } from '@cuttle/timeline';
 import { AudioSchedule } from './audio';
 import { TypingSchedule } from './typing-audio';
 import { FrameGrabber, KeyFrames, PlaybackFrames, type HeldFrame, type PlaybackVideo } from './frames';
@@ -28,18 +28,22 @@ export interface PlayerState {
 const LOOKAHEAD_FRAMES = 20;
 /** Playback this far behind the clock restarts its decoders at the clock (frames are dropped). */
 const BEHIND_SECONDS = 0.5;
+/** A pause this long after a seek before the transitions' frames are made for playing (ms): scrubbing goes first. */
+const WARM_DELAY_MS = 400;
 /** The sizes motion frames are drawn at, as parts of the output: the smallest that fills the player on screen. */
 const MOTION_SCALES = [1 / 4, 1 / 3, 3 / 8, 1 / 2, 2 / 3, 3 / 4, 1];
 
 /** What playback did, for the check: frames drawn, decoder restarts at the clock (frames dropped), typing clicks scheduled, the clock. */
 export interface PlaybackStats {
   drawn: number;
+  /** Frames drawn by a transition's page (made while paused), not crossfaded. */
+  transitions: number;
   restarts: number;
   clicks: number;
   /** The clock's output time (where the sound is), while playing. */
   clock: number;
-  /** Motion frames that came while playing, and how long one took (ms, a running mean). */
-  motion?: { frames: number; took: number };
+  /** Motion frames that came while playing, how long one took (ms, a running mean), and the transition frames made. */
+  motion?: { frames: number; took: number; made: number };
   /** The soundtrack's buffers started in this run (music and effects; again after a new render came). */
   soundtrack?: number;
 }
@@ -86,7 +90,7 @@ export class Player {
   /** The run under way: output time `from` plays at context time `contextStart`. */
   private runMap: { from: number; contextStart: number } | undefined;
   private disposed = false;
-  private readonly playback: PlaybackStats = { drawn: 0, restarts: 0, clicks: 0, clock: 0 };
+  private readonly playback: PlaybackStats = { drawn: 0, transitions: 0, restarts: 0, clicks: 0, clock: 0 };
   private clockNow: (() => number) | undefined;
   private readonly motion: MotionFrames;
   private readonly fullSizeMotion: boolean;
@@ -302,52 +306,32 @@ export class Player {
     const frame = this.frameOf(time);
     const state = this.timeline.frameAt(frame / this.fps);
     let held: HeldFrame[] = [];
-    const sources: FrameSources = { screens: new Map(), webcams: new Map(), stills: new Map(), motion: new Map(), overlays: new Map() };
-    const stills = this.stillsByIndex();
     try {
-      for (const layer of state.layers) {
-        if (layer.kind === 'still') {
-          const image = stills.get(layer.index);
-          if (image) sources.stills.set(layer.index, image);
-          continue;
-        }
-        if (layer.kind !== 'clip' || layer.sourceTime === undefined) continue;
-        const screen = await this.screenGrabber.grab(layer.sourceTime);
-        if (!screen || token !== this.seekToken) {
-          screen?.close();
-          return;
-        }
-        held.push(screen);
-        sources.screens.set(layer.index, screen.frame);
-        const webcam = this.media.webcam;
-        if (webcam && this.webcamGrabber) {
-          const webcamTime = layer.sourceTime - webcam.offset;
-          if (webcamTime >= webcam.start && webcamTime < webcam.end) {
-            const frameOfWebcam = await this.webcamGrabber.grab(webcamTime);
-            if (token !== this.seekToken) {
-              frameOfWebcam?.close();
-              return;
-            }
-            if (frameOfWebcam) {
-              held.push(frameOfWebcam);
-              sources.webcams.set(layer.index, frameOfWebcam.frame);
-            }
-          }
-        }
-      }
-      if (token !== this.seekToken || this.disposed) return;
+      const gathered = await this.gather(state, token, held);
+      if (!gathered || token !== this.seekToken || this.disposed) return;
+      const sources = gathered;
       const needs = this.motion.needs(this.timeline.spans, state);
       const exact = this.motion.fill(needs, sources);
+      const between = this.motion.fillTransition(state, sources);
       this.seeking = undefined;
       if (this.draw(state, sources)) this.set({ t: time, source: this.sourceOf(state), error: undefined });
-      if (exact) return;
-      // the exact motion frames, then this frame again with them (its video frames are kept until then)
+      if (exact && between) return void this.warm(token);
+      // the exact motion frames and the transition's, then this frame again with them (its video frames are kept until then)
       this.parked = held;
       held = [];
-      const changed = await this.motion.exact(needs, sources);
-      if (token !== this.seekToken || this.disposed || this.state.playing) return;
-      if (changed) this.draw(state, sources);
+      if (!exact) {
+        const changed = await this.motion.exact(needs, sources);
+        if (token !== this.seekToken || this.disposed || this.state.playing) return;
+        if (changed) this.draw(state, sources);
+      }
+      if (!between) {
+        // its page draws from the two layers as they are now (the motion frames in them exact)
+        const made = await this.motion.transition(state, () => this.renderer.layerPixels(state, sources), 'seek').catch(() => undefined);
+        if (token !== this.seekToken || this.disposed || this.state.playing) return;
+        if (made && this.motion.fillTransition(state, sources)) this.draw(state, sources);
+      }
       this.unpark();
+      void this.warm(token);
     } catch (error) {
       if (token === this.seekToken && !this.disposed) {
         this.seeking = undefined;
@@ -355,6 +339,86 @@ export class Player {
       }
     } finally {
       for (const frame of held) frame.close();
+    }
+  }
+
+  /**
+   * The video and still frames of a paused frame's layers; the video frames go into `held` (the caller
+   * closes them). Undefined when a newer seek came meanwhile.
+   */
+  private async gather(state: RenderState, token: number, held: HeldFrame[]): Promise<FrameSources | undefined> {
+    const sources: FrameSources = { screens: new Map(), webcams: new Map(), stills: new Map(), motion: new Map(), overlays: new Map(), transitions: new Map() };
+    const stills = this.stillsByIndex();
+    for (const layer of state.layers) {
+      if (layer.kind === 'still') {
+        const image = stills.get(layer.index);
+        if (image) sources.stills.set(layer.index, image);
+        continue;
+      }
+      if (layer.kind !== 'clip' || layer.sourceTime === undefined) continue;
+      const screen = await this.screenGrabber.grab(layer.sourceTime);
+      if (!screen || token !== this.seekToken) {
+        screen?.close();
+        return undefined;
+      }
+      held.push(screen);
+      sources.screens.set(layer.index, screen.frame);
+      const webcam = this.media.webcam;
+      if (webcam && this.webcamGrabber) {
+        const webcamTime = layer.sourceTime - webcam.offset;
+        if (webcamTime >= webcam.start && webcamTime < webcam.end) {
+          const frameOfWebcam = await this.webcamGrabber.grab(webcamTime);
+          if (token !== this.seekToken) {
+            frameOfWebcam?.close();
+            return undefined;
+          }
+          if (frameOfWebcam) {
+            held.push(frameOfWebcam);
+            sources.webcams.set(layer.index, frameOfWebcam.frame);
+          }
+        }
+      }
+    }
+    return sources;
+  }
+
+  /** The output frames that show a transition page. */
+  private transitionFrames(): number[] {
+    const frames: number[] = [];
+    const spans = this.timeline.spans;
+    const look = this.project.look.transition;
+    for (let i = 1; i < spans.length; i++) {
+      const [before, into] = [spans[i - 1]!, spans[i]!];
+      if (!pageTransition(before, into, look)) continue;
+      const half = crossfadeHalf(before, into, look);
+      for (let frame = Math.ceil((into.start - half) * this.fps - 1e-6); frame / this.fps < into.start + half - 1e-9; frame++) frames.push(frame);
+    }
+    return frames;
+  }
+
+  /**
+   * While paused, a moment after a seek: makes the frames of the transitions for playing, one after
+   * the other (a seek, a play or an edit stops it; the next seek starts it again where it is needed).
+   */
+  private async warm(token: number): Promise<void> {
+    await new Promise((resolve) => setTimeout(resolve, WARM_DELAY_MS));
+    for (const at of this.transitionFrames()) {
+      if (token !== this.seekToken || this.state.playing || this.disposed) return;
+      const state = this.timeline.frameAt(at / this.fps);
+      if (this.motion.hasTransition(state)) continue;
+      const held: HeldFrame[] = [];
+      try {
+        const sources = await this.gather(state, token, held);
+        if (!sources || token !== this.seekToken || this.state.playing) return;
+        const needs = this.motion.needs(this.timeline.spans, state);
+        if (!this.motion.fill(needs, sources)) await this.motion.exact(needs, sources);
+        if (token !== this.seekToken || this.state.playing || this.disposed) return;
+        await this.motion.transition(state, () => this.renderer.layerPixels(state, sources), 'play');
+      } catch {
+        return; // the item's status says what went wrong
+      } finally {
+        for (const frame of held) frame.close();
+      }
     }
   }
 
@@ -403,6 +467,7 @@ export class Player {
     const clock = () => from + Math.max(0, heardTime(context) - contextStart);
     this.clockNow = clock;
     this.playback.drawn = 0;
+    this.playback.transitions = 0;
     this.playback.restarts = 0;
 
     const video: PlaybackVideo = {
@@ -452,8 +517,11 @@ export class Player {
             sources.overlays.clear();
             this.motion.stream(this.motion.needs(this.timeline.spans, state), frame, fps, last, sources, needsAt);
           }
+          // a transition plays as its page drew it while paused, else as a crossfade
+          const paged = sources !== undefined && state.transition !== undefined && this.motion.fillTransition(state, sources);
           if (sources && this.draw(state, sources)) {
             this.playback.drawn++;
+            if (paged) this.playback.transitions++;
             this.set({ t: frame / fps, source: this.sourceOf(state) });
           }
           shown = frame;

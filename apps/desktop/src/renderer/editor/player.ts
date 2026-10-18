@@ -10,6 +10,7 @@ import { TypingSchedule } from './typing-audio';
 import { FrameGrabber, KeyFrames, PlaybackFrames, type HeldFrame, type PlaybackVideo } from './frames';
 import type { EditorMedia, VideoSource } from './media';
 import { MotionFrames } from './motion';
+import { SoundtrackSchedule, type Soundtrack } from './soundtrack';
 
 export interface PlayerState {
   /** Output seconds of the frame on screen. */
@@ -39,6 +40,8 @@ export interface PlaybackStats {
   clock: number;
   /** Motion frames that came while playing, and how long one took (ms, a running mean). */
   motion?: { frames: number; took: number };
+  /** The soundtrack's buffers started in this run (music and effects; again after a new render came). */
+  soundtrack?: number;
 }
 
 export interface PlayerOptions {
@@ -76,6 +79,12 @@ export class Player {
   private audio: AudioSchedule | undefined;
   /** The typing sounds while playing (also without a mic). */
   private typing: TypingSchedule | undefined;
+  /** The music and sounds rendered for the project, and their playback while playing. */
+  private soundtrack: Soundtrack | undefined;
+  private sound: SoundtrackSchedule | undefined;
+  private soundStarts = 0;
+  /** The run under way: output time `from` plays at context time `contextStart`. */
+  private runMap: { from: number; contextStart: number } | undefined;
   private disposed = false;
   private readonly playback: PlaybackStats = { drawn: 0, restarts: 0, clicks: 0, clock: 0 };
   private clockNow: (() => number) | undefined;
@@ -151,7 +160,29 @@ export class Player {
 
   /** Playback counters since the last play, and the clock's time while playing. */
   stats(): PlaybackStats {
-    return { ...this.playback, clicks: this.typing?.scheduled ?? this.playback.clicks, clock: this.clockNow?.() ?? this.state.t, motion: this.motion.stats() };
+    return {
+      ...this.playback,
+      clicks: this.typing?.scheduled ?? this.playback.clicks,
+      clock: this.clockNow?.() ?? this.state.t,
+      motion: this.motion.stats(),
+      soundtrack: this.soundStarts,
+    };
+  }
+
+  /** The soundtrack to play (a new render of the music comes in while playing: it takes over at once). */
+  setSoundtrack(track: Soundtrack | undefined): void {
+    if (track === this.soundtrack) return;
+    this.soundtrack = track;
+    if (!this.state.playing || !this.context || !this.runMap) return;
+    this.sound?.stop();
+    const contextStart = this.context.currentTime + 0.05;
+    this.sound = track ? this.startSound(this.context, track, this.runMap.from + (contextStart - this.runMap.contextStart), contextStart) : undefined;
+  }
+
+  private startSound(context: AudioContext, track: Soundtrack, from: number, contextStart: number): SoundtrackSchedule {
+    const schedule = new SoundtrackSchedule(context, track, this.project, from, contextStart);
+    this.soundStarts += schedule.started;
+    return schedule;
   }
 
   private makeTimeline(): Timeline {
@@ -348,6 +379,9 @@ export class Player {
     this.audio = undefined;
     this.typing?.stop();
     this.typing = undefined;
+    this.sound?.stop();
+    this.sound = undefined;
+    this.runMap = undefined;
     // A running context keeps the audio device busy (and the laptop awake) for nothing.
     void this.context?.suspend();
     this.set({ playing: false });
@@ -391,6 +425,9 @@ export class Player {
     try {
       if (this.media.mic) this.audio = new AudioSchedule(context, this.media.mic, this.project, this.timeline.spans, from, contextStart);
       this.typing = new TypingSchedule(context, this.project, this.timeline.spans, this.media.events, from, contextStart);
+      this.runMap = { from, contextStart };
+      this.soundStarts = 0;
+      if (this.soundtrack) this.sound = this.startSound(context, this.soundtrack, from, contextStart);
       frames = open(startFrame);
       while (token === this.playToken && !this.disposed) {
         const now = clock();
@@ -434,6 +471,9 @@ export class Player {
         this.audio = undefined;
         this.typing?.stop();
         this.typing = undefined;
+        this.sound?.stop();
+        this.sound = undefined;
+        this.runMap = undefined;
         void context.suspend();
         this.set({ playing: false, t: Math.min(this.state.t, this.duration) });
       }

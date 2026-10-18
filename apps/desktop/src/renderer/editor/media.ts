@@ -2,6 +2,7 @@
 import { ALL_FORMATS, Input, UrlSource, type InputAudioTrack, type InputVideoTrack, type VideoSinkDecoderOptions } from 'mediabunny';
 import { createCursorTrack, type CursorTrack } from '@cuttle/timeline';
 import { parseEventsJsonl, parseMarkersJson, parseProject, parseTranscriptJson, type CuttleProject, type InputEvent, type Marker, type TranscriptFile } from '@cuttle/project';
+import { isSvg, svgBitmap } from '@cuttle/export/svg';
 import { plainIssue } from '../../shared/format';
 import { MEDIA_ORIGIN, type ProjectInfo } from '../../shared/ipc';
 
@@ -106,6 +107,8 @@ async function fetchText(path: string): Promise<string | undefined> {
 export async function loadImage(path: string, maxSize: number, what: string): Promise<ImageBitmap> {
   const response = await fetch(mediaUrl(path)).catch(() => undefined);
   if (!response?.ok) throw missing(path);
+  // an SVG (a logo): drawn by an image, at a size of its own
+  if (isSvg(path)) return svgBitmap(new Uint8Array(await response.arrayBuffer())).catch(() => Promise.reject(new MediaError(`${what} (${path}) is not an SVG Cuttle can draw.`)));
   const blob = await response.blob();
   const options: ImageBitmapOptions = { premultiplyAlpha: 'premultiply', imageOrientation: 'from-image' };
   let bitmap: ImageBitmap;
@@ -164,11 +167,19 @@ export interface EditorMedia {
   backgroundImage?: ImageBitmap;
   /** The path `backgroundImage` was read from. */
   backgroundPath?: string;
+  /** The watermark's image (its own, else the brand's logo), and the path it was read from. */
+  watermarkImage?: ImageBitmap;
+  watermarkPath?: string;
   /** Seconds after the screen track that the webcam and the mic started. */
   offsets: ProjectInfo['offsets'];
   /** Sources tried and failed (not tried again), and warnings for people (a missing webcam file …). */
   failed: Set<string>;
   warnings: string[];
+}
+
+/** The watermark's image file, when it is on: its own, else the brand's logo. */
+export function watermarkFile(project: CuttleProject): string | undefined {
+  return project.look.watermark.enabled ? (project.look.watermark.image ?? project.theme.logo) : undefined;
 }
 
 /** Larger images are scaled down: textures of 8192 px work on every GPU Cuttle runs on. */
@@ -242,6 +253,13 @@ export async function ensureMedia(media: EditorMedia, project: CuttleProject): P
   if (background && media.backgroundPath !== background) {
     media.backgroundImage = (await optional(media, background, () => loadImage(background, MAX_IMAGE, 'The background image'))) ?? (await placeholder());
     media.backgroundPath = background;
+    added = true;
+  }
+  const mark = watermarkFile(project);
+  if (mark && media.watermarkPath !== mark) {
+    // without it the watermark shows its text
+    media.watermarkImage = await optional(media, mark, () => loadImage(mark, MAX_IMAGE, 'The watermark image'));
+    media.watermarkPath = mark;
     added = true;
   }
   if (sources.webcam && look.webcam.enabled && !media.webcam) {

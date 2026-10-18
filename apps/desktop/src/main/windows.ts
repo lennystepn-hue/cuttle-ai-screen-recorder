@@ -259,9 +259,9 @@ async function editorWindow(dir: string, key: string, file: ProjectFile, release
         CHECK_IMAGE ??
         (
           await dialog.showOpenDialog(window, {
-            title: purpose === 'still' ? 'An image for the page' : purpose === 'logo' ? 'The brand\'s logo' : 'A background image',
+            title: purpose === 'still' ? 'An image for the page' : purpose === 'logo' ? 'The brand\'s logo' : purpose === 'watermark' ? 'The watermark\'s image' : 'A background image',
             properties: ['openFile'],
-            filters: [{ name: 'Images', extensions: purpose === 'logo' ? ['png', 'svg', 'webp', 'jpg', 'jpeg'] : ['png', 'jpg', 'jpeg', 'webp'] }],
+            filters: [{ name: 'Images', extensions: purpose === 'logo' || purpose === 'watermark' ? ['png', 'svg', 'webp', 'jpg', 'jpeg'] : ['png', 'jpg', 'jpeg', 'webp'] }],
           })
         ).filePaths[0];
       // a logo goes into brand/, beside the files brand kits bring

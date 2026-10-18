@@ -72,6 +72,7 @@ import {
   SubtitlesIcon,
   TextIcon,
   TrashIcon,
+  WatermarkIcon,
   WindowIcon,
   ZoomIcon,
 } from '../icons';
@@ -1440,6 +1441,7 @@ const SIZES = [
 /** The look's parts, in the order the tab lists them. */
 const LOOK_PARTS: { id: LookSection; title: string; icon: ComponentType<{ size?: number }> }[] = [
   { id: 'brand', title: 'Brand', icon: BrandIcon },
+  { id: 'watermark', title: 'Watermark', icon: WatermarkIcon },
   { id: 'background', title: 'Background', icon: BackgroundIcon },
   { id: 'window', title: 'Window', icon: WindowIcon },
   { id: 'cursor', title: 'Cursor', icon: SelectIcon },
@@ -1654,6 +1656,67 @@ function BackgroundColors({ background, logo }: { background: CuttleProject['loo
   );
 }
 
+/**
+ * The watermark: a mark in a corner of the whole video. Its image (else the brand's logo) or, without
+ * one, its text (else the brand's name); its corner, height and opacity.
+ */
+function WatermarkFields({ project }: { project: CuttleProject }) {
+  const { watermark } = project.look;
+  const { theme } = project;
+  const image = watermark.image ?? theme.logo;
+  return (
+    <>
+      <Row label="Watermark" inline note="over the whole video">
+        <Toggle checked={watermark.enabled} label="Watermark" onChange={(on) => look(['watermark', 'enabled'], on, on ? 'Watermark on' : 'Watermark off')} testId="watermark-enabled" />
+      </Row>
+      {watermark.enabled && (
+        <>
+          <Row label="Image" plain>
+            {image ? (
+              <>
+                <img className="logo-thumb" src={`${MEDIA_ORIGIN}/${image.split('/').map(encodeURIComponent).join('/')}`} alt="" />
+                <span className="path" title={image}>
+                  {watermark.image ? image.split('/').pop() : 'the brand’s logo'}
+                </span>
+              </>
+            ) : (
+              <span className="path">none: the text shows</span>
+            )}
+            {watermark.image && (
+              <button type="button" className="ghost small" onClick={() => look(['watermark', 'image'], undefined, 'Watermark: no image of its own')}>
+                Remove
+              </button>
+            )}
+            <button type="button" className="ghost small" onClick={() => void chooseImage('watermark')} data-testid="watermark-image">
+              {watermark.image ? 'Replace…' : 'Choose…'}
+            </button>
+          </Row>
+          {!image && (
+            <Row label="Text">
+              <TextInput value={watermark.text ?? ''} placeholder={theme.name || 'the brand’s name'} onCommit={(text) => look(['watermark', 'text'], text.trim() || undefined, 'Watermark text')} testId="watermark-text" />
+            </Row>
+          )}
+          <div className="chips" role="group" aria-label="Watermark corner">
+            {WEBCAM_CORNERS.map((corner) => (
+              <button key={corner} type="button" className="chip" aria-pressed={watermark.corner === corner} onClick={() => look(['watermark', 'corner'], corner, `Watermark: ${CORNER_NAMES[corner].toLowerCase()}`)} data-testid={`watermark-${corner}`}>
+                {CORNER_NAMES[corner]}
+              </button>
+            ))}
+          </div>
+          <div className="grid2">
+            <Row label={`Size · ${Math.round(watermark.size * 100)} %`}>
+              <RangeInput value={Math.round(watermark.size * 100)} min={2} max={30} label="Watermark size" toCommand={(value) => ({ type: 'look', path: ['watermark', 'size'], value: value / 100 }) as Command} commitLabel="Watermark size" testId="watermark-size" />
+            </Row>
+            <Row label={`Opacity · ${Math.round(watermark.opacity * 100)} %`}>
+              <RangeInput value={Math.round(watermark.opacity * 100)} min={10} max={100} label="Watermark opacity" toCommand={(value) => ({ type: 'look', path: ['watermark', 'opacity'], value: value / 100 }) as Command} commitLabel="Watermark opacity" testId="watermark-opacity" />
+            </Row>
+          </div>
+        </>
+      )}
+    </>
+  );
+}
+
 /** What each heading font is like, in the font list. */
 const FONT_NOTES: Record<ThemeFont, string> = {
   Archivo: 'wide, bold',
@@ -1673,6 +1736,9 @@ function LookPanel() {
   const webcam = current.webcam;
   const theme = project.theme;
   const summaries: Record<LookSection, string> = {
+    watermark: current.watermark.enabled
+      ? [current.watermark.image ? 'Image' : theme.logo ? 'Logo' : current.watermark.text || theme.name ? 'Text' : 'Nothing to show', CORNER_NAMES[current.watermark.corner].toLowerCase()].join(' · ')
+      : 'Off',
     brand: theme.kit ? `Kit · ${theme.kit}` : [theme.name, theme.font !== 'Archivo' && theme.font].filter(Boolean).join(' · ') || 'None set',
     background:
       current.background.preset === 'solid'
@@ -1699,6 +1765,10 @@ function LookPanel() {
     <div className="look-parts">
       <LookPart id="brand" summary={summaries.brand}>
         <BrandFields project={project} />
+      </LookPart>
+
+      <LookPart id="watermark" summary={summaries.watermark}>
+        <WatermarkFields project={project} />
       </LookPart>
 
       <LookPart id="background" summary={summaries.background}>

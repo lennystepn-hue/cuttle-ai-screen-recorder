@@ -136,6 +136,7 @@ describe('project.md', () => {
       ['| `frame` |', FRAME_STYLES],
       ['| `cursor` |', [...CURSOR_STYLES, ...CLICK_EFFECTS]],
       ['| `webcam` |', [...WEBCAM_SHAPES, ...WEBCAM_CORNERS]],
+      ['| `watermark` |', WEBCAM_CORNERS],
       ['| `still` |', [...STILL_MOTIONS, ...FRAME_STYLES]],
       ['`zooms`:', EASES],
       ['`masks` hide', MASK_STYLES],

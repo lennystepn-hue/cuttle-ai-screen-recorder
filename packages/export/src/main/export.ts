@@ -3,9 +3,10 @@ import { mkdir, mkdtemp, readdir, rename, rm, stat, writeFile } from 'node:fs/pr
 import { tmpdir } from 'node:os';
 import { basename, dirname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { applyCaptionFixes, captionCues, captionWords, sceneSpans, toSrt, toVtt, typingClicks } from '@cuttle/timeline';
+import { applyCaptionFixes, captionCues, captionWords, sceneSpans, stepChapters, toSrt, toVtt, typingClicks, type Chapter } from '@cuttle/timeline';
 import { app } from 'electron';
 import { INLINE_GRAPH_LIMIT, audioFilterGraph, muxArgs, planAudio } from '../audio';
+import { chapterMetadata } from '../chapters';
 import { ExportError } from '../errors';
 import { withFormat, type ExportFormat } from '../formats';
 import { CHANNELS, type EncoderPreference, type ExportJob, type PageResult, type PageStillsSuccess, type PageSuccess } from '../job';
@@ -62,6 +63,8 @@ export interface ExportResult {
   seconds: number;
   /** The subtitle files written next to it. */
   subtitles?: string[];
+  /** The chapters in the video file, from the script's steps (`stepChapters`), when it has any. */
+  chapters?: Chapter[];
   /** What the motion items' pages said (errors and console), when the project has any. */
   motion?: MotionItemReport[];
   /** The music and sounds, when the project has any: what the page made and said, and sounds that could not play. */
@@ -357,7 +360,11 @@ export async function exportProject(opts: ExportOptions): Promise<ExportResult> 
     const graph = audioFilterGraph(segments, sources.mic?.offset ?? 0, 1, typing ? extra : undefined, sound ? extra : undefined);
     const graphFile = graph.length > INLINE_GRAPH_LIMIT ? join(work, 'audio.graph') : undefined;
     if (graphFile) await writeFile(graphFile, graph);
-    await runFfmpeg(muxArgs({ video, mic: usesMic ? sources.mic?.path : undefined, typing, sound, graph, graphFile, out: partial }), signal);
+    // the script's steps as the video's chapters, where the take reached them
+    const chapters = stepChapters(project.script, take.markers, spans);
+    const chapterFile = chapters.length > 0 ? join(work, 'chapters.txt') : undefined;
+    if (chapterFile) await writeFile(chapterFile, chapterMetadata(chapters));
+    await runFfmpeg(muxArgs({ video, mic: usesMic ? sources.mic?.path : undefined, typing, sound, graph, graphFile, ...(chapterFile && { chapters: chapterFile }), out: partial }), signal);
     throwIfCancelled();
     try {
       await rename(partial, out);
@@ -380,6 +387,7 @@ export async function exportProject(opts: ExportOptions): Promise<ExportResult> 
       frames: page.frames,
       seconds,
       ...(written.length > 0 && { subtitles: written }),
+      ...(chapters.length > 0 && { chapters }),
       ...(said && { motion: said }),
       ...(musicReport && { music: musicReport }),
       stats: {

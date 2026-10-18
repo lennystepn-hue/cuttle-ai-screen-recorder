@@ -202,11 +202,14 @@ export interface MuxArgsOptions {
   graph: string;
   /** A file holding `graph`, used instead of the inline graph when given. */
   graphFile?: string;
+  /** The chapters as an ffmetadata file (the last input), when the video has any. */
+  chapters?: string;
   out: string;
 }
 
-/** ffmpeg arguments that add the audio to the video without re-encoding it: AAC 48 kHz, moov at the front. */
-export function muxArgs({ video, mic, typing, sound, graph, graphFile, out }: MuxArgsOptions): string[] {
+/** ffmpeg arguments that add the audio (and the chapters) to the video without re-encoding it: AAC 48 kHz, moov at the front. */
+export function muxArgs({ video, mic, typing, sound, graph, graphFile, chapters, out }: MuxArgsOptions): string[] {
+  const inputs = 1 + [mic, typing, sound].filter((input) => input !== undefined).length;
   return [
     '-hide_banner',
     '-nostdin',
@@ -218,11 +221,13 @@ export function muxArgs({ video, mic, typing, sound, graph, graphFile, out }: Mu
     ...(mic ? ['-i', mic] : []),
     ...(typing ? ['-i', typing] : []),
     ...(sound ? ['-i', sound] : []),
+    ...(chapters ? ['-i', chapters] : []),
     ...(graphFile ? ['-/filter_complex', graphFile] : ['-filter_complex', graph]),
     '-map',
     '0:v:0',
     '-map',
     '[aout]',
+    ...(chapters ? ['-map_chapters', String(inputs)] : []),
     '-c:v',
     'copy',
     '-c:a',

@@ -116,6 +116,19 @@ describe('ProjectSchema', () => {
     ]);
   });
 
+  it('reads a script: steps with an id, a title and a note, each id unique in the project', () => {
+    expect(ProjectSchema.parse(minimal).script).toEqual([]);
+    const steps = [{ id: 'step1', title: 'Open the settings', note: 'The gear, top right.' }, { id: 'step2', title: 'Turn on dark mode' }];
+    expect(ProjectSchema.parse({ ...minimal, script: steps }).script).toEqual(steps);
+    expect(pathsOf({ ...minimal, script: [{ title: 'No id' }] })).toEqual(['script.0.id']);
+    expect(pathsOf({ ...minimal, script: [{ id: 'step1', title: '   ' }] })).toEqual(['script.0.title']);
+    expect(pathsOf({ ...minimal, script: [{ id: 'step1', title: 'x'.repeat(81) }] })).toEqual(['script.0.title']);
+    expect(pathsOf({ ...minimal, script: [{ id: 'step1', title: 'Go', note: 'x'.repeat(1001) }] })).toEqual(['script.0.note']);
+    expect(pathsOf({ ...minimal, script: Array.from({ length: 51 }, (_, i) => ({ id: `step${i + 1}`, title: 'Go' })) })).toEqual(['script']);
+    const twice = ProjectSchema.safeParse({ ...minimal, scenes: [{ type: 'clip', id: 'step1', from: 0, to: 1 }], script: [{ id: 'step1', title: 'Go' }] });
+    expect(twice.error?.issues.map((issue) => [issue.path.join('.'), issue.message])).toEqual([['script.0.id', 'the id "step1" is already used by scenes[0]']]);
+  });
+
   it('rejects unknown keys and names them', () => {
     const r = ProjectSchema.safeParse({ ...minimal, look: { frame: { foo: 1 } } });
     expect(r.success).toBe(false);

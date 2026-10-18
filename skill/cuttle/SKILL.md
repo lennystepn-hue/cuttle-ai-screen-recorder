@@ -209,7 +209,8 @@ Then refine `cuttle.json` ([project.md](project.md)) and preview again:
   speech by itself; `music set --volume`, `--duck` and `--param` tune it. Ask the user before
   adding music to a video with a voice that should stand alone.
 - **Sounds.** A sound at a moment, without the music: `cuttle -C "<project>" --json sound add whoosh --at 12.4`
-  (source seconds) or `--scene s5 --at 0.2`; `sound list` has the built-in sounds.
+  (source seconds) or `--scene s5 --at 0.2`; `sound list` has the built-in sounds. A motion page
+  asks for its own with `cuttle.sound(…)` (motion.md); the templates come with theirs.
 - **End card.** A `card` scene at the end with the product name and URL, or a `motion` scene.
 
 ## 4. Render

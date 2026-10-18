@@ -209,6 +209,22 @@ describe.runIf(enabled)('cuttle in Electron', () => {
       expect(json).toMatchObject({ frames: 225, seconds: 7.5 });
       expect((json.motion as { errors: string[] }[]).flatMap((report) => report.errors)).toEqual([]);
       expect(probe(json.out as string).split(/\r?\n/)[0]).toBe('h264,1920,1080');
+      // the templates' own sounds (a whoosh with the title; a hit, keys and a ding on the end card)
+      // are the video's sound, without music
+      expect(json.music).toMatchObject({ errors: [], skipped: [] });
+      expect(json.music).not.toHaveProperty('src');
+      const audio = spawnSync('ffprobe', ['-v', 'error', '-select_streams', 'a', '-show_entries', 'stream=codec_name,channels', '-of', 'csv=p=0', json.out as string], { encoding: 'utf8' }).stdout.trim();
+      expect(audio).toBe('aac,2');
+      const checked = cuttle('-C', reel, 'music', 'check');
+      expect(checked.code).toBe(0);
+      const parts = (checked.json as { parts: { name: string; effectsDb: number }[] }).parts;
+      expect(parts.map((part) => part.name)).toEqual(['Title', 'End card']);
+      for (const part of parts) expect(part.effectsDb, part.name).toBeGreaterThan(-50);
+      // their sounds param switches them off
+      const config = join(reel, 'cuttle.json');
+      const raw = JSON.parse(readFileSync(config, 'utf8')) as { scenes: { params?: Record<string, unknown> }[] };
+      writeFileSync(config, JSON.stringify({ ...raw, scenes: raw.scenes.map((scene) => ({ ...scene, params: { ...scene.params, sounds: false } })) }));
+      expect(cuttle('-C', reel, 'music', 'check').code).toBe(1);
       // the title is on screen at 1.5 s: its light letters over its dark background, in the middle
       const still = cuttle('-C', reel, 'preview', '--at', '1.5', '-o', join(reel, 'still'));
       const png = PNG.sync.read(readFileSync((still.json.stills as { file: string }[])[0]!.file));

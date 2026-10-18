@@ -20,7 +20,9 @@ SVG, WebGL, Three.js or all of them at once. Make it look like the work of a gre
    to it (or shared, `motion/shared.js`, imported as `../shared.js`). Or start from a template:
    `cuttle -C "<project>" --json motion new <template>` (title, end-card, code-typing, lower-third,
    click-callouts, kinetic-captions; `cuttle --json motion templates` says what each shows); it
-   copies the page and adds it to cuttle.json. Then change the copy as much as you like.
+   copies the page and adds it to cuttle.json. Then change the copy as much as you like. Most
+   templates make their sounds (a whoosh with the title, a pop on each callout, keys while code
+   types); their `sounds` param switches them off.
 2. Add it (project.md has the fields): a scene,
    `{ "type": "motion", "id": "s9", "label": "Intro", "src": "motion/intro/index.html", "duration": 3 }`,
    or an overlay over the clips, `{ "id": "o1", "src": "motion/callouts/index.html", "at": 4, "duration": 20 }`.
@@ -49,7 +51,8 @@ page in `motion/` you did not write.
   typing with a rhythm, syntax colours and springs, all as functions of time.
 - **`window.cuttle`:** `time` and `duration` (the item's seconds), `videoTime` (the video's),
   `fps`, `size` (the output's pixels), `format` (`16:9`, `9:16`, `1:1`), `params`, `theme`,
-  `ready(promise)` (the first frame waits for it: fonts, data, a model), and `take` (below).
+  `ready(promise)` (the first frame waits for it: fonts, data, a model), `sound(…)` (below) and
+  `take` (below).
 - **Size:** the page is the output, one CSS pixel per pixel (1920×1080 for 16:9, 1080×1920 for
   9:16). Size things from the short side so one page works in every format:
   `--u: calc(100vmin / 1080)` and `font-size: calc(120 * var(--u))`. Canvases: `cuttle.size`.
@@ -57,7 +60,33 @@ page in `motion/` you did not write.
   shows the video there. A page cannot see the video behind it (no `backdrop-filter` on it).
 - **Only the project's files**, by relative paths, and the kit; no network unless the item has
   `"network": true`. Image params are paths in the project folder: use them as `/<path>`.
-- **Silent:** pages make no sound (sounds come with Cuttle's sound items).
+- **Sound by asking:** a page plays nothing itself (no `<audio>`, no WebAudio); it asks Cuttle for
+  sounds, which play with the project's (see below).
+
+## Sounds from the page
+
+A page asks for its sounds where its motion happens, so they stay on it however the video is cut:
+
+```js
+cuttle.sound('whoosh', { at: 0.3 }); // 0.3 s into the item, at every showing of it
+cuttle.sound('sounds/ding.wav', { at: 1.6, volume: 0.5 }); // a file of the project
+for (const click of cuttle.take.clicks) {
+  const shown = cuttle.take.toOutput(click.t);
+  if (shown !== null) cuttle.sound('pop', { videoTime: shown, volume: 0.4 }); // a second of the video
+}
+```
+
+- Names are the built-in sounds (`cuttle --json sound list`: whoosh, swoosh-in, riser, impact, pop,
+  click, tick, ding, chime, success, type-burst, glitch …) or files of the project. `volume` is 0
+  to 1 (`0.8`); without `at` or `videoTime`, the moment it is asked.
+- Ask when the page loads (or before a `cuttle.ready` promise ends): Cuttle opens the page once,
+  draws its first frame and reads what it asked for. A sound asked for later in `onFrame` is not
+  heard. The same sound at the same moment counts once.
+- They play under `look.audio.effectsVolume`, like the project's `sounds`, and not when
+  `look.audio.effects` is off. `cuttle music check` renders them with the music; the editor plays
+  them as you save the page.
+- Time them to the motion: a whoosh peaks on its moment, a swoosh-in and a riser end on it, a pop or
+  an impact starts on it. Two or three sounds an item are plenty; leave the quiet parts quiet.
 
 ## The kit (no network needed)
 

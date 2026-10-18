@@ -162,7 +162,8 @@ edit. Without `music` the video has none.
 `sounds` are single sounds at moments: `sound` (a built-in sound, `cuttle sound list`, or a file of
 the project: WAV, MP3, M4A, OGG, FLAC), `at` (source seconds: it plays wherever the video shows that
 moment, and not where it is cut), or `scene` (a scene's id) with `at` seconds into that scene,
-`volume` (`0.8`), `enabled` (`true`), and an `id` (`a1`) and `label`.
+`volume` (`0.8`), `enabled` (`true`), and an `id` (`a1`) and `label`. Motion pages add their own
+sounds as they render (`cuttle.sound`, motion.md); those are not in `sounds`.
 
 ## Motion pages
 

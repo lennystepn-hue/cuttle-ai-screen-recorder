@@ -7,7 +7,9 @@ export const BACKGROUND_PRESETS = ['sunset-sky', 'aurora', 'mesh', 'solid', 'ima
 /** The backgrounds drawn in colours of their own (`background.colors`): a gradient's, and the tints of the others. */
 export const COLOURED_BACKGROUNDS = ['gradient', 'mesh', 'flow', 'bokeh', 'dots'] as const;
 export const GRADIENT_KINDS = ['linear', 'radial'] as const;
-export const FRAME_STYLES = ['mac-dark', 'mac-light', 'browser-light', 'none'] as const;
+export const FRAME_STYLES = ['mac-dark', 'mac-light', 'browser-light', 'browser-dark', 'windows-light', 'windows-dark', 'terminal', 'iphone', 'android', 'none'] as const;
+/** The frames that are a device around the screen (a bezel, a camera), not a window with a title bar. */
+export const DEVICE_FRAMES = ['iphone', 'android'] as const;
 export const TEXT_STYLES = ['pill', 'lower-third', 'caption'] as const;
 export const CURSOR_STYLES = ['system', 'arrow-white', 'arrow-black', 'dot', 'ring', 'spotlight'] as const;
 export const CURSOR_SHAPES = ['arrow', 'text', 'pointer', 'wait', 'crosshair', 'move', 'not-allowed'] as const;
@@ -149,6 +151,20 @@ const TransitionSchema = z.strictObject({
 
 // zod 4: .default() returns its value without parsing it; .prefault() parses it, so inner
 // defaults apply when a whole block is missing.
+/**
+ * A mark in a corner of the whole video: an image of the project (else the brand's logo), or a text
+ * (else the brand's name); off by default.
+ */
+const WatermarkSchema = z.strictObject({
+  enabled: z.boolean().default(false),
+  image: z.string().min(1).optional(),
+  text: z.string().max(80).optional(),
+  corner: z.enum(WEBCAM_CORNERS).default('bottom-right'),
+  /** Its height as a share of the output's short side. */
+  size: z.number().min(0.02).max(0.3).default(0.06),
+  opacity: z.number().min(0.1).max(1).default(0.7),
+});
+
 const LookSchema = z.strictObject({
   background: BackgroundSchema.default({ preset: 'sunset-sky' }),
   frame: FrameSchema.prefault({}),
@@ -156,6 +172,7 @@ const LookSchema = z.strictObject({
   webcam: WebcamSchema.prefault({}),
   audio: AudioSchema.prefault({}),
   transition: TransitionSchema.prefault({}),
+  watermark: WatermarkSchema.prefault({}),
 });
 
 // Scenes and overlays may carry an id (for editors: selection, undo; unique in the project) and a
@@ -487,6 +504,7 @@ export type MaskStyle = (typeof MASK_STYLES)[number];
 export type TextPosition = (typeof TEXT_POSITIONS)[number];
 export type StillMotion = (typeof STILL_MOTIONS)[number];
 export type BackgroundPreset = (typeof BACKGROUND_PRESETS)[number];
+export type DeviceFrame = (typeof DEVICE_FRAMES)[number];
 export type ColouredBackground = (typeof COLOURED_BACKGROUNDS)[number];
 export type GradientKind = (typeof GRADIENT_KINDS)[number];
 export type FrameStyle = (typeof FRAME_STYLES)[number];

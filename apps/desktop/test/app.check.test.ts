@@ -2117,6 +2117,58 @@ describe.runIf(enabled)('the Cuttle app', () => {
     await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find((window) => window.getTitle() === 'backgrounds · Cuttle')?.close());
   }, 240_000);
 
+  it('frames the take as Windows, a terminal or a phone and puts a watermark in a corner (its text, then an image), each as the export draws it', async () => {
+    const dir = join(root, 'frames');
+    makeFixture(dir);
+    const page = await openEditor(dir);
+    await page.waitForFunction(() => '__cuttleCheck' in window);
+    const seekTo = (t: number) => page.evaluate((time) => (window as unknown as Hooked).__cuttleCheck.seek(time), t);
+    const view = async () => decode(await page.evaluate(() => (window as unknown as Hooked).__cuttleCheck.pixels()));
+    type Look = { frame?: { style?: string }; watermark?: { enabled?: boolean; text?: string; image?: string; corner?: string; size?: number } };
+    const saved = () => (JSON.parse(readFileSync(join(dir, 'cuttle.json'), 'utf8')) as { look: Look }).look;
+    const asExported = async (t: number, name: string) => {
+      await page.evaluate(() => (window as unknown as Hooked).__cuttleCheck.flush());
+      const still = spawnSync('node', [CLI, '--json', '-C', dir, 'preview', '--at', String(t), '-o', join(root, `frame-${name}`)], { encoding: 'utf8', timeout: 120_000 });
+      expect(still.status, still.stderr).toBe(0);
+      const exported = PNG.sync.read(readFileSync((JSON.parse(still.stdout) as { stills: { file: string }[] }).stills[0]!.file));
+      await expect.poll(async () => (await seekTo(t), difference(await view(), exported).mean), { timeout: 20_000, message: `${name}: the editor against the export` }).toBeLessThan(0.6);
+    };
+    await click(page, '#tab-look');
+
+    // the frames: the engine's own pictures of each, then three of them on the take
+    await click(page, '[data-testid=look-open-window]');
+    await page.waitForSelector('[data-testid=frame-iphone] img', { timeout: 20_000 });
+    await page.locator('[data-testid=frame-iphone]').evaluate((element) => element.scrollIntoView({ block: 'center' }));
+    await shotOf('44-frames', '/editor.html', 'frames · Cuttle');
+    for (const style of ['windows-dark', 'terminal', 'iphone']) {
+      await click(page, `[data-testid=frame-${style}]`);
+      await expect.poll(() => saved().frame?.style).toBe(style);
+      await asExported(1, style);
+    }
+
+    // the watermark: on, its text (the project has no logo and no name), then an image, top left and larger
+    await click(page, '[data-testid=look-open-watermark]');
+    await click(page, '[data-testid=watermark-enabled]');
+    await expect.poll(() => saved().watermark?.enabled).toBe(true);
+    await page.fill('[data-testid=watermark-text]', 'nimbus.app');
+    await page.press('[data-testid=watermark-text]', 'Enter');
+    await expect.poll(() => saved().watermark?.text).toBe('nimbus.app');
+    await asExported(1, 'watermark-text');
+    await click(page, '[data-testid=watermark-image]');
+    await expect.poll(() => saved().watermark?.image).toBe('images/nimbus.svg');
+    await click(page, '[data-testid=watermark-top-left]');
+    await page.locator('[data-testid=watermark-size]').evaluate((element) => {
+      const input = element as HTMLInputElement;
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, '12');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    await expect.poll(() => saved().watermark).toMatchObject({ corner: 'top-left', size: 0.12 });
+    await asExported(1, 'watermark-image');
+    await shotOf('44b-watermark', '/editor.html', 'frames · Cuttle');
+    await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find((window) => window.getTitle() === 'frames · Cuttle')?.close());
+  }, 240_000);
+
   it('had no unhandled rejection in the main process, and no error in the editor', async () => {
     expect(await app.evaluate(() => (globalThis as unknown as { __rejections: string[] }).__rejections)).toEqual([]);
     expect(pageErrors).toEqual([]);

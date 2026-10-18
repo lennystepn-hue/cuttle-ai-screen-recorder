@@ -364,7 +364,7 @@ export const REQUESTS = {
       base: z.string().regex(/^[0-9a-f]{64}$/),
     })
     .refine((value) => JSON.stringify(value.raw).length <= MAX_PROJECT_BYTES, 'cuttle.json is too large'),
-  'project:import-image': z.strictObject({ purpose: z.enum(['still', 'background', 'logo']) }),
+  'project:import-image': z.strictObject({ purpose: z.enum(['still', 'background', 'logo', 'watermark']) }),
   /** The brand kits saved on this computer. */
   'brand:list': z.undefined(),
   /** Saves the project's brand, as this version of it has it, as a kit (a kit of that name is replaced). */

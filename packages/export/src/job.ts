@@ -68,6 +68,8 @@ export interface ExportJob {
   stills: Record<number, string>;
   /** Image for `look.background.preset: 'image'`. */
   backgroundImage?: string;
+  /** The watermark's image (`look.watermark.image`, else the brand's logo), when it is on. */
+  watermarkImage?: string;
   /** Present when the project has motion scenes or overlays. */
   motion?: MotionPages;
   encoder: EncoderPreference;

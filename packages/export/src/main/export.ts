@@ -259,6 +259,7 @@ export async function exportProject(opts: ExportOptions): Promise<ExportResult> 
     ...(opts.captions !== undefined && { captions: opts.captions }),
     stills: sources.stills,
     backgroundImage: sources.backgroundImage,
+    watermarkImage: sources.watermarkImage,
     ...(sources.motion && { motion: sources.motion }),
     encoder: opts.encoder ?? 'auto',
   };
@@ -283,7 +284,7 @@ export async function exportProject(opts: ExportOptions): Promise<ExportResult> 
   try {
     work = await mkdtemp(join(tmpdir(), WORK_PREFIX));
     const video = join(work, 'video.mp4');
-    const images = [...Object.values(sources.stills), ...(sources.backgroundImage ? [sources.backgroundImage] : [])];
+    const images = [...Object.values(sources.stills), ...[sources.backgroundImage, sources.watermarkImage].filter((path): path is string => path !== undefined)];
     const host = new FileHost([...(sources.screen ? [sources.screen] : []), ...(sources.webcam ? [sources.webcam.path] : [])], video, images);
     files = host;
     window = await openExportWindow(opts.pageDir ?? defaultPageDir());

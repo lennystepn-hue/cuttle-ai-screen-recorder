@@ -27,7 +27,18 @@ export const BACKGROUND_NAMES: Names<typeof BACKGROUND_PRESETS> = {
   bokeh: 'Bokeh',
   dots: 'Dots',
 };
-export const FRAME_NAMES: Names<typeof FRAME_STYLES> = { 'mac-dark': 'Mac, dark', 'mac-light': 'Mac, light', 'browser-light': 'Browser, light', none: 'No title bar' };
+export const FRAME_NAMES: Names<typeof FRAME_STYLES> = {
+  'mac-dark': 'Mac, dark',
+  'mac-light': 'Mac, light',
+  'browser-light': 'Browser, light',
+  'browser-dark': 'Browser, dark',
+  'windows-light': 'Windows, light',
+  'windows-dark': 'Windows, dark',
+  terminal: 'Terminal',
+  iphone: 'iPhone',
+  android: 'Android',
+  none: 'No title bar',
+};
 export const CURSOR_NAMES: Names<typeof CURSOR_STYLES> = {
   system: 'System',
   'arrow-white': 'White arrow',

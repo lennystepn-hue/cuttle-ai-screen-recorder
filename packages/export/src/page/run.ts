@@ -65,6 +65,7 @@ async function withRendering<T>(job: PageJob, makePlan: (timeline: Timeline) => 
   ]);
   const canvas = new OffscreenCanvas(1, 1);
   let background: ImageBitmap | undefined;
+  let watermark: ImageBitmap | undefined;
   let sources: SceneSources | undefined;
   let renderer: Renderer | undefined;
   try {
@@ -79,7 +80,8 @@ async function withRendering<T>(job: PageJob, makePlan: (timeline: Timeline) => 
     });
     const plan = makePlan(timeline);
     if (job.backgroundImage) background = await loadImage(job.backgroundImage, probeMaxTextureSize(), 'the background image');
-    renderer = createRenderer(canvas, project, { assets, screenSize, backgroundImage: background });
+    if (job.watermarkImage) watermark = await loadImage(job.watermarkImage, probeMaxTextureSize(), 'the watermark image');
+    renderer = createRenderer(canvas, project, { assets, screenSize, backgroundImage: background, ...(watermark && { watermarkImage: watermark }) });
     const gl = canvas.getContext('webgl2')!;
     const maxTextureSize = gl.getParameter(gl.MAX_TEXTURE_SIZE) as number;
     sources = new SceneSources(
@@ -95,6 +97,7 @@ async function withRendering<T>(job: PageJob, makePlan: (timeline: Timeline) => 
     // Free the context now instead of waiting for GC (browsers keep only ~16 live WebGL contexts).
     (canvas.getContext('webgl2') as WebGL2RenderingContext | null)?.getExtension('WEBGL_lose_context')?.loseContext();
     background?.close();
+    watermark?.close();
     screen?.input.dispose();
     webcam?.input.dispose();
   }

@@ -325,12 +325,13 @@ export function addSound(sound = 'pop'): void {
   if (added?.id) select({ kind: 'sound', id: added.id });
 }
 
-/** Replaces a still's image, the background's or the brand's logo with one the person picks. */
-export async function chooseImage(purpose: 'still' | 'background' | 'logo', id?: string): Promise<void> {
+/** Replaces a still's image, the background's, the brand's logo or the watermark's with one the person picks. */
+export async function chooseImage(purpose: 'still' | 'background' | 'logo' | 'watermark', id?: string): Promise<void> {
   const chosen = await bridge.invoke('project:import-image', { purpose });
   if (!chosen) return;
   if (purpose === 'still' && id) edit([{ type: 'set', list: 'scenes', id, fields: { image: chosen.path } }], 'Replace image');
   else if (purpose === 'logo') edit([{ type: 'theme', fields: { logo: chosen.path } }], 'Logo');
+  else if (purpose === 'watermark') edit([{ type: 'look', path: ['watermark', 'image'], value: chosen.path }], 'Watermark image');
   else edit([{ type: 'look', path: ['background'], value: { preset: 'image', image: chosen.path } }], 'Background image');
 }
 

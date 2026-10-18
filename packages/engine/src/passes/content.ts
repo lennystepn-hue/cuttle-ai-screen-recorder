@@ -19,7 +19,7 @@ void main() {
   o_color = vec4(color * a, a);
 }`;
 
-/** The screen (cropped to the zoom) or a still image, drawn into the content rect and clipped to the window's rounded corners. */
+/** The screen (cropped to the zoom) or a still image, drawn into the content rect and clipped to the window's rounded corners (a device's screen). */
 export class ContentPass {
   private readonly shader: Shader;
 
@@ -39,8 +39,8 @@ export class ContentPass {
       .use()
       .texture('u_tex', 0, texture)
       .vec4('u_crop', crop)
-      .vec4('u_window', layout.window)
-      .float('u_radius', layout.radius)
+      .vec4('u_window', layout.clip)
+      .float('u_radius', layout.clipRadius)
       .vec3('u_matte', matte);
     drawRect(this.gl, this.shader, layout.content, this.output);
   }

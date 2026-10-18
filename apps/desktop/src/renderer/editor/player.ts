@@ -8,7 +8,7 @@ import { createTimeline, crossfadeHalf, pageTransition, type RenderState, type T
 import { AudioSchedule } from './audio';
 import { TypingSchedule } from './typing-audio';
 import { FrameGrabber, KeyFrames, PlaybackFrames, type HeldFrame, type PlaybackVideo } from './frames';
-import type { EditorMedia, VideoSource } from './media';
+import { watermarkFile, type EditorMedia, type VideoSource } from './media';
 import { MotionFrames } from './motion';
 import { SoundtrackSchedule, type Soundtrack } from './soundtrack';
 
@@ -199,11 +199,19 @@ export class Player {
 
   private makeRenderer(): Renderer {
     this.drawnBackground = this.media.backgroundImage;
+    this.drawnWatermark = this.watermark();
     return createRenderer(this.canvas, this.project, {
       assets: this.assets,
       screenSize: this.media.screen.size,
       ...(this.media.backgroundImage && { backgroundImage: this.media.backgroundImage }),
+      ...(this.drawnWatermark && { watermarkImage: this.drawnWatermark }),
     });
+  }
+
+  /** The watermark's image for this version of the project: none when it is off or shows another file. */
+  private watermark(): ImageBitmap | undefined {
+    const mark = watermarkFile(this.project);
+    return mark && this.media.watermarkPath === mark ? this.media.watermarkImage : undefined;
   }
 
   private set(change: Partial<PlayerState>): void {
@@ -220,10 +228,12 @@ export class Player {
     if (project === this.project && !options.redrawOnly) return;
     const playing = this.state.playing;
     this.pause();
-    const look = (value: CuttleProject) => JSON.stringify([value.look, value.output]);
+    // the brand too: a watermark shows its logo or its name
+    const look = (value: CuttleProject) => JSON.stringify([value.look, value.output, value.theme]);
     const background = this.media.backgroundImage;
-    const renew = look(project) !== look(this.project) || background !== this.drawnBackground;
+    const previous = this.project;
     this.project = project;
+    const renew = look(project) !== look(previous) || background !== this.drawnBackground || this.watermark() !== this.drawnWatermark;
     this.motion.setProject(project);
     this.timeline = this.makeTimeline();
     // the title bar and the transport show the length: they learn it changed with the state
@@ -239,6 +249,8 @@ export class Player {
 
   /** The background image the renderer was made with. */
   private drawnBackground: ImageBitmap | undefined;
+  /** The watermark's image the renderer was made with. */
+  private drawnWatermark: ImageBitmap | undefined;
 
   /** The still images of the timeline's scenes, by scene index (`media` keeps them by path). */
   private stillsByIndex(): Map<number, ImageBitmap> {

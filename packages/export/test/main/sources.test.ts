@@ -175,6 +175,21 @@ describe('loadSources', () => {
     }
   });
 
+  it('finds the watermark image when it is on: its own, else the brand logo; none when it is off', async () => {
+    const files = { ...MEDIA, 'brand/logo.svg': '<svg/>', 'images/mark.png': 'm' };
+    const ownDir = await projectDir({ sources: SOURCES, theme: { logo: 'brand/logo.svg' }, look: { watermark: { enabled: true, image: 'images/mark.png' } }, scenes: SCENES }, files);
+    expect((await loadSources(ownDir)).watermarkImage).toBe(join(ownDir, 'images', 'mark.png'));
+    const logoDir = await projectDir({ sources: SOURCES, theme: { logo: 'brand/logo.svg' }, look: { watermark: { enabled: true } }, scenes: SCENES }, files);
+    const logo = await loadSources(logoDir);
+    expect(logo.watermarkImage).toBe(join(logoDir, 'brand', 'logo.svg'));
+    expect(logo.inputs).toEqual(expect.arrayContaining([logo.watermarkImage]));
+    const off = await loadSources(await projectDir({ sources: SOURCES, theme: { logo: 'brand/logo.svg' }, scenes: SCENES }, files));
+    expect(off.watermarkImage).toBeUndefined();
+    // a watermark with no image and no logo shows its text: nothing to read
+    const text = await loadSources(await projectDir({ sources: SOURCES, look: { watermark: { enabled: true, text: 'acme.dev' } }, scenes: SCENES }, files));
+    expect(text.watermarkImage).toBeUndefined();
+  });
+
   it('refuses a folder without cuttle.json and a project without scenes', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'cuttle-sources-'));
     dirs.push(dir);

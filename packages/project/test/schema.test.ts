@@ -384,6 +384,26 @@ describe('the theme (the brand)', () => {
   });
 });
 
+describe('the watermark and the device frames', () => {
+  it('has the watermark off by default, in the bottom right corner', () => {
+    expect(ProjectSchema.parse(minimal).look.watermark).toEqual({ enabled: false, corner: 'bottom-right', size: 0.06, opacity: 0.7 });
+  });
+
+  it('reads an image or a text, a corner, a size and an opacity, and refuses them out of range', () => {
+    const watermark = { enabled: true, image: 'images/mark.png', text: 'acme.dev', corner: 'top-left', size: 0.1, opacity: 0.5 };
+    expect(ProjectSchema.parse({ ...minimal, look: { watermark } }).look.watermark).toEqual(watermark);
+    expect(pathsOf({ ...minimal, look: { watermark: { size: 0.5 } } })).toEqual(['look.watermark.size']);
+    expect(pathsOf({ ...minimal, look: { watermark: { opacity: 0 } } })).toEqual(['look.watermark.opacity']);
+    expect(pathsOf({ ...minimal, look: { watermark: { corner: 'middle' } } })).toEqual(['look.watermark.corner']);
+  });
+
+  it('reads the new frames, for the window and for a still', () => {
+    for (const style of ['browser-dark', 'windows-light', 'windows-dark', 'terminal', 'iphone', 'android']) {
+      expect(pathsOf({ ...minimal, look: { frame: { style } }, scenes: [{ type: 'still', image: 'a.png', duration: 1, frame: style }] })).toEqual([]);
+    }
+  });
+});
+
 describe('backgrounds', () => {
   it('read a gradient, the quiet ones in colours of their own, and a softened, darker image', () => {
     const gradient = { preset: 'gradient', colors: ['#0B132B', '#3A506B', '#5BC0BE'], angle: 90, kind: 'radial' };

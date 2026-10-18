@@ -124,8 +124,8 @@ export class CursorPass {
       .float('u_lightRadius', 3.2 * size)
       .float('u_soft', size)
       .vec3('u_color', color)
-      .vec4('u_window', layout.window)
-      .float('u_radius', layout.radius);
+      .vec4('u_window', layout.clip)
+      .float('u_radius', layout.clipRadius);
     drawRect(this.gl, this.spotlight, layout.content, this.output);
   }
 
@@ -141,8 +141,8 @@ export class CursorPass {
       .float('u_width', width)
       .vec3('u_color', color)
       .float('u_alpha', alpha)
-      .vec4('u_window', layout.window)
-      .float('u_radius', layout.radius);
+      .vec4('u_window', layout.clip)
+      .float('u_radius', layout.clipRadius);
     drawRect(this.gl, this.ripple, [x - extent, y - extent, 2 * extent, 2 * extent], this.output);
   }
 
@@ -160,7 +160,7 @@ export class CursorPass {
       const [hx, hy] = CURSOR_ART[image].hotspot;
       const texture = this.images.get(image);
       if (!texture) throw new Error(`cursor image ${image} was not loaded`);
-      this.image.use().texture('u_tex', 0, texture).vec4('u_window', layout.window).float('u_radius', layout.radius);
+      this.image.use().texture('u_tex', 0, texture).vec4('u_window', layout.clip).float('u_radius', layout.clipRadius);
       drawRect(this.gl, this.image, [x - (hx / CURSOR_GRID) * size, y - (hy / CURSOR_GRID) * size, size, size], this.output);
       return;
     }
@@ -173,8 +173,8 @@ export class CursorPass {
       .float('u_shapeRadius', radius)
       .vec3('u_color', color)
       .int('u_kind', kind)
-      .vec4('u_window', layout.window)
-      .float('u_radius', layout.radius);
+      .vec4('u_window', layout.clip)
+      .float('u_radius', layout.clipRadius);
     drawRect(this.gl, this.shape, [x - extent, y - extent, 2 * extent, 2 * extent], this.output);
   }
 

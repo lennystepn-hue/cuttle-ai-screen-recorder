@@ -97,6 +97,7 @@ export const WarningIcon = icon(<path d="M8 2.5 14 13H2zM8 6.5v3M8 11.2v.1" />);
 export const RecordIcon = icon(<circle cx="8" cy="8" r="5" />, true);
 export const ChevronIcon = icon(<path d="m4.5 6 3.5 3.5L11.5 6" />);
 // the look's parts
+export const WatermarkIcon = icon(<path d="M2.5 2.5h11v11h-11zM8.5 10.5h3v1.5h-3z" />);
 export const BrandIcon = icon(<path d="M2.5 2.5h5.2l5.8 5.8-5.2 5.2-5.8-5.8zM5.4 5.4h.1" />);
 export const BackgroundIcon = icon(<path d="M2.5 3.5h11v9h-11zM2.5 10l3.2-3 2.6 2.4L10.5 7.5l3 2.8" />);
 export const WindowIcon = icon(<path d="M2 3.5h12v9H2zM2 6h12M3.8 4.8h.1M5.3 4.8h.1" />);

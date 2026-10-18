@@ -10,7 +10,10 @@ import {
   labelPlacement,
   matchMediaDevice,
   monitorAt,
+  prompterPosition,
   recordingFailure,
+  scriptForTake,
+  stepsFromText,
   stopOptionsFor,
   toDisplayPixels,
   windowAt,
@@ -175,5 +178,43 @@ describe('the picker’s layout', () => {
     expect(bubblePlacement({ x: 100, y: 500, width: 800, height: 604 }, 108, { y: 900, where: 'inside' }, 508)).toEqual({ left: 116, top: 776 });
     // a bar below or above leaves the bubble alone; a short target keeps it under the label inside
     expect(bubblePlacement({ x: 0, y: 0, width: 300, height: 90 }, 48, { y: 106, where: 'below' }, 44)).toEqual({ left: 16, top: 44 });
+  });
+});
+
+describe('the script', () => {
+  const area = { x: 0, y: 0, width: 2048, height: 1104 };
+  const size = { width: 512, height: 180 };
+
+  it('puts the prompter right under the HUD at the top, right over it at the bottom, inside the work area', () => {
+    expect(prompterPosition({ x: 768, y: 12, width: 512, height: 64 }, area, size)).toEqual({ x: 768, y: 66, below: true });
+    expect(prompterPosition({ x: 768, y: 1028, width: 512, height: 64 }, area, size)).toEqual({ x: 768, y: 858, below: false });
+    // a HUD dragged to the edge: the prompter stays on the display
+    expect(prompterPosition({ x: 1700, y: 12, width: 512, height: 64 }, area, size).x).toBe(2048 - 512);
+  });
+
+  it('makes steps of a pasted list: one per line, numbers and bullets dropped, indented lines as the note', () => {
+    const text = '1. Open the settings\r\n   The gear, top right.\r\n   Say it is one click.\n\n- Turn on dark mode\n* Export the video\n• ' + 'x'.repeat(90);
+    expect(stepsFromText(text, 80)).toEqual([
+      { title: 'Open the settings', note: 'The gear, top right.\nSay it is one click.' },
+      { title: 'Turn on dark mode' },
+      { title: 'Export the video' },
+      { title: 'x'.repeat(80) },
+    ]);
+    // an indented first line has no step to belong to: it is a step
+    expect(stepsFromText('  Just this', 80)).toEqual([{ title: 'Just this' }]);
+  });
+
+  it('records with the steps that have a title, each with an id no other item of the project has', () => {
+    const typed = [
+      { id: 'step1', title: ' Open the settings ', note: '  ' },
+      { id: 'step2', title: '' },
+      { id: 'z1', title: 'Turn on dark mode', note: ' The switch. ' },
+      { id: 'step1', title: 'Export' },
+    ];
+    expect(scriptForTake(typed, new Set(['z1', 's1']))).toEqual([
+      { id: 'step1', title: 'Open the settings' },
+      { id: 'step2', title: 'Turn on dark mode', note: 'The switch.' },
+      { id: 'step3', title: 'Export' },
+    ]);
   });
 });

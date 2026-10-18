@@ -70,6 +70,13 @@ changed (`suggest`, on Windows): one JSON line per frame read,
 `{ "t", "lines": [{ "text", "rect", "words": [{ "text", "rect" }] }] }`. Read it to find what the
 screen showed where; never edit it.
 
+`script`: the demo's steps, written before the take, at most 50:
+`[{ "id": "step1", "title": "Open the settings", "note": "The gear, top right." }]`. `id` is
+unique in the project (the app gives `step1`, `step2` …); `title` says in up to 80 characters what
+the step shows; `note` (optional, up to 1000) is what to say, shown only in the app's prompter and
+never in the video. A take starts at the first step; the step key (Ctrl+Shift+Alt+N, back
+Ctrl+Shift+Alt+B) or the prompter's buttons move on, and each move is a `step` marker.
+
 `look` (every field is optional):
 
 | Field | Values (default first) |
@@ -242,7 +249,8 @@ recording.
   with a numbered grid every 100 pixels (stronger lines every 500). Read the PNG and take rects off
   the grid; `frames/<t>s-grid.png` is the default file.
 - `takes/<n>/markers.json` lists the prompt, each tool call and Claude's answer in source seconds,
-  and each press of the mistake key (kind `retake`).
+  each press of the mistake key (kind `retake`), and where the take reached each step of the
+  script (kind `step`, labelled with the step's id; the first at 0).
 - `takes/<n>/events.jsonl` has the input: `move`, `click` and `scroll` with `x` and `y`, `keys`
   (presses per half second, never which keys) and the pointer's `shape`. On Windows it also has
   facts about the screen: `caret` with a `rect` (where text is typed, while it is, where the app

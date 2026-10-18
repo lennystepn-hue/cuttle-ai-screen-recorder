@@ -20,6 +20,7 @@ export default defineConfig({
         pill: fileURLToPath(new URL('./src/renderer/pill.html', import.meta.url)),
         picker: fileURLToPath(new URL('./src/renderer/picker.html', import.meta.url)),
         hud: fileURLToPath(new URL('./src/renderer/hud.html', import.meta.url)),
+        prompter: fileURLToPath(new URL('./src/renderer/prompter.html', import.meta.url)),
         countdown: fileURLToPath(new URL('./src/renderer/countdown.html', import.meta.url)),
         settings: fileURLToPath(new URL('./src/renderer/settings.html', import.meta.url)),
       },

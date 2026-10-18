@@ -106,6 +106,45 @@ describe.concurrent('record (test backend)', () => {
     expect(processes.type === 'processes' && processes.pids.length === 3 && processes.pids.every(Number.isInteger)).toBe(true);
   }, SLOW);
 
+  it("moves through the script's steps: the first at the first frame, then a marker for each move, none past either end", async () => {
+    const projectDir = project();
+    const events: RecorderEvent[] = [];
+    const moves: number[] = [];
+    const recording = record({
+      ...test,
+      projectDir,
+      steps: ['step1', 'step2', 'step3'],
+      stop: { maxSeconds: 2.5 },
+      onEvent: (event) => {
+        events.push(event);
+        if (event.type !== 'recording') return;
+        setTimeout(() => {
+          recording.previous(); // at the first step: nothing
+          moves.push(Date.now() / 1000);
+          recording.next();
+        }, 700);
+        setTimeout(() => {
+          moves.push(Date.now() / 1000);
+          recording.next();
+          recording.next(); // past the last: nothing
+          recording.previous();
+        }, 1400);
+      },
+    });
+    const take = await recording.done;
+    const takeFile = parseTakeJson(read(projectDir, 'takes/1/take.json'));
+    if (!takeFile.ok) throw new Error(JSON.stringify(takeFile.issues));
+    const [second, third] = moves.map((at) => at - takeFile.take.tracks.screen.start);
+    expect(markersOf(projectDir, take.markers)).toEqual([
+      { t: 0, kind: 'step', label: 'step1' },
+      { t: expect.closeTo(second!, 1), kind: 'step', label: 'step2' },
+      { t: expect.closeTo(third!, 1), kind: 'step', label: 'step3' },
+      { t: expect.closeTo(third!, 1), kind: 'step', label: 'step2' },
+    ]);
+    // each step reaches the host as a marker event, the first right after the recording one
+    expect(events.filter((event) => event.type === 'recording' || event.type === 'marker').map((event) => (event.type === 'marker' ? event.marker.label : event.type))).toEqual(['recording', 'step1', 'step2', 'step3', 'step2']);
+  }, SLOW);
+
   it('stops once untilFile exists', async () => {
     const projectDir = project();
     const flag = join(projectDir, 'done.flag');
@@ -222,6 +261,8 @@ describe.concurrent('record (test backend)', () => {
       [{ stop: { maxSeconds: 0 } }, 'invalid-options'],
       [{ stop: { untilFile: flag } }, 'invalid-options'],
       [{ countdownSeconds: -1 }, 'invalid-options'],
+      [{ steps: ['step1', 'step1'] }, 'invalid-options'],
+      [{ steps: [''] }, 'invalid-options'],
       [{ mic: 'No Such Microphone' }, 'device-not-found'],
       [{ source: { kind: 'monitor', index: 7 } }, 'device-not-found'],
     ];

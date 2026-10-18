@@ -9,6 +9,8 @@ export type HostRequest =
   | { type: 'stop' }
   | { type: 'marker'; label?: string }
   | { type: 'retake' }
+  /** The script's next step (1) or the one before (-1). */
+  | { type: 'step'; delta: 1 | -1 }
   | { type: 'pause' }
   | { type: 'resume' }
   | { type: 'dead-zones'; zones: Bounds[] };
@@ -64,6 +66,20 @@ export interface RecordChoices {
   stop: 'none' | 'claude' | 'idle';
   /** The folder Claude Code runs in, for `stop: 'claude'`. */
   claudeFolder?: string;
+}
+
+/** A step of the script as the picker edits it and the prompter shows it (`script` in cuttle.json). */
+export interface ScriptStep {
+  id: string;
+  title: string;
+  note?: string;
+}
+
+/** What the prompter shows: the script, the step the take is at, and whether its buttons work yet (not during the countdown). */
+export interface PrompterState {
+  steps: Omit<ScriptStep, 'id'>[];
+  index: number;
+  live: boolean;
 }
 
 /** The first window whose bounds contain the point (front to back), or undefined: the display. */
@@ -155,6 +171,55 @@ export function hudPosition(displays: readonly Pick<PickerDisplay, 'id' | 'workA
   const candidates = [at(own.workArea, 'top'), at(own.workArea, 'bottom')];
   const free = candidates.find((place) => !overlaps(place, target)) ?? candidates[0]!;
   return { x: free.x, y: free.y };
+}
+
+/**
+ * Where the prompter goes: right under the HUD, or right over it when the HUD sits in the lower half
+ * of its display's work area (the windows' shadow margins overlap, so their cards are 8 DIP apart);
+ * centred on the HUD, inside the work area. `below` says which edge a new height keeps. DIP.
+ */
+export function prompterPosition(hud: Rect, area: Rect, size: { width: number; height: number }): { x: number; y: number; below: boolean } {
+  const below = hud.y + hud.height / 2 < area.y + area.height / 2;
+  const x = Math.round(Math.min(Math.max(hud.x + (hud.width - size.width) / 2, area.x), area.x + area.width - size.width));
+  return { x, y: below ? hud.y + hud.height - 10 : hud.y - size.height + 10, below };
+}
+
+/**
+ * The steps a pasted text makes: one per line, a list's number or bullet dropped ("1. ", "- "); a
+ * line indented under a step is that step's note. Titles longer than a step's are cut there.
+ */
+export function stepsFromText(text: string, titleMax: number): Omit<ScriptStep, 'id'>[] {
+  const steps: Omit<ScriptStep, 'id'>[] = [];
+  for (const line of text.split(/\r?\n|\r/)) {
+    if (line.trim() === '') continue;
+    const last = steps.at(-1);
+    if (/^\s/.test(line) && last) {
+      last.note = last.note ? `${last.note}\n${line.trim()}` : line.trim();
+      continue;
+    }
+    const title = line.trim().replace(/^(?:\d+[.)]|[-*•])\s+/, '').trim();
+    if (title !== '') steps.push({ title: title.slice(0, titleMax) });
+  }
+  return steps;
+}
+
+/**
+ * The script a take records with: steps without a title left out, titles trimmed, each id kept when
+ * it is free in the project (`taken`: its other items' ids), else the next free `step<n>`.
+ */
+export function scriptForTake(steps: readonly ScriptStep[], taken: ReadonlySet<string>): ScriptStep[] {
+  const used = new Set(taken);
+  const kept: ScriptStep[] = [];
+  for (const step of steps) {
+    const title = step.title.trim();
+    if (title === '') continue;
+    let id = step.id;
+    if (id === '' || used.has(id)) for (let n = 1; used.has((id = `step${n}`)); n++);
+    used.add(id);
+    const note = step.note?.trim();
+    kept.push({ id, title, ...(note && { note }) });
+  }
+  return kept;
 }
 
 /** A recorder warning for the HUD: a few words, and the whole message for its tooltip. */

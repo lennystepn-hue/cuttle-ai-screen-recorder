@@ -159,6 +159,22 @@ describe('cuttle devices and record (test backend)', () => {
     expect(project.scenes).toEqual([{ type: 'clip', from: 0, to: Math.floor(result.take.seconds * 1000) / 1000 }]);
   }, 20_000);
 
+  it("records with the project's script: the take starts at its first step, and the status lines name the steps", async () => {
+    const dir = join(temp(), 'demo');
+    expect((await cli('--json', 'init', dir)).code).toBe(0);
+    const path = join(dir, 'cuttle.json');
+    const script = [{ id: 'step1', title: 'Open the settings', note: 'The gear, top right.' }, { id: 'step2', title: 'Turn on dark mode' }];
+    writeFileSync(path, JSON.stringify({ ...JSON.parse(readFileSync(path, 'utf8')), script }));
+    let stderr = '';
+    const code = await runCli(['-C', dir, 'record', '--backend', 'test', '--max', '1', '--countdown', '0'], { stdout: () => {}, stderr: (chunk) => void (stderr += chunk) });
+    expect(code, stderr).toBe(0);
+    expect(stderr).toContain('script: 2 steps; next step: Ctrl+Shift+Alt+N, back: Ctrl+Shift+Alt+B');
+    expect(stderr).toContain('step 1/2: Open the settings at 0.00 s');
+    expect(JSON.parse(readFileSync(join(dir, 'takes/1/markers.json'), 'utf8')).markers).toEqual([{ t: 0, kind: 'step', label: 'step1' }]);
+    // the script stays the project's
+    expect(JSON.parse(readFileSync(path, 'utf8')).script).toEqual(script);
+  }, 20_000);
+
   it('refuses a project open in the Cuttle app, unless forced or its app is gone', async () => {
     const dir = join(temp(), 'demo');
     mkdirSync(join(dir, '.cuttle'), { recursive: true });

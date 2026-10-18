@@ -11,6 +11,8 @@ describe('usedIds', () => {
     };
     expect([...usedIds(raw)]).toEqual(['s1', 'answer']);
     expect([...usedIds({ ...raw, sounds: [{ id: 'a1' }, { sound: 'pop' }] })]).toEqual(['s1', 'answer', 'a1']);
+    // the script's steps (their ids are given when a take records with them)
+    expect([...usedIds({ ...raw, script: [{ id: 'step1', title: 'Go' }] })]).toEqual(['s1', 'answer', 'step1']);
     expect(usedIds({})).toEqual(new Set());
   });
 });

@@ -434,11 +434,31 @@ const SoundSchema = z.strictObject({
   enabled: z.boolean().default(true),
 });
 
+/** A step's title is a few words (the prompter's heading); its note a few sentences; a script holds this many steps. */
+export const STEP_TITLE_MAX = 80;
+export const STEP_NOTE_MAX = 1000;
+export const SCRIPT_MAX_STEPS = 50;
+
+/**
+ * A step of the script: what the person shows next, written before the take. While recording, the
+ * prompter (a window that is never in the video) shows it, and the step key marks where it starts
+ * (a `step` marker labelled with its id).
+ */
+const StepSchema = z.strictObject({
+  /** The `step` markers name it; unique in the project. */
+  id: z.string().regex(ID_PATTERN, 'an id is 1 to 64 letters, digits, "-" or "_"'),
+  /** What it shows, in a few words. */
+  title: z.string().max(STEP_TITLE_MAX).regex(/\S/, 'a step needs a title'),
+  /** What to say or do: for the prompter only, never in the video. */
+  note: z.string().max(STEP_NOTE_MAX).optional(),
+});
+
 export const ProjectSchema = z
   .strictObject({
     version: z.literal(CURRENT_VERSION),
     output: OutputSchema.prefault({}),
     sources: SourcesSchema,
+    script: z.array(StepSchema).max(SCRIPT_MAX_STEPS).default([]),
     look: LookSchema.prefault({}),
     scenes: z.array(SceneSchema).default([]),
     zooms: z.array(ZoomSchema).default([]),
@@ -456,7 +476,7 @@ export const ProjectSchema = z
   // Runs once everything else is valid (see the note above BackgroundSchema).
   .superRefine((project, ctx) => {
     const seen = new Map<string, string>();
-    for (const list of ['scenes', 'zooms', 'masks', 'texts', 'overlays', 'cuts', 'sounds'] as const) {
+    for (const list of ['scenes', 'zooms', 'masks', 'texts', 'overlays', 'cuts', 'sounds', 'script'] as const) {
       project[list].forEach((item: { id?: string }, index) => {
         if (item.id === undefined) return;
         const first = seen.get(item.id);
@@ -524,6 +544,7 @@ export type MotionOverlay = CuttleProject['overlays'][number];
 export type SceneTransition = NonNullable<Scene['transition']>;
 export type Music = NonNullable<CuttleProject['music']>;
 export type Sound = CuttleProject['sounds'][number];
+export type ScriptStep = CuttleProject['script'][number];
 export type Zoom = CuttleProject['zooms'][number];
 export type ZoomMove = NonNullable<Zoom['moves']>[number];
 export type WindowKind = (typeof WINDOW_KINDS)[number];

@@ -64,12 +64,16 @@ export const WINDOW_CHANNELS = {
     events: ['pill:recent', 'app:motion'],
   },
   picker: {
-    requests: ['picker:setup', 'picker:hover', 'picker:choices', 'picker:record', 'picker:cancel', 'picker:claude-folder', 'picker:retry'],
-    events: ['picker:open', 'picker:active', 'picker:choices', 'picker:devices', 'app:motion'],
+    requests: ['picker:setup', 'picker:hover', 'picker:choices', 'picker:record', 'picker:cancel', 'picker:claude-folder', 'picker:retry', 'picker:script'],
+    events: ['picker:open', 'picker:active', 'picker:choices', 'picker:devices', 'picker:script', 'app:motion'],
   },
   hud: {
     requests: ['hud:stop', 'hud:marker', 'hud:retake', 'hud:pause', 'hud:resume', 'hud:restart'],
     events: ['hud:state', 'app:motion'],
+  },
+  prompter: {
+    requests: ['prompter:next', 'prompter:previous', 'prompter:size'],
+    events: ['prompter:state', 'app:motion'],
   },
   countdown: {
     requests: [],

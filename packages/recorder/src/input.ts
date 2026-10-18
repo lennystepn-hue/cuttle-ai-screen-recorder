@@ -18,7 +18,14 @@ export type HotkeySink = (action: HotkeyAction) => void;
 const now = () => Date.now() / 1000;
 
 /** Ctrl+Shift+Alt+<key>: no app binds these, and AltGr+Shift+letter types nothing on common layouts. */
-export const HOTKEYS: Record<HotkeyAction, string> = { stop: 'Ctrl+Shift+Alt+S', marker: 'Ctrl+Shift+Alt+M', pause: 'Ctrl+Shift+Alt+P', retake: 'Ctrl+Shift+Alt+X' };
+export const HOTKEYS: Record<HotkeyAction, string> = {
+  stop: 'Ctrl+Shift+Alt+S',
+  marker: 'Ctrl+Shift+Alt+M',
+  pause: 'Ctrl+Shift+Alt+P',
+  retake: 'Ctrl+Shift+Alt+X',
+  next: 'Ctrl+Shift+Alt+N',
+  previous: 'Ctrl+Shift+Alt+B',
+};
 
 export interface KeyEvent {
   keycode: number;
@@ -140,7 +147,7 @@ async function startWindowsInput(onInput: InputSink, onHotkey: HotkeySink): Prom
     UiohookKey.Ctrl, UiohookKey.CtrlRight, UiohookKey.Shift, UiohookKey.ShiftRight,
     UiohookKey.Alt, UiohookKey.AltRight, UiohookKey.Meta, UiohookKey.MetaRight,
   ]);
-  const keys = keyHandler(modifiers, new Map<number, HotkeyAction>([[UiohookKey.S, 'stop'], [UiohookKey.M, 'marker'], [UiohookKey.P, 'pause'], [UiohookKey.X, 'retake']]), onInput, onHotkey);
+  const keys = keyHandler(modifiers, new Map<number, HotkeyAction>([[UiohookKey.S, 'stop'], [UiohookKey.M, 'marker'], [UiohookKey.P, 'pause'], [UiohookKey.X, 'retake'], [UiohookKey.N, 'next'], [UiohookKey.B, 'previous']]), onInput, onHotkey);
   const buttons = new Map<unknown, 'left' | 'right' | 'middle'>([[1, 'left'], [2, 'right'], [3, 'middle']]);
   let shape = win.cursorShape(); // before the hook starts: nothing to undo if it throws
 
@@ -210,8 +217,8 @@ async function startWindowsInput(onInput: InputSink, onHotkey: HotkeySink): Prom
   };
 }
 
-/** macOS virtual key codes of the hotkeys' letters (kVK_ANSI_S, _M, _P, _X). */
-const MAC_HOTKEYS = new Map<number, HotkeyAction>([[0x01, 'stop'], [0x2e, 'marker'], [0x23, 'pause'], [0x07, 'retake']]);
+/** macOS virtual key codes of the hotkeys' letters (kVK_ANSI_S, _M, _P, _X, _N, _B). */
+const MAC_HOTKEYS = new Map<number, HotkeyAction>([[0x01, 'stop'], [0x2e, 'marker'], [0x23, 'pause'], [0x07, 'retake'], [0x2d, 'next'], [0x0b, 'previous']]);
 const WHERE_INPUT_MONITORING = 'allow the app that runs Cuttle (your terminal, or Cuttle) under System Settings > Privacy & Security > Input Monitoring';
 
 /**

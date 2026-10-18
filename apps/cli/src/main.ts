@@ -5,6 +5,7 @@ import { fitCommand } from './commands/fit';
 import { frameCommand } from './commands/frame';
 import { init } from './commands/init';
 import { motionCheckCommand, motionNewCommand, motionTemplatesCommand } from './commands/motion';
+import { musicCheckCommand, musicNewCommand, musicSetCommand, musicTemplatesCommand, soundAddCommand, soundListCommand } from './commands/music';
 import { previewCommand } from './commands/preview';
 import { recordCommand } from './commands/record';
 import { recoverCommand } from './commands/recover';
@@ -39,6 +40,16 @@ const pixels = (value: string): number => {
   return parsed;
 };
 const collect = (value: string, previous: number[] = []): number[] => [...previous, seconds(value)];
+const fraction = (value: string): number => {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed < 0 || parsed > 1) throw new InvalidArgumentError('expected a number from 0 to 1');
+  return parsed;
+};
+const decibels = (value: string): number => {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed < 0 || parsed > 40) throw new InvalidArgumentError('expected decibels from 0 to 40');
+  return parsed;
+};
 
 /** `--json` before a `--`: usage errors then answer in JSON too. */
 const wantsJson = (argv: readonly string[]): boolean => {
@@ -218,6 +229,47 @@ export async function runCli(argv: readonly string[], streams?: Streams): Promis
         withSignal(output, (signal) => motionCheckCommand(project, src, options, output, signal)),
       ),
     );
+
+  const music = program.command('music').description('the video\'s music: a page that composes it for this video in WebAudio, fitted to its scenes and cuts');
+  music
+    .command('new <template>')
+    .description('copy a music template into music/<name>/ and make it the video\'s music (music templates lists them)')
+    .option('--name <name>', 'the folder in music/ (default: the template\'s name)')
+    .action(action((output, project, template: string, options: { name?: string }) => musicNewCommand(project, template, options, output)));
+  music
+    .command('templates')
+    .description('the music templates music new copies')
+    .action(action((output) => musicTemplatesCommand(output)));
+  music
+    .command('set')
+    .description('the music\'s level, its duck under speech, its page\'s params, its page, or on and off')
+    .option('--volume <0-1>', 'its level', (value: string) => fraction(value))
+    .option('--duck <dB>', 'how far it goes down under speech (0: not at all)', (value: string) => decibels(value))
+    .option('--param <name=value...>', 'a param of the page (name= removes it)', (value: string, previous: string[] = []) => [...previous, value])
+    .option('--src <page>', 'another page in the project')
+    .option('--on', 'play it')
+    .option('--off', 'leave it out')
+    .action(action((output, project, options: { volume?: number; duck?: number; param?: string[]; src?: string; on?: boolean; off?: boolean }) => musicSetCommand(project, options, output)));
+  music
+    .command('check')
+    .description('render the music and sounds alone: a WAV, a sheet of the waveforms over the scenes, loudness, hits on the scene changes, errors')
+    .option('--src <page>', 'check this page instead of the project\'s music')
+    .option('-o, --out <dir>', 'folder for music.wav and music.png (default: preview/ in the project)')
+    .action(action((output, project, options: { src?: string; out?: string }) => withSignal(output, (signal) => musicCheckCommand(project, options, output, signal))));
+
+  const sound = program.command('sound').description('sounds at moments of the video: built-in effects or files of the project');
+  sound
+    .command('list')
+    .description('the built-in sounds')
+    .action(action((output) => soundListCommand(output)));
+  sound
+    .command('add <sound>')
+    .description('a built-in sound or a file of the project at a moment: source seconds (where the video shows it), or --scene seconds into a scene')
+    .requiredOption('--at <seconds>', 'source seconds, or seconds into --scene', seconds)
+    .option('--scene <id>', 'a scene\'s id: --at counts from its start')
+    .option('--volume <0-1>', 'its level (default 0.8)', (value: string) => fraction(value))
+    .option('--label <text>', 'a name for it')
+    .action(action((output, project, name: string, options: { at: number; scene?: string; volume?: number; label?: string }) => soundAddCommand(project, name, options, output)));
 
   program
     .command('capture-page <target>')

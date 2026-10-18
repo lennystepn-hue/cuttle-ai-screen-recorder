@@ -26,7 +26,7 @@ export const LOAD_TIMEOUT_MS = 30_000;
 /** A frame whose paint has not come in this long is drawn again (ms). */
 const REDRAW_MS = 400;
 /** At most this many console lines are kept per page. */
-const MAX_LOG_LINES = 200;
+export const MAX_LOG_LINES = 200;
 
 /** A page's frame: premultiplied RGBA, top row first. */
 export interface MotionFrame {
@@ -119,12 +119,12 @@ const idle = new Map<string, Session[]>();
 const poolKey = (root: string, network: boolean, kitDir: string) => `${resolve(root)}|${network}|${resolve(kitDir)}`;
 
 /** A session of its own for one page: its files from `root` and the kit's, no permissions, no network unless asked. */
-function takeSession(root: string, network: boolean, kitDir: string): Session {
+export function takeSession(root: string, network: boolean, kitDir: string): Session {
   return idle.get(poolKey(root, network, kitDir))?.pop() ?? pageSession(root, network, kitDir);
 }
 
 /** A page is done with `ses`: what the page stored is wiped, and the next page may take it. */
-function giveBack(ses: Session, root: string, network: boolean, kitDir: string): void {
+export function giveBack(ses: Session, root: string, network: boolean, kitDir: string): void {
   void ses
     .clearStorageData()
     .catch(() => {})

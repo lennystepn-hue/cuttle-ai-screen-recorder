@@ -29,6 +29,8 @@ export {
   type CaptionStyle,
   type CardScene,
   type MotionOverlay,
+  type Music,
+  type Sound,
   type MotionScene,
   type ClipScene,
   type CursorShape,

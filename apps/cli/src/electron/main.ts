@@ -3,7 +3,7 @@
 // channel, which carries the answer back and a cancel in; progress and warnings go to stderr.
 // Loaded by bootstrap.ts, which handles uncaught exceptions.
 import { app, protocol } from 'electron';
-import { MOTION_SCHEME_PRIVILEGES, SUBTITLE_FORMATS, exportProject, isExportFormat, renderStills, type EncoderPreference, type ExportFormat, type SubtitleFormat } from '@cuttle/export';
+import { MOTION_SCHEME_PRIVILEGES, SUBTITLE_FORMATS, checkMusic, exportProject, isExportFormat, renderStills, type EncoderPreference, type ExportFormat, type SubtitleFormat } from '@cuttle/export';
 import { capturePage } from './capture-page';
 import { failure, finish } from './finish';
 import { decodeRequest, type CancelMessage, type ElectronRequest, type ElectronResponse, type MotionCheck } from './protocol';
@@ -89,6 +89,8 @@ async function handle(request: ElectronRequest): Promise<unknown> {
       });
     case 'capture-page':
       return capturePage(request, cancel.signal);
+    case 'music':
+      return checkMusic({ projectDir: request.projectDir, out: request.out, ...(request.sheet && { sheet: request.sheet }), ...(request.src && { src: request.src }) });
   }
 }
 

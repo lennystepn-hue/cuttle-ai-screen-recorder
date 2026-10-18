@@ -5,6 +5,8 @@ export { EXPORT_FORMATS, isExportFormat, type ExportFormat } from './formats';
 export type { EncoderPreference, ExportErrorCode } from './job';
 export { renderStills, stillName, type StillsOptions, type StillsResult } from './main/stills';
 export { MOTION_SCHEME_PRIVILEGES } from './main/motion';
+export { checkMusic, type MusicCheckOptions, type MusicCheckResult } from './main/music-check';
+export type { SoundtrackReport } from './main/export';
 export type { MotionItemReport } from './main/motion-host';
 export { MotionPreview, type MotionPreviewOptions, type MotionStatus, type PreviewMode } from './main/motion-preview';
 export type { MotionFrameRequest, MotionPixels } from './job';

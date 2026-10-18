@@ -29,15 +29,15 @@ async function copyFolder(from: string, to: string): Promise<void> {
 }
 
 /**
- * Copies a template of the kit next to a bundle (`bundleUrl`) into the project's `motion/<name>/`,
- * or `motion/<name>-2/` and so on when that folder is taken. Answers the page's path in the project
- * (`motion/<folder>/index.html`).
+ * Copies a template of the kit next to a bundle (`bundleUrl`) into the project's `<into>/<name>/`
+ * (`motion`, or `music` for a music page), or `<name>-2/` and so on when that folder is taken.
+ * Answers the page's path in the project (`motion/<folder>/index.html`).
  */
-export async function copyTemplate(projectDir: string, template: string, name: string, bundleUrl: string): Promise<string> {
+export async function copyTemplate(projectDir: string, template: string, name: string, bundleUrl: string, into: 'motion' | 'music' = 'motion'): Promise<string> {
   const from = join(templatesFolder(bundleUrl), template);
   if (!(await isFolder(from))) throw new MissingTemplateError(`the template ${template} is missing from the motion kit (${from})`);
   let folder = name;
-  for (let n = 2; await stat(join(projectDir, 'motion', folder)).then(() => true, () => false); n++) folder = `${name}-${n}`;
-  await copyFolder(from, join(projectDir, 'motion', folder));
-  return `motion/${folder}/index.html`;
+  for (let n = 2; await stat(join(projectDir, into, folder)).then(() => true, () => false); n++) folder = `${name}-${n}`;
+  await copyFolder(from, join(projectDir, into, folder));
+  return `${into}/${folder}/index.html`;
 }

@@ -2,6 +2,8 @@
 // cuttle-motion://kit/ from a folder that scripts/copy.mjs builds next to each bundle (the CLI's,
 // the app's, the export check's):
 //   motion.js            Cuttle's helpers (easing, tweens, text, code)
+//   sound.js             Cuttle's sound kit for music pages (instruments, effects, harmony, the video's parts)
+//   blank.html           the page a video's sounds render in when it has no music page
 //   three/               Three.js (three.module.js, three.core.js) and its addons (three/addons/)
 //   lottie/              lottie-web: lottie.mjs (a module) and lottie.min.js (a script)
 //   fonts/               Inter, JetBrains Mono and display faces (woff2, Latin; see KIT_FONTS)
@@ -14,11 +16,12 @@ export const KIT_ORIGIN = 'cuttle-motion://kit';
 /** The folder of the kit next to a bundle. */
 export const KIT_FOLDER = 'motion-kit';
 
-/** Bare names a page may import (its import map): Three.js and its addons, Cuttle's helpers, lottie-web. */
+/** Bare names a page may import (its import map): Three.js and its addons, Cuttle's helpers and sound kit, lottie-web. */
 export const KIT_IMPORTS: Readonly<Record<string, string>> = {
   three: `${KIT_ORIGIN}/three/three.module.js`,
   'three/addons/': `${KIT_ORIGIN}/three/addons/`,
   cuttle: `${KIT_ORIGIN}/motion.js`,
+  'cuttle/sound': `${KIT_ORIGIN}/sound.js`,
   'lottie-web': `${KIT_ORIGIN}/lottie/lottie.mjs`,
 };
 
@@ -89,3 +92,40 @@ export function withImportMap(html: string): string {
   const doctype = /^\uFEFF?\s*<!doctype[^>]*>/i.exec(html)?.[0] ?? '';
   return `${doctype}${importMapTag()}${html.slice(doctype.length)}`;
 }
+
+/** A music page `cuttle music new` copies into `music/<name>/`: a starting point for the video's own music. */
+export interface MusicTemplate {
+  name: string;
+  description: string;
+}
+
+/** The music templates (their folders in templates/ are `music-<name>`). */
+export const MUSIC_TEMPLATES: readonly MusicTemplate[] = [
+  { name: 'pulse', description: 'driving electronic: four on the floor where the video is busy, a pad where it breathes, risers and hits on the scene changes' },
+  { name: 'drift', description: 'calm and wide, for a walkthrough with a voice: strings and a pad, a glassy arpeggio, a soft pulse, swells into the scene changes' },
+  { name: 'lofi', description: 'laid back with swing: a dusty beat, an electric piano on seventh chords, a round bass, record crackle, a tick on each click' },
+  { name: 'bright', description: 'upbeat and friendly for a launch: claps, an octave bass, a marimba, bells on the scene changes, a pop on each click' },
+  { name: 'cinematic', description: 'a trailer: low strings and a drone, toms that grow with the energy, a ticking clock, braams, impacts and sub drops on the cuts' },
+];
+
+/** The built-in sounds of a project's `sounds` (kit/sound.js plays them; a test keeps the two lists the same). */
+export const BUILT_IN_SOUNDS: readonly (readonly [name: string, description: string])[] = [
+  ['whoosh', 'air rushing past, loudest on its moment, left to right'],
+  ['swoosh-in', 'a short whoosh that lands on its moment'],
+  ['riser', 'rising noise and tone for 2 s that end on its moment (a cut, a reveal)'],
+  ['impact', 'a deep boom and a crack with a long tail'],
+  ['downlifter', 'falling noise from its moment'],
+  ['sub-drop', 'a falling sub you feel more than hear'],
+  ['braam', 'a cinematic low brass hit'],
+  ['reverse-cymbal', 'a cymbal swell that ends on its moment'],
+  ['swell', 'a chord that swells up to its moment'],
+  ['pop', 'a bubble pop (something appears)'],
+  ['click', 'a UI click'],
+  ['tick', 'a soft tick (a counter, a step)'],
+  ['ding', 'a bell-like ding (a notification)'],
+  ['chime', 'three bell notes up a chord'],
+  ['success', 'two bright notes up: it worked'],
+  ['error', 'two dull notes down: it did not'],
+  ['type-burst', 'a burst of keys typed fast'],
+  ['glitch', 'a digital stutter'],
+];

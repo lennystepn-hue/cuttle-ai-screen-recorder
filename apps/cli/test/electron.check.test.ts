@@ -330,6 +330,34 @@ describe.runIf(enabled)('cuttle in Electron', () => {
     }
   }, 180_000);
 
+  it('composes music for the video and mixes it with its sounds under the mic', () => {
+    const copy = join(mkdtempSync(join(tmpdir(), 'cuttle-music-')), 'take');
+    cpSync(project, copy, { recursive: true });
+    try {
+      expect(cuttle('-C', copy, 'music', 'new', 'pulse').code).toBe(0);
+      expect(cuttle('-C', copy, 'sound', 'add', 'pop', '--at', '1').code).toBe(0);
+      const checked = cuttle('-C', copy, 'music', 'check');
+      expect(checked.code).toBe(0);
+      const report = checked.json as { seconds: number; errors: string[]; skipped: string[]; info: { bpm: number }; loudness: { lufs: number; truePeak: number }; out: string; sheet: string; parts: unknown[] };
+      expect(report.errors).toEqual([]);
+      expect(report.skipped).toEqual([]);
+      expect(report.seconds).toBeGreaterThan(2);
+      expect(report.info.bpm).toBeGreaterThanOrEqual(114);
+      expect(report.parts.length).toBeGreaterThan(0);
+      expect(report.loudness.lufs).toBeGreaterThan(-40);
+      expect(report.loudness.truePeak).toBeLessThan(0);
+      expect(pngSize(report.sheet)).toEqual([1600, 900]);
+      expect(readFileSync(report.out).toString('ascii', 0, 4)).toBe('RIFF');
+      const { code, json } = cuttle('-C', copy, 'render');
+      expect(code).toBe(0);
+      expect(json.music).toMatchObject({ src: 'music/pulse/index.html', errors: [], skipped: [] });
+      const audio = spawnSync('ffprobe', ['-v', 'error', '-select_streams', 'a', '-show_entries', 'stream=codec_name,channels', '-of', 'csv=p=0', json.out as string], { encoding: 'utf8' }).stdout.trim();
+      expect(audio).toBe('aac,2');
+    } finally {
+      rmSync(dirname(copy), { recursive: true, force: true });
+    }
+  }, 180_000);
+
   it('fails on an unknown format before rendering, and on a page that does not exist', () => {
     expect(cuttle('-C', project, 'render', '--format', '4:3').code).toBe(1);
     expect(cuttle('-C', project, 'capture-page', join(project, 'missing.html')).code).toBe(1);

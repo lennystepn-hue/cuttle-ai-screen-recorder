@@ -5,8 +5,10 @@
 // page's transparency kept, the same on every render. The motion kit (Three.js, lottie-web, fonts,
 // Cuttle's helpers) is served at cuttle-motion://kit/, and every page of the project gets an
 // import map for its bare names (`three`, `cuttle`).
-import { readFile } from 'node:fs/promises';
+import { createReadStream } from 'node:fs';
+import { readFile, stat } from 'node:fs/promises';
 import { extname, isAbsolute, relative, resolve, sep } from 'node:path';
+import { Readable } from 'node:stream';
 import { fileURLToPath } from 'node:url';
 import { KIT_FOLDER, withImportMap } from '@cuttle/motion-kit';
 import { BrowserWindow, screen, session, type NativeImage, type Session } from 'electron';
@@ -145,10 +147,21 @@ function pageSession(root: string, network: boolean, kitDir: string): Session {
     if (base === undefined || path === undefined || !inside(base, path)) return new Response('not found', { status: 404 });
     try {
       const type = TYPES[extname(path).toLowerCase()] ?? 'application/octet-stream';
+      const headers = { 'Content-Type': type, 'Content-Security-Policy': policy, 'Cache-Control': 'no-store', 'Accept-Ranges': 'bytes' };
+      // a part of a file (the take's frames, a video the page plays): streamed from where it is asked
+      const range = /^bytes=(\d+)-(\d*)$/.exec(request.headers.get('range') ?? '');
+      if (range) {
+        const size = (await stat(path)).size;
+        const start = Number(range[1]);
+        const end = Math.min(range[2] ? Number(range[2]) : size - 1, size - 1);
+        if (start > end) return new Response(null, { status: 416, headers: { ...headers, 'Content-Range': `bytes */${size}` } });
+        const part = Readable.toWeb(createReadStream(path, { start, end })) as ReadableStream<Uint8Array>;
+        return new Response(part, { status: 206, headers: { ...headers, 'Content-Range': `bytes ${start}-${end}/${size}`, 'Content-Length': String(end - start + 1) } });
+      }
       const bytes = await readFile(path);
       // the project's pages get the kit's import map; the kit's files are served as they are
       const body = url.host === 'project' && type === 'text/html' ? withImportMap(bytes.toString('utf8')) : bytes;
-      return new Response(body, { headers: { 'Content-Type': type, 'Content-Security-Policy': policy, 'Cache-Control': 'no-store' } });
+      return new Response(body, { headers });
     } catch {
       return new Response('not found', { status: 404 });
     }

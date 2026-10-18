@@ -277,6 +277,25 @@ describe.runIf(enabled)('the Cuttle app', () => {
     );
     writeFileSync(join(SHOTS, `${name}.png`), Buffer.from(png, 'base64'));
   };
+  /** A screenshot of a picker: the window over its display (each display has its own). */
+  const shotOfPicker = async (name: string, page: Page) => {
+    if (!SHOTS) return;
+    const setup = await page.evaluate(() => (window as unknown as { cuttle: { invoke(channel: string): Promise<{ display: { bounds: { x: number; y: number; width: number; height: number } } }> } }).cuttle.invoke('picker:setup'));
+    const { x, y, width, height } = setup.display.bounds;
+    const png = await app.evaluate(
+      async ({ BrowserWindow }, centre) => {
+        const window = BrowserWindow.getAllWindows().find((candidate) => {
+          const bounds = candidate.getBounds();
+          return candidate.webContents.getURL().includes('/picker.html') && centre.x >= bounds.x && centre.x < bounds.x + bounds.width && centre.y >= bounds.y && centre.y < bounds.y + bounds.height;
+        })!;
+        window.webContents.invalidate();
+        await new Promise((resolve) => setTimeout(resolve, 1600));
+        return (await window.webContents.capturePage()).toPNG().toString('base64');
+      },
+      { x: x + width / 2, y: y + height / 2 },
+    );
+    writeFileSync(join(SHOTS, `${name}.png`), Buffer.from(png, 'base64'));
+  };
   /** Opens a project folder as a second launch would, and finds its editor (others may be open: the takes recorded before). */
   const openEditor = async (dir: string): Promise<Page> => {
     const name = basename(dir);
@@ -1321,6 +1340,97 @@ describe.runIf(enabled)('the Cuttle app', () => {
     expect(await opened.locator('.inspector .kind-head .name').textContent()).toBe('Retake');
     await click(opened, '#tab-auto');
     expect(await opened.locator('[data-testid=auto-group-retakes] .auto-count').textContent()).toBe('1 on');
+  }, 120_000);
+
+  it("records with a script: typed in the picker (a pasted list becomes steps), the prompter by the HUD moves on with Next, and the steps become markers and the project's script", async () => {
+    const before = new Set(existsSync(join(root, 'projects')) ? readdirSync(join(root, 'projects')) : []);
+    await pillRecord();
+    const { page } = await firstMonitorPicker();
+    await page.evaluate(async () => {
+      const bridge = (window as unknown as { cuttle: { invoke(channel: string, argument?: unknown): Promise<unknown> } }).cuttle;
+      await bridge.invoke('picker:choices', { stop: 'none' });
+      await bridge.invoke('picker:hover');
+    });
+    await page.waitForSelector('[data-testid=picker-script]');
+    expect(await page.locator('[data-testid=picker-script] small').textContent()).toBe('none');
+    await click(page, '[data-testid=picker-script]');
+    await page.waitForSelector('[data-testid=script-panel]');
+    // the first step's title has the focus: typed, and Enter goes on to a new step
+    await expect.poll(() => page.evaluate(() => (document.activeElement as HTMLElement | null)?.dataset.testid)).toBe('script-title');
+    await page.keyboard.type('Open the settings');
+    await page.keyboard.press('Enter');
+    await expect.poll(() => page.locator('[data-testid=script-title]').count()).toBe(2);
+    // a pasted list becomes steps, an indented line the note of the step above it
+    await page.evaluate(() => {
+      const data = new DataTransfer();
+      data.setData('text/plain', '2. Turn on dark mode\n   Say that it follows the system.\n3. Export the video');
+      document.activeElement!.dispatchEvent(new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true }));
+    });
+    const titles = () => page.locator('[data-testid=script-title]').evaluateAll((inputs) => inputs.map((input) => (input as HTMLInputElement).value));
+    await expect.poll(titles).toEqual(['Open the settings', 'Turn on dark mode', 'Export the video']);
+    expect(await page.locator('[data-testid=script-note]').nth(1).inputValue()).toBe('Say that it follows the system.');
+    expect(await page.locator('[data-testid=picker-script] small').textContent()).toBe('3 steps');
+    await shotOfPicker('46-script', page);
+    // Esc closes the panel, not the pick
+    await page.keyboard.press('Escape');
+    await page.waitForSelector('[data-testid=script-panel]', { state: 'detached' });
+    await click(page, '[data-testid=picker-record]').catch(() => {});
+
+    // the prompter: the first step from the countdown on, by the HUD, never in the video, never focused
+    const prompter = await waitForPage(app, async (candidate) => candidate.url().includes('/prompter.html') && (await candidate.locator('[data-testid=prompter-title]').textContent()) === 'Open the settings');
+    const hud = await runningHud();
+    const windows = await app.evaluate(({ BrowserWindow }) => {
+      const of = (part: string) => BrowserWindow.getAllWindows().find((window) => window.webContents.getURL().includes(part))!;
+      const [hud, prompter] = [of('/hud.html'), of('/prompter.html')];
+      return { hud: hud.getBounds(), prompter: prompter.getBounds(), isProtected: prompter.isContentProtected(), focusable: prompter.isFocusable() };
+    });
+    expect(windows).toMatchObject({ isProtected: true, focusable: false, prompter: { x: windows.hud.x, width: windows.hud.width } });
+    // right under the HUD, or right over it
+    expect([windows.hud.y + windows.hud.height - 10, windows.hud.y - windows.prompter.height + 10]).toContain(windows.prompter.y);
+    await prompter.waitForSelector('[data-testid=prompter-next]:not([disabled])');
+    expect(await prompter.locator('[data-testid=prompter-count]').textContent()).toBe('Step 1 of 3');
+    await wait(800);
+    await click(prompter, '[data-testid=prompter-next]');
+    await expect.poll(() => prompter.locator('[data-testid=prompter-title]').textContent()).toBe('Turn on dark mode');
+    expect(await prompter.locator('[data-testid=prompter-count]').textContent()).toBe('Step 2 of 3');
+    expect(await prompter.locator('.prompter-note').textContent()).toBe('Say that it follows the system.');
+    expect(await prompter.locator('.prompter-then').textContent()).toBe('Then Export the video');
+    // the window took its card's height and its margins
+    const card = await prompter.locator('[data-testid=prompter]').evaluate((element) => element.getBoundingClientRect().height);
+    const prompterHeight = () => app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find((window) => window.webContents.getURL().includes('/prompter.html'))!.getContentBounds().height);
+    await expect.poll(prompterHeight).toBe(Math.ceil(card) + 20);
+    // the steps are not the person's markers: the HUD counts none
+    expect(await hud.locator('.marker small').count()).toBe(0);
+    await shotOf('47-prompter', '/prompter.html');
+    await wait(600);
+    await click(hud, '[data-testid=hud-stop]');
+
+    const dir = await newProject(before);
+    const written = (await projectWhen(dir, (file) => file.scenes[0]?.id !== undefined)) as unknown as { script?: unknown };
+    expect(written.script).toEqual([
+      { id: 'step1', title: 'Open the settings' },
+      { id: 'step2', title: 'Turn on dark mode', note: 'Say that it follows the system.' },
+      { id: 'step3', title: 'Export the video' },
+    ]);
+    const { markers } = JSON.parse(readFileSync(join(dir, 'takes', '1', 'markers.json'), 'utf8')) as { markers: { t: number; kind: string; label?: string }[] };
+    expect(markers.filter((marker) => marker.kind === 'step').map((marker) => [marker.label, marker.t > 0])).toEqual([
+      ['step1', false],
+      ['step2', true],
+    ]);
+    // the editor pins the steps on its timeline by their names
+    const opened = await waitForPage(app, async (candidate) => candidate.url().includes('/editor.html') && (await candidate.title()) === `${basename(dir)} · Cuttle`);
+    await opened.waitForSelector('.app[data-phase="ready"]', { timeout: 30_000 });
+    await expect.poll(() => opened.evaluate(() => (window as unknown as { __cuttleCheck: Check }).__cuttleCheck.doc().undo), { timeout: 15_000 }).toBe("Cuttle's cut");
+    await expect.poll(() => opened.locator('.flag span').allTextContents(), { timeout: 15_000 }).toContain('2 · Turn on dark mode');
+    await shotOf('47b-step-pins', '/editor.html', `${basename(dir)} · Cuttle`);
+    // Record again, once the take is in: the picker opens with the project's script
+    await expect.poll(() => opened.locator('[data-testid=project-status]').count(), { timeout: 30_000 }).toBe(0);
+    await click(opened, '[data-testid=record-again]');
+    const again = await firstMonitorPicker();
+    const bridge = (page: Page) => page.evaluate(() => (window as unknown as { cuttle: { invoke(channel: string): Promise<{ script: { title: string }[] }> } }).cuttle.invoke('picker:setup'));
+    expect((await bridge(again.page)).script.map((step) => step.title)).toEqual(['Open the settings', 'Turn on dark mode', 'Export the video']);
+    // the pickers close as the pick is cancelled
+    await again.page.evaluate(() => (window as unknown as { cuttle: { invoke(channel: string): Promise<unknown> } }).cuttle.invoke('picker:cancel')).catch(() => {});
   }, 120_000);
 
   it('restarts from the HUD on a held press only: the take is put aside, and Undo restart brings it back', async () => {

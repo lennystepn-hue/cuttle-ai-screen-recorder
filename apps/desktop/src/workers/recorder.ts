@@ -46,6 +46,10 @@ port.on('message', ({ data }) => {
     case 'retake':
       recording?.retake();
       return;
+    case 'step':
+      if (data.delta === 1) recording?.next();
+      else recording?.previous();
+      return;
     case 'pause':
       recording?.pause();
       return;

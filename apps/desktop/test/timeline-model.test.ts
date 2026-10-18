@@ -151,6 +151,21 @@ describe('timelineModel', () => {
       [4.75, 'answer'],
     ]);
   });
+
+  it("names a step's pin by its number and title in the script, and by its id when the script lost it", () => {
+    const scripted = project({ ...demo, script: [{ id: 'step1', title: 'Open the settings' }, { id: 'step2', title: 'Turn on dark mode' }] });
+    const steps = timelineModel(scripted, spans, [
+      { t: 0, kind: 'step', label: 'step1' },
+      { t: 2, kind: 'step', label: 'step2' },
+      { t: 9, kind: 'step', label: 'step9' },
+    ]).markers;
+    expect(steps.map((pin) => [pin.t, pin.label])).toEqual([
+      [0, '1 · Open the settings'],
+      [2, '2 · Turn on dark mode'],
+      [4.75, 'step9'],
+    ]);
+    expect(groupPins(steps, 1).map(pinGroupName)).toEqual(['1 · Open the settings', '2 · Turn on dark mode', 'step9']);
+  });
 });
 
 describe('outputTimesOf and groupPins', () => {

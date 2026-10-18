@@ -127,6 +127,15 @@ export class RecorderHost {
     if (this.running) this.send({ type: 'retake' });
   }
 
+  /** The script's next step, or the one before: a `step` marker (nothing at either end). */
+  nextStep(): void {
+    if (this.running) this.send({ type: 'step', delta: 1 });
+  }
+
+  previousStep(): void {
+    if (this.running) this.send({ type: 'step', delta: -1 });
+  }
+
   /** Pauses the take: every track stops until `resume()` (events `paused`, `resuming`, `resumed`). */
   pause(): void {
     if (this.running) this.send({ type: 'pause' });

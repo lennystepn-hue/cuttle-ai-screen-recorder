@@ -4,10 +4,11 @@
 import { z } from 'zod';
 import type { ParamDeclaration } from '@cuttle/export/motion-params';
 import { MOTION_TEMPLATES, MUSIC_TEMPLATES } from '@cuttle/motion-kit';
+import { ID_PATTERN, SCRIPT_MAX_STEPS, STEP_NOTE_MAX, STEP_TITLE_MAX } from '@cuttle/project';
 import type { LengthReport } from './media-jobs';
-import type { PickedTarget, PickerDisplay, PickerWindow, RecordChoices } from './recording';
+import type { PickedTarget, PickerDisplay, PickerWindow, PrompterState, RecordChoices, ScriptStep } from './recording';
 
-export type { PickedTarget, PickerDisplay, PickerWindow, Rect, RecordChoices } from './recording';
+export type { PickedTarget, PickerDisplay, PickerWindow, PrompterState, Rect, RecordChoices, ScriptStep } from './recording';
 
 export const EXPORT_FORMATS = ['16:9', '1:1', '9:16'] as const;
 /** What an export makes: the project's own output size, or a preset. */
@@ -89,6 +90,8 @@ export interface PickerSetup {
   warning?: string;
   /** Cameras and mics are still being listed (DirectShow takes a moment): the bar says so. */
   listingDevices?: boolean;
+  /** The script the take records with: the project's (`script` in cuttle.json), or what was typed for it since. */
+  script: ScriptStep[];
 }
 
 /** What the HUD shows. */
@@ -347,6 +350,21 @@ export const REQUESTS = {
   'picker:cancel': z.undefined(),
   'picker:claude-folder': z.undefined(),
   'picker:retry': z.undefined(),
+  /** The script as typed so far (a step being written may have no title yet). */
+  'picker:script': z
+    .array(
+      z.strictObject({
+        id: z.string().regex(ID_PATTERN),
+        title: z.string().max(STEP_TITLE_MAX),
+        note: z.string().max(STEP_NOTE_MAX).optional(),
+      }),
+    )
+    .max(SCRIPT_MAX_STEPS),
+  // prompter
+  'prompter:next': z.undefined(),
+  'prompter:previous': z.undefined(),
+  /** The height its content needs (DIP, its margins included): the window takes it. */
+  'prompter:size': z.strictObject({ height: z.number().finite().positive().max(4000) }),
   // HUD
   'hud:stop': z.undefined(),
   'hud:marker': z.undefined(),
@@ -508,6 +526,10 @@ export interface Responses {
   'picker:cancel': void;
   'picker:claude-folder': string | undefined;
   'picker:retry': void;
+  'picker:script': void;
+  'prompter:next': void;
+  'prompter:previous': void;
+  'prompter:size': void;
   'hud:stop': void;
   'hud:marker': void;
   'hud:retake': void;
@@ -602,6 +624,9 @@ export interface Events {
   'picker:devices': Pick<PickerSetup, 'cameras' | 'mics' | 'choices'>;
   'picker:active': { display: number };
   'picker:choices': RecordChoices;
+  /** The script, changed in another display's picker. */
+  'picker:script': ScriptStep[];
+  'prompter:state': PrompterState;
   /** `restart`: counting down again after a restart (the take before is kept). */
   'countdown:tick': { seconds: number; restart?: boolean };
   'hud:state': HudState;

@@ -297,9 +297,18 @@ export function timelineModel(project: CuttleProject, spans: readonly SceneSpan[
     },
     ...(project.music && { music: { title: motionName(project.music.src), src: project.music.src, enabled: project.music.enabled } }),
     markers: markers
-      .flatMap((marker) => outputTimesOf(spans, marker.t).map((t) => ({ t, source: marker.t, kind: marker.kind, ...(marker.label !== undefined && { label: marker.label }) })))
+      .flatMap((marker) => {
+        const label = marker.kind === 'step' ? stepName(project, marker.label) : marker.label;
+        return outputTimesOf(spans, marker.t).map((t) => ({ t, source: marker.t, kind: marker.kind, ...(label !== undefined && { label }) }));
+      })
       .sort((a, b) => a.t - b.t),
   };
+}
+
+/** A step marker's name: the step's number and title in the script ("2 · Open the settings"), else its id. */
+function stepName(project: CuttleProject, id: string | undefined): string | undefined {
+  const index = project.script.findIndex((step) => step.id === id);
+  return index < 0 ? id : `${index + 1} · ${project.script[index]!.title}`;
 }
 
 /** Pins closer than `minGap` output seconds that are tool calls merge into one pin with a count. */
@@ -316,6 +325,7 @@ export function pinGroupName(group: PinGroup): string {
   if (group.kind === 'answer') return 'Answer';
   if (group.kind === 'manual') return first.label ?? 'Marker';
   if (group.kind === 'retake') return 'Retake';
+  if (group.kind === 'step') return first.label ?? 'Step';
   if (group.pins.length === 1) return first.label ?? 'Tool';
   const tools = new Set(group.pins.map((pin) => pin.label ?? 'Tool'));
   return tools.size === 1 ? `${first.label ?? 'Tool'} ×${group.pins.length}` : `${group.pins.length} tool calls`;

@@ -1,5 +1,7 @@
 // Joining the segments of a paused take into its tracks. The screen's are copied end to end by the
-// concat demuxer (lossless), or re-encoded when a segment's size changed (a display mode change).
+// concat demuxer (lossless), each cut where its segment ends (at a pause, the frames written while
+// the capture stopped are left out), or re-encoded when a segment's size changed (a display mode
+// change).
 // The mic's and the webcam's are lined up with their screen segment one by one: each starts as far
 // after its screen segment as it did when recorded and lasts exactly as long, so the tracks stay
 // in sync however many pauses there were (AAC joined as it is drifts ~23 ms per pause).
@@ -28,11 +30,18 @@ export function renameWhenFree(from: string, to: string): void {
 }
 
 const AUDIO_RATE = 48_000;
-const FPS = 30;
+/** The frame rate segments are lined up at (the capture's). */
+export const FPS = 30;
+const seconds = (value: number) => value.toFixed(6);
 
-/** The concat demuxer's list file: one line per file, single quotes escaped. */
-export function concatList(files: readonly string[]): string {
-  return files.map((file) => `file '${file.replaceAll('\\', '/').replaceAll("'", "'\\''")}'\n`).join('');
+/** The concat demuxer's list file: one line per file, single quotes escaped, each cut at its `outpoint` (seconds) where it has one. */
+export function concatList(files: readonly string[], outpoints: readonly (number | undefined)[] = []): string {
+  return files
+    .map((file, k) => {
+      const outpoint = outpoints[k];
+      return `file '${file.replaceAll('\\', '/').replaceAll("'", "'\\''")}'\n${outpoint !== undefined ? `outpoint ${seconds(outpoint)}\n` : ''}`;
+    })
+    .join('');
 }
 
 /** The screen's segments copied end to end into `out` (all the same size). */
@@ -40,15 +49,14 @@ export function screenCopyArgs(list: string, out: string): string[] {
   return ['-f', 'concat', '-safe', '0', '-i', list, '-map', '0:v:0', '-c', 'copy', '-movflags', '+faststart', '-y', out];
 }
 
-/** The screen's segments re-encoded to the first one's size (a segment's size changed while paused). */
-export function screenEncodeArgs(files: readonly string[], size: { width: number; height: number }, out: string): string[] {
+/** The screen's segments re-encoded to the first one's size (a segment's size changed while paused), each cut to its `durations` (seconds) where it has one. */
+export function screenEncodeArgs(files: readonly string[], size: { width: number; height: number }, out: string, durations: readonly (number | undefined)[] = []): string[] {
   const { width, height } = size;
-  const chains = files.map((_, k) => `[${k}:v]scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=${FPS}[v${k}]`);
+  const cut = (k: number) => (durations[k] !== undefined ? `,trim=duration=${seconds(durations[k])},setpts=PTS-STARTPTS` : '');
+  const chains = files.map((_, k) => `[${k}:v]scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=${FPS}${cut(k)}[v${k}]`);
   const graph = `${chains.join(';')};${files.map((_, k) => `[v${k}]`).join('')}concat=n=${files.length}:v=1:a=0[out]`;
   return [...files.flatMap((file) => ['-i', file]), '-filter_complex', graph, '-map', '[out]', ...VIDEO_CODEC, '-movflags', '+faststart', '-y', out];
 }
-
-const seconds = (value: number) => value.toFixed(6);
 
 /**
  * A track's segments lined up with the screen's, by the stamps in segments.json (the time of each
@@ -131,12 +139,13 @@ export async function joinSegments(dir: string, segments: readonly Segment[], fi
   const first = { width: sizes[0]?.width ?? 0, height: sizes[0]?.height ?? 0 };
   const temp = (file: string) => join(dir, `${file}.joining.${file.endsWith('.m4a') ? 'm4a' : 'mp4'}`);
   const same = sizes.every((size) => size.width === first.width && size.height === first.height);
+  const durations = segments.map((segment) => segment.duration);
   if (same) {
     const list = join(dir, 'segments.txt');
-    writeFileSync(list, concatList(screens));
+    writeFileSync(list, concatList(screens, durations));
     await runFfmpeg(screenCopyArgs(list, temp(files.screen)));
   } else {
-    await runFfmpeg(screenEncodeArgs(screens, first, temp(files.screen)));
+    await runFfmpeg(screenEncodeArgs(screens, first, temp(files.screen), durations));
   }
   renameWhenFree(temp(files.screen), join(dir, files.screen));
   const has = { webcam: segments.some((segment) => segment.webcam), mic: segments.some((segment) => segment.mic) };

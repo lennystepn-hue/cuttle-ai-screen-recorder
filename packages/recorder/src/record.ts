@@ -9,7 +9,7 @@ import { EventsWriter } from './events';
 import { spawnCapture, type CaptureProcess } from './ffmpeg';
 import { captureHelper, helperArgs, helperInput } from './mac-capture';
 import { startInput, type InputSource } from './input';
-import { joinSegments, mediaInfo, renameWhenFree } from './join';
+import { FPS as JOIN_FPS, joinSegments, mediaInfo, renameWhenFree } from './join';
 import { areaGeometry, checkDevice, deviceClock, micInput, micLatency, platformFor, resolveArea, screenFilter, screenInput, screenLatency, webcamInput, type CameraMode, type Platform, type ScreenArea } from './sources';
 import type { Bounds, RawInput, RecordOptions, Recording, RecorderEvent, StopOptions, StopReason, Take } from './types';
 
@@ -458,13 +458,18 @@ async function recordTake({ options, control, platform, area, cameraMode, projec
         reason = next;
         break;
       }
-      // Pause: every track finishes its file; the take's time stands still.
+      // Pause: every track finishes its file; the take's time stands still. The piece ends where
+      // the pause was asked for: the frames the tracks write while they stop (half a second and
+      // more) are cut off when the pieces are joined.
+      const pausedAt = now();
       capturing = false;
       clearTimeout(claudeTimer);
       await Promise.all(all(tracks).map((capture) => capture.stop()));
       running = false;
       const segment = segments.at(-1)!;
-      segment.duration = await lengthOf(segment.screen.file, now() - segment.screen.start);
+      // in whole frames, so the joined screen is exactly as long as its pieces
+      const asked = Math.floor((pausedAt - segment.screen.start) * JOIN_FPS) / JOIN_FPS;
+      segment.duration = Math.min(await lengthOf(segment.screen.file, asked), asked);
       if (!paused) {
         // the first pause: the first segment's files get their number too
         paused = true;

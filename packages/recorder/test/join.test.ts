@@ -96,5 +96,21 @@ describe('joining a paused take', () => {
 
   it('writes a concat list that survives quotes and backslashes in paths', () => {
     expect(concatList(["C:\\takes\\it's\\screen.1.mp4", '/x/screen.2.mp4'])).toBe("file 'C:/takes/it'\\''s/screen.1.mp4'\nfile '/x/screen.2.mp4'\n");
+    expect(concatList(['/x/screen.1.mp4', '/x/screen.2.mp4'], [1.5, undefined])).toBe("file '/x/screen.1.mp4'\noutpoint 1.500000\nfile '/x/screen.2.mp4'\n");
   });
+
+  it('cuts each screen piece where its segment ends: the frames written while a pause stopped the capture are left out', async () => {
+    const dir = temp();
+    // the first piece's file runs 0.5 s past its pause (2 s): its flash at 2.2 s must not be in the take
+    await Promise.all([screen(join(dir, 'screen.1.mp4'), 2.5, 2.2), screen(join(dir, 'screen.2.mp4'), 1.5, 0.5)]);
+    const segments: Segment[] = [
+      { screen: { file: 'screen.1.mp4', start: 10 }, duration: 2 },
+      { screen: { file: 'screen.2.mp4', start: 20 }, duration: 1.5 },
+    ];
+    await joinSegments(dir, segments, { screen: 'screen.mp4', webcam: 'webcam.mp4', mic: 'mic.m4a' });
+    expect((await mediaInfo(join(dir, 'screen.mp4'), 'v')).seconds).toBeCloseTo(3.5, 1);
+    const seen = await flashes(join(dir, 'screen.mp4'));
+    expect(seen).toHaveLength(1);
+    expect(seen[0]).toBeCloseTo(2.5, 1);
+  }, 60_000);
 });

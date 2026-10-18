@@ -6,6 +6,7 @@ import type { Command } from '../../shared/document';
 import { formatDuration, formatSource, formatTime, plainIssue } from '../../shared/format';
 import type { MediaState } from '../../shared/ipc';
 import { bridge } from '../bridge';
+import { shortcut } from '../keys';
 import {
   ChevronIcon,
   CloseIcon,
@@ -150,7 +151,7 @@ function TitleBar() {
               <ChevronIcon size={13} />
             </button>
           </div>
-          <button className="primary" onClick={openExport} disabled={(store.get().doc?.project.scenes.length ?? 0) === 0} title={(store.get().doc?.project.scenes.length ?? 0) === 0 ? 'Nothing to export yet: the project has no scenes' : 'Export (Ctrl+E)'}>
+          <button className="primary" onClick={openExport} disabled={(store.get().doc?.project.scenes.length ?? 0) === 0} title={(store.get().doc?.project.scenes.length ?? 0) === 0 ? 'Nothing to export yet: the project has no scenes' : `Export (${shortcut('Ctrl+E')})`}>
             <ExportIcon size={14} />
             Export
           </button>
@@ -166,10 +167,10 @@ function History() {
   const redoLabel = useStore(store, (state) => (state.doc?.issues ? undefined : state.doc?.redoLabel));
   return (
     <div className="seg icons" role="group" aria-label="History">
-      <button onClick={undo} disabled={!undoLabel} title={undoLabel ? `Undo ${undoLabel} (Ctrl+Z)` : 'Nothing to undo'} aria-label={undoLabel ? `Undo ${undoLabel}` : 'Undo'} data-testid="undo">
+      <button onClick={undo} disabled={!undoLabel} title={undoLabel ? `Undo ${undoLabel} (${shortcut('Ctrl+Z')})` : 'Nothing to undo'} aria-label={undoLabel ? `Undo ${undoLabel}` : 'Undo'} data-testid="undo">
         <UndoIcon size={14} />
       </button>
-      <button onClick={redo} disabled={!redoLabel} title={redoLabel ? `Redo ${redoLabel} (Ctrl+Shift+Z)` : 'Nothing to redo'} aria-label={redoLabel ? `Redo ${redoLabel}` : 'Redo'} data-testid="redo">
+      <button onClick={redo} disabled={!redoLabel} title={redoLabel ? `Redo ${redoLabel} (${shortcut('Ctrl+Shift+Z')})` : 'Nothing to redo'} aria-label={redoLabel ? `Redo ${redoLabel}` : 'Redo'} data-testid="redo">
         <RedoIcon size={14} />
       </button>
     </div>
@@ -258,7 +259,7 @@ function ExportChip() {
   if (exporting) {
     const percent = progress ? Math.round((progress.done / Math.max(1, progress.total)) * 100) : 0;
     return (
-      <button className="chip-status" onClick={openExport} title="Show the export (Ctrl+E)">
+      <button className="chip-status" onClick={openExport} title={`Show the export (${shortcut('Ctrl+E')})`}>
         Exporting {progress ? targetName(progress.format, output) : ''} · {percent}%
         <span className="bar">
           <i style={{ width: `${percent}%` }} />
@@ -346,7 +347,7 @@ function Tools() {
         );
       })}
       <div className="grow" />
-      <button onClick={openMenu} disabled={!ready} title="Every command and its keys (Ctrl+K)" aria-label="Commands" data-testid="open-menu">
+      <button onClick={openMenu} disabled={!ready} title={`Every command and its keys (${shortcut('Ctrl+K')})`} aria-label="Commands" data-testid="open-menu">
         <KeysIcon size={17} />
       </button>
     </nav>

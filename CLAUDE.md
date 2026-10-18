@@ -22,6 +22,11 @@ Cuttle runs on **Windows and macOS**. A change made on one has to keep working o
 - **Cuttle's windows in a take**: Windows leaves out content-protected windows; macOS leaves out
   the windows of `hideWindowsOf` (the app's process) through the ScreenCaptureKit helper. A new
   window that must not show in takes needs content protection and to belong to the app's process.
+- **A window take**: macOS's helper takes the window by itself (`--window`, ScreenCaptureKit), so
+  what lies over it or is done elsewhere is not in the take, and `window-gate.ts` logs only the input
+  done in it (none while another window is in front, no popups, the origin following the window).
+  Windows still records the screen where the window is, so whatever covers it shows: Windows'
+  counterpart would be Windows.Graphics.Capture.
 - **Windows of the app**: title bar buttons sit on the right on Windows, the traffic lights on the
   left on macOS (`titleBar()` in `windows.ts`, `:root[data-platform='darwin']` in CSS). macOS opens
   an app's windows behind the active app: show what the person asked for with `bringToFront()`.

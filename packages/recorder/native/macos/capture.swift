@@ -3,8 +3,10 @@
 // ffmpeg reads the frames (rawvideo) and does the rest, as with the other platforms' captures.
 //
 //   cuttle-capture --display <CGDirectDisplayID> [--crop x,y,w,h] [--fps 30] [--cursor] [--exclude-pid <pid>]...
+//   cuttle-capture --display <CGDirectDisplayID> --window <CGWindowID> --size w,h [--fps 30] [--cursor]
 //
-// The crop is in the display's backing pixels. ScreenCaptureKit delivers a frame only when the screen
+// The crop is in the display's backing pixels. With --window the window itself is captured, at
+// --size pixels: what lies over it, and what is done elsewhere meanwhile, is not in the take. ScreenCaptureKit delivers a frame only when the screen
 // changes; the last one is written again on every tick, so ffmpeg gets a constant frame rate. Exits when
 // ffmpeg closes the pipe; exit code 3 when screen recording is not allowed, 2 for other failures.
 //
@@ -40,6 +42,8 @@ struct Options {
   var cursor = false
   var excluded: Set<pid_t> = []
   var verbose = false
+  var window: CGWindowID?
+  var size: CGSize?
 }
 
 func parse() -> Options {
@@ -52,6 +56,11 @@ func parse() -> Options {
     case "--cursor": options.cursor = true
     case "--verbose": options.verbose = true
     case "--exclude-pid": options.excluded.insert(required(args.next().flatMap(Int32.init), "--exclude-pid needs a process id"))
+    case "--window": options.window = required(args.next().flatMap(UInt32.init), "--window needs a window id")
+    case "--size":
+      let parts = (args.next() ?? "").split(separator: ",").compactMap { Double($0) }
+      guard parts.count == 2, parts[0] >= 2, parts[1] >= 2 else { fail(2, "--size needs w,h") }
+      options.size = CGSize(width: parts[0], height: parts[1])
     case "--crop":
       let parts = (args.next() ?? "").split(separator: ",").compactMap { Double($0) }
       guard parts.count == 4 else { fail(2, "--crop needs x,y,w,h") }
@@ -59,6 +68,7 @@ func parse() -> Options {
     default: fail(2, "unknown argument \(arg)")
     }
   }
+  if options.window != nil && options.size == nil { fail(2, "--window needs --size") }
   return options
 }
 
@@ -192,15 +202,27 @@ Task {
     let pixelHeight = mode?.pixelHeight ?? display.height
     let scale = Double(pixelWidth) / Double(display.width)
     let excluded = content.applications.filter { options.excluded.contains($0.processID) }
-    let filter = SCContentFilter(display: display, excludingApplications: excluded, exceptingWindows: [])
-
     let config = SCStreamConfiguration()
-    let crop = options.crop ?? CGRect(x: 0, y: 0, width: pixelWidth, height: pixelHeight)
-    if options.crop != nil {
-      config.sourceRect = CGRect(x: crop.minX / scale, y: crop.minY / scale, width: crop.width / scale, height: crop.height / scale)
+    let filter: SCContentFilter
+    if let id = options.window, let size = options.size {
+      // the window by itself, wherever it is and whatever lies over it, without its shadow
+      guard let window = content.windows.first(where: { $0.windowID == id }) else { fail(2, "there is no window \(id) (closed, or on another desktop)") }
+      filter = SCContentFilter(desktopIndependentWindow: window)
+      config.width = Int(size.width)
+      config.height = Int(size.height)
+      if #available(macOS 14.0, *) {
+        config.ignoreShadowsSingleWindow = true
+        config.preservesAspectRatio = true
+      }
+    } else {
+      filter = SCContentFilter(display: display, excludingApplications: excluded, exceptingWindows: [])
+      let crop = options.crop ?? CGRect(x: 0, y: 0, width: pixelWidth, height: pixelHeight)
+      if options.crop != nil {
+        config.sourceRect = CGRect(x: crop.minX / scale, y: crop.minY / scale, width: crop.width / scale, height: crop.height / scale)
+      }
+      config.width = Int(crop.width)
+      config.height = Int(crop.height)
     }
-    config.width = Int(crop.width)
-    config.height = Int(crop.height)
     config.pixelFormat = kCVPixelFormatType_32BGRA
     config.colorSpaceName = CGColorSpace.sRGB
     config.minimumFrameInterval = CMTime(value: 1, timescale: CMTimeScale(options.fps))
@@ -212,7 +234,7 @@ Task {
     let stream = SCStream(filter: filter, configuration: config, delegate: frames)
     try stream.addStreamOutput(frames, type: .screen, sampleHandlerQueue: DispatchQueue(label: "cuttle.frames"))
     try await stream.startCapture()
-    say("capturing \(config.width)x\(config.height), leaving out \(excluded.map(\.applicationName))")
+    say(options.window.map { "capturing window \($0) at \(config.width)x\(config.height)" } ?? "capturing \(config.width)x\(config.height), leaving out \(excluded.map(\.applicationName))")
 
     let out = FileHandle.standardOutput.fileDescriptor
     let timer = DispatchSource.makeTimerSource(queue: DispatchQueue(label: "cuttle.ticks"))

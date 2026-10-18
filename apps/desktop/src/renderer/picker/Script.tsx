@@ -5,6 +5,7 @@
 import { useEffect, useRef, type ClipboardEvent, type KeyboardEvent } from 'react';
 import { SCRIPT_MAX_STEPS, STEP_NOTE_MAX, STEP_TITLE_MAX } from '@cuttle/project';
 import { stepsFromText, type ScriptStep } from '../../shared/recording';
+import { hotkey } from '../keys';
 
 /** An id no step of `steps` has: the next `step<n>` (the recording makes it unique in the project). */
 function freeId(steps: readonly ScriptStep[]): string {
@@ -111,7 +112,7 @@ export function ScriptPanel({ steps, onChange, onClose, place }: { steps: Script
     >
       <div className="script-head">
         <b>Script</b>
-        <span>The prompter shows it while you record, never in the video. Ctrl+Shift+Alt+N goes to the next step.</span>
+        <span>The prompter shows it while you record, never in the video. {hotkey('Ctrl+Shift+Alt+N')} goes to the next step.</span>
         <button type="button" className="script-close" onClick={onClose} aria-label="Close the script" title="Close (Esc)">
           <svg width="12" height="12" viewBox="0 0 12 12" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" aria-hidden="true">
             <path d="M2.5 2.5l7 7M9.5 2.5l-7 7" />

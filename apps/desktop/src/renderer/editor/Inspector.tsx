@@ -78,6 +78,7 @@ import {
 } from '../icons';
 import { bridge } from '../bridge';
 import { Select as StyledSelect } from '../Select';
+import { shortcut } from '../keys';
 import { chooseImage, cutShownAt, deleteSelection, duplicateSelection, LIST_OF, playheadPlace, reveal, SPEEDS } from './actions';
 import { edit, preview } from './doc';
 import { currentPlayer, engineAssets, select, setTool, store, type LookSection, type Selection, type Tool } from './session';
@@ -614,7 +615,7 @@ function Head({ icon, color, name, copies = true }: { icon: ReactNode; color: st
         {name}
       </span>
       {copies && (
-        <button type="button" className="head-action" onClick={duplicateSelection} title="Duplicate (Ctrl+D)" aria-label="Duplicate" data-testid="duplicate">
+        <button type="button" className="head-action" onClick={duplicateSelection} title={`Duplicate (${shortcut('Ctrl+D')})`} aria-label="Duplicate" data-testid="duplicate">
           <CopyIcon size={15} />
         </button>
       )}
@@ -653,7 +654,7 @@ const HINTS: Record<Tool, ReactNode> = {
         <kbd>S</kbd> splits at the playhead, <kbd>R</kbd> speeds a clip up, <kbd>Del</kbd> deletes.
       </li>
       <li>
-        <kbd>Z</kbd> zoom, <kbd>M</kbd> mask, <kbd>T</kbd> caption; <kbd>Ctrl+K</kbd> finds any command.
+        <kbd>Z</kbd> zoom, <kbd>M</kbd> mask, <kbd>T</kbd> caption; <kbd>{shortcut('Ctrl+K')}</kbd> finds any command.
       </li>
     </ul>
   ),

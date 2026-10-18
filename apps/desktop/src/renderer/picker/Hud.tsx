@@ -7,6 +7,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { HudState } from '../../shared/ipc';
 import { bridge } from '../bridge';
 import { Mark, WarningIcon } from '../icons';
+import { hotkey } from '../keys';
 
 const clock = (seconds: number) => `${Math.floor(seconds / 60)}:${String(Math.floor(seconds % 60)).padStart(2, '0')}`;
 /** How long Restart must be held. */
@@ -72,7 +73,7 @@ export function Hud() {
         <button
           className="retake"
           onClick={() => void bridge.invoke('hud:retake')}
-          title="A slip? Press it, then say or do the bit again: Cuttle cuts back to the pause before (Ctrl+Shift+Alt+X)"
+          title={`A slip? Press it, then say or do the bit again: Cuttle cuts back to the pause before (${hotkey('Ctrl+Shift+Alt+X')})`}
           aria-label="Mark a slip: cut back to the pause before"
           disabled={state.phase !== 'recording'}
           data-testid="hud-retake"
@@ -86,7 +87,7 @@ export function Hud() {
         <button
           className={`marker${flash ? ' flash' : ''}`}
           onClick={() => void bridge.invoke('hud:marker')}
-          title={`Set a marker (Ctrl+Shift+Alt+M)${state.markers > 0 ? `: ${state.markers} so far` : ''}`}
+          title={`Set a marker (${hotkey('Ctrl+Shift+Alt+M')})${state.markers > 0 ? `: ${state.markers} so far` : ''}`}
           aria-label="Set a marker"
           disabled={!live}
         >
@@ -98,7 +99,7 @@ export function Hud() {
         <button
           className={`pause${paused ? ' paused' : ''}`}
           onClick={() => void bridge.invoke(paused ? 'hud:resume' : 'hud:pause')}
-          title={paused ? 'Resume (Ctrl+Shift+Alt+P)' : 'Pause: nothing is recorded until you resume (Ctrl+Shift+Alt+P)'}
+          title={paused ? `Resume (${hotkey('Ctrl+Shift+Alt+P')})` : `Pause: nothing is recorded until you resume (${hotkey('Ctrl+Shift+Alt+P')})`}
           aria-label={paused ? 'Resume the recording' : 'Pause the recording'}
           aria-pressed={paused}
           disabled={!live}
@@ -115,7 +116,7 @@ export function Hud() {
             </svg>
           )}
         </button>
-        <button className="stop" onClick={() => void bridge.invoke('hud:stop')} title="Stop (Ctrl+Shift+Alt+S)" aria-label="Stop the recording" data-testid="hud-stop" disabled={state.phase === 'stopping'}>
+        <button className="stop" onClick={() => void bridge.invoke('hud:stop')} title={`Stop (${hotkey('Ctrl+Shift+Alt+S')})`} aria-label="Stop the recording" data-testid="hud-stop" disabled={state.phase === 'stopping'}>
           <i />
         </button>
       </div>

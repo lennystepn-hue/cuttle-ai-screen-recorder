@@ -8,6 +8,7 @@ import type { Command } from '../../shared/document';
 import { formatTime } from '../../shared/format';
 import { outputTimesOf } from '../../shared/timeline-model';
 import { bridge } from '../bridge';
+import { shortcut } from '../keys';
 import { edit } from './doc';
 import { currentPlayer, store } from './session';
 import { useStore } from './store';
@@ -163,7 +164,7 @@ export function TranscriptPanel() {
           ref={find}
           type="search"
           value={query}
-          placeholder="Find a word (Ctrl+F)"
+          placeholder={`Find a word (${shortcut('Ctrl+F')})`}
           aria-label="Find a word"
           onChange={(event) => setQuery(event.target.value)}
           onKeyDown={(event) => {

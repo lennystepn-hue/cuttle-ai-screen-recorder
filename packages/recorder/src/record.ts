@@ -12,6 +12,7 @@ import { startInput, type InputSource } from './input';
 import { levelMeter, wholeSamples } from './level';
 import { FPS as JOIN_FPS, joinSegments, mediaInfo, renameWhenFree } from './join';
 import { areaGeometry, checkDevice, deviceClock, micInput, micLatency, platformFor, resolveArea, screenFilter, screenInput, screenLatency, webcamInput, type CameraMode, type Platform, type ScreenArea } from './sources';
+import { WINDOW_GATE_MS, windowGate } from './window-gate';
 import type { Bounds, RawInput, RecordOptions, Recording, RecorderEvent, StopOptions, StopReason, Take } from './types';
 
 const DEFAULT_COUNTDOWN_SECONDS = 3;
@@ -330,6 +331,20 @@ async function recordTake({ options, control, platform, area, cameraMode, projec
   // macOS: the camera's and the mic's starts are their capture times on the host clock, mapped to the wall clock
   const ownStamps = deviceClock(platform);
   const toWall = ownStamps ? (await import('./darwin').then(({ loadDarwin }) => loadDarwin())).hostToWall : (seconds: number) => seconds;
+  // macOS, a window take through the helper: the window by itself, and only the input done in it
+  const gate = helper && area.window !== undefined ? windowGate(area.window, { ...origin, ...size }, (corner) => writer.moveOrigin(corner)) : undefined;
+  if (gate) {
+    const mac = await (await import('./darwin')).loadDarwin();
+    const look = () => {
+      try {
+        gate.look(mac.foreground());
+      } catch {
+        // the next look tries again
+      }
+    };
+    look();
+    timer(look, WINDOW_GATE_MS, true);
+  }
   if (platform === 'macos' && !helper && (options.hideWindowsOf?.length ?? 0) > 0) {
     reporter.warn("Cuttle's own windows show in this take: the capture helper is missing (it is built by pnpm install with Xcode's command line tools)");
   }
@@ -432,6 +447,8 @@ async function recordTake({ options, control, platform, area, cameraMode, projec
         // Nothing while paused, nothing after a stop was asked for, nothing over the app's own
         // controls: no take shows the pointer travelling to Stop or its click.
         if (!capturing || control.reason !== undefined || inDeadZone(raw, control.deadZones)) return;
+        // a window take: nothing done in another window, nothing that opens over the screen
+        if (gate && !gate.allows(raw)) return;
         // the facts about the screen (the content area, a window opening) are no one's input
         if (raw.type !== 'area' && raw.type !== 'window') lastInput = raw.time;
         writer.push(raw);

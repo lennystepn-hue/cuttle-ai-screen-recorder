@@ -33,6 +33,12 @@ export const TEST_DEVICES: Devices = {
 export interface ScreenArea {
   monitor: Monitor;
   crop?: Bounds;
+  /**
+   * The window a window take shows (`WindowInfo.id`). macOS's capture helper takes that window by
+   * itself, at the crop's size: what lies over it is not in the take. Elsewhere the crop is the screen
+   * where the window is.
+   */
+  window?: number;
 }
 
 /** The area's size and its top-left corner on the desktop (where events.jsonl's origin lies). */
@@ -81,7 +87,7 @@ export function resolveArea(source: CaptureSource, devices: Devices): ScreenArea
       const bottom = Math.min(window.bounds.y + window.bounds.height, bounds.y + bounds.height) - bounds.y;
       const crop = { x: left, y: top, width: even(right - left), height: even(bottom - top) };
       if (crop.width < 2 || crop.height < 2) throw new RecorderError('invalid-options', `window "${window.title}" is not visible on a monitor`);
-      return { monitor, crop: fullOrCrop(monitor, crop) };
+      return { monitor, crop: fullOrCrop(monitor, crop), window: window.id };
     }
   }
 }

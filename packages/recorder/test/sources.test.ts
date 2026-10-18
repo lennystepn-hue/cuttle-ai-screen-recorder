@@ -68,7 +68,8 @@ describe('resolveArea', () => {
 
   it('captures a window as the region of its bounds', () => {
     const area = resolveArea({ kind: 'window', title: 'Claude Code - demo' }, devices);
-    expect(area).toEqual({ monitor: devices.monitors[1], crop: { x: 40, y: 91, width: 800, height: 500 } });
+    // the window's id too: macOS's helper takes the window by itself
+    expect(area).toEqual({ monitor: devices.monitors[1], crop: { x: 40, y: 91, width: 800, height: 500 }, window: 11 });
     expect(areaGeometry(area).origin).toEqual({ x: 2600, y: 600 });
   });
 
@@ -85,7 +86,7 @@ describe('resolveArea', () => {
   });
 
   it('finds a window by its id, whatever its title, and says when it is gone', () => {
-    expect(resolveArea({ kind: 'window', id: 14 }, devices)).toEqual(resolveArea({ kind: 'window', title: 'Browser - docs' }, devices));
+    expect(resolveArea({ kind: 'window', id: 14 }, devices)).toEqual(resolveArea({ kind: 'window', title: 'Browser - mail' }, devices));
     expect(() => resolveArea({ kind: 'window', id: 99 }, devices)).toThrow(expect.objectContaining({ code: 'device-not-found', message: 'the window 99 is gone (closed, minimized or on another desktop)' }));
   });
 

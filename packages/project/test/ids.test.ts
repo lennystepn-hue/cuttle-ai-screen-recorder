@@ -10,6 +10,9 @@ describe('usedIds', () => {
       texts: [{ id: 7 }],
     };
     expect([...usedIds(raw)]).toEqual(['s1', 'answer']);
+    expect([...usedIds({ ...raw, sounds: [{ id: 'a1' }, { sound: 'pop' }] })]).toEqual(['s1', 'answer', 'a1']);
+    // the script's steps (their ids are given when a take records with them)
+    expect([...usedIds({ ...raw, script: [{ id: 'step1', title: 'Go' }] })]).toEqual(['s1', 'answer', 'step1']);
     expect(usedIds({})).toEqual(new Set());
   });
 });
@@ -22,6 +25,7 @@ describe('newId', () => {
     expect(newId('zooms', taken)).toBe('z2');
     expect(newId('masks', taken)).toBe('m1');
     expect(newId('texts', taken)).toBe('t1');
-    expect(taken).toEqual(new Set(['s1', 's2', 's3', 's4', 'z1', 'z2', 'm1', 't1']));
+    expect(newId('sounds', taken)).toBe('a1');
+    expect(taken).toEqual(new Set(['s1', 's2', 's3', 's4', 'z1', 'z2', 'm1', 't1', 'a1']));
   });
 });

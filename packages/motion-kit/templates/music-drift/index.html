@@ -1,0 +1,87 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <!--
+      Drift: calm, wide and warm, for a walkthrough with a voice over it. Slow chords on strings and a
+      pad, a glassy arpeggio that drifts through a long delay, a soft pulse only where the video moves,
+      swells into the scene changes instead of hits. Change anything: it is a starting point.
+    -->
+    <script type="application/json" id="cuttle-params">
+      [
+        { "name": "key", "label": "Key", "type": "select", "default": "F", "options": ["C", "Db", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B"] },
+        { "name": "mode", "label": "Mode", "type": "select", "default": "lydian", "options": ["major", "lydian", "dorian", "minor"] },
+        { "name": "progression", "label": "Chords", "type": "text", "default": "I V vi IV" },
+        { "name": "bpm", "label": "Tempo (0: fitted to the cuts)", "type": "number", "default": 0, "min": 0, "max": 140 },
+        { "name": "pulse", "label": "A soft beat where the video moves", "type": "bool", "default": true },
+        { "name": "energies", "label": "Energy by scene (Intro=0, s4=2)", "type": "text", "default": "" }
+      ]
+    </script>
+  </head>
+  <body>
+    <script type="module">
+      import { song, kick, shaker, rim, sub, pad, strings, keys, fx, progression, voiceLead, sections, fitTempo, arp } from 'cuttle/sound';
+
+      cuttle.music((audio) => {
+        const { video, params } = audio;
+        const fitted = fitTempo(video, { min: 78, max: 92, snap: 2 });
+        const bpm = params.bpm > 0 ? params.bpm : fitted.bpm;
+        const s = song(audio, { bpm, offset: params.bpm > 0 ? 0 : fitted.offset, key: params.key, mode: params.mode, reverb: 3.6, brightness: 0.35, delay: 0.75 });
+        const chords = voiceLead(progression(params.key, params.mode, params.progression, 3), { low: 'C3', high: 'G4' });
+        const energy = Object.fromEntries(String(params.energies ?? '').split(',').map((pair) => pair.split('=').map((x) => x.trim())).filter(([k, v]) => k && v));
+        const parts = sections(video, { energy });
+        const energyAt = (t) => parts.find((part) => t >= part.start && t < part.end)?.energy ?? 2;
+
+        const bed = strings(s, { gain: 0.07, attack: 1.4, release: 2.2, cutoff: 1800 });
+        const air = pad(s, { wave: 'triangle', voices: 2, detune: 9, cutoff: 2600, attack: 1.8, release: 2.5, gain: 0.09, width: 1 });
+        const glass = keys(s, { type: 'glass', gain: 0.07, decay: 2.8, tremolo: 0 });
+        const low = sub(s, { gain: 0.32, attack: 0.4, release: 0.8 });
+        const soft = kick(s, { tone: 52, punch: 0.7, click: 0.1, drive: 0, gain: 0.55, decay: 0.5 });
+        const shake = shaker(s, { gain: 0.1 });
+        const knock = rim(s, { gain: 0.16 });
+
+        const kicks = [];
+        for (const { bar, t } of s.bars(-1, video.duration)) {
+          const notes = chords[((bar % chords.length) + chords.length) % chords.length];
+          const start = Math.max(0, t);
+          const e = energyAt(start);
+          bed.play(start, notes, s.bar, { velocity: 0.5 + 0.15 * e });
+          air.play(start, notes.map((n) => n + 12), s.bar, { velocity: 0.4 + 0.15 * e, brightness: 0.6 + 0.15 * e });
+          low.play(start, notes[0] - 12, s.bar * 0.98, { velocity: 0.6 + 0.1 * e });
+          // the glass arpeggio: eighths, one note left out now and then, wider as the energy rises
+          if (e >= 1) {
+            const line = arp(notes.map((n) => n + 24), { pattern: 'updown', octaves: e >= 2 ? 2 : 1 });
+            for (let i = 0; i < 8; i++) {
+              const at = s.time(bar, i / 2);
+              if (at < 0 || at >= video.duration || s.random() < 0.25) continue;
+              glass.play(at, line[i % line.length], s.beat, { velocity: 0.5 + 0.3 * s.random() });
+            }
+          }
+          if (params.pulse && e >= 2) {
+            for (let beat = 0; beat < 4; beat++) {
+              const bt = s.time(bar, beat);
+              if (bt < 0 || bt >= video.duration) continue;
+              if (beat % 2 === 0) {
+                soft.hit(bt, 0.7);
+                kicks.push(bt);
+              }
+              shake.hit(s.time(bar, beat + 0.5), 0.5);
+              if (e >= 3 && beat === 3) knock.hit(s.time(bar, beat + 0.75), 0.6);
+            }
+          }
+        }
+        s.duck(s.pads, kicks, { depth: 0.25, release: 0.4 });
+
+        // the scene changes: a swell into each, a soft sub under it, a chime where Claude answers
+        for (const cut of video.cuts.filter((c) => !c.jump)) {
+          const notes = chords[((Math.floor(s.barAt(cut.t)) % chords.length) + chords.length) % chords.length];
+          fx.swell(audio, cut.t, { length: 1.6, notes: notes.map((n) => n + 12), volume: 0.5 });
+          fx.subDrop(audio, cut.t, { length: 1.2, volume: 0.35 });
+        }
+        for (const marker of video.markers.filter((m) => m.kind === 'answer')) fx.chime(audio, marker.t, { volume: 0.4 });
+
+        return { bpm, key: `${params.key} ${params.mode}`, sections: parts.map((part) => ({ start: part.start, end: part.end, name: part.name, energy: part.energy })) };
+      });
+    </script>
+  </body>
+</html>

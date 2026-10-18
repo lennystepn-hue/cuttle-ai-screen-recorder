@@ -58,16 +58,19 @@ const FEEDER_DENIED = 3;
 /**
  * Starts one capture process. `name` labels its errors ("screen", "webcam", "mic"). With a `feeder`,
  * ffmpeg reads that process's output; the feeder ends with ffmpeg, and its own failure is the one reported.
+ * `onStdout` takes what ffmpeg writes to its stdout (the mic's samples), as it comes.
  */
-export function spawnCapture(name: string, args: readonly string[], feeder?: Feeder): CaptureProcess {
+export function spawnCapture(name: string, args: readonly string[], feeder?: Feeder, onStdout?: (chunk: Buffer) => void): CaptureProcess {
   const feed = feeder && spawn(feeder.command, [...feeder.args], { stdio: ['ignore', 'pipe', 'pipe'] });
   const feedTail: string[] = [];
   feed?.stderr?.setEncoding('utf8');
   feed?.stderr?.on('data', (chunk: string) => feedTail.push(...chunk.split(/\r?\n/).filter((line) => line.trim() !== '')));
   feed?.on('error', () => {}); // a feeder that cannot start ends its pipe: ffmpeg reports that
   const feedExit = feed && new Promise<number | null>((resolve) => feed.once('close', (code) => resolve(code)));
-  // stdin for "q", stderr for the log; a feeder's pipe as file descriptor 3
-  const child = spawn(ffmpegPath(), ['-hide_banner', ...args], { stdio: ['pipe', 'ignore', 'pipe', ...(feed ? [feed.stdout] : [])], windowsHide: true }) as ChildProcessByStdio<Writable, null, Readable>;
+  // stdin for "q", stdout for what the caller reads (else nothing), stderr for the log; a feeder's pipe as file descriptor 3
+  const child = spawn(ffmpegPath(), ['-hide_banner', ...args], { stdio: ['pipe', onStdout ? 'pipe' : 'ignore', 'pipe', ...(feed ? [feed.stdout] : [])], windowsHide: true }) as ChildProcessByStdio<Writable, Readable | null, Readable>;
+  // read as it comes: a full pipe would stall ffmpeg
+  if (onStdout) child.stdout?.on('data', onStdout);
   // ffmpeg holds the pipe now: this process lets go of it, so the feeder sees ffmpeg's end
   feed?.stdout?.destroy();
   const listeners: ((line: string) => void)[] = [];

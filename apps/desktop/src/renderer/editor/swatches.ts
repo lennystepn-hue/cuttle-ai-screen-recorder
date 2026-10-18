@@ -82,7 +82,7 @@ function render(gl: OffscreenCanvas, assets: EngineAssets, shot: Shot): void {
   const events: InputEvent[] = [{ t: 0, type: 'move', ...shot.at }];
   if (shot.shape) events.push({ t: 0, type: 'shape', shape: shot.shape });
   const state = createTimeline(parsed.project, { screenSize, cursor: createCursorTrack(events) }).frameAt(1);
-  const sources: FrameSources = { screens: new Map(), webcams: new Map(), stills: new Map() };
+  const sources: FrameSources = { screens: new Map(), webcams: new Map(), stills: new Map(), motion: new Map(), overlays: new Map() };
   for (const layer of state.layers) if (layer.kind === 'clip') sources.screens.set(layer.index, shot.screen);
   const renderer = createRenderer(gl, parsed.project, { assets, screenSize });
   try {

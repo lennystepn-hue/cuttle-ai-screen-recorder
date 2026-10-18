@@ -3,8 +3,13 @@ import { z } from 'zod';
 // The cuttle.json format version this build reads and writes.
 export const CURRENT_VERSION = 1;
 
-export const BACKGROUND_PRESETS = ['sunset-sky', 'aurora', 'mesh', 'solid', 'image'] as const;
-export const FRAME_STYLES = ['mac-dark', 'mac-light', 'browser-light', 'none'] as const;
+export const BACKGROUND_PRESETS = ['sunset-sky', 'aurora', 'mesh', 'solid', 'image', 'gradient', 'flow', 'bokeh', 'dots'] as const;
+/** The backgrounds drawn in colours of their own (`background.colors`): a gradient's, and the tints of the others. */
+export const COLOURED_BACKGROUNDS = ['gradient', 'mesh', 'flow', 'bokeh', 'dots'] as const;
+export const GRADIENT_KINDS = ['linear', 'radial'] as const;
+export const FRAME_STYLES = ['mac-dark', 'mac-light', 'browser-light', 'browser-dark', 'windows-light', 'windows-dark', 'terminal', 'iphone', 'android', 'none'] as const;
+/** The frames that are a device around the screen (a bezel, a camera), not a window with a title bar. */
+export const DEVICE_FRAMES = ['iphone', 'android'] as const;
 export const TEXT_STYLES = ['pill', 'lower-third', 'caption'] as const;
 export const CURSOR_STYLES = ['system', 'arrow-white', 'arrow-black', 'dot', 'ring', 'spotlight'] as const;
 export const CURSOR_SHAPES = ['arrow', 'text', 'pointer', 'wait', 'crosshair', 'move', 'not-allowed'] as const;
@@ -13,21 +18,27 @@ export const MASK_STYLES = ['fill', 'blur'] as const;
 export const TEXT_POSITIONS = ['top', 'center', 'bottom'] as const;
 /** How captions look: classic subtitles on a dark box, the spoken word in colour, or a few big words at a time. */
 export const CAPTION_STYLES = ['subtitle', 'karaoke', 'bold'] as const;
+/** The fonts a theme's headings may be in: the motion kit's display faces, and its text face. */
+export const THEME_FONTS = ['Archivo', 'Inter', 'Space Grotesk', 'Fraunces', 'Instrument Serif', 'Bebas Neue'] as const;
 export const STILL_MOTIONS = ['none', 'kenburns', 'scroll'] as const;
 export const WEBCAM_SHAPES = ['circle', 'rounded', 'squircle', 'square'] as const;
 export const WEBCAM_CORNERS = ['top-left', 'top-right', 'bottom-left', 'bottom-right'] as const;
 export const CLICK_EFFECTS = ['ripple', 'none'] as const;
 export const MOUSE_BUTTONS = ['left', 'right', 'middle'] as const;
 /**
- * What made an automatic item (`auto` on cuts, zooms, masks and a clip's crop). Editing an item by
- * hand drops its tag; a rerun replaces only tagged items of the kinds it makes.
+ * What made an automatic item (`auto` on cuts, zooms, masks, texts, overlays and a clip's crop).
+ * Editing an item by hand drops its tag; a rerun replaces only tagged items of the kinds it makes.
+ * `title`: a step's title from the script (a text, or an overlay of the step's motion template);
+ * `step`: a zoom on where a step of the script happens.
  */
-export const AUTO_KINDS = ['crop', 'privacy', 'notification', 'retake', 'filler', 'pause', 'length', 'typing', 'dialog', 'click', 'answer'] as const;
+export const AUTO_KINDS = ['crop', 'privacy', 'notification', 'retake', 'filler', 'pause', 'length', 'typing', 'dialog', 'click', 'answer', 'title', 'step'] as const;
+/** The motion templates a step's title may be drawn with, as an overlay over the step's start. */
+export const STEP_MOTIONS = ['lower-third', 'title'] as const;
 
 // z.number() already rejects Infinity and NaN in zod 4.
 const seconds = z.number().nonnegative();
 const positiveSeconds = z.number().positive();
-const hexColor = z.string().regex(/^#[0-9a-fA-F]{6}$/, 'expected a hex color like #0c0c0c');
+export const hexColor = z.string().regex(/^#[0-9a-fA-F]{6}$/, 'expected a hex color like #0c0c0c');
 
 export const RectSchema = z.tuple([z.number(), z.number(), z.number().positive(), z.number().positive()]);
 
@@ -60,11 +71,19 @@ const SourcesSchema = z.strictObject({
 
 // Cross-field checks live on the object they belong to, so zod reports them in the same pass
 // as every other issue (a root superRefine is skipped when any other issue exists).
-const BackgroundSchema = z
+export const BackgroundSchema = z
   .strictObject({
     preset: z.enum(BACKGROUND_PRESETS),
     color: hexColor.optional(),
     image: z.string().min(1).optional(),
+    /** The colours of a gradient (its stops, first to last) and the tints of mesh, flow, bokeh and dots; without them, their own. */
+    colors: z.array(hexColor).min(2).max(4).optional(),
+    /** A gradient's direction, as in CSS: 0 to the top, 90 to the right (default 135); and `radial`, from the centre out. */
+    angle: z.number().min(0).max(360).optional(),
+    kind: z.enum(GRADIENT_KINDS).optional(),
+    /** An image softened (0 sharp, 1 a wash of its colours: a wallpaper behind the window) and darkened (0 to 0.8). */
+    blur: z.number().min(0).max(1).optional(),
+    dim: z.number().min(0).max(0.8).optional(),
   })
   .superRefine((background, ctx) => {
     if (background.preset === 'solid' && background.color === undefined) {
@@ -72,6 +91,9 @@ const BackgroundSchema = z
     }
     if (background.preset === 'image' && background.image === undefined) {
       ctx.addIssue({ code: 'custom', message: 'the "image" background needs an "image" path', path: ['image'] });
+    }
+    if (background.preset === 'gradient' && background.colors === undefined) {
+      ctx.addIssue({ code: 'custom', message: 'the "gradient" background needs its "colors" (2 to 4)', path: ['colors'] });
     }
   });
 
@@ -116,6 +138,14 @@ const AudioSchema = z.strictObject({
   muteSpedUp: z.boolean().default(true),
   /** Play the cleaned-up mic (`sources.cleanMic`: less noise, even loudness) where there is one. */
   cleanup: z.boolean().default(true),
+  /** A key click for each key typed (the take's `keys` counts), where its clip is heard. */
+  typing: z.boolean().default(true),
+  /** The clicks' volume, 0 to 1. */
+  typingVolume: z.number().min(0).max(1).default(0.5),
+  /** The sounds (`sounds`) and the music page's effects. */
+  effects: z.boolean().default(true),
+  /** Their volume, 0 to 1. */
+  effectsVolume: z.number().min(0).max(1).default(0.8),
 });
 
 const TransitionSchema = z.strictObject({
@@ -125,6 +155,20 @@ const TransitionSchema = z.strictObject({
 
 // zod 4: .default() returns its value without parsing it; .prefault() parses it, so inner
 // defaults apply when a whole block is missing.
+/**
+ * A mark in a corner of the whole video: an image of the project (else the brand's logo), or a text
+ * (else the brand's name); off by default.
+ */
+const WatermarkSchema = z.strictObject({
+  enabled: z.boolean().default(false),
+  image: z.string().min(1).optional(),
+  text: z.string().max(80).optional(),
+  corner: z.enum(WEBCAM_CORNERS).default('bottom-right'),
+  /** Its height as a share of the output's short side. */
+  size: z.number().min(0.02).max(0.3).default(0.06),
+  opacity: z.number().min(0.1).max(1).default(0.7),
+});
+
 const LookSchema = z.strictObject({
   background: BackgroundSchema.default({ preset: 'sunset-sky' }),
   frame: FrameSchema.prefault({}),
@@ -132,6 +176,7 @@ const LookSchema = z.strictObject({
   webcam: WebcamSchema.prefault({}),
   audio: AudioSchema.prefault({}),
   transition: TransitionSchema.prefault({}),
+  watermark: WatermarkSchema.prefault({}),
 });
 
 // Scenes and overlays may carry an id (for editors: selection, undo; unique in the project) and a
@@ -144,10 +189,32 @@ const named = {
 
 const autoKind = z.enum(AUTO_KINDS).optional();
 
+/** A page (HTML, in the project) as a value its params may hold: text, a number, a switch, a colour, a path. */
+const ParamValue = z.union([z.string(), z.number(), z.boolean(), z.null()]);
+
+/**
+ * A page that takes the place of the crossfade into its scene (a fold, a wipe, a zoom through): it is
+ * given the outgoing and the incoming frame for each of its frames and draws the frame between them.
+ * It lasts `duration` seconds around the cut, half before and half after, also with crossfades off.
+ */
+const SceneTransitionSchema = z.strictObject({
+  /** The page: an HTML file in the project (`motion/fold/index.html`). */
+  src: z.string().min(1),
+  /** The values of the params the page declares. */
+  params: z.record(z.string(), ParamValue).default({}),
+  /** Let the page reach https: (off: only the project's files). */
+  network: z.boolean().default(false),
+  duration: z.number().positive().max(4).default(0.8),
+  enabled: z.boolean().default(true),
+});
+
+/** What every scene may have: an id, a label, and a page for the way into it. */
+const sceneFields = { ...named, transition: SceneTransitionSchema.optional() };
+
 const ClipSceneSchema = z
   .strictObject({
     type: z.literal('clip'),
-    ...named,
+    ...sceneFields,
     from: seconds,
     to: seconds,
     speed: z.number().positive().max(64).default(1),
@@ -159,7 +226,7 @@ const ClipSceneSchema = z
 
 const StillSceneSchema = z.strictObject({
   type: z.literal('still'),
-  ...named,
+  ...sceneFields,
   image: z.string().min(1),
   duration: positiveSeconds,
   motion: z.enum(STILL_MOTIONS).default('none'),
@@ -168,13 +235,41 @@ const StillSceneSchema = z.strictObject({
 
 const CardSceneSchema = z.strictObject({
   type: z.literal('card'),
-  ...named,
+  ...sceneFields,
   title: z.string().min(1),
   subtitle: z.string().optional(),
   duration: positiveSeconds,
 });
 
-const SceneSchema = z.discriminatedUnion('type', [ClipSceneSchema, StillSceneSchema, CardSceneSchema]);
+/** What a motion page gets: the page (a path in the project), its params, and whether it may reach the network. */
+const motionPage = {
+  /** The page: an HTML file in the project (`motion/intro/index.html`). */
+  src: z.string().min(1),
+  /** The values of the params the page declares. */
+  params: z.record(z.string(), ParamValue).default({}),
+  /** Let the page reach https: (off: only the project's files). */
+  network: z.boolean().default(false),
+  /**
+   * Motion blur, as a camera's: each frame is the average of `samples` moments while the shutter is
+   * open, `shutter` a share of the frame (0.5 is film's 180°). Off without it.
+   */
+  motionBlur: z
+    .strictObject({
+      samples: z.number().int().min(2).max(32).default(8),
+      shutter: z.number().positive().max(1).default(0.5),
+    })
+    .optional(),
+};
+
+/** A page Claude or the person wrote, rendered frame by frame as a scene (an intro, an end card, a 3D shot). */
+const MotionSceneSchema = z.strictObject({
+  type: z.literal('motion'),
+  ...sceneFields,
+  ...motionPage,
+  duration: positiveSeconds,
+});
+
+const SceneSchema = z.discriminatedUnion('type', [ClipSceneSchema, StillSceneSchema, CardSceneSchema, MotionSceneSchema]);
 
 /** A point on a zoom's path: from `at` (source seconds) the zoom shows `rect`. */
 const ZoomMoveSchema = z.strictObject({ at: seconds, rect: RectSchema });
@@ -223,6 +318,26 @@ const MaskSchema = z
   });
 
 /** The privacy guard's words: masked wherever the screen shows them (a name, an address). */
+/**
+ * The project's brand: what its motion pages read for titles, end cards, lower thirds and every
+ * colour (`--cuttle-accent`, `--cuttle-display`, `cuttle.theme.logo`). A brand kit sets it with a click.
+ */
+export const ThemeSchema = z.strictObject({
+  /** The product's name and address, for titles and end cards. */
+  name: z.string().max(80).optional(),
+  url: z.string().max(200).optional(),
+  /** The logo: an image in the project (`brand/logo.png`). */
+  logo: z.string().min(1).optional(),
+  /** The brand's colour (without one, the cursor's), the text's, and the tone pages draw their own background in (without one, the background's). */
+  accent: hexColor.optional(),
+  foreground: hexColor.default('#FFFFFF'),
+  background: hexColor.optional(),
+  /** The headings' font. */
+  font: z.enum(THEME_FONTS).default('Archivo'),
+  /** The brand kit it was set from, by name. */
+  kit: z.string().max(80).optional(),
+});
+
 const PrivacySchema = z.strictObject({
   words: z.array(z.string().trim().min(1).max(100)).default([]),
 });
@@ -266,6 +381,8 @@ const AutoEditsSchema = z.strictObject({
   dialogZooms: z.boolean().default(true),
   clickZooms: z.boolean().default(true),
   answerZoom: z.boolean().default(true),
+  stepTitles: z.boolean().default(true),
+  stepZooms: z.boolean().default(true),
 });
 
 const TextSchema = z.strictObject({
@@ -276,6 +393,74 @@ const TextSchema = z.strictObject({
   style: z.enum(TEXT_STYLES).default('pill'),
   position: z.enum(TEXT_POSITIONS).default('top'),
   enabled: z.boolean().default(true),
+  auto: autoKind,
+});
+
+/**
+ * A page drawn over the video where its clips show source seconds `at` to `at + duration`, with
+ * its transparency (a lower third, callouts, a logo); its own clock runs in output seconds.
+ */
+const MotionOverlaySchema = z.strictObject({
+  ...named,
+  ...motionPage,
+  at: seconds,
+  duration: positiveSeconds,
+  enabled: z.boolean().default(true),
+  auto: autoKind,
+});
+
+/**
+ * The video's music: a page that composes it in WebAudio for this video (`music/<name>/index.html`),
+ * from the video's scenes, cuts, clicks, typing and words. It is rendered as long as the video,
+ * follows every edit, and goes down under speech.
+ */
+const MusicSchema = z.strictObject({
+  /** The page: an HTML file in the project. */
+  src: z.string().min(1),
+  /** The values of the params the page declares. */
+  params: z.record(z.string(), ParamValue).default({}),
+  /** Let the page reach https: (off: only the project's files). */
+  network: z.boolean().default(false),
+  /** Its level, 0 to 1. */
+  volume: z.number().min(0).max(1).default(0.8),
+  /** How far it goes down under speech, in dB (0: it does not). */
+  duck: z.number().min(0).max(40).default(12),
+  enabled: z.boolean().default(true),
+});
+
+/**
+ * A sound at a moment: a built-in sound (`whoosh`, `pop`; `cuttle sound list`) or a file in the
+ * project (`sounds/ding.wav`). At a source second it plays wherever the video shows that moment (and
+ * not where it is cut); with `scene` (an id) it plays `at` seconds into that scene.
+ */
+const SoundSchema = z.strictObject({
+  ...named,
+  sound: z.string().min(1),
+  at: seconds,
+  scene: z.string().regex(ID_PATTERN).optional(),
+  volume: z.number().min(0).max(1).default(0.8),
+  enabled: z.boolean().default(true),
+});
+
+/** A step's title is a few words (the prompter's heading); its note a few sentences; a script holds this many steps. */
+export const STEP_TITLE_MAX = 80;
+export const STEP_NOTE_MAX = 1000;
+export const SCRIPT_MAX_STEPS = 50;
+
+/**
+ * A step of the script: what the person shows next, written before the take. While recording, the
+ * prompter (a window that is never in the video) shows it, and the step key marks where it starts
+ * (a `step` marker labelled with its id).
+ */
+const StepSchema = z.strictObject({
+  /** The `step` markers name it; unique in the project. */
+  id: z.string().regex(ID_PATTERN, 'an id is 1 to 64 letters, digits, "-" or "_"'),
+  /** What it shows, in a few words. */
+  title: z.string().max(STEP_TITLE_MAX).regex(/\S/, 'a step needs a title'),
+  /** What to say or do: for the prompter only, never in the video. */
+  note: z.string().max(STEP_NOTE_MAX).optional(),
+  /** Its title as this motion template (an overlay), instead of a text. */
+  motion: z.enum(STEP_MOTIONS).optional(),
 });
 
 export const ProjectSchema = z
@@ -283,20 +468,25 @@ export const ProjectSchema = z
     version: z.literal(CURRENT_VERSION),
     output: OutputSchema.prefault({}),
     sources: SourcesSchema,
+    script: z.array(StepSchema).max(SCRIPT_MAX_STEPS).default([]),
     look: LookSchema.prefault({}),
     scenes: z.array(SceneSchema).default([]),
     zooms: z.array(ZoomSchema).default([]),
     masks: z.array(MaskSchema).default([]),
     texts: z.array(TextSchema).default([]),
+    overlays: z.array(MotionOverlaySchema).default([]),
     cuts: z.array(CutSchema).default([]),
+    music: MusicSchema.optional(),
+    sounds: z.array(SoundSchema).default([]),
     autoEdits: AutoEditsSchema.prefault({}),
     captions: CaptionsSchema.prefault({}),
     privacy: PrivacySchema.prefault({}),
+    theme: ThemeSchema.prefault({}),
   })
   // Runs once everything else is valid (see the note above BackgroundSchema).
   .superRefine((project, ctx) => {
     const seen = new Map<string, string>();
-    for (const list of ['scenes', 'zooms', 'masks', 'texts', 'cuts'] as const) {
+    for (const list of ['scenes', 'zooms', 'masks', 'texts', 'overlays', 'cuts', 'sounds', 'script'] as const) {
       project[list].forEach((item: { id?: string }, index) => {
         if (item.id === undefined) return;
         const first = seen.get(item.id);
@@ -304,6 +494,11 @@ export const ProjectSchema = z
         else ctx.addIssue({ code: 'custom', message: `the id "${item.id}" is already used by ${first}`, path: [list, index, 'id'] });
       });
     }
+    project.sounds.forEach((sound, index) => {
+      if (sound.scene !== undefined && !project.scenes.some((scene) => scene.id === sound.scene)) {
+        ctx.addIssue({ code: 'custom', message: `no scene has the id "${sound.scene}"`, path: ['sounds', index, 'scene'] });
+      }
+    });
   });
 
 // One line of events.jsonl. Times are source seconds (seconds since the screen track started).
@@ -339,6 +534,9 @@ export type MaskStyle = (typeof MASK_STYLES)[number];
 export type TextPosition = (typeof TEXT_POSITIONS)[number];
 export type StillMotion = (typeof STILL_MOTIONS)[number];
 export type BackgroundPreset = (typeof BACKGROUND_PRESETS)[number];
+export type DeviceFrame = (typeof DEVICE_FRAMES)[number];
+export type ColouredBackground = (typeof COLOURED_BACKGROUNDS)[number];
+export type GradientKind = (typeof GRADIENT_KINDS)[number];
 export type FrameStyle = (typeof FRAME_STYLES)[number];
 export type TextStyle = (typeof TEXT_STYLES)[number];
 export type CaptionStyle = (typeof CAPTION_STYLES)[number];
@@ -351,6 +549,13 @@ export type Scene = CuttleProject['scenes'][number];
 export type ClipScene = Extract<Scene, { type: 'clip' }>;
 export type StillScene = Extract<Scene, { type: 'still' }>;
 export type CardScene = Extract<Scene, { type: 'card' }>;
+export type MotionScene = Extract<Scene, { type: 'motion' }>;
+export type MotionOverlay = CuttleProject['overlays'][number];
+export type SceneTransition = NonNullable<Scene['transition']>;
+export type Music = NonNullable<CuttleProject['music']>;
+export type Sound = CuttleProject['sounds'][number];
+export type ScriptStep = CuttleProject['script'][number];
+export type StepMotion = (typeof STEP_MOTIONS)[number];
 export type Zoom = CuttleProject['zooms'][number];
 export type ZoomMove = NonNullable<Zoom['moves']>[number];
 export type WindowKind = (typeof WINDOW_KINDS)[number];
@@ -360,4 +565,6 @@ export type Cut = CuttleProject['cuts'][number];
 export type AutoKind = (typeof AUTO_KINDS)[number];
 export type AutoEdits = CuttleProject['autoEdits'];
 export type Captions = CuttleProject['captions'];
+export type Theme = CuttleProject['theme'];
+export type ThemeFont = (typeof THEME_FONTS)[number];
 export type CaptionFix = Captions['fixes'][number];

@@ -30,6 +30,19 @@ describe('the IPC contract', () => {
     expect(REQUESTS['settings:set'].safeParse({ privacyWords: Array.from({ length: 51 }, (_, k) => `w${k}`) }).success).toBe(false);
   });
 
+  it('checks what the editor asks of its motion preview', () => {
+    const request = { key: 'overlay:0@2', kind: 'overlay', index: 0, frame: 15, start: 2, duration: 2, screen: { width: 1280, height: 720 } };
+    const view = { source: 1.5, zoom: [0, 0, 1280, 720], content: [0, 0, 1920, 1080], cursor: null };
+    expect(REQUESTS['motion:frame'].safeParse({ version: 3, request: { ...request, view }, width: 960, height: 540, mode: 'seek', have: 7 }).success).toBe(true);
+    expect(REQUESTS['motion:frame'].safeParse({ version: 3, request, width: 99_999, height: 540, mode: 'seek' }).success).toBe(false);
+    expect(REQUESTS['motion:frame'].safeParse({ version: 3, request: { ...request, frame: -1 }, width: 960, height: 540, mode: 'play' }).success).toBe(false);
+    expect(REQUESTS['motion:frame'].safeParse({ version: 3, request: { ...request, view: { ...view, zoom: [0, 0] } }, width: 960, height: 540, mode: 'seek' }).success).toBe(false);
+    expect(REQUESTS['motion:add-template'].safeParse('lower-third').success).toBe(true);
+    expect(REQUESTS['motion:add-template'].safeParse('../../evil').success).toBe(false);
+    expect(REQUESTS['motion:reload'].safeParse('scenes[2]').success).toBe(true);
+    expect(REQUESTS['motion:reload'].safeParse('zooms[0]').success).toBe(false);
+  });
+
   it('names the speech models as @cuttle/core does (the windows cannot import it)', () => {
     expect(SPEECH_MODEL_NAMES).toEqual(MODEL_NAMES);
   });

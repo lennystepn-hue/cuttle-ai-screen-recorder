@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { ClipScene, Scene } from '@cuttle/project';
-import { crossfadeHalf, isContinuousCut, sceneDuration, sceneSpans, sourceTimeAt, spanAt, totalDuration } from '../src/time';
+import { crossfadeHalf, isContinuousCut, pageTransition, sceneDuration, sceneSpans, sourceTimeAt, spanAt, totalDuration } from '../src/time';
 
 const clip = (from: number, to: number, speed = 1): ClipScene => ({ type: 'clip', from, to, speed });
 const scenes: Scene[] = [clip(10, 20), clip(20, 140, 12), { type: 'card', title: 'End', duration: 2 }];
@@ -84,6 +84,21 @@ describe('crossfadeHalf', () => {
     expect(crossfadeHalf(spans[1]!, spans[2]!, on)).toBe(0.2);
     expect(crossfadeHalf(spans[2]!, spans[3]!, on)).toBeCloseTo(0.1, 9);
     expect(crossfadeHalf(spans[1]!, spans[2]!, { enabled: false, duration: 0.4 })).toBe(0);
+  });
+
+  it('is half of a scene\'s own transition into it, also with crossfades off, and never at a continuous cut', () => {
+    const into = (duration: number, enabled = true) => ({ ...clip(20, 21), transition: { src: 'fold.html', params: {}, network: false, duration, enabled } });
+    const off = { enabled: false, duration: 0.4 };
+    const own = sceneSpans([clip(0, 10), clip(10, 12), into(0.8), { ...clip(21, 23), transition: { src: 'fold.html', params: {}, network: false, duration: 0.8, enabled: true } }]);
+    expect(crossfadeHalf(own[1]!, own[2]!, off)).toBe(0.4);
+    expect(pageTransition(own[1]!, own[2]!, off)).toBe(true);
+    // capped by half the span into which it goes (1 s), and none where the footage runs on
+    expect(crossfadeHalf(own[1]!, sceneSpans([clip(0, 10), clip(10, 12), into(3)])[2]!, off)).toBe(0.5);
+    expect([crossfadeHalf(own[2]!, own[3]!, off), pageTransition(own[2]!, own[3]!, off)]).toEqual([0, false]);
+    // switched off: the look's crossfade, or none
+    const switched = sceneSpans([clip(0, 10), clip(10, 12), into(0.8, false)]);
+    expect([crossfadeHalf(switched[1]!, switched[2]!, on), pageTransition(switched[1]!, switched[2]!, on)]).toEqual([0.2, false]);
+    expect(crossfadeHalf(switched[1]!, switched[2]!, off)).toBe(0);
   });
 });
 

@@ -1,6 +1,7 @@
 // The command menu (Ctrl+K, or ?): everything the editor can do, by name, with its keys. Type to
 // filter, arrows to choose, Enter to run; what cannot run now says why.
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { shortcut } from '../keys';
 import { editorCommands, type EditorCommand } from './commands';
 import { store } from './session';
 import { useStore } from './store';
@@ -139,7 +140,7 @@ function Menu() {
                     {command.name}
                     {command.detail && <span className="command-detail">{command.detail}</span>}
                   </span>
-                  {blocked ? <em>{blocked}</em> : command.keys && <kbd>{command.keys}</kbd>}
+                  {blocked ? <em>{blocked}</em> : command.keys && <kbd>{shortcut(command.keys)}</kbd>}
                 </div>
               </div>
             );

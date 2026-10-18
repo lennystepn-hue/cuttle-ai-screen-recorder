@@ -8,9 +8,11 @@ import { basename, delimiter, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { PNG } from 'pngjs';
 import { whisperCliPath } from '@cuttle/core';
+import { parseEventsJsonl, parseProjectJson } from '@cuttle/project';
+import { sceneSpans, typingClicks } from '@cuttle/timeline';
 import { _electron, type ElectronApplication, type Page } from 'playwright';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { FIXTURE_OUTPUT, makeFixture, makePrivateFixture, makeSpokenFixture } from './fixture';
+import { FIXTURE_OUTPUT, makeFixture, makeMotionFixture, makePrivateFixture, makeRestingFixture, makeSpokenFixture } from './fixture';
 
 /**
  * The app end to end, its windows never shown: open a project, play, scrub, select, compare the
@@ -60,7 +62,7 @@ interface CheckState {
 interface Check {
   state(): CheckState;
   seek(t: number): Promise<void>;
-  playback(): { drawn: number; restarts: number; clock: number };
+  playback(): { drawn: number; restarts: number; clicks: number; clock: number };
   pixels(): string;
   useProxy(): Promise<boolean>;
   doc(): { hash: string; saving: boolean; problem?: string; issues?: string[]; toast?: { text: string; undo?: boolean }; draftNote?: string; undo?: string; redo?: string };
@@ -93,15 +95,51 @@ async function waitForPage(app: ElectronApplication, test: (page: Page) => Promi
 /** Clicks an element in a page without a real mouse (the window is never shown). */
 const click = (page: Page, selector: string) => page.evaluate((target) => (document.querySelector(target) as HTMLElement).click(), selector);
 /**
+ * What in the inspector reaches past the right edge of its box (a Look part's card, else the panel
+ * inside its padding): a text or a control running out of its panel. Each as its tag, classes and
+ * text, with how far it reaches out.
+ */
+const outsideItsPanel = (page: Page) =>
+  page.evaluate(() => {
+    const found: string[] = [];
+    for (const panel of document.querySelectorAll<HTMLElement>('.inspector .panel-body')) {
+      const style = getComputedStyle(panel);
+      const panelRight = panel.getBoundingClientRect().left + panel.clientWidth - parseFloat(style.paddingRight);
+      for (const element of panel.querySelectorAll<HTMLElement>('*')) {
+        const rect = element.getBoundingClientRect();
+        if (rect.width === 0 || rect.height === 0) continue;
+        const card = element.closest('.look-part');
+        const right = card && card !== element ? card.getBoundingClientRect().right : panelRight;
+        if (rect.right > right + 0.5) found.push(`${element.tagName.toLowerCase()}${[...element.classList].map((name) => `.${name}`).join('')} "${(element.textContent ?? '').trim().slice(0, 40)}" by ${Math.round(rect.right - right)} px`);
+      }
+    }
+    return found;
+  });
+/**
  * Picks the option labelled `label` (`prefix`: starting with it) from a select (Select.tsx): a click
  * opens it, a click on the option picks it. A list closed again before the pick (a scroll still due
- * from a panel that changed just before, as in a small window) is opened again.
+ * from a panel that changed just before, as in a small window), or before it was seen at all, is
+ * opened again; one that never opens is reported with the select's state.
  */
 async function chooseIn(page: Page, trigger: string, label: string, prefix = false): Promise<void> {
   for (let attempt = 1; ; attempt++) {
     // a Playwright selector (it may use :has-text): the element's own click, as in a window never shown
     await page.locator(trigger).evaluate((element) => (element as HTMLElement).click());
-    await page.waitForSelector('.select-list [role=option]');
+    const shown = await page.waitForSelector('.select-list [role=option]', { timeout: 5000 }).then(
+      () => true,
+      () => false,
+    );
+    if (!shown) {
+      if (attempt < 5) continue;
+      const state = await page.locator(trigger).evaluate((element) => ({
+        disabled: (element as HTMLButtonElement).disabled,
+        expanded: element.getAttribute('aria-expanded'),
+        focused: document.hasFocus(),
+        lists: document.querySelectorAll('.select-list').length,
+        status: document.querySelector('[data-testid=project-status]')?.textContent ?? null,
+      }));
+      throw new Error(`the select ${trigger} did not open: ${JSON.stringify(state)}`);
+    }
     const result = await page.evaluate(
       ({ label, prefix }) => {
         const options = [...document.querySelectorAll('.select-list [role=option]')];
@@ -153,6 +191,14 @@ function difference(a: PNG, b: PNG): { mean: number; max: number } {
     }
   }
   return { mean: sum / ((a.data.length / 4) * 3), max };
+}
+
+/** Waits for an export to be written; when it is not, the error says what the export sheet shows. */
+async function exported(page: Page): Promise<void> {
+  await page.waitForSelector('[data-testid=export-file]', { timeout: 120_000 }).catch(async (error: Error) => {
+    const sheet = await page.locator('[data-testid=export-sheet]').innerText().catch(() => '(no export sheet)');
+    throw new Error(`${error.message}\nThe export sheet says: ${sheet}`);
+  });
 }
 
 describe.runIf(enabled)('the Cuttle app', () => {
@@ -208,6 +254,13 @@ describe.runIf(enabled)('the Cuttle app', () => {
   };
   /** A screenshot of the window whose URL has `part` and whose title is `title` (when given). */
   const shotOf = async (name: string, part: string, title?: string) => {
+    // what an editor shows here stays inside its inspector, screenshots taken or not
+    if (part === '/editor.html') {
+      for (const page of app.windows()) {
+        if (!page.url().includes(part) || (title !== undefined && (await page.title().catch(() => '')) !== title)) continue;
+        expect({ shot: name, outside: await outsideItsPanel(page) }).toEqual({ shot: name, outside: [] });
+      }
+    }
     if (!SHOTS) return;
     const png = await app.evaluate(
       async ({ BrowserWindow }, { part, title }) => {
@@ -221,6 +274,25 @@ describe.runIf(enabled)('the Cuttle app', () => {
         return (await window.webContents.capturePage()).toPNG().toString('base64');
       },
       { part, title },
+    );
+    writeFileSync(join(SHOTS, `${name}.png`), Buffer.from(png, 'base64'));
+  };
+  /** A screenshot of a picker: the window over its display (each display has its own). */
+  const shotOfPicker = async (name: string, page: Page) => {
+    if (!SHOTS) return;
+    const setup = await page.evaluate(() => (window as unknown as { cuttle: { invoke(channel: string): Promise<{ display: { bounds: { x: number; y: number; width: number; height: number } } }> } }).cuttle.invoke('picker:setup'));
+    const { x, y, width, height } = setup.display.bounds;
+    const png = await app.evaluate(
+      async ({ BrowserWindow }, centre) => {
+        const window = BrowserWindow.getAllWindows().find((candidate) => {
+          const bounds = candidate.getBounds();
+          return candidate.webContents.getURL().includes('/picker.html') && centre.x >= bounds.x && centre.x < bounds.x + bounds.width && centre.y >= bounds.y && centre.y < bounds.y + bounds.height;
+        })!;
+        window.webContents.invalidate();
+        await new Promise((resolve) => setTimeout(resolve, 1600));
+        return (await window.webContents.capturePage()).toPNG().toString('base64');
+      },
+      { x: x + width / 2, y: y + height / 2 },
     );
     writeFileSync(join(SHOTS, `${name}.png`), Buffer.from(png, 'base64'));
   };
@@ -262,6 +334,10 @@ describe.runIf(enabled)('the Cuttle app', () => {
     mkdirSync(join(root, 'user-data'));
     // The screen is read after a take's cut only where the check asks for it (it says so in the settings).
     writeFileSync(join(root, 'user-data', 'settings.json'), JSON.stringify({ projectsFolder: join(root, 'projects'), privacy: { read: false } }));
+    // the desktop's wallpaper the check gives the app
+    spawnSync('ffmpeg', ['-v', 'error', '-y', '-f', 'lavfi', '-i', 'testsrc2=s=1280x720', '-frames:v', '1', join(root, 'wallpaper.png')], { windowsHide: true });
+    // the logo the brand's file dialog picks
+    writeFileSync(join(root, 'nimbus.svg'), '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120"><rect width="120" height="120" rx="28" fill="#7C5CFF"/><path d="M34 86V34h12l28 34V34h12v52H74L46 52v34z" fill="#fff"/></svg>');
     models = createServer((request, response) => {
       if (request.url === '/ggml-base.bin' && BASE_MODEL) return void response.end(readFileSync(BASE_MODEL));
       if (request.url === '/ggml-small.bin') return void response.end('not a model');
@@ -289,6 +365,13 @@ describe.runIf(enabled)('the Cuttle app', () => {
         // the check's own models folder (empty at first), and the models from the check's server
         CUTTLE_MODELS_DIR: join(root, 'models'),
         CUTTLE_MODELS_URL: `http://127.0.0.1:${(models.address() as { port: number }).port}/`,
+        // the brand kits in a folder of the check's own, and the image a file dialog picks
+        CUTTLE_BRANDS_DIR: join(root, 'brands'),
+        CUTTLE_CHECK_IMAGE: join(root, 'nimbus.svg'),
+        // the desktop's wallpaper, the check's own (never this computer's)
+        CUTTLE_WALLPAPER: join(root, 'wallpaper.png'),
+        // what the spoken test mic says
+        CUTTLE_TEST_SPEECH: SPOKEN,
       },
     });
     // Unhandled rejections in the main process are bugs: collect them for the last test.
@@ -366,11 +449,19 @@ describe.runIf(enabled)('the Cuttle app', () => {
     expect(stats.clock - playing.t).toBeLessThan(0.7);
     // and plays as a movie, not a slideshow: at least half the frame rate per second of the clock
     expect(stats.drawn / stats.clock).toBeGreaterThan(FIXTURE_OUTPUT.fps / 2);
+    // the six keys typed at 2.4 s click a second before the clock gets there: every click up to
+    // 0.9 s past the clock is set (the schedule looks every 0.1 s), whatever pace the machine kept
+    const parsed = parseProjectJson(readFileSync(join(project, 'cuttle.json'), 'utf8'));
+    if (!parsed.ok) throw new Error('the demo project does not parse');
+    const { events } = parseEventsJsonl(readFileSync(join(project, parsed.project.sources.events!), 'utf8'));
+    const clicks = typingClicks(sceneSpans(parsed.project.scenes, parsed.project.cuts), events, parsed.project.look.audio);
+    expect(clicks.length).toBe(6);
+    expect(stats.clicks).toBeGreaterThanOrEqual(clicks.filter((click) => click.at <= stats.clock + 0.9).length);
     const paused = await state();
     expect(paused.playing).toBe(false);
     await editor.waitForTimeout(300);
     expect((await state()).t).toBe(paused.t);
-  });
+  }, 30_000);
 
   it('scrubs with the playhead on the ruler and on the blocks; a click selects, Esc clears', async () => {
     const { duration } = await state();
@@ -428,7 +519,7 @@ describe.runIf(enabled)('the Cuttle app', () => {
     expect(await editor.locator('.format').first().textContent()).toContain('640×360');
     await shot('05-export-sheet');
     await editor.click('[data-testid=export-start]');
-    await editor.waitForSelector('[data-testid=export-file]', { timeout: 120_000 });
+    await exported(editor);
     await shot('06-exported');
     const out = join(project, 'out', 'export.mp4');
     const probe = spawnSync('ffprobe', ['-v', 'error', '-show_entries', 'stream=codec_name,width,height', '-of', 'csv=p=0', out], { encoding: 'utf8' }).stdout.trim().split(/\r?\n/);
@@ -1221,6 +1312,27 @@ describe.runIf(enabled)('the Cuttle app', () => {
     await opened.waitForSelector('.app[data-phase="ready"]', { timeout: 30_000 });
   }, 120_000);
 
+  it("shows the mic's level in the HUD: its bars rise with the test mic's tone and go dark while paused", async () => {
+    const before = new Set(existsSync(join(root, 'projects')) ? readdirSync(join(root, 'projects')) : []);
+    await recordThroughPicker(pillRecord, { stop: 'none', camera: undefined, mic: 'Test Microphone' }, false);
+    const hud = await runningHud();
+    const lit = () => hud.locator('[data-testid=hud-level]').getAttribute('data-level');
+    // the test mic's tone is about -21 dBFS: four of the five bars
+    await expect.poll(lit, { timeout: 10_000 }).toBe('4');
+    // the bars fit the HUD beside the time, the note and the buttons
+    expect(await hud.evaluate(() => document.querySelector('.hud')!.scrollWidth <= document.querySelector('.hud')!.clientWidth)).toBe(true);
+    await shotOf('31b-hud-level', '/hud.html');
+    await click(hud, '[data-testid=hud-pause]');
+    await hud.waitForSelector('.hud.paused');
+    await expect.poll(lit).toBe('0');
+    await click(hud, '[data-testid=hud-pause]');
+    await hud.waitForSelector('.hud.recording');
+    await expect.poll(lit, { timeout: 10_000 }).toBe('4');
+    await click(hud, '[data-testid=hud-stop]');
+    const dir = await newProject(before);
+    await projectWhen(dir, (written) => written.scenes[0]?.id !== undefined);
+  }, 120_000);
+
   it('marks a slip from the HUD (the mistake key): it says what to do next, and the cut goes back from there', async () => {
     const before = new Set(existsSync(join(root, 'projects')) ? readdirSync(join(root, 'projects')) : []);
     await recordThroughPicker(pillRecord, { stop: 'none', camera: undefined }, false);
@@ -1231,7 +1343,8 @@ describe.runIf(enabled)('the Cuttle app', () => {
     // the hint fits the HUD whole
     expect(await hud.evaluate(() => [...document.querySelectorAll('[data-testid=hud-note], [data-testid=hud-note] *')].every((element) => element.scrollWidth <= element.clientWidth + 1))).toBe(true);
     await shotOf('31-hud-retake', '/hud.html');
-    // the take runs on past the slip: stopped at once, its end would be the cut's (a fast check, no shots)
+    // the take goes on past the slip (the cut ends 0.15 s after it, at most at the take's end): a busy
+    // runner gets here within that otherwise
     await wait(1000);
     await click(hud, '[data-testid=hud-stop]');
     const dir = await newProject(before);
@@ -1250,6 +1363,105 @@ describe.runIf(enabled)('the Cuttle app', () => {
     expect(await opened.locator('.inspector .kind-head .name').textContent()).toBe('Retake');
     await click(opened, '#tab-auto');
     expect(await opened.locator('[data-testid=auto-group-retakes] .auto-count').textContent()).toBe('1 on');
+  }, 120_000);
+
+  it("records with a script: typed in the picker (a pasted list becomes steps), the prompter by the HUD moves on with Next, and the steps become markers and the project's script", async () => {
+    const before = new Set(existsSync(join(root, 'projects')) ? readdirSync(join(root, 'projects')) : []);
+    await pillRecord();
+    const { page } = await firstMonitorPicker();
+    await page.evaluate(async () => {
+      const bridge = (window as unknown as { cuttle: { invoke(channel: string, argument?: unknown): Promise<unknown> } }).cuttle;
+      await bridge.invoke('picker:choices', { stop: 'none' });
+      await bridge.invoke('picker:hover');
+    });
+    await page.waitForSelector('[data-testid=picker-script]');
+    expect(await page.locator('[data-testid=picker-script] small').textContent()).toBe('none');
+    await click(page, '[data-testid=picker-script]');
+    await page.waitForSelector('[data-testid=script-panel]');
+    // the first step's title has the focus: typed, and Enter goes on to a new step
+    await expect.poll(() => page.evaluate(() => (document.activeElement as HTMLElement | null)?.dataset.testid)).toBe('script-title');
+    await page.keyboard.type('Open the settings');
+    await page.keyboard.press('Enter');
+    await expect.poll(() => page.locator('[data-testid=script-title]').count()).toBe(2);
+    // a pasted list becomes steps, an indented line the note of the step above it
+    await page.evaluate(() => {
+      const data = new DataTransfer();
+      data.setData('text/plain', '2. Turn on dark mode\n   Say that it follows the system.\n3. Export the video');
+      document.activeElement!.dispatchEvent(new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true }));
+    });
+    const titles = () => page.locator('[data-testid=script-title]').evaluateAll((inputs) => inputs.map((input) => (input as HTMLInputElement).value));
+    await expect.poll(titles).toEqual(['Open the settings', 'Turn on dark mode', 'Export the video']);
+    expect(await page.locator('[data-testid=script-note]').nth(1).inputValue()).toBe('Say that it follows the system.');
+    expect(await page.locator('[data-testid=picker-script] small').textContent()).toBe('3 steps');
+    await shotOfPicker('46-script', page);
+    // Esc closes the panel, not the pick
+    await page.keyboard.press('Escape');
+    await page.waitForSelector('[data-testid=script-panel]', { state: 'detached' });
+    await click(page, '[data-testid=picker-record]').catch(() => {});
+
+    // the prompter: the first step from the countdown on, by the HUD, never in the video, never focused
+    const prompter = await waitForPage(app, async (candidate) => candidate.url().includes('/prompter.html') && (await candidate.locator('[data-testid=prompter-title]').textContent()) === 'Open the settings');
+    const hud = await runningHud();
+    const windows = await app.evaluate(({ BrowserWindow }) => {
+      const of = (part: string) => BrowserWindow.getAllWindows().find((window) => window.webContents.getURL().includes(part))!;
+      const [hud, prompter] = [of('/hud.html'), of('/prompter.html')];
+      return { hud: hud.getBounds(), prompter: prompter.getBounds(), isProtected: prompter.isContentProtected(), focusable: prompter.isFocusable() };
+    });
+    expect(windows).toMatchObject({ isProtected: true, focusable: false, prompter: { x: windows.hud.x, width: windows.hud.width } });
+    // right under the HUD, or right over it
+    expect([windows.hud.y + windows.hud.height - 10, windows.hud.y - windows.prompter.height + 10]).toContain(windows.prompter.y);
+    await prompter.waitForSelector('[data-testid=prompter-next]:not([disabled])');
+    expect(await prompter.locator('[data-testid=prompter-count]').textContent()).toBe('Step 1 of 3');
+    await wait(800);
+    await click(prompter, '[data-testid=prompter-next]');
+    await expect.poll(() => prompter.locator('[data-testid=prompter-title]').textContent()).toBe('Turn on dark mode');
+    expect(await prompter.locator('[data-testid=prompter-count]').textContent()).toBe('Step 2 of 3');
+    expect(await prompter.locator('.prompter-note').textContent()).toBe('Say that it follows the system.');
+    expect(await prompter.locator('.prompter-then').textContent()).toBe('Then Export the video');
+    // the window took its card's height and its margins
+    const card = await prompter.locator('[data-testid=prompter]').evaluate((element) => element.getBoundingClientRect().height);
+    const prompterHeight = () => app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find((window) => window.webContents.getURL().includes('/prompter.html'))!.getContentBounds().height);
+    await expect.poll(prompterHeight).toBe(Math.ceil(card) + 20);
+    // the steps are not the person's markers: the HUD counts none
+    expect(await hud.locator('.marker small').count()).toBe(0);
+    await shotOf('47-prompter', '/prompter.html');
+    await wait(600);
+    await click(hud, '[data-testid=hud-stop]');
+
+    const dir = await newProject(before);
+    const written = (await projectWhen(dir, (file) => file.scenes[0]?.id !== undefined)) as unknown as { script?: unknown };
+    expect(written.script).toEqual([
+      { id: 'step1', title: 'Open the settings' },
+      { id: 'step2', title: 'Turn on dark mode', note: 'Say that it follows the system.' },
+      { id: 'step3', title: 'Export the video' },
+    ]);
+    const { markers } = JSON.parse(readFileSync(join(dir, 'takes', '1', 'markers.json'), 'utf8')) as { markers: { t: number; kind: string; label?: string }[] };
+    expect(markers.filter((marker) => marker.kind === 'step').map((marker) => [marker.label, marker.t > 0])).toEqual([
+      ['step1', false],
+      ['step2', true],
+    ]);
+    // the editor pins the steps on its timeline by their names
+    const opened = await waitForPage(app, async (candidate) => candidate.url().includes('/editor.html') && (await candidate.title()) === `${basename(dir)} · Cuttle`);
+    await opened.waitForSelector('.app[data-phase="ready"]', { timeout: 30_000 });
+    await expect.poll(() => opened.evaluate(() => (window as unknown as { __cuttleCheck: Check }).__cuttleCheck.doc().undo), { timeout: 15_000 }).toBe("Cuttle's cut");
+    await expect.poll(() => opened.locator('.flag span').allTextContents(), { timeout: 15_000 }).toContain('2 · Turn on dark mode');
+    await shotOf('47b-step-pins', '/editor.html', `${basename(dir)} · Cuttle`);
+    // the cut titled the steps the video shows: a title over step 2, listed in the Auto tab
+    const titled = JSON.parse(readFileSync(join(dir, 'cuttle.json'), 'utf8')) as { texts?: { text: string; auto?: string }[] };
+    expect(titled.texts?.filter((text) => text.auto === 'title').map((text) => text.text)).toContain('Turn on dark mode');
+    await click(opened, '#tab-auto');
+    await opened.waitForSelector('[data-testid=auto-group-titles]');
+    await click(opened, '[data-testid=auto-group-titles] .auto-toggle');
+    await shotOf('47c-step-titles', '/editor.html', `${basename(dir)} · Cuttle`);
+    await click(opened, '#tab-selection');
+    // Record again, once the take is in: the picker opens with the project's script
+    await expect.poll(() => opened.locator('[data-testid=project-status]').count(), { timeout: 30_000 }).toBe(0);
+    await click(opened, '[data-testid=record-again]');
+    const again = await firstMonitorPicker();
+    const bridge = (page: Page) => page.evaluate(() => (window as unknown as { cuttle: { invoke(channel: string): Promise<{ script: { title: string }[] }> } }).cuttle.invoke('picker:setup'));
+    expect((await bridge(again.page)).script.map((step) => step.title)).toEqual(['Open the settings', 'Turn on dark mode', 'Export the video']);
+    // the pickers close as the pick is cancelled
+    await again.page.evaluate(() => (window as unknown as { cuttle: { invoke(channel: string): Promise<unknown> } }).cuttle.invoke('picker:cancel')).catch(() => {});
   }, 120_000);
 
   it('restarts from the HUD on a held press only: the take is put aside, and Undo restart brings it back', async () => {
@@ -1351,7 +1563,7 @@ describe.runIf(enabled)('the Cuttle app', () => {
     const settings = await waitForPage(app, async (page) => page.url().includes('/settings.html') && (await page.locator('[data-testid=settings-page-speech]').count()) === 1);
     await click(settings, '[data-testid=settings-page-speech]');
     await settings.waitForSelector('[data-testid=speech-line]');
-    const saved = () => JSON.parse(readFileSync(join(root, 'user-data', 'settings.json'), 'utf8')) as { speech?: { model: string; language: string } };
+    const saved = () => JSON.parse(readFileSync(join(root, 'user-data', 'settings.json'), 'utf8')) as { speech?: { model: string; language: string; live?: boolean } };
     const line = () => settings.locator('[data-testid=speech-line] .row-hint').textContent();
     const choose = (label: string) => chooseIn(settings, '[data-testid=speech-model]', label, true);
     // Good (small), the default: not downloaded here; its download breaks off, and says so
@@ -1382,6 +1594,13 @@ describe.runIf(enabled)('the Cuttle app', () => {
     // the language spoken
     await click(settings, '[data-testid=speech-language] button:nth-child(3)');
     await expect.poll(() => saved().speech?.language).toBe('en');
+    // live captions while recording: on until switched off; without a model the row says what they need
+    expect(await settings.locator('[data-testid=speech-live]').getAttribute('aria-checked')).toBe('true');
+    expect(await settings.locator('.row:has([data-testid=speech-live]) .row-hint').textContent()).toBe('The HUD shows what the mic hears as you speak. It needs a speech model: download one above.');
+    await click(settings, '[data-testid=speech-live]');
+    await expect.poll(() => saved().speech?.live).toBe(false);
+    await click(settings, '[data-testid=speech-live]');
+    await expect.poll(() => saved().speech?.live).toBe(true);
     if (!BASE_MODEL || !hasWhisper) {
       await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find((window) => window.webContents.getURL().includes('/settings.html'))?.close());
       return;
@@ -1435,6 +1654,33 @@ describe.runIf(enabled)('the Cuttle app', () => {
     await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find((window) => window.getTitle() === 'spoken · Cuttle')?.close());
   }, 120_000);
 
+  it.runIf(!!BASE_MODEL && hasWhisper)("shows live captions in the HUD while a take with a mic records: the spoken test mic's words, newest at the right", async () => {
+    // the fastest model downloaded (the test before downloads it; alone, this one copies it)
+    if (!existsSync(join(root, 'models', 'ggml-base.bin'))) {
+      mkdirSync(join(root, 'models'), { recursive: true });
+      cpSync(BASE_MODEL!, join(root, 'models', 'ggml-base.bin'));
+    }
+    const before = new Set(existsSync(join(root, 'projects')) ? readdirSync(join(root, 'projects')) : []);
+    await recordThroughPicker(pillRecord, { stop: 'none', camera: undefined, mic: 'Spoken Test Microphone' }, false);
+    const hud = await runningHud();
+    const captions = hud.locator('[data-testid=hud-captions]');
+    // "Uh, this is Cuttle. It records your screen…": about two seconds after it is said
+    await expect.poll(() => captions.textContent(), { timeout: 45_000 }).toMatch(/\bscreen\b/i);
+    // the strip fits under the bar in the HUD's window, the newest word at its right end
+    const fits = await hud.evaluate(() => {
+      const strip = document.querySelector('.captions')!.getBoundingClientRect();
+      const said = document.querySelector('.captions .said')!.getBoundingClientRect();
+      const bar = document.querySelector('.hud')!;
+      return { inside: strip.bottom <= window.innerHeight && strip.top >= bar.getBoundingClientRect().bottom, newest: said.right <= strip.right, bar: bar.scrollWidth <= bar.clientWidth };
+    });
+    expect(fits).toEqual({ inside: true, newest: true, bar: true });
+    await shotOf('31c-hud-captions', '/hud.html');
+    await click(hud, '[data-testid=hud-stop]');
+    const dir = await newProject(before);
+    const written = await projectWhen(dir, (file) => file.scenes[0]?.id !== undefined);
+    expect(written.sources.mic).toBe('takes/1/mic.m4a');
+  }, 120_000);
+
   it('shows the transcript (a click goes to a word, a fix reads in the subtitles, Delete cuts words and Restore brings them back), styles the subtitles, and exports them as .srt', async () => {
     const dir = join(root, 'subtitled');
     makeSpokenFixture(dir, SPOKEN);
@@ -1447,7 +1693,7 @@ describe.runIf(enabled)('the Cuttle app', () => {
     const path = join(dir, 'cuttle.json');
     const raw = JSON.parse(readFileSync(path, 'utf8')) as { sources: Record<string, string> };
     writeFileSync(path, JSON.stringify({ ...raw, sources: { ...raw.sources, transcript: 'takes/1/transcript.json', cleanMic: 'takes/1/mic.clean.m4a' } }, null, 2));
-    type Saved = { cuts?: { label?: string }[]; captions?: { style?: string; fixes?: { at: number; end: number; text: string }[] }; look?: { audio?: { cleanup?: boolean } } };
+    type Saved = { cuts?: { label?: string }[]; captions?: { style?: string; fixes?: { at: number; end: number; text: string }[] }; look?: { audio?: { cleanup?: boolean; typing?: boolean; typingVolume?: number } } };
     const saved = () => JSON.parse(readFileSync(path, 'utf8')) as Saved;
     const page = await openEditor(dir);
     const pageState = () => page.evaluate(() => (window as unknown as Hooked).__cuttleCheck.state());
@@ -1494,8 +1740,22 @@ describe.runIf(enabled)('the Cuttle app', () => {
     await expect.poll(() => saved().captions?.style).toBe('karaoke');
     await click(page, '[data-testid=look-open-sound]');
     await click(page, '[data-testid=audio-cleanup]');
-    await click(page, '[data-testid=look-open-subtitles]');
     await expect.poll(() => saved().look?.audio?.cleanup).toBe(false);
+    // the typing sounds: their volume on a slider (let go at 30 %), and a switch
+    await page.locator('[data-testid=audio-typing-volume]').evaluate((element) => {
+      const input = element as HTMLInputElement;
+      // React sees a value set through the element's own setter
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, '30');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    await expect.poll(() => saved().look?.audio?.typingVolume).toBe(0.3);
+    await page.locator('[data-testid=audio-typing]').evaluate((element) => element.scrollIntoView({ block: 'center' }));
+    await shotOf('29b-typing-sounds', '/editor.html', 'subtitled · Cuttle');
+    await click(page, '[data-testid=audio-typing]');
+    await expect.poll(() => saved().look?.audio?.typing).toBe(false);
+    await page.waitForSelector('[data-testid=audio-typing-volume]', { state: 'detached' });
+    await click(page, '[data-testid=look-open-subtitles]');
     await page.evaluate((t) => (window as unknown as Hooked).__cuttleCheck.seek(t), words[index('zooms')]!.t + 0.1);
     await page.locator('[data-testid=captions-style]').evaluate((element) => element.scrollIntoView({ block: 'center' }));
     await shotOf('29-subtitles-karaoke', '/editor.html', 'subtitled · Cuttle');
@@ -1506,7 +1766,7 @@ describe.runIf(enabled)('the Cuttle app', () => {
     await page.waitForSelector('[data-testid=export-srt][aria-pressed=true]');
     await shotOf('30-export-subtitles', '/editor.html', 'subtitled · Cuttle');
     await click(page, '[data-testid=export-start]');
-    await page.waitForSelector('[data-testid=export-file]', { timeout: 120_000 });
+    await exported(page);
     expect(await page.locator('[data-testid=export-file] small').textContent()).toContain('with .srt');
     const srt = readFileSync(join(dir, 'out', 'export.srt'), 'utf8');
     expect(srt.startsWith('1\n00:00:00,100 --> ')).toBe(true);
@@ -1514,7 +1774,50 @@ describe.runIf(enabled)('the Cuttle app', () => {
     await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find((window) => window.getTitle() === 'subtitled · Cuttle')?.close());
   }, 180_000);
 
-  it.runIf(process.platform === 'win32')('reads the screen after a take when the settings say so, and from the Auto tab: what it shows that is private and the notifications masked as one step', async () => {
+  // the system's own OCR: Windows', macOS's Vision
+  it('fits a video to a length from the timeline bar: cut where it rests, never near a click, one step, listed in the Auto tab, and back to the full length', async () => {
+    // the demo (10.1 s) fits 15 s as it is: nothing changes, and the bar says so
+    await chooseIn(editor, '[data-testid=length]', '15 s');
+    // (the first fit reads the take's screen: its analysis is kept for the next)
+    await expect.poll(async () => (await doc()).toast?.text, { timeout: 30_000 }).toBe('The video is 10.1 s: it fits 15 s.');
+    expect(((JSON.parse(readFileSync(projectFile(), 'utf8')) as { cuts?: { auto?: string }[] }).cuts ?? []).some((cut) => cut.auto === 'length')).toBe(false);
+
+    // a take that mostly rests: 20 s of a still screen, clicks at 3 and 15 s
+    const dir = join(root, 'resting');
+    makeRestingFixture(dir);
+    const page = await openEditor(dir);
+    const pageDoc = () => page.evaluate(() => (window as unknown as Hooked).__cuttleCheck.doc());
+    const pageState = () => page.evaluate(() => (window as unknown as Hooked).__cuttleCheck.state());
+    const lengthCuts = () => ((JSON.parse(readFileSync(join(dir, 'cuttle.json'), 'utf8')) as { cuts?: { from: number; to: number; auto?: string; label?: string }[] }).cuts ?? []).filter((cut) => cut.auto === 'length');
+    // an other length, typed
+    await chooseIn(page, '[data-testid=length]', 'Other length…');
+    await page.fill('[data-testid=length-input]', '5');
+    await page.press('[data-testid=length-input]', 'Enter');
+    await expect.poll(() => lengthCuts().length, { timeout: 30_000 }).toBeGreaterThan(0);
+    for (const cut of lengthCuts()) {
+      expect(cut.label).toBe('Fit to 5 s');
+      for (const t of [3, 15]) expect(cut.to <= t - 0.3 || cut.from >= t + 0.3).toBe(true);
+    }
+    await expect.poll(async () => (await pageDoc()).undo).toBe("Cuttle's length fit");
+    await expect.poll(async () => (await pageState()).duration).toBeLessThan(5.2);
+    expect((await pageState()).duration).toBeGreaterThan(4.3);
+    expect((await pageDoc()).toast?.text).toMatch(/^Cuttle cut where the video rests to fit 5 s: [\d.]+ s now\.$/);
+    await page.waitForSelector('[data-testid=length] .length-fitted');
+    // the Auto tab lists the fit's cuts
+    await click(page, '#tab-auto');
+    await page.waitForSelector('[data-testid=auto-group-length]');
+    await click(page, '[data-testid=auto-group-length] .auto-toggle');
+    await shotOf('36-length-fit', '/editor.html', 'resting · Cuttle');
+    // the full length again, also one step
+    await chooseIn(page, '[data-testid=length]', 'Full length');
+    await expect.poll(() => lengthCuts().length, { timeout: 30_000 }).toBe(0);
+    await expect.poll(async () => (await pageState()).duration).toBeCloseTo(20, 1);
+    await expect.poll(async () => (await pageDoc()).toast?.text).toBe('Cuttle took the length fit out: the video is 20 s again.');
+    await page.waitForSelector('[data-testid=length] .length-fitted', { state: 'detached' });
+    await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find((window) => window.getTitle() === 'resting · Cuttle')?.close());
+  }, 120_000);
+
+  it.runIf(process.platform === 'win32' || process.platform === 'darwin')('reads the screen after a take when the settings say so, and from the Auto tab: what it shows that is private and the notifications masked as one step', async () => {
     // the settings: reading is off in this check; switched on, each new take is read after its cut
     await launchAgain(['--settings']);
     const settings = await waitForPage(app, async (page) => page.url().includes('/settings.html') && (await page.locator('[data-testid=settings-page-privacy]').count()) === 1);
@@ -1585,6 +1888,557 @@ describe.runIf(enabled)('the Cuttle app', () => {
     expect(file().sources.screenText).toBeUndefined();
     await page.waitForSelector('[data-testid=privacy-note]');
     await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find((window) => window.getTitle() === 'private · Cuttle')?.close());
+  }, 180_000);
+
+  it('opens a project with motion: its scene on the timeline, and the export draws the scene and the overlay', async () => {
+    const dir = join(root, 'motion');
+    makeMotionFixture(dir);
+    const page = await openEditor(dir);
+    await page.waitForSelector('.scene.motion');
+    expect(await page.locator('.scene.motion').first().textContent()).toContain('intro');
+    await shotOf('37-motion', '/editor.html', 'motion · Cuttle');
+    await page.keyboard.press('Control+E');
+    await page.waitForSelector('[data-testid=export-sheet]');
+    await page.click('[data-testid=export-start]');
+    await exported(page);
+    // a pixel of the video (rgb24 from ffmpeg; a crop of 2×2, since 4:2:0 video crops in pairs)
+    const pixel = (seconds: number, x: number, y: number) => [
+      ...spawnSync('ffmpeg', ['-v', 'error', '-ss', String(seconds), '-i', join(dir, 'out', 'export.mp4'), '-frames:v', '1', '-vf', `crop=2:2:${x}:${y}`, '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-'], { windowsHide: true }).stdout.subarray(0, 3),
+    ];
+    // saturated colours move a little between the video's colour matrix and ffmpeg's
+    const near = (actual: number[], expected: number[]) => actual.length === 3 && actual.every((value, i) => Math.abs(value - expected[i]!) <= 40);
+    // the scene fills the frame; over the clip (output 2.5 s is source 1.5 s) the overlay's bar shows at the bottom only
+    expect(near(pixel(0.5, 320, 180), [255, 0, 255])).toBe(true);
+    expect(near(pixel(2.5, 320, 350), [0, 255, 0])).toBe(true);
+    expect(near(pixel(2.5, 320, 100), [0, 255, 0])).toBe(false);
+    await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find((window) => window.getTitle() === 'motion · Cuttle')?.close());
+  }, 180_000);
+
+  it('edits motion in the editor: + Motion adds a template drawn as the export draws it, a param and an edited page show at once, a page that throws says so', async () => {
+    const dir = join(root, 'motion-editor');
+    makeMotionFixture(dir);
+    const page = await openEditor(dir);
+    // the hook comes once the first frame is drawn
+    await page.waitForFunction(() => '__cuttleCheck' in window);
+    type Motion = { status: { item: string; src: string; state: string; errors: string[] }[]; files: number };
+    const seekTo = (t: number) => page.evaluate((time) => (window as unknown as Hooked).__cuttleCheck.seek(time), t);
+    const view = async () => decode(await page.evaluate(() => (window as unknown as Hooked).__cuttleCheck.pixels()));
+    const now = () => page.evaluate(() => (window as unknown as Hooked).__cuttleCheck.state() as CheckState & { motion: Motion });
+    const flushPage = () => page.evaluate(() => (window as unknown as Hooked).__cuttleCheck.flush());
+    const saved = () => JSON.parse(readFileSync(join(dir, 'cuttle.json'), 'utf8')) as { scenes: { type: string; src?: string; params?: Record<string, unknown> }[]; overlays: { id: string }[] };
+    const titleAt = 2.2;
+
+    // + Motion: the title after the scene under the playhead, its page copied into motion/, the playhead on it
+    await seekTo(0.5);
+    await chooseIn(page, '[data-testid=add-motion]', 'Title');
+    await expect.poll(() => saved().scenes.map((scene) => scene.src ?? scene.type)).toEqual(['motion/intro/index.html', 'motion/title/index.html', 'clip']);
+    expect(existsSync(join(dir, 'motion', 'title', 'index.html'))).toBe(true);
+    await expect.poll(async () => (await now()).t).toBe(1);
+    // its block on the timeline shows frames of its page
+    await page.waitForSelector('.scene.motion .thumbs i', { timeout: 30_000 });
+    // the whoosh its page asks for, on the Sound lane where it plays (0.45 s into it), and rendered
+    type PageSounds = { sound: { status: { state: string; pageSounds?: { sound: string; at: number; item: string }[] } } };
+    const sound = async () => ((await now()) as unknown as PageSounds).sound.status;
+    await expect.poll(async () => (await sound()).pageSounds, { timeout: 60_000 }).toEqual([{ sound: 'whoosh', at: 1.45, item: 'Title' }]);
+    await page.waitForSelector('[data-testid=page-sound]');
+    await expect.poll(async () => (await sound()).state, { timeout: 90_000 }).toBe('ready');
+
+    // the editor draws the scenes and the overlay as the export does (`cuttle preview`), pixel for pixel
+    await flushPage();
+    const times = [0.5, titleAt, 6];
+    const stills = join(root, 'motion-stills');
+    const result = spawnSync('node', [CLI, '--json', '-C', dir, 'preview', ...times.flatMap((t) => ['--at', String(t)]), '-o', stills], { encoding: 'utf8', timeout: 120_000 });
+    expect(result.status, result.stderr).toBe(0);
+    const files = (JSON.parse(result.stdout) as { stills: { file: string }[] }).stills.map((still) => still.file);
+    for (const [i, t] of times.entries()) {
+      await seekTo(t);
+      const { mean, max } = difference(await view(), PNG.sync.read(readFileSync(files[i]!)));
+      expect(mean, `t = ${t}: mean difference`).toBeLessThan(0.5);
+      expect(max, `t = ${t}: largest difference`).toBeLessThanOrEqual(24);
+    }
+    expect((await now()).motion.status.map((status) => [status.src, status.state])).toEqual(
+      expect.arrayContaining([
+        ['motion/title/index.html', 'ready'],
+        ['motion/bar/index.html', 'ready'],
+      ]),
+    );
+
+    // a param, set in the inspector, on the video at once
+    await seekTo(titleAt);
+    const before = await view();
+    await page.fill('[data-testid=param-title]', 'Edited in Cuttle');
+    await page.press('[data-testid=param-title]', 'Enter');
+    await expect.poll(() => saved().scenes[1]!.params).toEqual({ title: 'Edited in Cuttle' });
+    await expect.poll(async () => (await seekTo(titleAt), difference(await view(), before).mean), { timeout: 20_000 }).toBeGreaterThan(1);
+    await shotOf('38-motion-editor', '/editor.html', 'motion-editor · Cuttle');
+
+    // Claude edits the page: the editor draws it again
+    const changes = (await now()).motion.files;
+    const html = join(dir, 'motion', 'title', 'index.html');
+    writeFileSync(html, readFileSync(html, 'utf8').replace('</head>', '<style>* { color: #00ff00 !important; }</style></head>'));
+    await expect.poll(async () => (await now()).motion.files, { timeout: 10_000 }).toBeGreaterThan(changes);
+    const green = (png: PNG) => {
+      let count = 0;
+      for (let i = 0; i < png.data.length; i += 4) if (png.data[i + 1]! > 200 && png.data[i]! < 90 && png.data[i + 2]! < 90) count++;
+      return count;
+    };
+    await expect.poll(async () => (await seekTo(titleAt), green(await view())), { timeout: 20_000 }).toBeGreaterThan(500);
+
+    // the export has the edited param and the edited page (the param's field gives the keys back first)
+    await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+    await page.keyboard.press('Control+E');
+    await page.waitForSelector('[data-testid=export-sheet]');
+    await page.click('[data-testid=export-start]');
+    await exported(page);
+    const exportedFrame = spawnSync('ffmpeg', ['-v', 'error', '-ss', String(titleAt), '-i', join(dir, 'out', 'export.mp4'), '-frames:v', '1', '-f', 'image2pipe', '-vcodec', 'png', '-'], { windowsHide: true }).stdout;
+    expect(green(PNG.sync.read(exportedFrame))).toBeGreaterThan(500);
+    await page.keyboard.press('Escape');
+
+    // playing draws the motion frames as they come (the param's field has the keys: the button plays)
+    await seekTo(1);
+    await click(page, 'button.play');
+    await page.waitForTimeout(1500);
+    const stats = await page.evaluate(() => (window as unknown as Hooked).__cuttleCheck.playback() as { motion?: { frames: number } });
+    expect((await now()).playing).toBe(true);
+    await click(page, 'button.play');
+    expect(stats.motion?.frames).toBeGreaterThan(5);
+
+    // a page that throws, added from outside: its error in the inspector
+    mkdirSync(join(dir, 'motion', 'oops'), { recursive: true });
+    writeFileSync(join(dir, 'motion', 'oops', 'index.html'), '<!doctype html><body><script>cuttle.onFrame((t) => { if (t > 0.2) undefinedThing.go(); });</script></body>');
+    await flushPage();
+    const raw = JSON.parse(readFileSync(join(dir, 'cuttle.json'), 'utf8'));
+    writeFileSync(join(dir, 'cuttle.json'), `${JSON.stringify({ ...raw, overlays: [...raw.overlays, { id: 'o9', src: 'motion/oops/index.html', at: 1, duration: 2 }] }, null, 2)}\n`);
+    await page.waitForSelector('.item.motion[data-id=o9]', { timeout: 20_000 });
+    await page.evaluate(() => (window as unknown as Hooked).__cuttleCheck.select({ kind: 'motion', id: 'o9' }));
+    await seekTo(6);
+    await expect.poll(async () => (await page.locator('[data-testid=motion-errors]').textContent().catch(() => '')) ?? '', { timeout: 20_000 }).toContain('ReferenceError');
+    expect(await page.locator('[data-testid=motion-state]').textContent()).toContain('threw an error');
+    await shotOf('39-motion-errors', '/editor.html', 'motion-editor · Cuttle');
+
+    // + Motion → Device 3D after the clip: the take plays on its screen, drawn as the export draws it
+    await chooseIn(page, '[data-testid=add-motion]', 'Device 3D');
+    await expect.poll(() => saved().scenes.map((scene) => scene.src ?? scene.type)).toEqual(['motion/intro/index.html', 'motion/title/index.html', 'clip', 'motion/device-3d/index.html']);
+    await expect.poll(async () => (await now()).motion.status.find((status) => status.src === 'motion/device-3d/index.html')?.state, { timeout: 60_000 }).toBe('ready');
+    const deviceAt = 12;
+    await flushPage();
+    const deviceStill = spawnSync('node', [CLI, '--json', '-C', dir, 'preview', '--at', String(deviceAt), '-o', join(root, 'device-stills')], { encoding: 'utf8', timeout: 120_000 });
+    expect(deviceStill.status, deviceStill.stderr).toBe(0);
+    await seekTo(deviceAt);
+    const shown = difference(await view(), PNG.sync.read(readFileSync((JSON.parse(deviceStill.stdout) as { stills: { file: string }[] }).stills[0]!.file)));
+    expect(shown.mean, 'the device: mean difference').toBeLessThan(1.5);
+    expect((await now()).motion.status.find((status) => status.src === 'motion/device-3d/index.html')?.errors).toEqual([]);
+    await shotOf('39b-device-3d', '/editor.html', 'motion-editor · Cuttle');
+
+    // Claude adds a fold into the clip: the clip's panel shows it, its length is set there, and it goes again
+    const folded = spawnSync('node', [CLI, '--json', '-C', dir, 'motion', 'new', 'fold', '--into', 's2'], { encoding: 'utf8', timeout: 60_000 });
+    expect(folded.status, folded.stderr).toBe(0);
+    type Transitioned = { scenes: { id?: string; transition?: { src: string; duration: number } }[] };
+    const clipOf = () => (saved() as unknown as Transitioned).scenes.find((scene) => scene.id === 's2');
+    await page.evaluate(() => (window as unknown as Hooked).__cuttleCheck.select({ kind: 'scene', id: 's2' }));
+    await page.waitForSelector('[data-testid=transition-in]', { timeout: 20_000 });
+    await page.fill('[data-testid=transition-duration]', '0.6');
+    await page.press('[data-testid=transition-duration]', 'Enter');
+    await expect.poll(() => clipOf()?.transition?.duration).toBe(0.6);
+    // stopped at the cut: the page's frame, as the export draws it
+    const cut = 4.5;
+    await flushPage();
+    const foldStill = spawnSync('node', [CLI, '--json', '-C', dir, 'preview', '--at', String(cut), '-o', join(root, 'fold-stills')], { encoding: 'utf8', timeout: 120_000 });
+    expect(foldStill.status, foldStill.stderr).toBe(0);
+    const foldFrame = PNG.sync.read(readFileSync((JSON.parse(foldStill.stdout) as { stills: { file: string }[] }).stills[0]!.file));
+    await seekTo(cut);
+    await expect.poll(async () => difference(await view(), foldFrame).mean, { timeout: 30_000 }).toBeLessThan(1.5);
+    expect((await now()).error).toBeUndefined();
+    await shotOf('39c-transition', '/editor.html', 'motion-editor · Cuttle');
+    // a moment later its frames are made for playing: playing through the cut shows them
+    type Made = { motion?: { made: number }; transitions: number };
+    const playback = () => page.evaluate(() => (window as unknown as Hooked).__cuttleCheck.playback() as unknown as Made);
+    // 0.6 s at 30 fps, the frame on its very start a crossfade's
+    await expect.poll(async () => (await playback()).motion?.made, { timeout: 60_000 }).toBeGreaterThanOrEqual(17);
+    await seekTo(4);
+    await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+    await click(page, 'button.play');
+    await page.waitForTimeout(1300);
+    const played = await playback();
+    await click(page, 'button.play');
+    expect(played.transitions).toBeGreaterThan(8);
+    await click(page, '[data-testid=transition-remove]');
+    await expect.poll(() => clipOf()?.transition).toBeUndefined();
+    await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find((window) => window.getTitle() === 'motion-editor · Cuttle')?.close());
+  }, 240_000);
+
+  it('plays music made for the video: + Music renders it (its lane, its parts), a param renders it anew, it plays and goes into the export; + Sound puts a sound at the playhead, moved on its lane', async () => {
+    const dir = join(root, 'music-editor');
+    makeMotionFixture(dir);
+    const page = await openEditor(dir);
+    await page.waitForFunction(() => '__cuttleCheck' in window);
+    type Sound = { status: { state: string; key?: string; info?: { bpm?: number; sections?: unknown[] } | null; errors: string[] }; track?: string; seconds: number };
+    const seekTo = (t: number) => page.evaluate((time) => (window as unknown as Hooked).__cuttleCheck.seek(time), t);
+    const now = () => page.evaluate(() => (window as unknown as Hooked).__cuttleCheck.state() as CheckState & { sound: Sound });
+    const saved = () => JSON.parse(readFileSync(join(dir, 'cuttle.json'), 'utf8')) as { music?: { src: string; volume?: number; params?: Record<string, unknown> }; sounds?: { id: string; sound: string; at: number; scene?: string }[] };
+
+    // + Music: the template copied into music/, the music set, rendered for the video, its lane and its panel
+    await seekTo(0.5);
+    await chooseIn(page, '[data-testid=add-music]', 'Pulse');
+    await expect.poll(() => saved().music?.src).toBe('music/pulse/index.html');
+    expect(existsSync(join(dir, 'music', 'pulse', 'index.html'))).toBe(true);
+    // while it renders, its state is a line in the panel and the editor stays in sight (a state's "loading" once took the window's loading cover)
+    const rendering = await page.waitForSelector('[data-testid=music-state].loading', { timeout: 30_000 });
+    expect((await rendering.boundingBox())!.height).toBeLessThan(60);
+    expect(await page.evaluate(() => document.elementFromPoint(innerWidth / 2, 22)?.closest('.titlebar') !== null)).toBe(true);
+    await shotOf('40a-music-rendering', '/editor.html', 'music-editor · Cuttle');
+    await expect.poll(async () => (await now()).sound.status.state, { timeout: 90_000 }).toBe('ready');
+    await expect.poll(async () => (await now()).sound.track, { timeout: 20_000 }).toBe((await now()).sound.status.key);
+    const first = (await now()).sound;
+    expect(first.status.errors).toEqual([]);
+    expect(first.seconds).toBeCloseTo((await now()).duration, 1);
+    expect(first.status.info?.bpm).toBeGreaterThanOrEqual(114);
+    expect(first.status.info?.sections?.length).toBeGreaterThan(0);
+    await page.waitForSelector('[data-testid=music-lane] .music-part');
+    expect(await page.locator('[data-testid=music-state]').textContent()).toContain('Ready');
+    await shotOf('40-music-editor', '/editor.html', 'music-editor · Cuttle');
+
+    // a param: the music renders again with it
+    await page.fill('[data-testid=param-bpm]', '100');
+    await page.press('[data-testid=param-bpm]', 'Enter');
+    await expect.poll(() => saved().music?.params).toEqual({ bpm: 100 });
+    await expect.poll(async () => (await now()).sound.status.info?.bpm, { timeout: 90_000 }).toBe(100);
+    await expect.poll(async () => (await now()).sound.track, { timeout: 20_000 }).not.toBe(first.track);
+
+    // it plays with the video: the music and the effects start (the param's field gives the keys back first)
+    await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+    await seekTo(1);
+    await click(page, 'button.play');
+    await page.waitForTimeout(1200);
+    const stats = await page.evaluate(() => (window as unknown as Hooked).__cuttleCheck.playback() as { soundtrack?: number });
+    expect((await now()).playing).toBe(true);
+    await click(page, 'button.play');
+    expect(stats.soundtrack).toBe(2);
+
+    // + Sound at the playhead: on the clip at the source second it shows, its chip on the lane, its panel
+    await seekTo(3);
+    await chooseIn(page, '[data-testid=add-sound]', 'Whoosh');
+    await expect.poll(() => saved().sounds).toEqual([{ id: 'a1', sound: 'whoosh', at: 2 }]);
+    const chip = page.locator('.item.sound[data-id=a1]');
+    await chip.waitFor();
+    expect(await page.locator('[data-testid=sound-volume]').count()).toBe(1);
+    // dragged half a second later on its lane
+    const box = (await chip.boundingBox())!;
+    const pps = await page.evaluate(() => (window as unknown as { __cuttleCheck: { pps(): number } }).__cuttleCheck.pps());
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(box.x + box.width / 2 + pps * 0.25, box.y + box.height / 2, { steps: 4 });
+    await page.mouse.move(box.x + box.width / 2 + pps * 0.5, box.y + box.height / 2, { steps: 4 });
+    await page.mouse.up();
+    await expect.poll(() => saved().sounds?.[0]?.at).toBeGreaterThan(2.3);
+    // and in the intro (a motion scene): seconds into it
+    await seekTo(0.4);
+    await chooseIn(page, '[data-testid=add-sound]', 'Pop');
+    await expect.poll(() => saved().sounds?.find((sound) => sound.id === 'a2')).toEqual({ id: 'a2', sound: 'pop', at: 0.4, scene: 's1' });
+    await expect.poll(async () => (await now()).sound.status.state, { timeout: 90_000 }).toBe('ready');
+    await shotOf('41-music-sounds', '/editor.html', 'music-editor · Cuttle');
+
+    // the export has the music (the take has no mic: what is heard is the music and the sounds)
+    await page.keyboard.press('Control+E');
+    await page.waitForSelector('[data-testid=export-sheet]');
+    await page.click('[data-testid=export-start]');
+    await exported(page);
+    const meter = spawnSync('ffmpeg', ['-hide_banner', '-nostats', '-i', join(dir, 'out', 'export.mp4'), '-map', '0:a', '-af', 'ebur128', '-f', 'null', '-'], { encoding: 'utf8', windowsHide: true }).stderr;
+    const lufs = Number(/I:\s+(-?[\d.]+) LUFS/.exec(meter.slice(meter.lastIndexOf('Summary:')))?.[1]);
+    expect(lufs).toBeGreaterThan(-30);
+    await page.keyboard.press('Escape');
+    await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find((window) => window.getTitle() === 'music-editor · Cuttle')?.close());
+  }, 300_000);
+
+  it('sets the brand in the Look tab and saves it as a kit; another project wears the kit with one click, its end card as the first one’s, as the export draws it', async () => {
+    const brands = join(root, 'brands');
+    type Branded = { theme?: Record<string, unknown>; look: { background?: { preset: string }; frame?: { style?: string }; cursor?: { style?: string; color?: string } }; scenes: { type: string; src?: string }[] };
+    const saved = (dir: string) => JSON.parse(readFileSync(join(dir, 'cuttle.json'), 'utf8')) as Branded;
+    const hooks = (page: Page) => ({
+      seek: (t: number) => page.evaluate((time) => (window as unknown as Hooked).__cuttleCheck.seek(time), t),
+      view: async () => decode(await page.evaluate(() => (window as unknown as Hooked).__cuttleCheck.pixels())),
+      state: () => page.evaluate(() => (window as unknown as Hooked).__cuttleCheck.state() as CheckState & { motion: { status: { src: string; state: string; errors: string[] }[] } }),
+    });
+    /** A project with an end card after its clip, open, its brand part open in the Look tab. */
+    const endCard = async (name: string) => {
+      const dir = join(root, name);
+      makeMotionFixture(dir);
+      const page = await openEditor(dir);
+      await page.waitForFunction(() => '__cuttleCheck' in window);
+      await hooks(page).seek(5.5);
+      await chooseIn(page, '[data-testid=add-motion]', 'End card');
+      await expect.poll(() => saved(dir).scenes.map((scene) => scene.src ?? scene.type)).toEqual(['motion/intro/index.html', 'clip', 'motion/end-card/index.html']);
+      await click(page, '#tab-look');
+      await click(page, '[data-testid=look-open-brand]');
+      await page.waitForSelector('[data-testid=brand-name]');
+      return { dir, page, ...hooks(page) };
+    };
+    // the end card settled: the mark landed, the URL typed, the call to action in
+    const cardAt = 9.4;
+    const settled = async (one: Awaited<ReturnType<typeof endCard>>) => {
+      await expect.poll(async () => (await one.state()).motion.status.find((status) => status.src === 'motion/end-card/index.html')?.state, { timeout: 60_000 }).toBe('ready');
+      await one.seek(cardAt);
+      return one.view();
+    };
+
+    // the first project: the brand set in the Look tab (a logo from a file, a font, an accent), the background its own
+    const first = await endCard('brand-first');
+    await first.page.fill('[data-testid=brand-name]', 'Nimbus');
+    await first.page.press('[data-testid=brand-name]', 'Enter');
+    await first.page.fill('[data-testid=brand-url]', 'nimbus.app');
+    await first.page.press('[data-testid=brand-url]', 'Enter');
+    await click(first.page, '[data-testid=brand-logo]');
+    await chooseIn(first.page, '[data-testid=brand-font]', 'Bebas Neue');
+    await first.page.evaluate(() => {
+      const input = document.querySelector('input[aria-label="Accent colour"]') as HTMLInputElement;
+      input.value = '#7c5cff';
+      input.dispatchEvent(new Event('change'));
+    });
+    await click(first.page, '[data-testid=look-open-background]');
+    await click(first.page, '.swatch-button.bg-mesh');
+    await expect.poll(() => saved(first.dir).theme).toEqual({ name: 'Nimbus', url: 'nimbus.app', logo: 'brand/nimbus.svg', font: 'Bebas Neue', accent: '#7C5CFF' });
+    expect(readFileSync(join(first.dir, 'brand', 'nimbus.svg'), 'utf8')).toContain('<svg');
+    // the end card wears it: the logo, the name's font, the URL, the accent; the editor draws it as `cuttle preview` does
+    const firstCard = await settled(first);
+    // the logo is there (the brand's accent fills it; a logo that did not load leaves its place empty)
+    const accentPixels = (png: PNG) => {
+      let count = 0;
+      for (let i = 0; i < png.data.length; i += 4) if (Math.abs(png.data[i]! - 0x7c) + Math.abs(png.data[i + 1]! - 0x5c) + Math.abs(png.data[i + 2]! - 0xff) < 40) count++;
+      return count;
+    };
+    expect(accentPixels(firstCard), 'the logo').toBeGreaterThan(400);
+    await first.page.evaluate(() => (window as unknown as Hooked).__cuttleCheck.flush());
+    const still = spawnSync('node', [CLI, '--json', '-C', first.dir, 'preview', '--at', String(cardAt), '-o', join(root, 'brand-stills')], { encoding: 'utf8', timeout: 120_000 });
+    expect(still.status, still.stderr).toBe(0);
+    const exportCard = PNG.sync.read(readFileSync((JSON.parse(still.stdout) as { stills: { file: string }[] }).stills[0]!.file));
+    const drawn = difference(firstCard, exportCard);
+    expect(drawn.mean, 'the end card: mean difference').toBeLessThan(0.5);
+    expect((await first.state()).motion.status.find((status) => status.src === 'motion/end-card/index.html')?.errors).toEqual([]);
+    // saved as a kit, under the brand's name: its files beside it, and the project wears it
+    await click(first.page, '[data-testid=look-open-brand]');
+    await first.page.waitForSelector('[data-testid=brand-save]:not([disabled])');
+    await click(first.page, '[data-testid=brand-save]');
+    await expect.poll(() => existsSync(join(brands, 'nimbus', 'brand.json'))).toBe(true);
+    expect(readdirSync(join(brands, 'nimbus')).sort()).toEqual(['brand.json', 'logo.svg']);
+    await expect.poll(() => saved(first.dir).theme?.kit).toBe('Nimbus');
+    await first.page.waitForSelector('[data-testid=brand-kit][aria-pressed=true]');
+    await shotOf('42-brand', '/editor.html', 'brand-first · Cuttle');
+    await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find((window) => window.getTitle() === 'brand-first · Cuttle')?.close());
+
+    // another project: the kit is one click; its end card is the first one's; undo takes it all back as one step
+    const second = await endCard('brand-second');
+    await second.page.waitForSelector('[data-testid=brand-kit]');
+    await click(second.page, '[data-testid=brand-kit]');
+    await expect.poll(() => saved(second.dir).theme).toEqual({ name: 'Nimbus', url: 'nimbus.app', logo: 'brand/nimbus-logo.svg', foreground: '#FFFFFF', font: 'Bebas Neue', accent: '#7C5CFF', kit: 'Nimbus' });
+    expect(saved(second.dir).look).toMatchObject({ background: { preset: 'mesh' }, frame: { style: 'mac-dark' }, cursor: { style: 'system', color: '#D97757' } });
+    expect(existsSync(join(second.dir, 'brand', 'nimbus-logo.svg'))).toBe(true);
+    const secondCard = await settled(second);
+    expect(difference(secondCard, firstCard).mean, 'the second end card against the first').toBeLessThan(0.5);
+    await shotOf('42b-brand-applied', '/editor.html', 'brand-second · Cuttle');
+    await second.page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+    await second.page.keyboard.press('Control+Z');
+    await expect.poll(() => saved(second.dir).theme).toBeUndefined();
+    expect(saved(second.dir).look.background).toBeUndefined();
+    await second.page.keyboard.press('Control+Shift+Z');
+    await expect.poll(() => saved(second.dir).theme?.kit).toBe('Nimbus');
+    // a kit is removed after a question; the project keeps what it set
+    await click(second.page, '.kit-remove');
+    await second.page.waitForSelector('.kit-confirm');
+    await click(second.page, '.kit-confirm .primary');
+    await expect.poll(() => existsSync(join(brands, 'nimbus'))).toBe(false);
+    await second.page.waitForSelector('[data-testid=brand-kit]', { state: 'detached' });
+    expect(saved(second.dir).theme?.kit).toBe('Nimbus');
+    await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find((window) => window.getTitle() === 'brand-second · Cuttle')?.close());
+  }, 240_000);
+
+  it('builds a gradient in the Look tab from the take’s colours, puts the desktop’s wallpaper behind the window, softened and darker, and draws the quiet ones as the export does', async () => {
+    const dir = join(root, 'backgrounds');
+    makeFixture(dir);
+    const page = await openEditor(dir);
+    await page.waitForFunction(() => '__cuttleCheck' in window);
+    const seekTo = (t: number) => page.evaluate((time) => (window as unknown as Hooked).__cuttleCheck.seek(time), t);
+    const view = async () => decode(await page.evaluate(() => (window as unknown as Hooked).__cuttleCheck.pixels()));
+    type Background = { preset: string; colors?: string[]; angle?: number; kind?: string; image?: string; blur?: number; dim?: number };
+    const saved = () => (JSON.parse(readFileSync(join(dir, 'cuttle.json'), 'utf8')) as { look: { background: Background } }).look.background;
+    /** The editor's frame at `t` against `cuttle preview`'s (the window over the background, in the first clip). */
+    const asExported = async (t: number, name: string) => {
+      await page.evaluate(() => (window as unknown as Hooked).__cuttleCheck.flush());
+      const still = spawnSync('node', [CLI, '--json', '-C', dir, 'preview', '--at', String(t), '-o', join(root, `bg-${name}`)], { encoding: 'utf8', timeout: 120_000 });
+      expect(still.status, still.stderr).toBe(0);
+      const exported = PNG.sync.read(readFileSync((JSON.parse(still.stdout) as { stills: { file: string }[] }).stills[0]!.file));
+      await expect.poll(async () => (await seekTo(t), difference(await view(), exported).mean), { timeout: 20_000, message: `${name}: the editor against the export` }).toBeLessThan(0.6);
+    };
+    const setRange = (testId: string, value: number) =>
+      page.locator(`[data-testid=${testId}]`).evaluate((element, to) => {
+        const input = element as HTMLInputElement;
+        Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, String(to));
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+        input.dispatchEvent(new Event('change', { bubbles: true }));
+      }, value);
+    await click(page, '#tab-look');
+    await click(page, '[data-testid=look-open-background]');
+
+    // a gradient: its own colours first, then the take's, a third stop, an angle, then radial
+    await click(page, '[data-testid=bg-gradient]');
+    await expect.poll(saved).toEqual({ preset: 'gradient', colors: ['#7C5CFF', '#FF7AB6'] });
+    await click(page, '[data-testid=bg-from-take]');
+    await expect.poll(() => saved().colors, { timeout: 30_000 }).not.toEqual(['#7C5CFF', '#FF7AB6']);
+    const taken = saved().colors!;
+    expect(taken.length).toBeGreaterThanOrEqual(2);
+    if (taken.length < 4) {
+      await click(page, '[data-testid=bg-color-add]');
+      await expect.poll(() => saved().colors?.length).toBe(taken.length + 1);
+    }
+    await page.fill('[data-testid=bg-angle]', '90');
+    await page.press('[data-testid=bg-angle]', 'Enter');
+    await expect.poll(() => saved().angle).toBe(90);
+    await asExported(1, 'gradient');
+    await shotOf('43-background-gradient', '/editor.html', 'backgrounds · Cuttle');
+    await click(page, '[data-testid=bg-radial]');
+    await expect.poll(() => saved().kind).toBe('radial');
+    await asExported(1, 'radial');
+
+    // the desktop's wallpaper (the check's own), softened; then darker
+    await click(page, '[data-testid=bg-wallpaper]');
+    await expect.poll(saved).toEqual({ preset: 'image', image: 'images/wallpaper.png', blur: 0.6 });
+    expect(existsSync(join(dir, 'images', 'wallpaper.png'))).toBe(true);
+    await page.waitForSelector('[data-testid=bg-dim]');
+    await setRange('bg-dim', 30);
+    await expect.poll(() => saved().dim).toBe(0.3);
+    await asExported(1, 'wallpaper');
+    await shotOf('43b-background-wallpaper', '/editor.html', 'backgrounds · Cuttle');
+
+    // the quiet ones, each as the export draws it; flow in the gradient's colours (they stay)
+    await click(page, '[data-testid=bg-flow]');
+    await expect.poll(saved).toEqual({ preset: 'flow' });
+    for (const preset of ['flow', 'bokeh', 'dots']) {
+      await click(page, `[data-testid=bg-${preset}]`);
+      await expect.poll(() => saved().preset).toBe(preset);
+      await asExported(1, preset);
+      if (preset === 'dots') await shotOf('43c-background-dots', '/editor.html', 'backgrounds · Cuttle');
+    }
+    await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find((window) => window.getTitle() === 'backgrounds · Cuttle')?.close());
+  }, 240_000);
+
+  it('frames the take as Windows, a terminal or a phone and puts a watermark in a corner (its text, then an image), each as the export draws it', async () => {
+    const dir = join(root, 'frames');
+    makeFixture(dir);
+    const page = await openEditor(dir);
+    await page.waitForFunction(() => '__cuttleCheck' in window);
+    const seekTo = (t: number) => page.evaluate((time) => (window as unknown as Hooked).__cuttleCheck.seek(time), t);
+    const view = async () => decode(await page.evaluate(() => (window as unknown as Hooked).__cuttleCheck.pixels()));
+    type Look = { frame?: { style?: string }; watermark?: { enabled?: boolean; text?: string; image?: string; corner?: string; size?: number } };
+    const saved = () => (JSON.parse(readFileSync(join(dir, 'cuttle.json'), 'utf8')) as { look: Look }).look;
+    const asExported = async (t: number, name: string) => {
+      await page.evaluate(() => (window as unknown as Hooked).__cuttleCheck.flush());
+      const still = spawnSync('node', [CLI, '--json', '-C', dir, 'preview', '--at', String(t), '-o', join(root, `frame-${name}`)], { encoding: 'utf8', timeout: 120_000 });
+      expect(still.status, still.stderr).toBe(0);
+      const exported = PNG.sync.read(readFileSync((JSON.parse(still.stdout) as { stills: { file: string }[] }).stills[0]!.file));
+      await expect.poll(async () => (await seekTo(t), difference(await view(), exported).mean), { timeout: 20_000, message: `${name}: the editor against the export` }).toBeLessThan(0.6);
+    };
+    await click(page, '#tab-look');
+
+    // the frames: the engine's own pictures of each, then three of them on the take
+    await click(page, '[data-testid=look-open-window]');
+    await page.waitForSelector('[data-testid=frame-iphone] img', { timeout: 20_000 });
+    await page.locator('[data-testid=frame-iphone]').evaluate((element) => element.scrollIntoView({ block: 'center' }));
+    await shotOf('44-frames', '/editor.html', 'frames · Cuttle');
+    for (const style of ['windows-dark', 'terminal', 'iphone']) {
+      await click(page, `[data-testid=frame-${style}]`);
+      await expect.poll(() => saved().frame?.style).toBe(style);
+      await asExported(1, style);
+    }
+
+    // the watermark: on, its text (the project has no logo and no name), then an image, top left and larger
+    await click(page, '[data-testid=look-open-watermark]');
+    await click(page, '[data-testid=watermark-enabled]');
+    await expect.poll(() => saved().watermark?.enabled).toBe(true);
+    await page.fill('[data-testid=watermark-text]', 'nimbus.app');
+    await page.press('[data-testid=watermark-text]', 'Enter');
+    await expect.poll(() => saved().watermark?.text).toBe('nimbus.app');
+    await asExported(1, 'watermark-text');
+    await click(page, '[data-testid=watermark-image]');
+    await expect.poll(() => saved().watermark?.image).toBe('images/nimbus.svg');
+    await click(page, '[data-testid=watermark-top-left]');
+    await page.locator('[data-testid=watermark-size]').evaluate((element) => {
+      const input = element as HTMLInputElement;
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, '12');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    await expect.poll(() => saved().watermark).toMatchObject({ corner: 'top-left', size: 0.12 });
+    await asExported(1, 'watermark-image');
+    await shotOf('44b-watermark', '/editor.html', 'frames · Cuttle');
+    await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find((window) => window.getTitle() === 'frames · Cuttle')?.close());
+  }, 240_000);
+
+  it('keeps every part of the Look tab inside the inspector, each with all its rows shown', async () => {
+    const dir = join(root, 'looks');
+    makeFixture(dir);
+    // a transcript and a clean voice, so the subtitles' and the sound's rows all show; a watermark on
+    const take = join(dir, 'takes', '1');
+    writeFileSync(join(take, 'transcript.json'), JSON.stringify({ version: 1, language: 'en', model: 'small', words: [{ t: 1, end: 1.4, text: 'Hello' }] }));
+    cpSync(join(take, 'mic.m4a'), join(take, 'mic.clean.m4a'));
+    const path = join(dir, 'cuttle.json');
+    const raw = JSON.parse(readFileSync(path, 'utf8')) as { sources: Record<string, string>; look: Record<string, unknown> };
+    raw.sources = { ...raw.sources, transcript: 'takes/1/transcript.json', cleanMic: 'takes/1/mic.clean.m4a' };
+    raw.look = { ...raw.look, watermark: { enabled: true } };
+    writeFileSync(path, JSON.stringify(raw, null, 2));
+    const page = await openEditor(dir);
+    await click(page, '#tab-look');
+    const parts = await page.$$eval('.look-part', (sections) => sections.map((section) => (section as HTMLElement).dataset.testid!.replace(/^look-/, '')));
+    expect(parts).toEqual(['brand', 'watermark', 'background', 'window', 'cursor', 'camera', 'subtitles', 'sound', 'video']);
+    const outside: Record<string, string[]> = {};
+    const look = async (part: string) => {
+      const found = await outsideItsPanel(page);
+      if (found.length > 0) outside[part] = found;
+    };
+    await look('closed');
+    for (const part of parts) {
+      await click(page, `[data-testid=look-open-${part}]`);
+      await page.waitForSelector(`[data-testid=look-${part}] .look-body`);
+      // a moment for what a part loads (the frames' and cursors' pictures, the kits)
+      await page.waitForTimeout(400);
+      await look(part);
+    }
+    expect(outside).toEqual({});
+    await click(page, '[data-testid=look-open-sound]');
+    await shotOf('45-sound', '/editor.html', 'looks · Cuttle');
+    await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find((window) => window.getTitle() === 'looks · Cuttle')?.close());
+  }, 120_000);
+
+  it("exports the script's steps as the video's chapters, and lists them to copy for a YouTube description", async () => {
+    const dir = join(root, 'chapters');
+    makeFixture(dir);
+    // the take reached the steps at 0, 2 and 9 s: the video shows 9 s at 4.125 s (after 3 s at 1× and 5 s at 8×)
+    writeFileSync(join(dir, 'takes', '1', 'markers.json'), JSON.stringify({ version: 1, markers: [{ t: 0, kind: 'step', label: 'step1' }, { t: 2, kind: 'step', label: 'step2' }, { t: 9, kind: 'step', label: 'step3' }] }));
+    const path = join(dir, 'cuttle.json');
+    writeFileSync(path, JSON.stringify({ ...JSON.parse(readFileSync(path, 'utf8')), script: [{ id: 'step1', title: 'Open the settings' }, { id: 'step2', title: 'Turn on dark mode' }, { id: 'step3', title: 'Export the video' }] }));
+    const page = await openEditor(dir);
+    await page.keyboard.press('Control+E');
+    await page.waitForSelector('[data-testid=export-chapters]');
+    expect(await page.locator('[data-testid=export-chapters] span').textContent()).toBe('3 from the script, in the video file');
+    await page.waitForSelector('[data-testid=export-start]:not([disabled])');
+    await click(page, '[data-testid=export-start]');
+    await exported(page);
+    expect(await page.locator('[data-testid=export-file] small').textContent()).toContain('· 3 chapters');
+    const list = '0:00 Open the settings\n0:02 Turn on dark mode\n0:04 Export the video';
+    expect(await page.locator('[data-testid=export-chapter-list] pre').textContent()).toBe(list);
+    // a video this short: YouTube would not show them, and says why
+    expect(await page.locator('[data-testid=export-chapter-list] .note').textContent()).toMatch(/^YouTube needs each chapter to last 10 s or more/);
+    await click(page, '[data-testid=export-copy-chapters]');
+    await expect.poll(() => page.locator('[data-testid=export-copy-chapters]').textContent()).toBe('Copied');
+    expect(await app.evaluate(() => (globalThis as { __copied?: string }).__copied)).toBe(list);
+    await shotOf('48-export-chapters', '/editor.html', 'chapters · Cuttle');
+    // the video file has them, where the take reached each step
+    const probe = spawnSync('ffprobe', ['-v', 'error', '-show_chapters', '-of', 'json', join(dir, 'out', 'export.mp4')], { encoding: 'utf8' });
+    const chapters = (JSON.parse(probe.stdout) as { chapters: { start_time: string; tags: { title: string } }[] }).chapters;
+    expect(chapters.map((chapter) => [Number(chapter.start_time), chapter.tags.title])).toEqual([
+      [0, 'Open the settings'],
+      [2, 'Turn on dark mode'],
+      [4.125, 'Export the video'],
+    ]);
+    await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find((window) => window.getTitle() === 'chapters · Cuttle')?.close());
   }, 180_000);
 
   it('had no unhandled rejection in the main process, and no error in the editor', async () => {

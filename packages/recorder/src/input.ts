@@ -18,7 +18,14 @@ export type HotkeySink = (action: HotkeyAction) => void;
 const now = () => Date.now() / 1000;
 
 /** Ctrl+Shift+Alt+<key>: no app binds these, and AltGr+Shift+letter types nothing on common layouts. */
-export const HOTKEYS: Record<HotkeyAction, string> = { stop: 'Ctrl+Shift+Alt+S', marker: 'Ctrl+Shift+Alt+M', pause: 'Ctrl+Shift+Alt+P', retake: 'Ctrl+Shift+Alt+X' };
+export const HOTKEYS: Record<HotkeyAction, string> = {
+  stop: 'Ctrl+Shift+Alt+S',
+  marker: 'Ctrl+Shift+Alt+M',
+  pause: 'Ctrl+Shift+Alt+P',
+  retake: 'Ctrl+Shift+Alt+X',
+  next: 'Ctrl+Shift+Alt+N',
+  previous: 'Ctrl+Shift+Alt+B',
+};
 
 export interface KeyEvent {
   keycode: number;
@@ -79,7 +86,8 @@ const AREA_EVERY = 30;
 /** A content area that moved less than this (px) has not moved. */
 const AREA_SLACK = 2;
 
-type Watched = Pick<import('./win32').Win32, 'foreground' | 'contentArea' | 'popups'>;
+/** What both platforms tell of the windows (win32.ts, darwin.ts). */
+type Watched = Pick<import('./win32').Win32, 'foreground' | 'contentArea' | 'popups'> & Pick<import('./darwin').Darwin, 'foreground' | 'contentArea' | 'popups'>;
 
 /**
  * The window shown and what opens over it: called on every shape read, it passes on the foreground
@@ -139,7 +147,7 @@ async function startWindowsInput(onInput: InputSink, onHotkey: HotkeySink): Prom
     UiohookKey.Ctrl, UiohookKey.CtrlRight, UiohookKey.Shift, UiohookKey.ShiftRight,
     UiohookKey.Alt, UiohookKey.AltRight, UiohookKey.Meta, UiohookKey.MetaRight,
   ]);
-  const keys = keyHandler(modifiers, new Map<number, HotkeyAction>([[UiohookKey.S, 'stop'], [UiohookKey.M, 'marker'], [UiohookKey.P, 'pause'], [UiohookKey.X, 'retake']]), onInput, onHotkey);
+  const keys = keyHandler(modifiers, new Map<number, HotkeyAction>([[UiohookKey.S, 'stop'], [UiohookKey.M, 'marker'], [UiohookKey.P, 'pause'], [UiohookKey.X, 'retake'], [UiohookKey.N, 'next'], [UiohookKey.B, 'previous']]), onInput, onHotkey);
   const buttons = new Map<unknown, 'left' | 'right' | 'middle'>([[1, 'left'], [2, 'right'], [3, 'middle']]);
   let shape = win.cursorShape(); // before the hook starts: nothing to undo if it throws
 
@@ -209,16 +217,18 @@ async function startWindowsInput(onInput: InputSink, onHotkey: HotkeySink): Prom
   };
 }
 
-/** macOS virtual key codes of the hotkeys' letters (kVK_ANSI_S, _M, _P, _X). */
-const MAC_HOTKEYS = new Map<number, HotkeyAction>([[0x01, 'stop'], [0x2e, 'marker'], [0x23, 'pause'], [0x07, 'retake']]);
+/** macOS virtual key codes of the hotkeys' letters (kVK_ANSI_S, _M, _P, _X, _N, _B). */
+const MAC_HOTKEYS = new Map<number, HotkeyAction>([[0x01, 'stop'], [0x2e, 'marker'], [0x23, 'pause'], [0x07, 'retake'], [0x2d, 'next'], [0x0b, 'previous']]);
 const WHERE_INPUT_MONITORING = 'allow the app that runs Cuttle (your terminal, or Cuttle) under System Settings > Privacy & Security > Input Monitoring';
 
 /**
  * macOS: an event tap of darwin.ts (see there why not uiohook) in desktop pixels, each event at its
  * own timestamp (a caret read or a busy moment of this thread does not shift it); the pointer's
- * shape read as on Windows. Without Input Monitoring only the mouse is logged (no key counts, no
- * hotkeys, no caret); the caret also needs the Accessibility permission (without it, zooms on
- * typing follow what the screen changes).
+ * shape, the windows' dialogs, menus and notifications and the page shown read as on Windows.
+ * Without Input Monitoring only the mouse is logged (no key counts, no hotkeys, no caret); the caret
+ * and the page also need the Accessibility permission (without it, zooms on typing follow what the
+ * screen changes, the crop comes from the picture, and a notification is masked on the whole right
+ * side of its display).
  */
 async function startMacInput(onInput: InputSink, onHotkey: HotkeySink): Promise<InputSource> {
   const { loadDarwin } = await import('./darwin');
@@ -243,19 +253,24 @@ async function startMacInput(onInput: InputSink, onHotkey: HotkeySink): Promise<
     : !keyboard
       ? `the keyboard is not logged (no typing activity, no hotkeys): ${WHERE_INPUT_MONITORING}`
       : undefined;
-  // the pointer's shape and the caret, read as on Windows (the caret a few times a second while keys come)
+  // the pointer's shape, the caret and the windows, read as on Windows (the caret a few times a second while keys come)
   const caret = caretWatch(() => mac.caret(), onInput);
+  const windows = windowWatch(mac, onInput);
   let shape = mac.cursorShape();
-  const poll = tap
-    ? setInterval(() => {
-        const current = mac.cursorShape();
-        if (current !== shape) {
-          shape = current;
-          onInput({ type: 'shape', time: now(), shape });
-        }
-        if (keyboard) caret(now(), typedAt);
-      }, SHAPE_POLL_MS)
-    : undefined;
+  const poll = setInterval(() => {
+    // an answer the system could not give must not end the recording: the next look tries again
+    try {
+      const current = mac.cursorShape();
+      if (tap && current !== shape) {
+        shape = current;
+        onInput({ type: 'shape', time: now(), shape });
+      }
+      if (tap && keyboard) caret(now(), typedAt);
+      windows(now());
+    } catch {
+      // as above
+    }
+  }, SHAPE_POLL_MS);
   return {
     initial: (time) => [{ type: 'move', time, ...mac.cursorPosition() }, { type: 'shape', time, shape }],
     stop: () => {

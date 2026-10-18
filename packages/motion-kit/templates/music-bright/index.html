@@ -1,0 +1,96 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <!--
+      Bright: upbeat and friendly, for a launch or a social clip. Claps on two and four, a bouncing bass
+      in octaves, a marimba-like pluck, bells on the scene changes, a pop on each click the video shows,
+      and the full beat where it peaks. Change anything: it is a starting point.
+    -->
+    <script type="application/json" id="cuttle-params">
+      [
+        { "name": "key", "label": "Key", "type": "select", "default": "G", "options": ["C", "Db", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B"] },
+        { "name": "progression", "label": "Chords", "type": "text", "default": "I V vi IV" },
+        { "name": "bpm", "label": "Tempo (0: fitted to the cuts)", "type": "number", "default": 0, "min": 0, "max": 160 },
+        { "name": "pops", "label": "A pop on each click", "type": "bool", "default": true },
+        { "name": "energies", "label": "Energy by scene (Intro=1, s4=3)", "type": "text", "default": "" }
+      ]
+    </script>
+  </head>
+  <body>
+    <script type="module">
+      import { song, kick, clap, hat, shaker, crash, bass, pluck, keys, pad, fx, progression, voiceLead, sections, fitTempo, euclid } from 'cuttle/sound';
+
+      cuttle.music((audio) => {
+        const { video, params } = audio;
+        const fitted = fitTempo(video, { min: 112, max: 124 });
+        const bpm = params.bpm > 0 ? params.bpm : fitted.bpm;
+        const s = song(audio, { bpm, offset: params.bpm > 0 ? 0 : fitted.offset, key: params.key, mode: 'major', swing: 0.06, reverb: 1.8, brightness: 0.7 });
+        const chords = voiceLead(progression(params.key, 'major', params.progression, 3), { low: 'B2', high: 'G4' });
+        const energy = Object.fromEntries(String(params.energies ?? '').split(',').map((pair) => pair.split('=').map((x) => x.trim())).filter(([k, v]) => k && v));
+        const parts = sections(video, { energy });
+        const energyAt = (t) => parts.find((part) => t >= part.start && t < part.end)?.energy ?? 2;
+
+        const k = kick(s, { tone: 50, punch: 1, click: 0.4, drive: 0.25, gain: 0.85 });
+        const cl = clap(s, { gain: 0.7, tone: 1400 });
+        const hh = hat(s, { gain: 0.2, tone: 1.1 });
+        const sh = shaker(s, { gain: 0.14 });
+        const cr = crash(s, { gain: 0.22 });
+        const low = bass(s, { wave: 'square', cutoff: 700, envelope: 2, resonance: 1.5, drive: 0.15, sub: 0.4, gain: 0.32 });
+        const marimba = keys(s, { type: 'glass', gain: 0.12, decay: 0.6, tremolo: 0 });
+        const sparkle = pluck(s, { wave: 'triangle', cutoff: 2400, gain: 0.08, decay: 0.12 });
+        const warm = pad(s, { voices: 2, cutoff: 2200, attack: 0.3, release: 0.8, gain: 0.07 });
+
+        const RHYTHM = euclid(5, 8, 1);
+        const kicks = [];
+        let previous = -1;
+        for (const { bar, t } of s.bars(-1, video.duration)) {
+          const notes = chords[((bar % chords.length) + chords.length) % chords.length];
+          const start = Math.max(0, t);
+          const e = energyAt(start);
+          if (e > previous && previous >= 0 && e >= 2 && t >= 0) cr.hit(t, 0.8);
+          previous = e;
+          warm.play(start, notes.map((n) => n + 12), s.bar, { velocity: 0.3 + 0.15 * e });
+          // the marimba plays the chord in a 5-of-8 rhythm
+          for (let i = 0; i < 8; i++) {
+            const at = s.time(bar, i / 2);
+            if (at < 0 || at >= video.duration || !RHYTHM[i]) continue;
+            marimba.play(at, notes[(i + bar) % notes.length] + 12, s.beat / 2, { velocity: 0.7 + 0.2 * s.random() });
+          }
+          for (let beat = 0; beat < 4; beat++) {
+            const bt = s.time(bar, beat);
+            if (bt < 0 || bt >= video.duration) continue;
+            const ee = energyAt(bt);
+            if (ee >= 2) {
+              if (ee >= 3 || beat % 2 === 0) {
+                k.hit(bt, 0.95);
+                kicks.push(bt);
+              }
+              if (beat % 2 === 1) cl.hit(bt, 0.9);
+              hh.hit(s.time(bar, beat + 0.5), 0.7);
+              // octave bass: root, up, root, up
+              low.play(bt, notes[0] - 12, s.beat * 0.4, { velocity: 0.9 });
+              low.play(s.time(bar, beat + 0.5), notes[0], s.beat * 0.35, { velocity: 0.7 });
+            } else if (ee === 1) sh.hit(s.time(bar, beat + 0.5), 0.6);
+            if (ee >= 3) {
+              sh.hit(s.time(bar, beat + 0.25), 0.5);
+              sparkle.play(s.time(bar, beat + 0.75), notes[(beat + 1) % notes.length] + 24, s.beat / 4, { velocity: 0.8, pan: beat % 2 ? 0.4 : -0.4 });
+            }
+          }
+        }
+        s.duck(s.pads, kicks, { depth: 0.4, release: 0.18 });
+        s.duck(s.bassBus, kicks, { depth: 0.25, release: 0.1 });
+
+        // bells on the scene changes, a pop on each click, a success where Claude answers
+        for (const cut of video.cuts.filter((c) => !c.jump)) {
+          fx.swooshIn(audio, cut.t, { volume: 0.5 });
+          fx.chime(audio, cut.t + 0.02, { volume: 0.4 });
+        }
+        if (params.pops) for (const t of video.clicks) fx.pop(audio, t, { volume: 0.35, pitch: 0.9 + audio.random() * 0.3 });
+        for (const marker of video.markers.filter((m) => m.kind === 'answer')) fx.success(audio, marker.t, { volume: 0.5 });
+
+        return { bpm, key: `${params.key} major`, sections: parts.map((part) => ({ start: part.start, end: part.end, name: part.name, energy: part.energy })) };
+      });
+    </script>
+  </body>
+</html>

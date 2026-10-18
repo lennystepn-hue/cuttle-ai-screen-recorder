@@ -4,7 +4,7 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import { loadEngineAssets, type EngineAssets } from '../src/assets';
 import { maskRectToOutput, windowLayout } from '../src/layout';
 import { FRAME_CHROME } from '../src/presets/frames';
-import { createRenderer, type FrameSources } from '../src/renderer';
+import { createRenderer, type FrameSources, type MotionPixels } from '../src/renderer';
 import { SCREEN, fakeScreen, fixtures } from './fixtures';
 import { pixelAt, readPixels, type Pixels } from './gl-util';
 
@@ -28,10 +28,10 @@ const CARDS = parse({
   ],
 });
 
-const NO_SOURCES: FrameSources = { screens: new Map(), webcams: new Map(), stills: new Map() };
+const NO_SOURCES: FrameSources = { screens: new Map(), webcams: new Map(), stills: new Map(), motion: new Map(), overlays: new Map() };
 
 function layer(index: number, opacity: number, kind: SceneFrame['kind'] = 'card'): SceneFrame {
-  return { index, sceneIndex: index, kind, local: 0, progress: 0, opacity, masks: [], texts: [] };
+  return { index, sceneIndex: index, kind, local: 0, progress: 0, opacity, masks: [], texts: [], overlays: [] };
 }
 
 function render(project: CuttleProject, state: RenderState, sources = NO_SOURCES) {
@@ -62,7 +62,7 @@ describe('createRenderer', () => {
   it('compiles every background preset', async () => {
     const { background } = await fixtures();
     for (const preset of BACKGROUND_PRESETS) {
-      const project = parse({ look: { background: { preset, color: '#000000', image: 'bg.png' } } });
+      const project = parse({ look: { background: { preset, color: '#000000', image: 'bg.png', colors: ['#000000', '#FFFFFF'] } } });
       createRenderer(new OffscreenCanvas(1, 1), project, { assets, screenSize: SCREEN, backgroundImage: background }).dispose();
     }
   });
@@ -95,6 +95,8 @@ describe('render', () => {
       screens: new Map([[0, screen]]),
       webcams: new Map(webcam ? [[0, webcam]] : []),
       stills: new Map(),
+      motion: new Map(),
+      overlays: new Map(),
     });
     const state: RenderState = { t: 0, layers: [layer(0, 1, 'clip')] };
     expect(() => render(project, state, frame(closed))).toThrow('render: the screen frame of scene 0 is empty (not decoded yet, or closed)');
@@ -113,7 +115,7 @@ describe('render', () => {
       const data = new ImageData(16, 10);
       for (let i = 0; i < data.data.length; i += 4) data.data.set(rgba, i);
       const image = await createImageBitmap(data, { premultiplyAlpha: 'premultiply' });
-      const sources: FrameSources = { screens: new Map(), webcams: new Map(), stills: new Map([[0, image]]) };
+      const sources: FrameSources = { screens: new Map(), webcams: new Map(), stills: new Map([[0, image]]), motion: new Map(), overlays: new Map() };
       return pixelAt(render(project, { t: 0, layers: [layer(0, 1, 'still')] }, sources).pixels, 32, 18);
     };
     expect(await still([0, 0, 0, 0])).toEqual([255, 255, 255, 255]);
@@ -129,7 +131,7 @@ describe('render', () => {
     const probe = new OffscreenCanvas(1, 1).getContext('webgl2')!;
     const max = probe.getParameter(probe.MAX_TEXTURE_SIZE) as number;
     probe.getExtension('WEBGL_lose_context')?.loseContext();
-    const still = (image: ImageBitmap): FrameSources => ({ screens: new Map(), webcams: new Map(), stills: new Map([[0, image]]) });
+    const still = (image: ImageBitmap): FrameSources => ({ screens: new Map(), webcams: new Map(), stills: new Map([[0, image]]), motion: new Map(), overlays: new Map() });
     const tall = await createImageBitmap(new ImageData(1, max + 1));
     expect(() => render(project, { t: 0, layers: [layer(0, 1, 'still')] }, still(tall))).toThrow(
       `render: the image of still scene 0 is 1×${max + 1} px, more than this GPU's limit of ${max} px`,
@@ -221,7 +223,7 @@ describe('masks hide what is under them', () => {
   function renderMask(style: MaskStyle, mask: Rect, source: OffscreenCanvas, zoom?: Rect) {
     const project = parse({ output: OUTPUT, scenes: [{ type: 'clip', from: 0, to: 1 }], masks: [{ from: 0, to: 1, rect: mask, style }] });
     const frame: SceneFrame = { ...layer(0, 1, 'clip'), zoom, masks: project.masks };
-    const pixels = render(project, { t: 0, layers: [frame] }, { screens: new Map([[0, source]]), webcams: new Map(), stills: new Map() }).pixels;
+    const pixels = render(project, { t: 0, layers: [frame] }, { screens: new Map([[0, source]]), webcams: new Map(), stills: new Map(), motion: new Map(), overlays: new Map() }).pixels;
     const { content } = windowLayout(OUTPUT, SCREEN.width / SCREEN.height, { titleBar: FRAME_CHROME['mac-dark'].titleBar, radius: 14 });
     return { pixels, rect: maskRectToOutput(mask, zoom ?? [0, 0, SCREEN.width, SCREEN.height], content) };
   }
@@ -268,7 +270,7 @@ describe('the cursor', () => {
   function renderCursor(style: CursorStyle, cursor?: CursorFrame): Pixels {
     const project = parse({ output: OUTPUT, look: { frame: { radius: RADIUS }, cursor: { style, size: 2 } }, scenes: [{ type: 'clip', from: 0, to: 1 }] });
     const frame: SceneFrame = { ...layer(0, 1, 'clip'), cursor };
-    return render(project, { t: 0, layers: [frame] }, { screens: new Map([[0, fakeScreen()]]), webcams: new Map(), stills: new Map() }).pixels;
+    return render(project, { t: 0, layers: [frame] }, { screens: new Map([[0, fakeScreen()]]), webcams: new Map(), stills: new Map(), motion: new Map(), overlays: new Map() }).pixels;
   }
 
   /** Pixels that differ between `a` and `b`; with `outsideWindow`, only those the window's rounded rect leaves out. */
@@ -307,5 +309,81 @@ describe('the cursor', () => {
     for (const style of ['system', 'spotlight'] as const) {
       expect(changed(renderCursor(style), renderCursor(style, off)), style).toBe(0);
     }
+  });
+});
+
+describe('motion', () => {
+  /** A 64×36 motion frame (premultiplied RGBA): the top half `top`, the bottom half `bottom`. */
+  function motionFrame(top: number[], bottom: number[]): MotionPixels {
+    const data = new Uint8Array(64 * 36 * 4);
+    for (let y = 0; y < 36; y++) for (let x = 0; x < 64; x++) data.set(y < 18 ? top : bottom, (y * 64 + x) * 4);
+    return { width: 64, height: 36, data };
+  }
+  const near = (pixel: number[], expected: number[]) => pixel.forEach((value, i) => expect(Math.abs(value - expected[i]!)).toBeLessThanOrEqual(1));
+  const solid = { background: { preset: 'solid', color: '#204060' } } as const;
+  const MOTION = parse({ look: solid, scenes: [{ type: 'motion', src: 'a.html', duration: 1 }] });
+
+  it('draws a motion scene over the background, its top row first, with its transparency', () => {
+    // the top opaque red, the bottom white at half opacity (premultiplied: 128 in every channel)
+    const sources = { ...NO_SOURCES, motion: new Map([[0, motionFrame([255, 0, 0, 255], [128, 128, 128, 128])]]) };
+    const { pixels } = render(MOTION, { t: 0, layers: [layer(0, 1, 'motion')] }, sources);
+    expect(pixelAt(pixels, 5, 5)).toEqual([255, 0, 0, 255]);
+    // 128 + (1 − 128/255) × the background (32, 64, 96)
+    near(pixelAt(pixels, 5, 30), [144, 160, 176, 255]);
+  });
+
+  it('shows the background alone while a motion scene has no frame yet', () => {
+    expect(pixelAt(render(MOTION, { t: 0, layers: [layer(0, 1, 'motion')] }).pixels, 5, 5)).toEqual([32, 64, 96, 255]);
+  });
+
+  it('refuses a frame whose bytes do not fit its size', () => {
+    const broken = { ...NO_SOURCES, motion: new Map([[0, { width: 64, height: 36, data: new Uint8Array(100) }]]) };
+    expect(() => render(MOTION, { t: 0, layers: [layer(0, 1, 'motion')] }, broken)).toThrow('render: the frame of motion scene 0 is 64×36 px with 100 bytes');
+  });
+
+  it('draws an overlay over the whole frame of a clip, where it is not clear', () => {
+    const project = parse({ look: { ...solid, frame: { enabled: false } }, scenes: [{ type: 'clip', from: 0, to: 1 }], overlays: [{ src: 'o.html', at: 0, duration: 1 }] });
+    const sources = { ...NO_SOURCES, screens: new Map([[0, fakeScreen()]]), overlays: new Map([['0@0', motionFrame([0, 0, 0, 0], [0, 255, 0, 255])]]) };
+    const plain = render(project, { t: 0, layers: [layer(0, 1, 'clip')] }, sources).pixels;
+    const shown = render(project, { t: 0, layers: [{ ...layer(0, 1, 'clip'), overlays: [{ index: 0, key: '0@0', start: 0, local: 0, duration: 1 }] }] }, sources).pixels;
+    expect(pixelAt(shown, 32, 30)).toEqual([0, 255, 0, 255]);
+    expect(pixelAt(shown, 1, 30)).toEqual([0, 255, 0, 255]);
+    expect(pixelAt(shown, 32, 5)).toEqual(pixelAt(plain, 32, 5));
+  });
+
+  it('gives a transition page the two layers whole, top row first, and draws its frame in place of their crossfade', () => {
+    // two motion scenes: the first red over blue, the second green; the transition page's frame white over black
+    const scenes = parse({ look: solid, scenes: [{ type: 'motion', src: 'a.html', duration: 1 }, { type: 'motion', src: 'b.html', duration: 1, transition: { src: 't.html' } }] });
+    const sources = { ...NO_SOURCES, motion: new Map([[0, motionFrame([255, 0, 0, 255], [0, 0, 255, 255])], [1, motionFrame([0, 255, 0, 255], [0, 255, 0, 255])]]) };
+    const state: RenderState = {
+      t: 1,
+      layers: [layer(0, 0.5, 'motion'), layer(1, 0.5, 'motion')],
+      transition: { sceneIndex: 1, key: 'transition:1', start: 0.6, local: 0.4, duration: 0.8 },
+    };
+    const canvas = new OffscreenCanvas(1, 1);
+    const renderer = createRenderer(canvas, scenes, { assets, screenSize: SCREEN });
+    const gl = canvas.getContext('webgl2')!;
+    renderer.render(state, sources);
+    const crossfade = readPixels(gl);
+    const [from, to] = renderer.layerPixels(state, sources);
+    const at = (pixels: MotionPixels, x: number, y: number) => [...pixels.data.subarray((y * 64 + x) * 4, (y * 64 + x) * 4 + 4)];
+    expect([from.width, from.height, at(from, 5, 5), at(from, 5, 30)]).toEqual([64, 36, [255, 0, 0, 255], [0, 0, 255, 255]]);
+    expect([at(to, 5, 5), at(to, 5, 30)]).toEqual([
+      [0, 255, 0, 255],
+      [0, 255, 0, 255],
+    ]);
+    // reading the layers leaves the canvas as it was
+    expect(readPixels(gl).data).toEqual(crossfade.data);
+    // without the page's frame the layers crossfade; with it, its frame is the picture
+    near(pixelAt(crossfade, 5, 5), [128, 128, 0, 255]);
+    renderer.render(state, { ...sources, transitions: new Map([['transition:1', motionFrame([255, 255, 255, 255], [0, 0, 0, 255])]]) });
+    const paged = readPixels(gl);
+    expect([pixelAt(paged, 5, 5), pixelAt(paged, 5, 30)]).toEqual([
+      [255, 255, 255, 255],
+      [0, 0, 0, 255],
+    ]);
+    expect(() => renderer.layerPixels({ t: 0, layers: [layer(0, 1, 'motion')] }, sources)).toThrow('layerPixels: the frame shows one scene, not two');
+    renderer.dispose();
+    gl.getExtension('WEBGL_lose_context')?.loseContext();
   });
 });

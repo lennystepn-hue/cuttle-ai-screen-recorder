@@ -115,7 +115,7 @@ interface OpenScene {
 export class PlaybackFrames {
   private readonly open = new Map<number, OpenScene>();
   private readonly pending: ScenePlan[];
-  private readonly sources: FrameSources = { screens: new Map(), webcams: new Map(), stills: new Map() };
+  private readonly sources: FrameSources = { screens: new Map(), webcams: new Map(), stills: new Map(), motion: new Map(), overlays: new Map() };
 
   constructor(
     plan: FramePlan,

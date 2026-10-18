@@ -1,0 +1,241 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>End card</title>
+    <!-- The end card: a logo (or a monogram tile) springs in with a ring, the headline rises letter by
+         letter, the URL types itself into a glass pill that a light sweeps across, a call to action
+         settles under it; particles drift up behind. Its sounds: a hit as the mark lands, keys while
+         the URL types, a ding once it is there (the "sounds" param). -->
+    <script type="application/json" id="cuttle-params">
+      [
+        { "name": "headline", "label": "Headline", "type": "text", "default": "Try it yourself" },
+        { "name": "url", "label": "URL (empty: the brand's)", "type": "text", "default": "" },
+        { "name": "cta", "label": "Call to action", "type": "text", "default": "Link in the description" },
+        { "name": "logo", "label": "Logo (empty: the brand's)", "type": "image", "default": null },
+        { "name": "monogram", "label": "Monogram without a logo (empty: the name's first letter)", "type": "text", "default": "" },
+        { "name": "sounds", "label": "Sounds", "type": "bool", "default": true }
+      ]
+    </script>
+    <style>
+      :root {
+        --u: calc(100vmin / 1080);
+      }
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        overflow: hidden;
+        background: var(--cuttle-bg);
+      }
+      body {
+        font-family: var(--cuttle-display);
+        /* the brand's heading font as it is: a face with one weight (Bebas Neue, Instrument Serif) is not made bold */
+        font-synthesis: none;
+        color: var(--cuttle-fg);
+        display: grid;
+        place-items: center;
+      }
+      canvas {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+      }
+      .card {
+        position: relative;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        text-align: center;
+        width: 88vw;
+      }
+      .mark {
+        position: relative;
+        width: calc(150 * var(--u));
+        height: calc(150 * var(--u));
+        margin-bottom: calc(48 * var(--u));
+      }
+      .tile {
+        position: absolute;
+        inset: 0;
+        border-radius: 26%;
+        display: grid;
+        place-items: center;
+        background: linear-gradient(145deg, color-mix(in srgb, var(--cuttle-accent) 70%, white), var(--cuttle-accent) 55%, color-mix(in srgb, var(--cuttle-accent) 70%, black));
+        box-shadow: 0 calc(24 * var(--u)) calc(70 * var(--u)) color-mix(in srgb, var(--cuttle-accent) 45%, transparent), inset 0 calc(2 * var(--u)) 0 rgba(255, 255, 255, 0.35);
+        font: 800 calc(84 * var(--u)) / 1 var(--cuttle-display);
+        color: white;
+      }
+      .tile img {
+        width: 72%;
+        height: 72%;
+        object-fit: contain;
+      }
+      .logo-only {
+        background: none;
+        box-shadow: none;
+      }
+      .ring {
+        position: absolute;
+        inset: 0;
+        border-radius: 26%;
+        border: calc(3 * var(--u)) solid var(--cuttle-accent);
+      }
+      h1 {
+        margin: 0;
+        font-weight: 800;
+        font-stretch: 108%;
+        font-size: calc(104 * var(--u));
+        letter-spacing: -0.03em;
+        line-height: 1;
+      }
+      h1 span span {
+        will-change: transform, opacity, filter;
+      }
+      .pill {
+        position: relative;
+        overflow: hidden;
+        margin-top: calc(44 * var(--u));
+        padding: calc(18 * var(--u)) calc(38 * var(--u));
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.07);
+        border: calc(1.5 * var(--u)) solid rgba(255, 255, 255, 0.16);
+        font: 500 calc(44 * var(--u)) / 1.2 var(--cuttle-mono);
+        letter-spacing: -0.01em;
+        min-height: 1.2em;
+      }
+      .caret {
+        display: inline-block;
+        width: 0.08em;
+        height: 1em;
+        margin-left: 0.06em;
+        vertical-align: -0.12em;
+        background: var(--cuttle-accent);
+      }
+      .sweep {
+        position: absolute;
+        inset: 0;
+        background: linear-gradient(100deg, transparent 30%, rgba(255, 255, 255, 0.35) 50%, transparent 70%);
+      }
+      .cta {
+        margin-top: calc(30 * var(--u));
+        font: 500 calc(34 * var(--u)) / 1.3 var(--cuttle-font);
+        color: color-mix(in srgb, var(--cuttle-fg) 70%, transparent);
+      }
+    </style>
+  </head>
+  <body>
+    <canvas id="particles"></canvas>
+    <div class="card">
+      <div class="mark"><div class="ring" id="ring"></div><div class="tile" id="tile"></div></div>
+      <h1 id="headline"></h1>
+      <div class="pill" id="pill"><span id="url"></span><span class="caret" id="caret"></span><div class="sweep" id="sweep"></div></div>
+      <div class="cta" id="cta"></div>
+    </div>
+    <script type="module">
+      import { at, ease, fit, random, spring, split, stagger, typed, typedUntil } from 'cuttle';
+
+      const { params, size, duration, theme } = cuttle;
+      // empty params take the brand's (the project's theme): its logo, URL and name
+      const logo = params.logo || theme.logo;
+      const link = params.url || theme.url || '';
+      const tile = document.getElementById('tile');
+      if (logo) {
+        const image = new Image();
+        // an image param is a path in the project folder (the page itself is in motion/<name>/); the theme's logo is a URL
+        image.src = /^([a-z][a-z0-9+.-]*:|\/)/i.test(logo) ? logo : `/${logo}`;
+        tile.append(image);
+        tile.classList.add('logo-only');
+        cuttle.ready(image.decode().catch(() => {}));
+      } else {
+        tile.textContent = (params.monogram || (theme.name || 'C').charAt(0).toUpperCase()).slice(0, 2);
+      }
+      const headline = document.getElementById('headline');
+      headline.textContent = params.headline || '';
+      document.getElementById('cta').textContent = params.cta || '';
+      let letters = [];
+      cuttle.ready(
+        document.fonts.load(`800 100px "${theme.font || 'Archivo'}"`).then(() => {
+          fit(headline, { width: size.width * 0.86, max: parseFloat(getComputedStyle(headline).fontSize), min: 24 });
+          letters = split(headline, 'char');
+        }),
+      );
+
+      // particles: seeded, drifting up, a few brighter ones in the accent colour
+      const canvas = document.getElementById('particles');
+      canvas.width = size.width;
+      canvas.height = size.height;
+      const g = canvas.getContext('2d');
+      const accent = getComputedStyle(document.documentElement).getPropertyValue('--cuttle-accent').trim() || '#d97757';
+      const rand = random(5);
+      const dots = Array.from({ length: 90 }, () => ({ x: rand(), y: rand(), r: 0.6 + rand() * 2.2, speed: 0.015 + rand() * 0.05, phase: rand() * 6.28, warm: rand() < 0.25 }));
+      function particles(t) {
+        const { width: w, height: h } = size;
+        g.clearRect(0, 0, w, h);
+        const glow = g.createRadialGradient(w / 2, h * 0.42, 0, w / 2, h * 0.42, Math.max(w, h) * 0.5);
+        glow.addColorStop(0, accent + '40');
+        glow.addColorStop(1, accent + '00');
+        g.fillStyle = glow;
+        g.fillRect(0, 0, w, h);
+        const unit = Math.min(w, h) / 1080;
+        for (const dot of dots) {
+          const y = (((dot.y - dot.speed * t) % 1) + 1) % 1;
+          const twinkle = 0.45 + 0.55 * Math.sin(dot.phase + t * 2.2) ** 2;
+          g.globalAlpha = twinkle * at(t, 0, 0.8);
+          g.fillStyle = dot.warm ? accent : '#ffffff';
+          g.beginPath();
+          g.arc(dot.x * w, y * h, dot.r * unit * 1.6, 0, Math.PI * 2);
+          g.fill();
+        }
+        g.globalAlpha = 1;
+      }
+
+      const ring = document.getElementById('ring');
+      const url = document.getElementById('url');
+      const caret = document.getElementById('caret');
+      const sweep = document.getElementById('sweep');
+      const pill = document.getElementById('pill');
+      const cta = document.getElementById('cta');
+      const typeFrom = 1.05;
+      const typedAt = typedUntil(link, { start: typeFrom, cps: 22 });
+      if (params.sounds !== false) {
+        cuttle.sound('impact', { at: 0.05, volume: 0.6 });
+        for (let key = typeFrom; key < typedAt - 0.1; key += 0.6) cuttle.sound('type-burst', { at: key, volume: 0.7 });
+        if (link) cuttle.sound('ding', { at: typedAt + 0.15, volume: 0.45 });
+      }
+      cuttle.onFrame((t) => {
+        particles(t);
+        // the mark springs in, a ring leaves it
+        const s = spring(t - 0.05, { stiffness: 180, damping: 14 });
+        tile.style.transform = `scale(${0.4 + 0.6 * s}) rotate(${(1 - s) * -14}deg)`;
+        tile.style.opacity = at(t, 0.05, 0.25);
+        const ringP = at(t, 0.35, 1.1, ease.out);
+        ring.style.transform = `scale(${1 + ringP * 0.9})`;
+        ring.style.opacity = t < 0.35 ? 0 : 0.9 * (1 - ringP);
+        // the headline, letter by letter
+        letters.forEach((letter, i) => {
+          const p = at(t, 0.4 + stagger(i, letters.length, 0.025), 0.7, ease.outExpo);
+          letter.style.transform = `translateY(${(1 - p) * 0.5}em)`;
+          letter.style.filter = `blur(${(1 - p) * 10}px)`;
+          letter.style.opacity = Math.min(1, p * 1.5);
+        });
+        // the pill opens, the URL types itself, a light sweeps across once it is there
+        const open = at(t, 0.8, 0.5, ease.outExpo);
+        pill.style.opacity = open;
+        pill.style.transform = `translateY(${(1 - open) * 20}px) scale(${0.94 + 0.06 * open})`;
+        url.textContent = typed(link, t, { start: typeFrom, cps: 22 });
+        const blinking = t > typedAt + 0.2;
+        caret.style.opacity = !blinking || Math.floor((t - typedAt) * 2) % 2 === 0 ? 1 : 0;
+        const across = at(t, typedAt + 0.15, 0.9, ease.inOut);
+        sweep.style.transform = `translateX(${-110 + across * 220}%)`;
+        // the call to action
+        const c = at(t, typedAt + 0.3, 0.7, ease.outExpo);
+        cta.style.opacity = c;
+        cta.style.transform = `translateY(${(1 - c) * 16}px)`;
+        // a slow push in, for life
+        document.querySelector('.card').style.transform = `scale(${1 + 0.03 * (t / duration)})`;
+      });
+    </script>
+  </body>
+</html>

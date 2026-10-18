@@ -16,6 +16,7 @@ import {
   STILL_MOTIONS,
   TEXT_POSITIONS,
   TEXT_STYLES,
+  THEME_FONTS,
   WEBCAM_CORNERS,
   WEBCAM_SHAPES,
   parseProject,
@@ -26,7 +27,9 @@ const INSTALL = fileURLToPath(new URL('../install.mjs', import.meta.url));
 const REPO = fileURLToPath(new URL('../../', import.meta.url)).replace(/\\/g, '/').replace(/\/$/, '');
 const skill = readFileSync(join(SKILL_DIR, 'SKILL.md'), 'utf8');
 const reference = readFileSync(join(SKILL_DIR, 'project.md'), 'utf8');
-const docs = [skill, reference];
+const motion = readFileSync(join(SKILL_DIR, 'motion.md'), 'utf8');
+const music = readFileSync(join(SKILL_DIR, 'music.md'), 'utf8');
+const docs = [skill, reference, motion, music];
 
 const dirs: string[] = [];
 afterAll(() => Promise.all(dirs.map((dir) => rm(dir, { recursive: true, force: true }))));
@@ -62,13 +65,15 @@ const GLOBAL = ['--json', '--project', '--help', '--version'];
 /** The help text of a command, from the CLI itself. */
 async function help(command: string): Promise<string> {
   let out = '';
-  await runCli([command, '--help'], { stdout: (text) => void (out += text), stderr: () => {} });
+  await runCli([...command.split(' '), '--help'], { stdout: (text) => void (out += text), stderr: () => {} });
   return out;
 }
 
 /** `--flag` as a whole option in a help text (not `--until` inside `--until-file`). */
 const hasFlag = (text: string, flag: string) => new RegExp(`${flag}(?![\\w-])`).test(text);
-const COMMANDS = ['devices', 'record', 'suggest', 'transcribe', 'models', 'transcript', 'preview', 'frame', 'capture-page', 'render', 'recover'];
+const COMMANDS = ['devices', 'record', 'suggest', 'transcribe', 'models', 'transcript', 'preview', 'fit', 'frame', 'capture-page', 'motion check', 'motion new', 'motion templates', 'music new', 'music templates', 'music set', 'music check', 'sound add', 'sound list', 'brand list', 'brand save', 'brand apply', 'brand remove', 'background', 'init', 'render', 'chapters', 'recover'];
+/** Commands with subcommands: the subcommand is part of the command (`motion check`). */
+const GROUPS = ['motion', 'music', 'sound', 'brand'];
 
 describe('the cuttle commands in the skill', () => {
   // Code blocks and inline code: what Claude runs.
@@ -76,14 +81,18 @@ describe('the cuttle commands in the skill', () => {
   // `cuttle [-C dir] [--json] <command> … --flags`, up to the end of the line, a `&&`, `;`, `|` or the next cuttle.
   const uses = code.flatMap((snippet) =>
     [...snippet.matchAll(/(?:^|\s)cuttle((?: (?:-C "[^"]*"|-C \S+|--json))*) ([a-z][a-z-]*)((?:(?!&&|;|\||\bcuttle )[^\n])*)/g)].map(
-      ([, , command, rest]) => ({
-        command: command!,
-        flags: [...rest!.matchAll(/(?:^|\s)(--[a-z-]+)/g)].map((flag) => flag[1]!).filter((flag) => !GLOBAL.includes(flag)),
-      }),
+      ([, , group, rest]) => {
+        const sub = GROUPS.includes(group!) ? / ([a-z][a-z-]*)/.exec(rest!)?.[1] : undefined;
+        return {
+          command: sub ? `${group} ${sub}` : group!,
+          flags: [...rest!.matchAll(/(?:^|\s)(--[a-z-]+)/g)].map((flag) => flag[1]!).filter((flag) => !GLOBAL.includes(flag)),
+        };
+      },
     ),
   );
-  // An option on its own (`--until-file "<project>/stop"`): it must belong to some command.
-  const loose = code.flatMap((snippet) => (/^--[a-z-]+/.exec(snippet)?.[0] ?? []) as string[]);
+  // An option on its own (`--until-file "<project>/stop"`): it must belong to some command. The
+  // motion pages' CSS variables (`--cuttle-accent`, `--u: …`) are not options.
+  const loose = code.flatMap((snippet) => (/^--(?!cuttle-)[a-z-]+(?![a-z-]|\s*:)/.exec(snippet)?.[0] ?? []) as string[]);
 
   it('covers the workflow', () => {
     expect(new Set(uses.map((use) => use.command))).toEqual(new Set(COMMANDS));
@@ -127,10 +136,12 @@ describe('project.md', () => {
       ['| `frame` |', FRAME_STYLES],
       ['| `cursor` |', [...CURSOR_STYLES, ...CLICK_EFFECTS]],
       ['| `webcam` |', [...WEBCAM_SHAPES, ...WEBCAM_CORNERS]],
+      ['| `watermark` |', WEBCAM_CORNERS],
       ['| `still` |', [...STILL_MOTIONS, ...FRAME_STYLES]],
       ['`zooms`:', EASES],
       ['`masks` hide', MASK_STYLES],
       ['`texts`:', [...TEXT_STYLES, ...TEXT_POSITIONS]],
+      ['`theme` is', THEME_FONTS],
     ];
     for (const [start, values] of fields) {
       const text = where(start);
@@ -147,7 +158,7 @@ describe('skill/install.mjs', () => {
     const config = temp();
     expect(install(config).status).toBe(0);
     const target = join(config, 'skills', 'cuttle');
-    expect(readdirSync(target).sort()).toEqual(['.cuttle-skill.json', 'SKILL.md', 'project.md']);
+    expect(readdirSync(target).sort()).toEqual(['.cuttle-skill.json', 'SKILL.md', 'motion.md', 'music.md', 'project.md']);
     const installed = readFileSync(join(target, 'SKILL.md'), 'utf8');
     expect(installed).not.toContain('{{REPO}}');
     expect(installed).toContain(`(\`${REPO}\`)`);

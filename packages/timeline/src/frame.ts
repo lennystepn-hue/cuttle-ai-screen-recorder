@@ -4,15 +4,27 @@ import { cursorAt, type CursorFrame, type CursorTrack } from './cursor';
 import { clamp } from './easing';
 import { occurrences, rampAmount, type Occurrence } from './occurrences';
 import { TEXT_FADE_SECONDS, activeMasks, activeTexts, badgeFor, type ActiveText } from './overlays';
-import { crossfadeHalf, isContinuousCut, sceneSpans, sourceTimeAt, spanAt, totalDuration, type SceneSpan } from './time';
+import { crossfadeHalf, isContinuousCut, pageTransition, sceneSpans, sourceTimeAt, spanAt, totalDuration, type SceneSpan } from './time';
 import { ZOOM_RAMP_SECONDS, zoomRectAt } from './zoom';
+
+/** A motion overlay on a clip's frame: which one, and where its own clock is. */
+export interface ActiveOverlay {
+  /** Its place in the project's `overlays`. */
+  index: number;
+  /** One showing of it (a clip shown twice shows it twice): the overlay and where its stretch starts. */
+  key: string;
+  /** Where this showing starts (output seconds), how far into it the frame is, and how long it lasts. */
+  start: number;
+  local: number;
+  duration: number;
+}
 
 export interface SceneFrame {
   /** The span it comes from (`Timeline.spans`); a clip with cuts in it has several. */
   index: number;
   /** The scene it shows, in the project's `scenes`. */
   sceneIndex: number;
-  kind: 'clip' | 'still' | 'card';
+  kind: 'clip' | 'still' | 'card' | 'motion';
   local: number;
   progress: number;
   opacity: number;
@@ -24,13 +36,30 @@ export interface SceneFrame {
   aspect?: number;
   masks: Mask[];
   texts: ActiveText[];
+  /** Clip scenes: the motion overlays it shows, in the project's order (drawn over the whole frame). */
+  overlays: ActiveOverlay[];
   badge?: string;
   cursor?: CursorFrame;
 }
 
+/** A scene's transition page while it plays: the scene it goes into, and where its clock is. */
+export interface ActiveTransition {
+  /** The scene it goes into, its place in the project's `scenes`. */
+  sceneIndex: number;
+  /** `transition:<sceneIndex>`: a scene is gone into once. */
+  key: string;
+  /** Where it starts (output seconds), how far into it the frame is, and how long it lasts. */
+  start: number;
+  local: number;
+  duration: number;
+}
+
 export interface RenderState {
   t: number;
+  /** One layer, or two during a crossfade or a transition (the outgoing one first). */
   layers: SceneFrame[];
+  /** The transition page that draws this frame from the two layers, instead of their crossfade. */
+  transition?: ActiveTransition;
   /** The caption shown over the frame, when captions are on and someone speaks. */
   caption?: ActiveCaption;
 }
@@ -79,6 +108,8 @@ export function createTimeline(project: CuttleProject, opts: TimelineOptions): T
   // Where each zoom and text shows in output time, per span: their ramps run in output seconds.
   const zoomShown = new Map(project.zooms.map((zoom) => [zoom, occurrences(spans, zoom.at, zoom.at + zoom.duration)]));
   const textShown = new Map(project.texts.map((text) => [text, occurrences(spans, text.at, text.at + text.duration)]));
+  const overlayShown = project.overlays.map((overlay) => occurrences(spans, overlay.at, overlay.at + overlay.duration));
+  const round = (seconds: number) => Math.round(seconds * 1e6) / 1e6;
 
   const halfBetween = (a: SceneSpan, b: SceneSpan): number => crossfadeHalf(a, b, project.look.transition);
 
@@ -100,7 +131,7 @@ export function createTimeline(project: CuttleProject, opts: TimelineOptions): T
     const local = clamp(t - span.start, 0, length);
     const base = { index: span.index, sceneIndex: span.sceneIndex, local, progress: length === 0 ? 1 : local / length, opacity };
     const scene = span.scene;
-    if (scene.type !== 'clip') return { ...base, kind: scene.type, masks: [], texts: [] };
+    if (scene.type !== 'clip') return { ...base, kind: scene.type, masks: [], texts: [], overlays: [] };
     // Past the end (or on a frame whose source time would be `to`), hold the last frame shown:
     // its source time lies inside [from, to), so masks that end with the clip stay on, and a
     // clip's source time never goes back during a crossfade.
@@ -126,6 +157,13 @@ export function createTimeline(project: CuttleProject, opts: TimelineOptions): T
       aspect: screen[2] / screen[3],
       masks: activeMasks(project.masks, sourceTime),
       texts: activeTexts(project.texts, sourceTime, (text) => amount(textShown.get(text), TEXT_FADE_SECONDS, 'linear')),
+      // a motion overlay's clock runs in output seconds from where its stretch starts showing
+      overlays: project.overlays.flatMap((overlay, index) => {
+        const occurrence = overlay.enabled ? overlayShown[index]?.[span.index] : undefined;
+        if (!occurrence || shownAt < occurrence.start - 1e-9 || shownAt >= occurrence.end - 1e-9) return [];
+        const start = round(occurrence.start);
+        return [{ index, key: `${index}@${start}`, start, local: round(shownAt - occurrence.start), duration: round(occurrence.end - occurrence.start) }];
+      }),
       badge: badgeFor(scene),
       cursor,
     };
@@ -150,22 +188,27 @@ export function createTimeline(project: CuttleProject, opts: TimelineOptions): T
       span = following;
     }
 
+    /** The two layers between `a` and `b`, and the transition page that draws them when `b` has one. */
+    const between = (a: SceneSpan, b: SceneSpan, half: number): RenderState => {
+      const start = round(a.end - half);
+      const mix = (time - (a.end - half)) / (2 * half);
+      const state: RenderState = { t: time, layers: [sceneFrame(a, time, 1 - mix), sceneFrame(b, time, mix)] };
+      if (pageTransition(a, b, project.look.transition)) {
+        state.transition = { sceneIndex: b.sceneIndex, key: `transition:${b.sceneIndex}`, start, local: round(time - start), duration: round(2 * half) };
+      }
+      return state;
+    };
+
     const next = spans[span.index + 1];
     if (next) {
       const half = halfBetween(span, next);
-      if (half > 0 && time > span.end - half) {
-        const mix = (time - (span.end - half)) / (2 * half);
-        return { t: time, layers: [sceneFrame(span, time, 1 - mix), sceneFrame(next, time, mix)] };
-      }
+      if (half > 0 && time > span.end - half) return between(span, next, half);
     }
 
     const prev = spans[span.index - 1];
     if (prev) {
       const half = halfBetween(prev, span);
-      if (half > 0 && time < span.start + half) {
-        const mix = (time - (span.start - half)) / (2 * half);
-        return { t: time, layers: [sceneFrame(prev, time, 1 - mix), sceneFrame(span, time, mix)] };
-      }
+      if (half > 0 && time < span.start + half) return between(prev, span, half);
     }
 
     return { t: time, layers: [sceneFrame(span, time, 1)] };

@@ -8,11 +8,10 @@ import { FRAME_RATE } from './args';
 import type { ScreenArea } from './sources';
 
 /**
- * Where the helper is looked for: CUTTLE_CAPTURE_HELPER (a path; "none" captures with avfoundation),
- * next to this bundle (the CLI's, the app's), or in the source tree.
+ * Where the helper is looked for: CUTTLE_CAPTURE_HELPER (`chosen`: a path; "none" captures with
+ * avfoundation), next to this bundle (the CLI's, the app's), or in the source tree.
  */
-export function captureHelper(): string | undefined {
-  const chosen = process.env.CUTTLE_CAPTURE_HELPER;
+export function captureHelper(chosen = process.env.CUTTLE_CAPTURE_HELPER): string | undefined {
   if (chosen) return existsSync(chosen) ? chosen : undefined;
   const here = dirname(fileURLToPath(import.meta.url));
   // a packaged app runs its bundle from app.asar; executables are unpacked beside it
@@ -20,9 +19,17 @@ export function captureHelper(): string | undefined {
   return [join(here, 'cuttle-capture'), join(here, '..', 'native', 'macos', 'cuttle-capture')].map(unpacked).find((file) => existsSync(file));
 }
 
-/** The helper's arguments: the area's display, its crop in the display's pixels, the pointer, the processes left out. */
+/**
+ * The helper's arguments: the area's display, its crop in the display's pixels, the pointer, the
+ * processes left out; for a window take the window itself at the crop's size (nothing over it shows,
+ * Cuttle's windows neither).
+ */
 export function helperArgs(area: ScreenArea, drawMouse: boolean, hide: readonly number[]): string[] {
   const { monitor, crop } = area;
+  if (area.window !== undefined) {
+    const { width, height } = crop ?? monitor.bounds;
+    return ['--display', String(monitor.displayId ?? 0), '--window', String(area.window), '--size', `${width},${height}`, '--fps', String(FRAME_RATE), ...(drawMouse ? ['--cursor'] : [])];
+  }
   return [
     '--display', String(monitor.displayId ?? 0),
     '--fps', String(FRAME_RATE),

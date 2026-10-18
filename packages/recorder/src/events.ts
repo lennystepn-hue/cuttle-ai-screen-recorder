@@ -32,8 +32,13 @@ export class EventsWriter {
 
   constructor(
     private readonly write: (line: string) => void,
-    private readonly origin: { x: number; y: number },
+    private origin: { x: number; y: number },
   ) {}
+
+  /** The screen track's top-left corner moved on the desktop (a window take's window was moved). */
+  moveOrigin(origin: { x: number; y: number }): void {
+    this.origin = { ...origin };
+  }
 
   /**
    * The screen track's start (wall-clock seconds). Writes `initial` (the pointer's position and shape

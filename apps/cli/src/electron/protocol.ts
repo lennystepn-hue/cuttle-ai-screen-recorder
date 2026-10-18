@@ -2,10 +2,27 @@
 // answer and a cancel go over Node's IPC channel (Electron's main process reads no stdin on
 // Windows, and the console's Ctrl+C does not reach it). Pure: both sides import it.
 
+/**
+ * A motion page to check (`cuttle motion check`): a scene is rendered as the project's only scene;
+ * an overlay (`overlay`: its place in `overlays`) over the project's video, the only overlay.
+ */
+export interface MotionCheck {
+  /** The page, from the project folder. */
+  src: string;
+  duration: number;
+  params: Record<string, string | number | boolean | null>;
+  network: boolean;
+  motionBlur?: { samples: number; shutter: number };
+  overlay?: number;
+  /** The scene whose transition page it is: checked in the video, between its two scenes. */
+  transition?: number;
+}
+
 export type ElectronRequest = (
   | { command: 'render'; projectDir: string; out: string; format?: string; encoder?: string; captions?: boolean; subtitles?: string[] }
-  | { command: 'preview'; projectDir: string; outDir: string; times: number[]; format?: string; sheet?: { columns?: number }; clean?: boolean }
+  | { command: 'preview'; projectDir: string; outDir: string; times: number[]; format?: string; sheet?: { columns?: number }; clean?: boolean; motion?: MotionCheck }
   | { command: 'capture-page'; target: string; out: string; width: number; height: number; fullPage: boolean; waitMs: number }
+  | { command: 'music'; projectDir: string; out: string; sheet?: string; src?: string }
 ) & {
   /** No progress lines on stderr (--json). */
   quiet?: boolean;

@@ -29,12 +29,36 @@ describe('ProjectSchema', () => {
     expect(p.look.frame).toEqual({ enabled: true, style: 'mac-dark', title: '', radius: 14, shadow: true });
     expect(p.look.cursor).toEqual({ enabled: true, style: 'system', size: 1, color: '#D97757', clickEffect: 'ripple', smoothing: 0.5 });
     expect(p.look.webcam).toEqual({ enabled: false, shape: 'circle', corner: 'bottom-left', size: 0.18, border: true, shadow: true, mirror: false });
-    expect(p.look.audio).toEqual({ enabled: true, muteSpedUp: true, cleanup: true });
+    expect(p.look.audio).toEqual({ enabled: true, muteSpedUp: true, cleanup: true, typing: true, typingVolume: 0.5, effects: true, effectsVolume: 0.8 });
     expect(p.look.transition).toEqual({ enabled: true, duration: 0.3 });
     expect(p.scenes).toEqual([]);
     expect(p.zooms).toEqual([]);
     expect(p.masks).toEqual([]);
     expect(p.texts).toEqual([]);
+    expect(p.overlays).toEqual([]);
+    expect(p.music).toBeUndefined();
+    expect(p.sounds).toEqual([]);
+  });
+
+  it("takes the video's music and its sounds, with their defaults", () => {
+    const p = ProjectSchema.parse({
+      ...minimal,
+      scenes: [{ type: 'card', id: 's1', title: 'Hi', duration: 2 }],
+      music: { src: 'music/pulse/index.html', params: { key: 'E', bpm: 0, hits: true } },
+      sounds: [{ id: 'a1', sound: 'whoosh', at: 3.5 }, { sound: 'sounds/ding.wav', at: 0.4, scene: 's1', volume: 0.5, label: 'Done' }],
+    });
+    expect(p.music).toEqual({ src: 'music/pulse/index.html', params: { key: 'E', bpm: 0, hits: true }, network: false, volume: 0.8, duck: 12, enabled: true });
+    expect(p.sounds).toEqual([
+      { id: 'a1', sound: 'whoosh', at: 3.5, volume: 0.8, enabled: true },
+      { sound: 'sounds/ding.wav', at: 0.4, scene: 's1', volume: 0.5, label: 'Done', enabled: true },
+    ]);
+  });
+
+  it("rejects a sound in a scene that does not exist, a sound's id used elsewhere, and levels out of range", () => {
+    expect(pathsOf({ ...minimal, sounds: [{ sound: 'pop', at: 1, scene: 's9' }] })).toEqual(['sounds.0.scene']);
+    expect(pathsOf({ ...minimal, scenes: [{ type: 'card', id: 'x', title: 'Hi', duration: 2 }], sounds: [{ id: 'x', sound: 'pop', at: 1 }] })).toEqual(['sounds.0.id']);
+    expect(pathsOf({ ...minimal, music: { src: 'm.html', volume: 2, duck: -1 } })).toEqual(['music.volume', 'music.duck']);
+    expect(pathsOf({ ...minimal, music: { volume: 0.5 } })).toEqual(['music.src']);
   });
 
   it('parses the spec example and applies item defaults', () => {
@@ -90,6 +114,22 @@ describe('ProjectSchema', () => {
       ['texts.0.id', 'the id "a" is already used by scenes[0]'],
       ['texts.1.id', 'the id "b" is already used by masks[0]'],
     ]);
+  });
+
+  it('reads a script: steps with an id, a title and a note, each id unique in the project', () => {
+    expect(ProjectSchema.parse(minimal).script).toEqual([]);
+    const steps = [{ id: 'step1', title: 'Open the settings', note: 'The gear, top right.' }, { id: 'step2', title: 'Turn on dark mode' }];
+    expect(ProjectSchema.parse({ ...minimal, script: steps }).script).toEqual(steps);
+    expect(pathsOf({ ...minimal, script: [{ title: 'No id' }] })).toEqual(['script.0.id']);
+    expect(pathsOf({ ...minimal, script: [{ id: 'step1', title: '   ' }] })).toEqual(['script.0.title']);
+    expect(pathsOf({ ...minimal, script: [{ id: 'step1', title: 'x'.repeat(81) }] })).toEqual(['script.0.title']);
+    expect(pathsOf({ ...minimal, script: [{ id: 'step1', title: 'Go', note: 'x'.repeat(1001) }] })).toEqual(['script.0.note']);
+    // a step's title may be a motion template's, the kit's lower third or title
+    expect(ProjectSchema.parse({ ...minimal, script: [{ id: 'step1', title: 'Go', motion: 'lower-third' }] }).script[0]!.motion).toBe('lower-third');
+    expect(pathsOf({ ...minimal, script: [{ id: 'step1', title: 'Go', motion: 'end-card' }] })).toEqual(['script.0.motion']);
+    expect(pathsOf({ ...minimal, script: Array.from({ length: 51 }, (_, i) => ({ id: `step${i + 1}`, title: 'Go' })) })).toEqual(['script']);
+    const twice = ProjectSchema.safeParse({ ...minimal, scenes: [{ type: 'clip', id: 'step1', from: 0, to: 1 }], script: [{ id: 'step1', title: 'Go' }] });
+    expect(twice.error?.issues.map((issue) => [issue.path.join('.'), issue.message])).toEqual([['script.0.id', 'the id "step1" is already used by scenes[0]']]);
   });
 
   it('rejects unknown keys and names them', () => {
@@ -238,7 +278,7 @@ describe('automatic edits in the project', () => {
     const p = ProjectSchema.parse(minimal);
     expect(p.cuts).toEqual([]);
     expect(p.autoEdits).toEqual({
-      crop: true, privacy: true, retakes: true, fillers: true, pauses: true, typingZooms: true, dialogZooms: true, clickZooms: true, answerZoom: true,
+      crop: true, privacy: true, retakes: true, fillers: true, pauses: true, typingZooms: true, dialogZooms: true, clickZooms: true, answerZoom: true, stepTitles: true, stepZooms: true,
     });
   });
 
@@ -249,11 +289,14 @@ describe('automatic edits in the project', () => {
       cuts: [{ id: 'c1', label: 'Filler: ähm', from: 12.4, to: 12.8, auto: 'filler' }],
       zooms: [{ id: 'z1', at: 30, duration: 3, rect: [0, 0, 960, 540], auto: 'click' }],
       masks: [{ id: 'm1', from: 1, to: 2, rect: [0, 0, 10, 10], auto: 'privacy' }],
+      texts: [{ id: 't1', at: 1, duration: 3, text: 'Open the settings', auto: 'title' }],
+      overlays: [{ id: 'o1', src: 'motion/lower-third/index.html', at: 8, duration: 4, auto: 'title' }],
       autoEdits: { fillers: false },
     });
     expect(p.scenes[0]).toMatchObject({ crop: { rect: [62, 141, 2478, 1237], enabled: true, auto: 'crop' } });
     expect(p.cuts[0]).toEqual({ id: 'c1', label: 'Filler: ähm', from: 12.4, to: 12.8, enabled: true, auto: 'filler' });
     expect(p.zooms[0]!.auto).toBe('click');
+    expect([p.texts[0]!.auto, p.overlays[0]!.auto]).toEqual(['title', 'title']);
     expect(p.autoEdits).toMatchObject({ fillers: false, pauses: true });
   });
 
@@ -279,5 +322,125 @@ describe('captions', () => {
     expect(pathsOf({ ...minimal, captions: { style: 'marquee' } })).toEqual(['captions.style']);
     expect(pathsOf({ ...minimal, captions: { size: 3 } })).toEqual(['captions.size']);
     expect(pathsOf({ ...minimal, captions: { fixes: [{ at: 2, end: 1, text: 'x' }] } })).toEqual(['captions.fixes.0.end']);
+  });
+});
+
+describe('motion', () => {
+  it('reads a motion scene and a motion overlay, with their defaults', () => {
+    const p = ProjectSchema.parse({
+      ...minimal,
+      scenes: [{ type: 'motion', id: 's1', label: 'Intro', src: 'motion/intro/index.html', duration: 3, params: { title: 'Cuttle', size: 2, dark: true, logo: null } }],
+      overlays: [{ id: 'o1', src: 'motion/callouts/index.html', at: 4.2, duration: 6 }],
+    });
+    expect(p.scenes[0]).toEqual({
+      type: 'motion',
+      id: 's1',
+      label: 'Intro',
+      src: 'motion/intro/index.html',
+      duration: 3,
+      params: { title: 'Cuttle', size: 2, dark: true, logo: null },
+      network: false,
+    });
+    expect(p.overlays[0]).toEqual({ id: 'o1', src: 'motion/callouts/index.html', at: 4.2, duration: 6, params: {}, network: false, enabled: true });
+  });
+
+  it('reads the transition page into any scene, with its defaults, and refuses one too long or without a page', () => {
+    const p = ProjectSchema.parse({
+      ...minimal,
+      scenes: [
+        { type: 'card', title: 'A', duration: 2 },
+        { type: 'clip', from: 0, to: 4, transition: { src: 'motion/fold/index.html' } },
+        { type: 'card', title: 'B', duration: 2, transition: { src: 'motion/fold/index.html', duration: 1.5, params: { direction: 'right' }, enabled: false } },
+      ],
+    });
+    expect(p.scenes[1]!.transition).toEqual({ src: 'motion/fold/index.html', params: {}, network: false, duration: 0.8, enabled: true });
+    expect(p.scenes[2]!.transition).toEqual({ src: 'motion/fold/index.html', params: { direction: 'right' }, network: false, duration: 1.5, enabled: false });
+    expect(p.scenes[0]!.transition).toBeUndefined();
+    expect(pathsOf({ ...minimal, scenes: [{ type: 'card', title: 'A', duration: 2, transition: { src: 'a.html', duration: 5 } }] })).toEqual(['scenes.0.transition.duration']);
+    expect(pathsOf({ ...minimal, scenes: [{ type: 'card', title: 'A', duration: 2, transition: { duration: 1 } }] })).toEqual(['scenes.0.transition.src']);
+  });
+
+  it('reads motion blur with its defaults, and refuses too few samples and a shutter of zero', () => {
+    const p = ProjectSchema.parse({
+      ...minimal,
+      scenes: [
+        { type: 'motion', src: 'a.html', duration: 1, motionBlur: {} },
+        { type: 'motion', src: 'b.html', duration: 1, motionBlur: { samples: 16, shutter: 1 } },
+      ],
+      overlays: [{ src: 'c.html', at: 0, duration: 1, motionBlur: { samples: 4 } }],
+    });
+    expect(p.scenes.map((scene) => (scene.type === 'motion' ? scene.motionBlur : undefined))).toEqual([
+      { samples: 8, shutter: 0.5 },
+      { samples: 16, shutter: 1 },
+    ]);
+    expect(p.overlays[0]!.motionBlur).toEqual({ samples: 4, shutter: 0.5 });
+    expect(pathsOf({ ...minimal, scenes: [{ type: 'motion', src: 'a.html', duration: 1, motionBlur: { samples: 1 } }] })).toEqual(['scenes.0.motionBlur.samples']);
+    expect(pathsOf({ ...minimal, scenes: [{ type: 'motion', src: 'a.html', duration: 1, motionBlur: { shutter: 0 } }] })).toEqual(['scenes.0.motionBlur.shutter']);
+  });
+
+  it('refuses a page without a path, a length of zero, a param that is a list and an id used elsewhere', () => {
+    expect(pathsOf({ ...minimal, scenes: [{ type: 'motion', src: '', duration: 2 }] })).toEqual(['scenes.0.src']);
+    expect(pathsOf({ ...minimal, scenes: [{ type: 'motion', src: 'a.html', duration: 0 }] })).toEqual(['scenes.0.duration']);
+    expect(pathsOf({ ...minimal, overlays: [{ src: 'a.html', at: 1, duration: 2, params: { list: [1, 2] } }] })).toEqual(['overlays.0.params.list']);
+    expect(pathsOf({ ...minimal, texts: [{ id: 'o1', at: 1, duration: 2, text: 'Hi' }], overlays: [{ id: 'o1', src: 'a.html', at: 1, duration: 2 }] })).toEqual(['overlays.0.id']);
+  });
+});
+
+describe('the theme (the brand)', () => {
+  it('has white text and the Archivo headings by default, and nothing else', () => {
+    expect(ProjectSchema.parse(minimal).theme).toEqual({ foreground: '#FFFFFF', font: 'Archivo' });
+  });
+
+  it('reads a name, URL, logo, colours, a heading font and its kit', () => {
+    const theme = { name: 'Acme', url: 'acme.dev', logo: 'brand/acme.svg', accent: '#3366FF', foreground: '#F0F0F0', background: '#0A0A14', font: 'Instrument Serif', kit: 'Acme' };
+    expect(ProjectSchema.parse({ ...minimal, theme }).theme).toEqual(theme);
+  });
+
+  it('refuses a colour that is no hex colour, a font of none of the kit\'s faces and an unknown key', () => {
+    expect(pathsOf({ ...minimal, theme: { accent: 'blue' } })).toEqual(['theme.accent']);
+    expect(pathsOf({ ...minimal, theme: { font: 'Comic Sans' } })).toEqual(['theme.font']);
+    expect(pathsOf({ ...minimal, theme: { colour: '#000000' } })).toEqual(['theme']);
+  });
+});
+
+describe('the watermark and the device frames', () => {
+  it('has the watermark off by default, in the bottom right corner', () => {
+    expect(ProjectSchema.parse(minimal).look.watermark).toEqual({ enabled: false, corner: 'bottom-right', size: 0.06, opacity: 0.7 });
+  });
+
+  it('reads an image or a text, a corner, a size and an opacity, and refuses them out of range', () => {
+    const watermark = { enabled: true, image: 'images/mark.png', text: 'acme.dev', corner: 'top-left', size: 0.1, opacity: 0.5 };
+    expect(ProjectSchema.parse({ ...minimal, look: { watermark } }).look.watermark).toEqual(watermark);
+    expect(pathsOf({ ...minimal, look: { watermark: { size: 0.5 } } })).toEqual(['look.watermark.size']);
+    expect(pathsOf({ ...minimal, look: { watermark: { opacity: 0 } } })).toEqual(['look.watermark.opacity']);
+    expect(pathsOf({ ...minimal, look: { watermark: { corner: 'middle' } } })).toEqual(['look.watermark.corner']);
+  });
+
+  it('reads the new frames, for the window and for a still', () => {
+    for (const style of ['browser-dark', 'windows-light', 'windows-dark', 'terminal', 'iphone', 'android']) {
+      expect(pathsOf({ ...minimal, look: { frame: { style } }, scenes: [{ type: 'still', image: 'a.png', duration: 1, frame: style }] })).toEqual([]);
+    }
+  });
+});
+
+describe('backgrounds', () => {
+  it('read a gradient, the quiet ones in colours of their own, and a softened, darker image', () => {
+    const gradient = { preset: 'gradient', colors: ['#0B132B', '#3A506B', '#5BC0BE'], angle: 90, kind: 'radial' };
+    expect(ProjectSchema.parse({ ...minimal, look: { background: gradient } }).look.background).toEqual(gradient);
+    for (const preset of ['flow', 'bokeh', 'dots', 'mesh']) expect(pathsOf({ ...minimal, look: { background: { preset, colors: ['#000000', '#FFFFFF'] } } })).toEqual([]);
+    expect(pathsOf({ ...minimal, look: { background: { preset: 'flow' } } })).toEqual([]);
+    expect(pathsOf({ ...minimal, look: { background: { preset: 'image', image: 'images/wallpaper.jpg', blur: 0.6, dim: 0.3 } } })).toEqual([]);
+  });
+
+  it('refuse a gradient without colours, too few or too many, an angle past 360, an unknown shape, and too much blur or dark', () => {
+    const issues = (background: Record<string, unknown>) => pathsOf({ ...minimal, look: { background } });
+    expect(issues({ preset: 'gradient' })).toEqual(['look.background.colors']);
+    expect(issues({ preset: 'gradient', colors: ['#000000'] })).toEqual(['look.background.colors']);
+    expect(issues({ preset: 'flow', colors: ['#000000', '#111111', '#222222', '#333333', '#444444'] })).toEqual(['look.background.colors']);
+    expect(issues({ preset: 'gradient', colors: ['#000000', 'red'] })).toEqual(['look.background.colors.1']);
+    expect(issues({ preset: 'gradient', colors: ['#000000', '#FFFFFF'], angle: 400 })).toEqual(['look.background.angle']);
+    expect(issues({ preset: 'gradient', colors: ['#000000', '#FFFFFF'], kind: 'conic' })).toEqual(['look.background.kind']);
+    expect(issues({ preset: 'image', image: 'a.png', blur: 1.5 })).toEqual(['look.background.blur']);
+    expect(issues({ preset: 'image', image: 'a.png', dim: 0.9 })).toEqual(['look.background.dim']);
   });
 });

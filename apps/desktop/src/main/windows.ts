@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { copyFile, readdir, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises';
 import { basename, dirname, join, resolve } from 'node:path';
-import { app, BrowserWindow, dialog, Menu, screen, session, shell, type Session, type WebContents } from 'electron';
+import { app, BrowserWindow, clipboard, dialog, Menu, screen, session, shell, type Session, type WebContents } from 'electron';
 import { PROJECT_FILE, backupFile, writeProjectFile, type ProjectFile } from '@cuttle/core';
 import { parseProject } from '@cuttle/project';
 import { plainIssue } from '../shared/format';
@@ -10,9 +10,13 @@ import type { Event, Events, ExportEnd, ProjectFileEvent, ProjectStatus } from '
 import { isInside } from '../shared/media-path';
 import { takeKey } from '../shared/take';
 import { CHECK, CHECK_IMAGE, HIDDEN } from './check';
+import { backgroundPalette, projectWallpaper } from './background';
+import { applyProjectBrand, brandViews, removeProjectBrand, saveProjectBrand } from './brands';
 import { ExportRun, exportPath } from './export-service';
 import { bindRequests, send } from './ipc';
 import { ProjectMedia } from './media-service';
+import { EditorMotion } from './motion-service';
+import { EditorSound } from './sound-service';
 import { LockedError, lockProject, openProjectFile, projectInfo } from './project';
 import { importImage, ProjectFileWatch } from './project-watch';
 import { APP_ORIGIN, assetPath, bundlePath, serveApp, serveMedia } from './protocols';
@@ -20,6 +24,7 @@ import { cutIfPending, recut, startPicking, takesBusy, undoRestart } from './rec
 import { deletableTakes, sizeText, trashName } from '../shared/takes';
 import { addRecent, loadSettings, motionSetting, updateSettings } from './settings';
 import { openSettings } from './settings-window';
+import { fitProjectLength } from './length';
 import { maskPrivacy } from './privacy';
 import { transcribeProject } from './speech';
 
@@ -85,6 +90,9 @@ interface Editor {
   /** Its webContents, kept: a closed window's `webContents` getter throws. */
   contents: WebContents;
   media: ProjectMedia;
+  /** The preview of its motion scenes and overlays. */
+  motion: EditorMotion;
+  sound: EditorSound;
   /** cuttle.json on disk: the editor's saves and the changes others make. */
   watch: ProjectFileWatch;
   release: () => Promise<void>;
@@ -138,6 +146,8 @@ async function createEditor(dir: string, key: string, force: boolean): Promise<B
     if (editor) {
       editors.delete(key);
       editor.media.dispose();
+      editor.motion.dispose();
+      editor.sound.dispose();
       if (!editor.window.isDestroyed()) editor.window.destroy();
     }
     await release();
@@ -164,7 +174,12 @@ async function editorWindow(dir: string, key: string, file: ProjectFile, release
   });
   const contents = window.webContents;
   guard(contents);
-  const editor: Editor = { window, contents, media: newMedia(file.project), release, watch: new ProjectFileWatch(dir, (event) => onFileChange(event)) };
+  const motion = new EditorMotion(dir, {
+    status: (statuses) => send(contents, 'motion:status', statuses),
+    changed: (files) => send(contents, 'motion:changed', { files }),
+  });
+  const sound = new EditorSound(dir, { status: (status) => send(contents, 'sound:status', status) });
+  const editor: Editor = { window, contents, media: newMedia(file.project), motion, sound, release, watch: new ProjectFileWatch(dir, (event) => onFileChange(event)) };
   editors.set(key, editor);
   function newMedia(project: ProjectFile['project']): ProjectMedia {
     return new ProjectMedia(dir, project, (state) => send(contents, 'media:state', state));
@@ -191,6 +206,8 @@ async function editorWindow(dir: string, key: string, file: ProjectFile, release
       if (!isInside(target, dir, process.platform)) throw new Error('only files inside the project can be shown');
       shell.showItemInFolder(target);
     },
+    // the check never touches this computer's clipboard: it keeps what was copied
+    'export:copy': (text) => (CHECK ? void ((globalThis as { __copied?: string }).__copied = text) : clipboard.writeText(text)),
     'media:state': () => media.current(),
     'media:retry': () => void media.start(),
     'export:targets': async (formats) =>
@@ -218,6 +235,7 @@ async function editorWindow(dir: string, key: string, file: ProjectFile, release
     'project:cut': () => void recut(dir),
     'project:transcribe': () => transcribeProject(dir, true),
     'project:read-screen': () => maskPrivacy(dir, true),
+    'project:fit-length': ({ seconds }) => fitProjectLength(dir, seconds),
     'project:undo-restart': (discarded) => void undoRestart(dir, discarded),
     'app:settings': (page) => void openSettings({ page }),
     'project:save': ({ raw, base }) => editor.watch.save(raw, base),
@@ -225,18 +243,38 @@ async function editorWindow(dir: string, key: string, file: ProjectFile, release
     // contents.reload() from here is not a navigation the page started (guard() refuses those)
     'project:reload': () => contents.reload(),
     'project:closed': () => closeNow(),
+    'motion:project': ({ version, raw }) => motion.project(version, raw),
+    'motion:frame': ({ version, request, width, height, mode, have }) => motion.frame(version, request, { width, height }, mode, have),
+    'motion:strip': ({ version, request, frames, width, height, have }) => motion.strip(version, request, frames, { width, height }, have),
+    'motion:params': (src) => motion.params(src),
+    'motion:statuses': () => motion.statuses(),
+    'motion:reload': (item) => motion.reload(item),
+    'motion:add-template': async (template) => ({ src: await motion.addTemplate(template) }),
+    'sound:project': ({ version, raw }) => sound.project(version, raw),
+    'sound:soundtrack': (key) => sound.soundtrack(key),
+    'sound:status': () => sound.currentStatus(),
+    'sound:params': (src) => sound.params(src),
+    'sound:reload': () => sound.reload(),
+    'sound:add-template': async (template) => ({ src: await sound.addTemplate(template) }),
     'project:import-image': async ({ purpose }) => {
       const chosen =
         CHECK_IMAGE ??
         (
           await dialog.showOpenDialog(window, {
-            title: purpose === 'still' ? 'An image for the page' : 'A background image',
+            title: purpose === 'still' ? 'An image for the page' : purpose === 'logo' ? 'The brand\'s logo' : purpose === 'watermark' ? 'The watermark\'s image' : 'A background image',
             properties: ['openFile'],
-            filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'webp'] }],
+            filters: [{ name: 'Images', extensions: purpose === 'logo' || purpose === 'watermark' ? ['png', 'svg', 'webp', 'jpg', 'jpeg'] : ['png', 'jpg', 'jpeg', 'webp'] }],
           })
         ).filePaths[0];
-      return chosen ? { path: await importImage(dir, chosen) } : undefined;
+      // a logo goes into brand/, beside the files brand kits bring
+      return chosen ? { path: await importImage(dir, chosen, purpose === 'logo' ? 'brand' : 'images') } : undefined;
     },
+    'brand:list': () => brandViews(),
+    'brand:save': ({ name, raw }) => saveProjectBrand(dir, name, raw),
+    'brand:apply': (name) => applyProjectBrand(dir, name),
+    'brand:remove': (name) => removeProjectBrand(name),
+    'background:palette': ({ from, logo }) => backgroundPalette(dir, from, logo),
+    'background:wallpaper': () => projectWallpaper(dir),
   });
   editor.watch.start(file.hash);
   contents.on('did-finish-load', () => send(contents, 'project:status', editor.status ?? {}));
@@ -264,6 +302,8 @@ async function editorWindow(dir: string, key: string, file: ProjectFile, release
     if (editors.get(key) === editor) editors.delete(key);
     editor.watch.close();
     editor.media.dispose();
+    editor.motion.dispose();
+    editor.sound.dispose();
     editor.run?.cancel();
     void release();
     // Closing the last editor returns to the pill (not while an editor is reopened on a new take).
@@ -307,6 +347,15 @@ export async function expectPrivacy(dir: string, expecting: boolean): Promise<vo
   // the cut's write may still wait for the watcher's look: it keeps its own origin
   if (expecting) await editor.watch.settle();
   editor.watch.origin = expecting ? 'privacy' : 'outside';
+}
+
+/** The next outside change of the project comes from the app's own length fit ("Cuttle's length fit"). */
+export async function expectLength(dir: string, expecting: boolean): Promise<void> {
+  const editor = await editorOf(dir);
+  if (!editor) return;
+  // a change still waiting for the watcher's look keeps its own origin
+  if (expecting) await editor.watch.settle();
+  editor.watch.origin = expecting ? 'length' : 'outside';
 }
 
 /** The window of a project's open editor, if there is one. */

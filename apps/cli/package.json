@@ -9,6 +9,7 @@
   "dependencies": {
     "@cuttle/core": "workspace:*",
     "@cuttle/export": "workspace:*",
+    "@cuttle/motion-kit": "workspace:*",
     "@cuttle/project": "workspace:*",
     "@cuttle/recorder": "workspace:*",
     "@cuttle/timeline": "workspace:*",

@@ -1,5 +1,5 @@
 // Privacy in the app: after a take's cut and its speech step, the screen's text is read inside the
-// clips (Windows' own OCR, in the media worker), then what it showed that is private and the
+// clips (the system's own OCR: Windows' or macOS's Vision, in the media worker), then what it showed that is private and the
 // notifications are masked, as one step to undo ("Cuttle's privacy masks").
 import { dirname, join, relative, resolve, sep } from 'node:path';
 import { SCREEN_TEXT_FILE, readProjectFile } from '@cuttle/core';
@@ -8,8 +8,8 @@ import { loadSettings } from './settings';
 import { speechDone } from './speech';
 import { expectPrivacy, sendToEditor, setEditorStatus } from './windows';
 
-/** Whether this system can read the screen's text (Windows' own OCR); elsewhere it is tried only when asked, which says why not. */
-const CAN_READ = process.platform === 'win32';
+/** Whether this system can read the screen's text (Windows' OCR, macOS's Vision); elsewhere it is tried only when asked, which says why not. */
+const CAN_READ = process.platform === 'win32' || process.platform === 'darwin';
 /** Projects whose privacy step runs now (their folders, as given). */
 const masking = new Set<string>();
 /** Said once per run of the app: the screen's text cannot be read here. */
@@ -22,7 +22,7 @@ const hashOf = async (dir: string) => (await readProjectFile(dir).catch(() => un
  * Masks what the project's screen showed that is private, and the notifications, once its speech
  * step has ended (one write at a time, each its own step to undo): the screen's text is read
  * inside the clips first when reading is on in the settings and the take was not read yet. Without
- * Windows' OCR the notifications are masked all the same, and a note says why the screen was not
+ * an OCR the notifications are masked all the same, and a note says why the screen was not
  * read (once per run of the app, or when asked). The editor's title bar shows the progress.
  * `asked`: the person asked for it (the Auto tab, Try again): the screen is read again.
  */

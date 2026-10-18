@@ -15,7 +15,7 @@ export async function renderScenario(scenario: Scenario, assets: EngineAssets): 
   const state = createTimeline(project, { screenSize: SCREEN, cursor, ...(scenario.transcript && { transcript: scenario.transcript }) }).frameAt(scenario.t);
 
   const fake = await fixtures();
-  const sources: FrameSources = { screens: new Map(), webcams: new Map(), stills: new Map() };
+  const sources: FrameSources = { screens: new Map(), webcams: new Map(), stills: new Map(), motion: new Map(), overlays: new Map() };
   for (const layer of state.layers) {
     if (layer.kind === 'clip') {
       sources.screens.set(layer.index, fake.screen);

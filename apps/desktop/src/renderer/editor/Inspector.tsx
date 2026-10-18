@@ -2,7 +2,7 @@
 // left or Enter is pressed (text also every 2 s while typing); each save is one step to undo.
 // Output times read m:ss.t, take seconds "54.4 s into the take", lengths "2.5 s". While cuttle.json
 // does not parse, every field is off (editing waits).
-import { useEffect, useRef, useState, type ComponentType, type KeyboardEvent, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ComponentType, type CSSProperties, type KeyboardEvent, type ReactNode } from 'react';
 import { EXPORT_FORMATS } from '@cuttle/export/formats';
 import {
   BACKGROUND_PRESETS,
@@ -15,15 +15,26 @@ import {
   STILL_MOTIONS,
   TEXT_POSITIONS,
   TEXT_STYLES,
+  THEME_FONTS,
   WEBCAM_CORNERS,
   WEBCAM_SHAPES,
   type AutoEdits,
   type AutoKind,
   type CuttleProject,
+  type MotionOverlay,
+  type MotionScene,
+  type Music,
   type Rect,
+  type ThemeFont,
+  backgroundColors,
+  backgroundTone,
+  isColouredBackground,
+  SOLID_DEFAULT,
 } from '@cuttle/project';
+import type { ParamDeclaration } from '@cuttle/export/motion-params';
 import { sceneSpans, type SceneSpan } from '@cuttle/timeline';
 import type { Command, ListName } from '../../shared/document';
+import { MEDIA_ORIGIN, type BrandView, type MotionParams, type MotionStatusView, type SoundStatusView } from '../../shared/ipc';
 import { formatDuration, formatSource, formatSpeed, formatTime } from '../../shared/format';
 import {
   BACKGROUND_NAMES,
@@ -39,9 +50,35 @@ import {
   TEXT_STYLE_NAMES,
   WEBCAM_SHAPE_NAMES,
 } from '../../shared/names';
-import { outputTimesOf } from '../../shared/timeline-model';
-import { BackgroundIcon, CameraIcon, CardIcon, CheckIcon, ChevronIcon, CopyIcon, CropIcon, FilmIcon, MaskIcon, PageIcon, SelectIcon, SoundIcon, SplitIcon, SubtitlesIcon, TextIcon, TrashIcon, WindowIcon, ZoomIcon } from '../icons';
+import { motionName, outputTimesOf, soundName } from '../../shared/timeline-model';
+import { BUILT_IN_SOUNDS } from '@cuttle/motion-kit';
+import {
+  BackgroundIcon,
+  BrandIcon,
+  CameraIcon,
+  CardIcon,
+  CheckIcon,
+  ChevronIcon,
+  CloseIcon,
+  CopyIcon,
+  CropIcon,
+  FilmIcon,
+  MaskIcon,
+  MotionIcon,
+  PageIcon,
+  SelectIcon,
+  SoundIcon,
+  SplitIcon,
+  SubtitlesIcon,
+  TextIcon,
+  TrashIcon,
+  WatermarkIcon,
+  WindowIcon,
+  ZoomIcon,
+} from '../icons';
+import { bridge } from '../bridge';
 import { Select as StyledSelect } from '../Select';
+import { shortcut } from '../keys';
 import { chooseImage, cutShownAt, deleteSelection, duplicateSelection, LIST_OF, playheadPlace, reveal, SPEEDS } from './actions';
 import { edit, preview } from './doc';
 import { currentPlayer, engineAssets, select, setTool, store, type LookSection, type Selection, type Tool } from './session';
@@ -49,6 +86,8 @@ import { isColoured, swatch, type SwatchKey } from './swatches';
 import { useStore } from './store';
 import { PrivacyNote } from './PrivacyNote';
 import { SpeechNote, TranscriptPanel } from './Transcript';
+import { applyBrandKit, removeBrandKit, saveBrandKit } from './brand';
+import { colorsFrom, switchTo, wallpaperBehind } from './background';
 
 const TABS = [
   { id: 'selection', name: 'Selection' },
@@ -104,12 +143,21 @@ export function Inspector() {
  */
 function Row({ label, children, note, wide, plain, inline }: { label: string; children: ReactNode; note?: ReactNode; wide?: boolean; plain?: boolean; inline?: boolean }) {
   const Tag = plain ? 'div' : 'label';
+  const said = note !== undefined && <em title={typeof note === 'string' ? note : undefined}>{note}</em>;
   return (
     <Tag className={`field${wide ? ' wide' : ''}${inline ? ' inline' : ''}`}>
-      <span className="field-label">{label}</span>
+      {inline && said ? (
+        // beside a switch the note goes under the name: the switches line up, and a long note wraps
+        <span className="field-text">
+          <span className="field-label">{label}</span>
+          {said}
+        </span>
+      ) : (
+        <span className="field-label">{label}</span>
+      )}
       <span className="field-input">
         {children}
-        {note !== undefined && <em title={typeof note === 'string' ? note : undefined}>{note}</em>}
+        {!inline && said}
       </span>
     </Tag>
   );
@@ -335,6 +383,35 @@ function CutDetails({ project, id }: { project: CuttleProject; id: string }) {
 }
 
 /** A clip's crop: the part of the screen it shows, in source pixels, on or off. */
+/** The transition page a scene is gone into with (Claude adds one with `motion new fold`): its length, on and off, out. */
+function TransitionInto({ project, index }: { project: CuttleProject; index: number }) {
+  const scene = project.scenes[index];
+  const transition = scene?.transition;
+  const name = `scenes[${index}].transition`;
+  const status = useStore(store, (state) => state.motionStatus.find((entry) => entry.item === name && entry.src === transition?.src));
+  if (!scene?.id || !transition || index === 0) return null;
+  const id = scene.id;
+  const change = (fields: Partial<typeof transition>, label: string) => set('scenes', id, { transition: { ...transition, ...fields } }, label);
+  return (
+    <div className="transition-in" data-testid="transition-in">
+      <Row label="Into this scene">{motionName(transition.src)}</Row>
+      {status && <MotionState status={status} />}
+      <p className="hint">Its page draws the frames between the two scenes from them. The player shows them once they are made, a moment after you stop on the timeline; until then, a crossfade.</p>
+      <div className="grid2">
+        <Row label="Length (s)">
+          <NumberInput value={transition.duration} min={0.1} max={4} step={0.1} onCommit={(duration) => change({ duration }, 'Transition length')} testId="transition-duration" />
+        </Row>
+        <Row label="Transition" inline>
+          <Toggle checked={transition.enabled} label="The transition into this scene" onChange={(on) => change({ enabled: on }, on ? 'Transition on' : 'Transition off')} testId="transition-on" />
+        </Row>
+      </div>
+      <button type="button" className="ghost small" onClick={() => set('scenes', id, { transition: undefined }, 'Remove transition')} data-testid="transition-remove">
+        Remove the transition
+      </button>
+    </div>
+  );
+}
+
 function CropDetails({ project, id }: { project: CuttleProject; id: string }) {
   const clip = project.scenes.find((scene) => scene.id === id);
   if (clip?.type !== 'clip' || !clip.crop) return <p className="hint">This clip has no crop any more.</p>;
@@ -377,7 +454,7 @@ function CropDetails({ project, id }: { project: CuttleProject; id: string }) {
 // ---- what Cuttle did on its own ------------------------------------------------------------------
 
 interface AutoItem {
-  kind: Selection['kind'];
+  kind: Exclude<Selection['kind'], 'music'>;
   id: string;
   label: string;
   enabled: boolean;
@@ -405,6 +482,8 @@ const AUTO_GROUPS: AutoGroup[] = [
   { id: 'dialog', title: 'Zooms on dialogs', icon: <ZoomIcon />, kinds: ['dialog'], key: 'dialogZooms' },
   { id: 'click', title: 'Zooms on clicks', icon: <ZoomIcon />, kinds: ['click'], key: 'clickZooms' },
   { id: 'answer', title: 'Zoom on Claude’s answer', icon: <ZoomIcon />, kinds: ['answer'], key: 'answerZoom' },
+  { id: 'titles', title: 'Step titles', icon: <TextIcon />, kinds: ['title'], key: 'stepTitles' },
+  { id: 'steps', title: 'Zooms on steps', icon: <ZoomIcon />, kinds: ['step'], key: 'stepZooms' },
 ];
 
 /** The automatic items of a group, in the order the video shows them. */
@@ -414,6 +493,10 @@ function autoItems(project: CuttleProject, spans: readonly SceneSpan[], group: A
   for (const zoom of project.zooms) if (of(zoom.auto) && zoom.id) items.push({ kind: 'zoom', id: zoom.id, label: zoom.label ?? 'Zoom', enabled: zoom.enabled, at: outputTimesOf(spans, zoom.at)[0] });
   for (const mask of project.masks) if (of(mask.auto) && mask.id) items.push({ kind: 'mask', id: mask.id, label: mask.label ?? 'Mask', enabled: mask.enabled, at: outputTimesOf(spans, mask.from)[0] });
   for (const cut of project.cuts) if (of(cut.auto) && cut.id) items.push({ kind: 'cut', id: cut.id, label: cut.label ?? 'Cut', enabled: cut.enabled, at: cutShownAt(spans, cut) });
+  for (const text of project.texts) if (of(text.auto) && text.id) items.push({ kind: 'caption', id: text.id, label: text.text, enabled: text.enabled, at: outputTimesOf(spans, text.at)[0] });
+  for (const overlay of project.overlays) {
+    if (of(overlay.auto) && overlay.id) items.push({ kind: 'motion', id: overlay.id, label: overlay.label ?? motionName(overlay.src), enabled: overlay.enabled, at: outputTimesOf(spans, overlay.at)[0] });
+  }
   project.scenes.forEach((scene, index) => {
     if (scene.type === 'clip' && scene.id && of(scene.crop?.auto)) {
       items.push({ kind: 'crop', id: scene.id, label: `${scene.label ?? 'Clip'}: ${Math.round(scene.crop!.rect[2])} × ${Math.round(scene.crop!.rect[3])}`, enabled: scene.crop!.enabled, at: sceneStretch(spans, index)?.start });
@@ -532,7 +615,7 @@ function Head({ icon, color, name, copies = true }: { icon: ReactNode; color: st
         {name}
       </span>
       {copies && (
-        <button type="button" className="head-action" onClick={duplicateSelection} title="Duplicate (Ctrl+D)" aria-label="Duplicate" data-testid="duplicate">
+        <button type="button" className="head-action" onClick={duplicateSelection} title={`Duplicate (${shortcut('Ctrl+D')})`} aria-label="Duplicate" data-testid="duplicate">
           <CopyIcon size={15} />
         </button>
       )}
@@ -571,7 +654,7 @@ const HINTS: Record<Tool, ReactNode> = {
         <kbd>S</kbd> splits at the playhead, <kbd>R</kbd> speeds a clip up, <kbd>Del</kbd> deletes.
       </li>
       <li>
-        <kbd>Z</kbd> zoom, <kbd>M</kbd> mask, <kbd>T</kbd> caption; <kbd>Ctrl+K</kbd> finds any command.
+        <kbd>Z</kbd> zoom, <kbd>M</kbd> mask, <kbd>T</kbd> caption; <kbd>{shortcut('Ctrl+K')}</kbd> finds any command.
       </li>
     </ul>
   ),
@@ -594,6 +677,8 @@ const AUTO_REASONS: Record<AutoKind, string> = {
   dialog: 'a dialog',
   click: 'clicks',
   answer: "Claude's answer",
+  title: 'a step of the script',
+  step: 'a step of the script',
 };
 
 /** Says that Cuttle made the item, for what, and that a change makes it the person's. */
@@ -618,6 +703,7 @@ function SelectionPanel() {
   // a drag in progress shows here as it goes
   const project = useStore(store, (state) => state.doc?.preview ?? state.doc?.project);
   if (!project || !selection) return HINTS[tool];
+  if (selection.kind === 'music') return project.music ? <MusicDetails music={project.music} /> : <p className="hint">The music is not in the project any more.</p>;
   const list = LIST_OF[selection.kind];
   const item = (project[list] as { id?: string }[]).find((candidate) => candidate.id === selection.id);
   if (!item) return <p className="hint">The selection is not in the project any more.</p>;
@@ -632,7 +718,12 @@ function Details({ project, selection }: { project: CuttleProject; selection: Se
     const sceneIndex = project.scenes.findIndex((item) => item.id === id);
     const scene = project.scenes[sceneIndex]!;
     const stretch = sceneStretch(sceneSpans(project.scenes, project.cuts), sceneIndex);
-    const inVideo = stretch && <Row label="In the video">{span(stretch.start, stretch.end)}</Row>;
+    const inVideo = (
+      <>
+        {stretch && <Row label="In the video">{span(stretch.start, stretch.end)}</Row>}
+        <TransitionInto project={project} index={sceneIndex} />
+      </>
+    );
     if (scene.type === 'clip') {
       const name = [scene.speed !== 1 ? formatSpeed(scene.speed) : '', scene.label ?? (scene.speed === 1 ? 'Clip' : '')].filter(Boolean).join(' ');
       return (
@@ -720,6 +811,23 @@ function Details({ project, selection }: { project: CuttleProject; selection: Se
         </>
       );
     }
+    if (scene.type === 'motion') {
+      return (
+        <MotionDetails
+          list="scenes"
+          index={sceneIndex}
+          item={scene}
+          placement={
+            <>
+              {inVideo}
+              <Row label="Length (s)">
+                <NumberInput value={scene.duration} min={0.1} onCommit={(duration) => edit([{ type: 'trim', id, duration }], 'Change the length of the motion scene')} testId="motion-length" />
+              </Row>
+            </>
+          }
+        />
+      );
+    }
     return (
       <>
         <Head icon={<CardIcon />} color="var(--card)" name={scene.label ?? 'Card'} />
@@ -738,9 +846,10 @@ function Details({ project, selection }: { project: CuttleProject; selection: Se
   }
 
   /** An overlay's place: in the video (read), its start in source seconds, its length in the video. */
-  const timing = (list: 'zooms' | 'texts' | 'masks', from: number, to: number) => {
+  const timing = (list: 'zooms' | 'texts' | 'masks' | 'overlays', from: number, to: number) => {
     const stretch = stretchOf(project, selection, from, to);
-    const label = list === 'masks' ? 'mask' : list === 'zooms' ? 'zoom' : 'caption';
+    const label = list === 'masks' ? 'mask' : list === 'zooms' ? 'zoom' : list === 'overlays' ? 'motion overlay' : 'caption';
+    const testId = list === 'overlays' ? 'motion' : label;
     return (
       <>
         <Row label="Shows at" note={formatSource(from)}>
@@ -758,14 +867,14 @@ function Details({ project, selection }: { project: CuttleProject; selection: Se
         ) : (
           <div className="grid2">
             <Row label="Start (take s)">
-              <NumberInput value={from} min={0} onCommit={(at) => set(list, id, { at }, `Move ${label}`)} testId={`${label}-at`} />
+              <NumberInput value={from} min={0} onCommit={(at) => set(list, id, { at }, `Move ${label}`)} testId={`${testId}-at`} />
             </Row>
             <Row label="Length (s)" note={stretch && stretch.speed !== 1 ? `${formatDuration(to - from)} src` : undefined}>
               <NumberInput
                 value={stretch ? (to - from) / stretch.speed : to - from}
                 min={0.05}
                 onCommit={(length) => set(list, id, { duration: length * (stretch?.speed ?? 1) }, `Change the length of the ${label}`)}
-                testId={`${label}-length`}
+                testId={`${testId}-length`}
               />
             </Row>
           </div>
@@ -793,7 +902,7 @@ function Details({ project, selection }: { project: CuttleProject; selection: Se
     </div>
   );
 
-  const enabled = (list: 'zooms' | 'masks' | 'texts', on: boolean, label: string) => (
+  const enabled = (list: 'zooms' | 'masks' | 'texts' | 'overlays', on: boolean, label: string) => (
     <Row label="Show" inline>
       <em>{on ? 'On' : 'Off: kept, not in the video'}</em>
       <Toggle checked={on} label={`Show the ${label}`} onChange={(value) => set(list, id, { enabled: value ? undefined : false }, value ? `Turn ${label} on` : `Turn ${label} off`)} />
@@ -850,10 +959,29 @@ function Details({ project, selection }: { project: CuttleProject; selection: Se
       </>
     );
   }
+  if (selection.kind === 'motion') {
+    const index = project.overlays.findIndex((item) => item.id === id);
+    const overlay = project.overlays[index]!;
+    return (
+      <MotionDetails
+        list="overlays"
+        index={index}
+        item={overlay}
+        placement={
+          <>
+            {timing('overlays', overlay.at, overlay.at + overlay.duration)}
+            {enabled('overlays', overlay.enabled, 'motion overlay')}
+          </>
+        }
+      />
+    );
+  }
+  if (selection.kind === 'sound') return <SoundDetails project={project} id={id} />;
   const text = project.texts.find((item) => item.id === id)!;
   return (
     <>
       <Head icon={<TextIcon />} color="var(--caption)" name={text.label ?? 'Caption'} />
+      <AutoNote kind={text.auto} />
       <Row label="Text" wide>
         <TextInput value={text.text} multiline onCommit={(value) => value.trim() && set('texts', id, { text: value }, 'Edit caption')} testId="caption-text" />
       </Row>
@@ -871,6 +999,419 @@ function Details({ project, selection }: { project: CuttleProject; selection: Se
       </Row>
       {enabled('texts', text.enabled, 'caption')}
     </>
+  );
+}
+
+// ---- music and sounds ----------------------------------------------------------------------------
+
+/** The params the music page declares, read again with each new render (Claude edited the page). */
+function useMusicParams(src: string): MotionParams | undefined {
+  const rendered = useStore(store, (state) => state.soundStatus.key);
+  const [read, setRead] = useState<{ src: string; params: MotionParams }>();
+  useEffect(() => {
+    let live = true;
+    bridge.invoke('sound:params', src).then(
+      (params) => live && setRead({ src, params }),
+      (error: Error) => live && setRead({ src, params: { params: [], issues: [error.message] } }),
+    );
+    return () => {
+      live = false;
+    };
+  }, [src, rendered]);
+  return read?.src === src ? read.params : undefined;
+}
+
+const musicEdit = (fields: Record<string, unknown>): Command => ({ type: 'music', fields });
+
+/**
+ * The video's music: how its render is doing, its page, on or off, its level and how far it goes down
+ * under speech, the params its page declares, what the page said.
+ */
+function MusicDetails({ music }: { music: Music }) {
+  const status = useStore(store, (state) => state.soundStatus);
+  const declared = useMusicParams(music.src);
+  const info = status.info;
+  const summary = [info?.bpm ? `${Math.round(info.bpm * 10) / 10} BPM` : '', info?.key ?? '', info?.sections?.length ? `${info.sections.length} parts` : ''].filter(Boolean).join(' · ');
+  const values = music.params;
+  const param = (name: string, value: unknown): Command => {
+    const next: Record<string, unknown> = { ...values };
+    if (value === undefined) delete next[name];
+    else next[name] = value;
+    return musicEdit({ params: next });
+  };
+  return (
+    <>
+      <Head icon={<SoundIcon />} color="var(--music)" name={`Music · ${motionName(music.src)}`} copies={false} />
+      <MusicState status={status} />
+      <div className="field">
+        <span className="field-label">
+          Page
+          <span className="links">
+            <button type="button" className="link" onClick={() => void bridge.invoke('project:reveal', music.src)} title="Show the page's file in its folder">
+              Show file
+            </button>
+            <button type="button" className="link" onClick={() => void bridge.invoke('sound:reload')} title="Render the music again" data-testid="music-reload">
+              Reload
+            </button>
+          </span>
+        </span>
+        <span className="field-input">
+          <span className="path" title={music.src}>
+            {music.src}
+          </span>
+        </span>
+      </div>
+      {summary && <Row label="Made">{summary}</Row>}
+      <Row label="Music" inline>
+        <em>{music.enabled ? 'On' : 'Off'}</em>
+        <Toggle checked={music.enabled} label="Play the music" onChange={(on) => edit([musicEdit({ enabled: on ? undefined : false })], on ? 'Music on' : 'Music off')} testId="music-enabled" />
+      </Row>
+      <Row label={`Volume · ${Math.round(music.volume * 100)} %`}>
+        <RangeInput value={Math.round(music.volume * 100)} min={0} max={100} label="Music volume" toCommand={(value) => musicEdit({ volume: value / 100 })} commitLabel="Music volume" testId="music-volume" />
+      </Row>
+      <Row label={`Under speech · ${music.duck > 0 ? `${music.duck} dB down` : 'stays as it is'}`}>
+        <RangeInput value={music.duck} min={0} max={30} label="How far the music goes down under speech (dB)" toCommand={(value) => musicEdit({ duck: value })} commitLabel="Music under speech" testId="music-duck" />
+      </Row>
+      {declared && (declared.params.length > 0 || declared.issues.length > 0) && (
+        <div className="motion-params" data-testid="music-params">
+          <span className="section-title">Params</span>
+          {declared.issues.map((issue) => (
+            <p key={issue} className="note warning">
+              {issue}
+            </p>
+          ))}
+          {declared.params.map((declaration) => (
+            <ParamField key={declaration.name} param={declaration} value={declaration.name in values ? values[declaration.name] : declaration.default} set={declaration.name in values} toCommand={(value) => param(declaration.name, value)} />
+          ))}
+        </div>
+      )}
+      <MotionLog status={{ item: 'music', src: music.src, state: status.state === 'failed' ? 'failed' : 'ready', errors: [...status.errors, ...status.skipped], console: status.console }} />
+      <p className="hint motion-hint">Claude writes this music for the video: ask it in Claude Code for another mood, tempo or sound. A saved change plays here a moment later.</p>
+    </>
+  );
+}
+
+/** How the music's render is doing. */
+function MusicState({ status }: { status: SoundStatusView }) {
+  const errors = status.errors.length;
+  const text =
+    status.state === 'failed'
+      ? `The music cannot render: ${status.failure ?? 'it failed'}`
+      : status.state === 'rendering'
+        ? 'Rendering the music…'
+        : status.state === 'none'
+          ? 'Waiting for the music'
+          : errors > 0
+            ? `Plays, but the page threw ${errors === 1 ? 'an error' : `${errors} errors`}`
+            : `Ready${status.renderMs !== undefined ? ` · rendered in ${(status.renderMs / 1000).toFixed(1)} s` : ''}`;
+  const state = status.state === 'ready' ? (errors > 0 ? 'warn' : 'ready') : status.state === 'failed' ? 'failed' : 'loading';
+  return (
+    <p className={`motion-state ${state}`} data-testid="music-state" title={text}>
+      <i />
+      {text}
+    </p>
+  );
+}
+
+/** A sound: which one, where it plays, how loud, on or off. */
+function SoundDetails({ project, id }: { project: CuttleProject; id: string }) {
+  const sound = project.sounds.find((item) => item.id === id)!;
+  const scene = sound.scene !== undefined ? project.scenes.find((item) => item.id === sound.scene) : undefined;
+  const options = [...BUILT_IN_SOUNDS.map(([name]) => name), ...(BUILT_IN_SOUNDS.some(([name]) => name === sound.sound) ? [] : [sound.sound])];
+  return (
+    <>
+      <Head icon={<SoundIcon />} color="var(--sound)" name={sound.label ?? soundName(sound.sound)} />
+      <Row label="Sound" note={BUILT_IN_SOUNDS.find(([name]) => name === sound.sound)?.[1] ?? 'a file of the project'}>
+        <StyledSelect value={sound.sound} options={options.map((name) => ({ value: name, label: soundName(name) }))} onChange={(name) => set('sounds', id, { sound: name }, 'Change sound')} label="Sound" />
+      </Row>
+      <Row label={scene ? `Into ${scene.label ?? 'its scene'} (s)` : 'At (take s)'} note={scene ? undefined : formatSource(sound.at)}>
+        <NumberInput value={sound.at} min={0} step={0.05} onCommit={(at) => set('sounds', id, { at }, 'Move sound')} testId="sound-at" />
+      </Row>
+      <Row label={`Volume · ${Math.round(sound.volume * 100)} %`}>
+        <RangeInput value={Math.round(sound.volume * 100)} min={0} max={100} label="Sound volume" toCommand={(value) => ({ type: 'set', list: 'sounds', id, fields: { volume: value / 100 } })} commitLabel="Sound volume" testId="sound-volume" />
+      </Row>
+      <Row label="Label">
+        <TextInput value={sound.label ?? ''} placeholder={soundName(sound.sound)} onCommit={(value) => set('sounds', id, { label: value.trim() || undefined }, 'Rename sound')} />
+      </Row>
+      <Row label="In the video" inline>
+        <em>{sound.enabled ? 'On' : 'Off'}</em>
+        <Toggle checked={sound.enabled} label="Play the sound" onChange={(on) => set('sounds', id, { enabled: on ? undefined : false }, on ? 'Sound on' : 'Sound off')} testId="sound-enabled" />
+      </Row>
+    </>
+  );
+}
+
+// ---- motion --------------------------------------------------------------------------------------
+
+/** The params a page declares, read again when the project's files change (Claude edited the page). */
+function useMotionParams(src: string): MotionParams | undefined {
+  const files = useStore(store, (state) => state.motionFiles);
+  const [read, setRead] = useState<{ src: string; params: MotionParams }>();
+  useEffect(() => {
+    let live = true;
+    bridge.invoke('motion:params', src).then(
+      (params) => live && setRead({ src, params }),
+      (error: Error) => live && setRead({ src, params: { params: [], issues: [error.message] } }),
+    );
+    return () => {
+      live = false;
+    };
+  }, [src, files]);
+  return read?.src === src ? read.params : undefined;
+}
+
+const BLUR_SAMPLES = ['4', '8', '16', '32'] as const;
+
+/**
+ * A motion scene or overlay: its page and how it is doing in the preview (what it threw, its
+ * console), its place (`placement`), the params its page declares, the internet and motion blur.
+ */
+function MotionDetails({ list, index, item, placement }: { list: 'scenes' | 'overlays'; index: number; item: MotionScene | MotionOverlay; placement: ReactNode }) {
+  const id = item.id!;
+  const name = `${list}[${index}]`;
+  const status = useStore(store, (state) => state.motionStatus.find((entry) => entry.item === name && entry.src === item.src));
+  const declared = useMotionParams(item.src);
+  const noun = list === 'scenes' ? 'motion scene' : 'motion overlay';
+  const blur = item.motionBlur;
+  return (
+    <>
+      <Head icon={<MotionIcon />} color="var(--motion)" name={item.label ?? motionName(item.src)} />
+      {'auto' in item && <AutoNote kind={item.auto} />}
+      <MotionState status={status} />
+      <Row label="Label">
+        <TextInput value={item.label ?? ''} placeholder={motionName(item.src)} onCommit={(value) => set(list, id, { label: value.trim() || undefined }, `Rename ${noun}`)} testId="motion-label" />
+      </Row>
+      <div className="field">
+        <span className="field-label">
+          Page
+          <span className="links">
+            <button type="button" className="link" onClick={() => void bridge.invoke('project:reveal', item.src)} title="Show the page's file in its folder">
+              Show file
+            </button>
+            <button type="button" className="link" onClick={() => void bridge.invoke('motion:reload', name)} title="Load the page again" data-testid="motion-reload">
+              Reload
+            </button>
+          </span>
+        </span>
+        <span className="field-input">
+          <span className="path" title={item.src}>
+            {item.src}
+          </span>
+        </span>
+      </div>
+      {placement}
+      {declared && <MotionParamFields list={list} id={id} item={item} declared={declared} />}
+      <Row label="Internet" inline>
+        <em title={item.network ? 'The page may load fonts, images and data from https: addresses' : 'The page reaches only the project folder and the motion kit'}>{item.network ? 'On' : 'Off'}</em>
+        <Toggle checked={item.network} label="Let the page load from the internet" onChange={(on) => set(list, id, { network: on || undefined }, on ? 'Let the page load from the internet' : 'Keep the page offline')} testId="motion-network" />
+      </Row>
+      <Row label="Motion blur" inline>
+        <em title="Each frame is the average of moments while a shutter would be open: smooth fast motion, drawn that many times (slower)">{blur ? 'On' : 'Off'}</em>
+        <Toggle checked={!!blur} label="Motion blur" onChange={(on) => set(list, id, { motionBlur: on ? { samples: 8, shutter: 0.5 } : undefined }, on ? 'Motion blur on' : 'Motion blur off')} testId="motion-blur" />
+      </Row>
+      {blur && (
+        <div className="grid2">
+          <Row label="Samples">
+            <StyledSelect
+              value={String(blur.samples)}
+              options={[...new Set([...BLUR_SAMPLES, String(blur.samples)])].map((samples) => ({ value: samples, label: samples }))}
+              onChange={(samples) => set(list, id, { motionBlur: { ...blur, samples: Number(samples) } }, 'Change motion blur')}
+              label="Samples"
+            />
+          </Row>
+          <Row label="Shutter" note="of a frame">
+            <NumberInput value={blur.shutter} min={0.05} max={1} step={0.05} onCommit={(shutter) => set(list, id, { motionBlur: { ...blur, shutter } }, 'Change motion blur')} />
+          </Row>
+        </div>
+      )}
+      <MotionLog status={status} />
+      <p className="hint motion-hint">Claude can change this page or write a new one: ask it in Claude Code. Each saved change shows here at once.</p>
+    </>
+  );
+}
+
+/** How the page is doing in the preview. */
+function MotionState({ status }: { status: MotionStatusView | undefined }) {
+  if (!status) return null;
+  const errors = status.errors.length;
+  const text =
+    status.state === 'failed'
+      ? `The page cannot draw: ${status.failure ?? 'it failed'}`
+      : status.state === 'loading'
+        ? 'Loading the page…'
+        : errors > 0
+          ? `Draws, but threw ${errors === 1 ? 'an error' : `${errors} errors`}`
+          : 'Ready';
+  return (
+    <p className={`motion-state ${status.state === 'ready' && errors > 0 ? 'warn' : status.state}`} data-testid="motion-state" title={text}>
+      <i />
+      {text}
+    </p>
+  );
+}
+
+/** What the page threw, and its console. */
+function MotionLog({ status }: { status: MotionStatusView | undefined }) {
+  if (!status || (status.errors.length === 0 && status.console.length === 0)) return null;
+  return (
+    <div className="motion-log">
+      {status.errors.length > 0 && (
+        <details open>
+          <summary>Errors ({status.errors.length})</summary>
+          <pre data-testid="motion-errors">{status.errors.join('\n')}</pre>
+        </details>
+      )}
+      {status.console.length > 0 && (
+        <details>
+          <summary>Console ({status.console.length})</summary>
+          <pre>{status.console.join('\n')}</pre>
+        </details>
+      )}
+    </div>
+  );
+}
+
+/** The params the page declares, each in a field of its kind; ones the item has that the page does not declare, as text. */
+function MotionParamFields({ list, id, item, declared }: { list: 'scenes' | 'overlays'; id: string; item: MotionScene | MotionOverlay; declared: MotionParams }) {
+  const values = item.params;
+  const command = (name: string, value: unknown): Command => {
+    const next: Record<string, unknown> = { ...values };
+    if (value === undefined) delete next[name];
+    else next[name] = value;
+    return { type: 'set', list, id, fields: { params: Object.keys(next).length > 0 ? next : undefined } };
+  };
+  const others = Object.keys(values).filter((name) => !declared.params.some((param) => param.name === name));
+  if (declared.params.length === 0 && others.length === 0 && declared.issues.length === 0) return null;
+  return (
+    <div className="motion-params" data-testid="motion-params">
+      <span className="section-title">Params</span>
+      {declared.issues.map((issue) => (
+        <p key={issue} className="note warning">
+          {issue}
+        </p>
+      ))}
+      {declared.params.map((param) => (
+        <ParamField key={param.name} param={param} value={param.name in values ? values[param.name] : param.default} set={param.name in values} toCommand={(value) => command(param.name, value)} />
+      ))}
+      {others.map((name) => (
+        <Row key={name} label={name} note="not declared by the page">
+          <TextInput
+            value={typeof values[name] === 'string' ? (values[name] as string) : JSON.stringify(values[name])}
+            onCommit={(text) => {
+              let value: unknown = text;
+              try {
+                value = JSON.parse(text);
+              } catch {
+                // plain text
+              }
+              edit([command(name, value)], `Change ${name}`);
+            }}
+          />
+        </Row>
+      ))}
+    </div>
+  );
+}
+
+/** One param: a field of its kind, live on the video while a slider or a colour moves; Reset back to the page's default. */
+function ParamField({ param, value, set: isSet, toCommand }: { param: ParamDeclaration; value: unknown; set: boolean; toCommand: (value: unknown) => Command }) {
+  const label = `Change ${param.label}`;
+  const commit = (next: unknown) => edit([toCommand(next)], label);
+  let input: ReactNode;
+  switch (param.type) {
+    case 'bool':
+      input = <Toggle checked={value === true} label={param.label} onChange={(on) => commit(on)} testId={`param-${param.name}`} />;
+      break;
+    case 'select':
+      input = (
+        <StyledSelect
+          value={String(value ?? '')}
+          options={(param.options ?? []).map((option) => ({ value: option, label: option }))}
+          onChange={(option) => commit(option)}
+          label={param.label}
+          testId={`param-${param.name}`}
+        />
+      );
+      break;
+    case 'number': {
+      const number = typeof value === 'number' ? value : 0;
+      const { min, max } = param;
+      input = (
+        <>
+          {min !== undefined && max !== undefined && max > min && (
+            <input
+              key={number}
+              type="range"
+              className="range"
+              min={min}
+              max={max}
+              step={(max - min) / 200}
+              defaultValue={number}
+              aria-label={param.label}
+              onInput={(event) => preview([toCommand(Number((event.target as HTMLInputElement).value))])}
+              onChange={(event) => {
+                preview(undefined);
+                commit(Number(event.target.value));
+              }}
+            />
+          )}
+          <span className="narrow">
+            <NumberInput value={number} min={min} max={max} step={min !== undefined && max !== undefined ? (max - min) / 20 : 1} onCommit={commit} testId={`param-${param.name}`} />
+          </span>
+        </>
+      );
+      break;
+    }
+    case 'color':
+      input = (
+        <>
+          <ColorInput value={/^#[0-9a-f]{6}$/i.test(String(value)) ? String(value) : '#ffffff'} label={label} toCommand={(colour) => toCommand(colour)} />
+          <TextInput value={String(value ?? '')} placeholder="#ffffff" onCommit={(text) => commit(text.trim() || undefined)} testId={`param-${param.name}`} />
+        </>
+      );
+      break;
+    case 'image':
+      input = (
+        <>
+          <span className="path" title={String(value ?? '')}>
+            {value ? String(value) : 'none'}
+          </span>
+          <button
+            type="button"
+            className="ghost small"
+            onClick={() =>
+              void bridge.invoke('project:import-image', { purpose: 'still' }).then((chosen) => {
+                if (chosen) commit(chosen.path);
+              })
+            }
+          >
+            Choose…
+          </button>
+          {value ? (
+            <button type="button" className="ghost small" onClick={() => commit(null)}>
+              None
+            </button>
+          ) : null}
+        </>
+      );
+      break;
+    default: {
+      const text = String(value ?? '');
+      input = <TextInput value={text} multiline={text.includes('\n') || String(param.default ?? '').includes('\n')} onCommit={(next) => commit(next)} testId={`param-${param.name}`} />;
+    }
+  }
+  return (
+    <div className={`field${param.type === 'bool' ? ' inline' : ''}`}>
+      <span className="field-label">
+        {param.label}
+        {isSet && (
+          <button type="button" className="link" onClick={() => edit([toCommand(undefined)], `Reset ${param.label}`)} title={`Back to the page's default (${JSON.stringify(param.default)})`}>
+            Reset
+          </button>
+        )}
+      </span>
+      <span className="field-input">{input}</span>
+    </div>
   );
 }
 
@@ -919,6 +1460,8 @@ const SIZES = [
 
 /** The look's parts, in the order the tab lists them. */
 const LOOK_PARTS: { id: LookSection; title: string; icon: ComponentType<{ size?: number }> }[] = [
+  { id: 'brand', title: 'Brand', icon: BrandIcon },
+  { id: 'watermark', title: 'Watermark', icon: WatermarkIcon },
   { id: 'background', title: 'Background', icon: BackgroundIcon },
   { id: 'window', title: 'Window', icon: WindowIcon },
   { id: 'cursor', title: 'Cursor', icon: SelectIcon },
@@ -951,6 +1494,259 @@ function LookPart({ id, summary, children }: { id: LookSection; summary: string;
   );
 }
 
+/** The theme's fields as one step to undo (`undefined` removes one). */
+const setTheme = (fields: Record<string, unknown>, label: string) => edit([{ type: 'theme', fields }], label);
+
+/** A kit's chip: its background as a tile with its accent on it, and its name. */
+function KitTone({ kit }: { kit: BrandView }) {
+  return (
+    <i className={`kit-tone bg-${kit.background.preset}`} style={kit.background.preset === 'solid' && kit.background.color ? { background: kit.background.color } : undefined}>
+      <b style={{ background: kit.accent }} />
+    </i>
+  );
+}
+
+/**
+ * The project's brand, which its motion pages read (titles, end cards, lower thirds, every colour):
+ * the saved kits as chips that apply with one click, then the name, URL, logo, colours and heading
+ * font, and saving it all as a kit for the next video.
+ */
+function BrandFields({ project }: { project: CuttleProject }) {
+  const { theme, look: current } = project;
+  const [kits, setKits] = useState<BrandView[]>();
+  const [removing, setRemoving] = useState<string>();
+  const [kitName, setKitName] = useState('');
+  useEffect(() => {
+    let live = true;
+    void bridge.invoke('brand:list').then((list) => live && setKits(list));
+    return () => {
+      live = false;
+    };
+  }, []);
+  const save = async () => {
+    const name = (kitName || theme.name || '').trim();
+    if (!name) return;
+    const brands = await saveBrandKit(name);
+    if (!brands) return;
+    setKits(brands);
+    setKitName('');
+  };
+  const remove = async (name: string) => {
+    setRemoving(undefined);
+    const brands = await removeBrandKit(name);
+    if (brands) setKits(brands);
+  };
+  return (
+    <>
+      {kits && kits.length > 0 && (
+        <div className="kits" role="group" aria-label="Brand kits">
+          {kits.map((kit) => (
+            <span key={kit.name} className="kit">
+              <button type="button" className="chip" aria-pressed={theme.kit === kit.name} title={`Apply ${kit.name}: its brand, background, frame and cursor`} onClick={() => void applyBrandKit(kit.name)} data-testid="brand-kit">
+                <KitTone kit={kit} />
+                {kit.name}
+              </button>
+              <button type="button" className="kit-remove" aria-label={`Remove the kit ${kit.name}`} title="Remove this kit" onClick={() => setRemoving(kit.name)}>
+                <CloseIcon size={10} />
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
+      {removing && (
+        <div className="kit-confirm" role="alert">
+          <span>
+            Remove the kit “{removing}”? Projects keep what it set.
+          </span>
+          <button type="button" className="ghost small" onClick={() => setRemoving(undefined)}>
+            Keep
+          </button>
+          <button type="button" className="primary small danger" onClick={() => void remove(removing)}>
+            Remove
+          </button>
+        </div>
+      )}
+      {kits && kits.length === 0 && <p className="hint">No brand kits yet: set the brand below, then save it as a kit to use it in the next video with one click.</p>}
+      <div className="grid2">
+        <Row label="Name">
+          <TextInput value={theme.name ?? ''} placeholder="the product" onCommit={(name) => setTheme({ name: name.trim() || undefined }, 'Brand name')} testId="brand-name" />
+        </Row>
+        <Row label="URL">
+          <TextInput value={theme.url ?? ''} placeholder="example.com" onCommit={(url) => setTheme({ url: url.trim() || undefined }, 'Brand URL')} testId="brand-url" />
+        </Row>
+      </div>
+      <Row label="Logo" plain>
+        {theme.logo ? (
+          <>
+            <img className="logo-thumb" src={`${MEDIA_ORIGIN}/${theme.logo.split('/').map(encodeURIComponent).join('/')}`} alt="" />
+            <span className="path" title={theme.logo}>
+              {theme.logo.split('/').pop()}
+            </span>
+            <button type="button" className="ghost small" onClick={() => setTheme({ logo: undefined }, 'No logo')}>
+              Remove
+            </button>
+          </>
+        ) : (
+          <span className="path">none: end cards show the name’s first letter</span>
+        )}
+        <button type="button" className="ghost small" onClick={() => void chooseImage('logo')} data-testid="brand-logo">
+          {theme.logo ? 'Replace…' : 'Choose…'}
+        </button>
+      </Row>
+      <div className="grid2">
+        <Row label="Accent" note={theme.accent ? undefined : 'the cursor’s colour'}>
+          <ColorInput value={theme.accent ?? current.cursor.color} label="Accent colour" upper toCommand={(accent) => ({ type: 'theme', fields: { accent } })} />
+        </Row>
+        <Row label="Text">
+          <ColorInput value={theme.foreground} label="Text colour" upper toCommand={(foreground) => ({ type: 'theme', fields: { foreground } })} />
+        </Row>
+      </div>
+      <Row label="Headings">
+        <StyledSelect value={theme.font} options={THEME_FONTS.map((font) => ({ value: font, label: font, note: FONT_NOTES[font] }))} onChange={(font) => setTheme({ font }, `Headings: ${font}`)} label="Heading font" testId="brand-font" />
+      </Row>
+      <Row label="Pages’ background" note={theme.background ? undefined : 'a dark tone of the background'}>
+        <ColorInput value={theme.background ?? backgroundTone(current.background)} label="Pages’ background" upper toCommand={(background) => ({ type: 'theme', fields: { background } })} />
+        {theme.background && (
+          <button type="button" className="ghost small" onClick={() => setTheme({ background: undefined }, 'Pages’ background from the background')}>
+            Reset
+          </button>
+        )}
+      </Row>
+      <Row label="Save as a kit" plain>
+        <span className="kit-save" title="The brand, the background, the frame and the cursor, for the next video; a kit of the same name is replaced">
+          <input type="text" value={kitName} placeholder={theme.name || 'a name'} onChange={(event) => setKitName(event.target.value)} onKeyDown={(event) => event.key === 'Enter' && void save()} aria-label="The kit's name" data-testid="brand-kit-name" />
+          <button type="button" className="ghost small" disabled={!(kitName || theme.name || '').trim()} onClick={() => void save()} data-testid="brand-save">
+            Save
+          </button>
+        </span>
+      </Row>
+    </>
+  );
+}
+
+/**
+ * The swatch of the current gradient or mesh in its own colours (a gradient as laid out); the
+ * others keep their picture.
+ */
+function swatchStyle(background: CuttleProject['look']['background'], preset: (typeof BACKGROUND_PRESETS)[number]): CSSProperties | undefined {
+  if ((preset !== 'gradient' && preset !== 'mesh') || !background.colors || background.preset !== preset) return undefined;
+  const stops = background.colors.join(', ');
+  if (preset === 'mesh') return { backgroundImage: `linear-gradient(135deg in oklab, ${stops})` };
+  return { backgroundImage: background.kind === 'radial' ? `radial-gradient(circle, ${stops})` : `linear-gradient(${background.angle ?? 135}deg in oklab, ${stops})` };
+}
+
+/**
+ * The colours of a gradient (its stops, first to last) or the tints of mesh, flow, bokeh and dots:
+ * a well each (2 to 4, one more with +, one fewer with its ×), and the colours of the take's screen
+ * or of the brand's logo with a click.
+ */
+function BackgroundColors({ background, logo }: { background: CuttleProject['look']['background']; logo: boolean }) {
+  const colors = [...backgroundColors(background)];
+  const setColors = (next: string[], label: string) => look(['background', 'colors'], next, label);
+  return (
+    <>
+      <Row label={background.preset === 'gradient' ? 'Colours, first to last' : 'Colours'} plain note={background.colors ? undefined : 'its own'}>
+        <span className="color-stops" data-testid="bg-colors">
+          {colors.map((color, i) => (
+            <span key={i} className="color-stop">
+              <ColorInput value={color} label={`Colour ${i + 1}`} upper toCommand={(value) => ({ type: 'look', path: ['background', 'colors'], value: colors.map((other, j) => (j === i ? value : other)) }) as Command} />
+              {colors.length > 2 && (
+                <button type="button" className="stop-remove" aria-label={`Remove colour ${i + 1}`} title="Remove this colour" onClick={() => setColors(colors.filter((_, j) => j !== i), 'Background: a colour fewer')}>
+                  <CloseIcon size={9} />
+                </button>
+              )}
+            </span>
+          ))}
+          {colors.length < 4 && (
+            <button type="button" className="ghost small stop-add" aria-label="Add a colour" title="Add a colour" onClick={() => setColors([...colors, colors.at(-1)!], 'Background: a colour more')} data-testid="bg-color-add">
+              +
+            </button>
+          )}
+        </span>
+      </Row>
+      <Row label="Take colours from" plain>
+        <button type="button" className="ghost small" title="The clearest colours the take shows" onClick={() => void colorsFrom('take')} data-testid="bg-from-take">
+          The take
+        </button>
+        <button type="button" className="ghost small" disabled={!logo} title={logo ? undefined : 'Choose a logo under Brand first'} onClick={() => void colorsFrom('logo')} data-testid="bg-from-logo">
+          The logo
+        </button>
+      </Row>
+    </>
+  );
+}
+
+/**
+ * The watermark: a mark in a corner of the whole video. Its image (else the brand's logo) or, without
+ * one, its text (else the brand's name); its corner, height and opacity.
+ */
+function WatermarkFields({ project }: { project: CuttleProject }) {
+  const { watermark } = project.look;
+  const { theme } = project;
+  const image = watermark.image ?? theme.logo;
+  return (
+    <>
+      <Row label="Watermark" inline note="over the whole video">
+        <Toggle checked={watermark.enabled} label="Watermark" onChange={(on) => look(['watermark', 'enabled'], on, on ? 'Watermark on' : 'Watermark off')} testId="watermark-enabled" />
+      </Row>
+      {watermark.enabled && (
+        <>
+          <Row label="Image" plain>
+            {image ? (
+              <>
+                <img className="logo-thumb" src={`${MEDIA_ORIGIN}/${image.split('/').map(encodeURIComponent).join('/')}`} alt="" />
+                <span className="path" title={image}>
+                  {watermark.image ? image.split('/').pop() : 'the brand’s logo'}
+                </span>
+              </>
+            ) : (
+              <span className="path">none: the text shows</span>
+            )}
+            {watermark.image && (
+              <button type="button" className="ghost small" onClick={() => look(['watermark', 'image'], undefined, 'Watermark: no image of its own')}>
+                Remove
+              </button>
+            )}
+            <button type="button" className="ghost small" onClick={() => void chooseImage('watermark')} data-testid="watermark-image">
+              {watermark.image ? 'Replace…' : 'Choose…'}
+            </button>
+          </Row>
+          {!image && (
+            <Row label="Text">
+              <TextInput value={watermark.text ?? ''} placeholder={theme.name || 'the brand’s name'} onCommit={(text) => look(['watermark', 'text'], text.trim() || undefined, 'Watermark text')} testId="watermark-text" />
+            </Row>
+          )}
+          <div className="chips" role="group" aria-label="Watermark corner">
+            {WEBCAM_CORNERS.map((corner) => (
+              <button key={corner} type="button" className="chip" aria-pressed={watermark.corner === corner} onClick={() => look(['watermark', 'corner'], corner, `Watermark: ${CORNER_NAMES[corner].toLowerCase()}`)} data-testid={`watermark-${corner}`}>
+                {CORNER_NAMES[corner]}
+              </button>
+            ))}
+          </div>
+          <div className="grid2">
+            <Row label={`Size · ${Math.round(watermark.size * 100)} %`}>
+              <RangeInput value={Math.round(watermark.size * 100)} min={2} max={30} label="Watermark size" toCommand={(value) => ({ type: 'look', path: ['watermark', 'size'], value: value / 100 }) as Command} commitLabel="Watermark size" testId="watermark-size" />
+            </Row>
+            <Row label={`Opacity · ${Math.round(watermark.opacity * 100)} %`}>
+              <RangeInput value={Math.round(watermark.opacity * 100)} min={10} max={100} label="Watermark opacity" toCommand={(value) => ({ type: 'look', path: ['watermark', 'opacity'], value: value / 100 }) as Command} commitLabel="Watermark opacity" testId="watermark-opacity" />
+            </Row>
+          </div>
+        </>
+      )}
+    </>
+  );
+}
+
+/** What each heading font is like, in the font list. */
+const FONT_NOTES: Record<ThemeFont, string> = {
+  Archivo: 'wide, bold',
+  Inter: 'plain',
+  'Space Grotesk': 'technical',
+  Fraunces: 'warm serif',
+  'Instrument Serif': 'editorial serif',
+  'Bebas Neue': 'tall capitals',
+};
+
 function LookPanel() {
   const project = useStore(store, (state) => state.doc?.project);
   const raw = useStore(store, (state) => state.doc?.raw);
@@ -958,8 +1754,20 @@ function LookPanel() {
   const { look: current, output, sources, captions } = project;
   const size = SIZES.find((item) => item.width === output.width && item.height === output.height);
   const webcam = current.webcam;
+  const theme = project.theme;
   const summaries: Record<LookSection, string> = {
-    background: current.background.preset === 'solid' ? `Solid · ${(current.background.color ?? '#1c1c22').toUpperCase()}` : BACKGROUND_NAMES[current.background.preset],
+    watermark: current.watermark.enabled
+      ? [current.watermark.image ? 'Image' : theme.logo ? 'Logo' : current.watermark.text || theme.name ? 'Text' : 'Nothing to show', CORNER_NAMES[current.watermark.corner].toLowerCase()].join(' · ')
+      : 'Off',
+    brand: theme.kit ? `Kit · ${theme.kit}` : [theme.name, theme.font !== 'Archivo' && theme.font].filter(Boolean).join(' · ') || 'None set',
+    background:
+      current.background.preset === 'solid'
+        ? `Solid · ${(current.background.color ?? SOLID_DEFAULT).toUpperCase()}`
+        : current.background.preset === 'image'
+          ? ['Image', current.background.blur && 'soft', current.background.dim && 'darker'].filter(Boolean).join(' · ')
+          : current.background.preset === 'gradient'
+            ? `Gradient · ${current.background.colors?.length ?? 2} colours${current.background.kind === 'radial' ? ' · radial' : ''}`
+            : `${BACKGROUND_NAMES[current.background.preset]}${current.background.colors ? ' · your colours' : ''}`,
     window: current.frame.enabled ? [FRAME_NAMES[current.frame.style], current.frame.title].filter(Boolean).join(' · ') : 'No frame',
     cursor: current.cursor.enabled ? `${CURSOR_NAMES[current.cursor.style]} · ${current.cursor.size}×` : 'Hidden',
     camera: !sources.webcam
@@ -968,11 +1776,21 @@ function LookPanel() {
         ? `${WEBCAM_SHAPE_NAMES[webcam.shape]} · ${webcam.position ? 'moved' : CORNER_NAMES[webcam.corner].toLowerCase()} · ${Math.round(webcam.size * 100)} %`
         : 'Off',
     subtitles: captions.enabled ? CAPTION_STYLE_NAMES[captions.style] : sources.transcript ? 'Off' : 'Not transcribed yet',
-    sound: current.audio.enabled ? (sources.cleanMic && current.audio.cleanup ? 'Mic · clean voice' : 'Mic') : 'Muted',
+    sound: current.audio.enabled
+      ? [sources.cleanMic && current.audio.cleanup ? 'Mic · clean voice' : 'Mic', current.audio.typing && 'key clicks', project.music?.enabled && 'music', current.audio.effects && project.sounds.length > 0 && 'sounds'].filter(Boolean).join(' · ')
+      : 'Muted',
     video: `${size?.name ?? `${output.width} × ${output.height}`} · ${output.fps} fps${current.transition.enabled ? ' · crossfades' : ''}`,
   };
   return (
     <div className="look-parts">
+      <LookPart id="brand" summary={summaries.brand}>
+        <BrandFields project={project} />
+      </LookPart>
+
+      <LookPart id="watermark" summary={summaries.watermark}>
+        <WatermarkFields project={project} />
+      </LookPart>
+
       <LookPart id="background" summary={summaries.background}>
         <div className="swatches" role="group" aria-label="Background">
           {BACKGROUND_PRESETS.map((preset) => (
@@ -982,10 +1800,9 @@ function LookPanel() {
               className={`swatch-button bg-${preset}`}
               aria-pressed={current.background.preset === preset}
               title={BACKGROUND_NAMES[preset]}
-              onClick={() => {
-                if (preset === 'image') return void chooseImage('background');
-                look(['background'], preset === 'solid' ? { preset, color: current.background.color ?? '#1c1c22' } : { preset }, `Background: ${BACKGROUND_NAMES[preset]}`);
-              }}
+              style={swatchStyle(current.background, preset)}
+              onClick={() => (preset === 'image' ? void chooseImage('background') : switchTo(preset))}
+              data-testid={`bg-${preset}`}
             >
               <span>{BACKGROUND_NAMES[preset]}</span>
             </button>
@@ -993,19 +1810,68 @@ function LookPanel() {
         </div>
         {current.background.preset === 'solid' && (
           <Row label="Colour">
-            <ColorInput value={current.background.color ?? '#1c1c22'} path={['background', 'color']} label="Background colour" />
+            <ColorInput value={current.background.color ?? SOLID_DEFAULT} path={['background', 'color']} label="Background colour" />
           </Row>
         )}
         {current.background.preset === 'image' && current.background.image && (
-          <Row label="Image" plain>
-            <span className="path" title={current.background.image}>
-              {current.background.image}
-            </span>
-            <button type="button" className="ghost small" onClick={() => void chooseImage('background')}>
-              Replace…
-            </button>
-          </Row>
+          <>
+            <Row label="Image" plain>
+              <span className="path" title={current.background.image}>
+                {current.background.image}
+              </span>
+              <button type="button" className="ghost small" onClick={() => void chooseImage('background')}>
+                Replace…
+              </button>
+            </Row>
+            <div className="grid2">
+              <Row label={`Soft · ${Math.round((current.background.blur ?? 0) * 100)} %`}>
+                <RangeInput
+                  value={Math.round((current.background.blur ?? 0) * 100)}
+                  min={0}
+                  max={100}
+                  label="How soft the image is"
+                  toCommand={(value) => ({ type: 'look', path: ['background', 'blur'], value: value > 0 ? value / 100 : undefined }) as Command}
+                  commitLabel="Background softness"
+                  testId="bg-blur"
+                />
+              </Row>
+              <Row label={`Darker · ${Math.round((current.background.dim ?? 0) * 100)} %`}>
+                <RangeInput
+                  value={Math.round((current.background.dim ?? 0) * 100)}
+                  min={0}
+                  max={80}
+                  label="How much darker the image is"
+                  toCommand={(value) => ({ type: 'look', path: ['background', 'dim'], value: value > 0 ? value / 100 : undefined }) as Command}
+                  commitLabel="Background darker"
+                  testId="bg-dim"
+                />
+              </Row>
+            </div>
+          </>
         )}
+        {isColouredBackground(current.background.preset) && <BackgroundColors background={current.background} logo={Boolean(project.theme.logo)} />}
+        {current.background.preset === 'gradient' && (
+          <div className="grid2">
+            <Row label="Angle (°)" note={current.background.kind === 'radial' ? 'radial: none' : undefined}>
+              <NumberInput value={current.background.angle ?? 135} min={0} max={360} step={15} digits={0} onCommit={(angle) => look(['background', 'angle'], angle, 'Gradient angle')} testId="bg-angle" />
+            </Row>
+            <Row label="Shape" plain>
+              <div className="seg" role="group" aria-label="Gradient shape">
+                <button type="button" aria-pressed={current.background.kind !== 'radial'} onClick={() => look(['background', 'kind'], undefined, 'Gradient: linear')}>
+                  Linear
+                </button>
+                <button type="button" aria-pressed={current.background.kind === 'radial'} onClick={() => look(['background', 'kind'], 'radial', 'Gradient: radial')} data-testid="bg-radial">
+                  Radial
+                </button>
+              </div>
+            </Row>
+          </div>
+        )}
+        <Row label="Your desktop" plain>
+          <button type="button" className="ghost small" title="The desktop's wallpaper behind the window, softened" onClick={() => void wallpaperBehind()} data-testid="bg-wallpaper">
+            Use its wallpaper
+          </button>
+        </Row>
       </LookPart>
 
       <LookPart id="window" summary={summaries.window}>
@@ -1108,8 +1974,8 @@ function LookPanel() {
       </LookPart>
 
       <LookPart id="sound" summary={summaries.sound}>
-        <Row label="Mic" inline>
-          <Toggle checked={current.audio.enabled} label="Mic sound" onChange={(on) => look(['audio', 'enabled'], on, on ? 'Sound on' : 'Sound off')} />
+        <Row label="Sound" inline note="the mic, the music and the sounds">
+          <Toggle checked={current.audio.enabled} label="Sound" onChange={(on) => look(['audio', 'enabled'], on, on ? 'Sound on' : 'Sound off')} />
         </Row>
         {current.audio.enabled && sources.cleanMic && (
           <Row label="Clean voice" inline note="less noise">
@@ -1117,9 +1983,44 @@ function LookPanel() {
           </Row>
         )}
         {current.audio.enabled && (
-          <Row label="Sped-up clips" inline>
+          <Row label="Typing sounds" inline note="a click per key">
+            <Toggle checked={current.audio.typing} label="Typing sounds" onChange={(on) => look(['audio', 'typing'], on, on ? 'Typing sounds on' : 'Typing sounds off')} testId="audio-typing" />
+          </Row>
+        )}
+        {current.audio.enabled && current.audio.typing && (
+          <Row label={`Typing volume · ${Math.round(current.audio.typingVolume * 100)} %`}>
+            <RangeInput
+              value={Math.round(current.audio.typingVolume * 100)}
+              min={0}
+              max={100}
+              label="Typing volume"
+              toCommand={(value) => ({ type: 'look', path: ['audio', 'typingVolume'], value: value / 100 }) as Command}
+              commitLabel="Typing volume"
+              testId="audio-typing-volume"
+            />
+          </Row>
+        )}
+        {current.audio.enabled && (
+          <Row label="Sounds" inline note="the sounds and the music's effects">
+            <Toggle checked={current.audio.effects} label="Sounds" onChange={(on) => look(['audio', 'effects'], on, on ? 'Sounds on' : 'Sounds off')} testId="audio-effects" />
+          </Row>
+        )}
+        {current.audio.enabled && current.audio.effects && (
+          <Row label={`Sounds volume · ${Math.round(current.audio.effectsVolume * 100)} %`}>
+            <RangeInput
+              value={Math.round(current.audio.effectsVolume * 100)}
+              min={0}
+              max={100}
+              label="Sounds volume"
+              toCommand={(value) => ({ type: 'look', path: ['audio', 'effectsVolume'], value: value / 100 }) as Command}
+              commitLabel="Sounds volume"
+              testId="audio-effects-volume"
+            />
+          </Row>
+        )}
+        {current.audio.enabled && (
+          <Row label="Sped-up clips" inline note={current.audio.muteSpedUp ? 'silent' : 'heard'}>
             <Toggle checked={current.audio.muteSpedUp} label="Silent when sped up" onChange={(on) => look(['audio', 'muteSpedUp'], on, on ? 'Sped-up clips silent' : 'Sped-up clips heard')} />
-            <em>{current.audio.muteSpedUp ? 'Silent' : 'Heard'}</em>
           </Row>
         )}
       </LookPart>

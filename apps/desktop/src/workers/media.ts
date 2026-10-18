@@ -3,7 +3,8 @@
 // the main process queues them.
 import { spawn, type ChildProcess } from 'node:child_process';
 import { rename, rm, writeFile } from 'node:fs/promises';
-import { applyPrivacy, applySpeechEdits, ffmpegPath, probeScreen, readScreenTake, streamSeconds, suggestProject, transcribeTake } from '@cuttle/core';
+import { applyLengthFit, applyPrivacy, applySpeechEdits, ffmpegPath, probeScreen, readScreenTake, streamSeconds, suggestProject, transcribeTake } from '@cuttle/core';
+import { templatePage } from '@cuttle/motion-kit/files';
 import {
   PEAKS_SAMPLE_RATE,
   PeakFolder,
@@ -12,8 +13,8 @@ import {
   proxyArgs,
   thumbnailsArgs,
   thumbnailsMeta,
+  type JobResult,
   type MediaJob,
-  type ThumbnailsMeta,
   type WorkerCancel,
   type WorkerReply,
   type WorkerRequest,
@@ -75,7 +76,7 @@ async function into<T>(id: number, output: string, make: (part: string) => Promi
   }
 }
 
-async function run(id: number, job: MediaJob): Promise<ThumbnailsMeta | undefined> {
+async function run(id: number, job: MediaJob): Promise<JobResult | undefined> {
   switch (job.job) {
     case 'proxy': {
       const { duration } = await probeScreen(job.input);
@@ -105,7 +106,9 @@ async function run(id: number, job: MediaJob): Promise<ThumbnailsMeta | undefine
     case 'suggest': {
       // the app transcribes after the cut, as a step of its own (`transcribe`, `speech-edits`); the
       // screen's text is read in a step of its own too (P4-M5b): the cut leaves the privacy masks be
-      await suggestProject(job.input, { transcribe: false, privacy: false, onStatus: () => reply({ id, progress: 0 }) });
+      // a step title in a motion template (the script's `motion`) takes the kit's page next to this bundle
+      const motionPage = (template: string) => templatePage(job.input, template, import.meta.url);
+      await suggestProject(job.input, { transcribe: false, privacy: false, motionPage, onStatus: () => reply({ id, progress: 0 }) });
       return undefined;
     }
     case 'transcribe': {
@@ -135,6 +138,10 @@ async function run(id: number, job: MediaJob): Promise<ThumbnailsMeta | undefine
     case 'privacy-edits': {
       await applyPrivacy(job.input, { ...(job.link && { link: job.link }), words: job.words });
       return undefined;
+    }
+    case 'fit-length': {
+      const fit = await applyLengthFit(job.input, job.seconds);
+      return { target: fit.target, before: fit.before, length: fit.length, reached: fit.reached, written: fit.written };
     }
     case 'peaks': {
       const seconds = await streamSeconds(job.input, 'a');

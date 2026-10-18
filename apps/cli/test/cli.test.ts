@@ -96,6 +96,7 @@ describe('cuttle devices and record (test backend)', () => {
         "mics": [
           "Test Microphone",
           "Silent Test Microphone",
+          "Spoken Test Microphone",
         ],
         "monitors": [
           {
@@ -157,6 +158,24 @@ describe('cuttle devices and record (test backend)', () => {
       markers: 'takes/1/markers.json',
     });
     expect(project.scenes).toEqual([{ type: 'clip', from: 0, to: Math.floor(result.take.seconds * 1000) / 1000 }]);
+  }, 20_000);
+
+  it("records with the project's script: the take starts at its first step, and the status lines name the steps", async () => {
+    const dir = join(temp(), 'demo');
+    expect((await cli('--json', 'init', dir)).code).toBe(0);
+    const path = join(dir, 'cuttle.json');
+    const script = [{ id: 'step1', title: 'Open the settings', note: 'The gear, top right.' }, { id: 'step2', title: 'Turn on dark mode' }];
+    writeFileSync(path, JSON.stringify({ ...JSON.parse(readFileSync(path, 'utf8')), script }));
+    let stderr = '';
+    const code = await runCli(['-C', dir, 'record', '--backend', 'test', '--mic', '--max', '2', '--countdown', '0'], { stdout: () => {}, stderr: (chunk) => void (stderr += chunk) });
+    expect(code, stderr).toBe(0);
+    // and whether the mic hears anything, after its first second: the test mic's tone
+    expect(stderr).toContain('mic: it hears sound (-21 dBFS at the loudest)');
+    expect(stderr).toContain('script: 2 steps; next step: Ctrl+Shift+Alt+N, back: Ctrl+Shift+Alt+B');
+    expect(stderr).toContain('step 1/2: Open the settings at 0.00 s');
+    expect(JSON.parse(readFileSync(join(dir, 'takes/1/markers.json'), 'utf8')).markers).toEqual([{ t: 0, kind: 'step', label: 'step1' }]);
+    // the script stays the project's
+    expect(JSON.parse(readFileSync(path, 'utf8')).script).toEqual(script);
   }, 20_000);
 
   it('refuses a project open in the Cuttle app, unless forced or its app is gone', async () => {
@@ -343,6 +362,41 @@ describe('cuttle transcript', () => {
   });
 });
 
+describe('cuttle chapters', () => {
+  it("lists the video's chapters from the script's steps, as a YouTube description has them", async () => {
+    const dir = temp();
+    takeFixture(dir);
+    const path = join(dir, 'cuttle.json');
+    const raw = JSON.parse(readFileSync(path, 'utf8'));
+    expect((await cli('-C', dir, 'chapters')).stdout).toBe('no chapters: the project has no script ("script" in cuttle.json)\n');
+    writeFileSync(join(dir, 'takes', '1', 'markers.json'), JSON.stringify({ version: 1, markers: [{ t: 0, kind: 'step', label: 'step1' }, { t: 3.5, kind: 'step', label: 'step2' }, { t: 6, kind: 'step', label: 'step3' }] }));
+    writeFileSync(
+      path,
+      JSON.stringify({
+        ...raw,
+        sources: { ...raw.sources, markers: 'takes/1/markers.json' },
+        script: [{ id: 'step1', title: 'Open the settings' }, { id: 'step2', title: 'Turn on dark mode' }, { id: 'step3', title: 'Export the video' }],
+        // the take from 0.5 s on: step 2 shows at 3 s of the video, step 3 at 5.5 s
+        scenes: [{ type: 'clip', from: 0.5, to: 8 }],
+      }),
+    );
+    const { code, json } = await cli('--json', '-C', dir, 'chapters');
+    expect(code).toBe(0);
+    expect(json).toEqual({
+      chapters: [
+        { at: 0, end: 3, title: 'Open the settings', step: 'step1' },
+        { at: 3, end: 5.5, title: 'Turn on dark mode', step: 'step2' },
+        { at: 5.5, end: 7.5, title: 'Export the video', step: 'step3' },
+      ],
+      youtube: '0:00 Open the settings\n0:03 Turn on dark mode\n0:05 Export the video',
+      problems: ['YouTube needs each chapter to last 10 s or more; shorter: “Open the settings” (3 s), “Turn on dark mode” (2.5 s), “Export the video” (2 s).'],
+    });
+    expect((await cli('-C', dir, 'chapters')).stdout).toBe(
+      '0:00 Open the settings\n0:03 Turn on dark mode\n0:05 Export the video\nnote: YouTube needs each chapter to last 10 s or more; shorter: “Open the settings” (3 s), “Turn on dark mode” (2.5 s), “Export the video” (2 s).\n',
+    );
+  });
+});
+
 describe('cuttle suggest and recover', () => {
   let fixture: string;
   beforeAll(() => {
@@ -406,6 +460,11 @@ describe('cuttle suggest and recover', () => {
           "pauses": 0,
           "retakes": 0,
         },
+        "steps": {
+          "reached": 0,
+          "titles": 0,
+          "zooms": 0,
+        },
         "written": true,
         "zooms": [
           {
@@ -451,6 +510,57 @@ describe('cuttle suggest and recover', () => {
     const without = await cli('--json', '-C', dir, 'suggest', '--dry-run', '--no-typing-zooms', '--no-click-zooms');
     expect((without.json as Zooms).zooms.map((zoom) => zoom.label)).not.toContain('Clicks');
   }, 30_000);
+
+  it("titles the script's steps and zooms on where they happen; a step's motion template is the kit's page; again, a title switched off stays off", async () => {
+    const dir = temp();
+    cpSync(fixture, dir, { recursive: true });
+    // three steps: clicks in the second, typed in the third (whose title is a lower third)
+    writeFileSync(join(dir, 'takes/1/markers.json'), JSON.stringify({ version: 1, markers: [{ t: 3, kind: 'step', label: 'step1' }, { t: 8, kind: 'step', label: 'step2' }, { t: 15, kind: 'step', label: 'step3' }] }));
+    const events = [
+      ...Array.from({ length: 11 }, (_, i) => ({ t: 3 + i * 0.4, type: 'keys', count: 1 })),
+      { t: 8.6, type: 'click', x: 400, y: 300, button: 'left' },
+      { t: 9.4, type: 'click', x: 480, y: 340, button: 'left' },
+      { t: 15.5, type: 'caret', rect: [900, 600, 2, 20] },
+      { t: 16.2, type: 'caret', rect: [960, 600, 2, 20] },
+    ].sort((a, b) => a.t - b.t);
+    writeFileSync(join(dir, 'takes/1/events.jsonl'), events.map((event) => `${JSON.stringify(event)}\n`).join(''));
+    const path = join(dir, 'cuttle.json');
+    const script = [{ id: 'step1', title: 'Open the settings' }, { id: 'step2', title: 'Turn on dark mode' }, { id: 'step3', title: 'Export the video', motion: 'lower-third' }];
+    writeFileSync(path, JSON.stringify({ ...JSON.parse(readFileSync(path, 'utf8')), script }));
+    type Result = { steps: { reached: number; titles: number; zooms: number }; zooms: { label?: string; auto?: string; at: number }[]; notes: string[] };
+    // the typing's zoom (3 to 8.7 s) would cover step 2's start: a step's zoom keeps clear of another
+    const first = await cli('--json', '-C', dir, 'suggest', '--no-click-zooms', '--no-typing-zooms');
+    expect(first.code, first.stdout).toBe(0);
+    const result = first.json as Result;
+    expect(result.steps).toEqual({ reached: 3, titles: 3, zooms: 2 });
+    expect(result.zooms.filter((zoom) => zoom.auto === 'step').map((zoom) => [zoom.label, zoom.at])).toEqual([
+      ['Step 2', 8],
+      ['Step 3', 15],
+    ]);
+    expect(result.notes).toContain("2 zooms on where the script's steps happen");
+    type Saved = { texts: { id: string; text: string; auto?: string; enabled?: boolean }[]; overlays: { src: string; params: Record<string, unknown>; auto?: string }[] };
+    const saved = () => JSON.parse(readFileSync(path, 'utf8')) as Saved;
+    expect(saved().texts.map((text) => [text.text, text.auto])).toEqual([
+      ['Open the settings', 'title'],
+      ['Turn on dark mode', 'title'],
+    ]);
+    expect(saved().overlays).toEqual([expect.objectContaining({ src: 'motion/lower-third/index.html', params: { name: 'Export the video', role: 'Step 3 of 3' }, auto: 'title' })]);
+    expect(existsSync(join(dir, 'motion', 'lower-third', 'index.html'))).toBe(true);
+    // the second step's title switched off by the person: a new run keeps it off, and the page it had
+    const switched = saved();
+    switched.texts[1]!.enabled = false;
+    writeFileSync(path, JSON.stringify(switched));
+    expect((await cli('--json', '-C', dir, 'suggest', '--no-click-zooms', '--no-typing-zooms')).code).toBe(0);
+    expect(saved().texts.map((text) => [text.text, text.enabled])).toEqual([
+      ['Open the settings', undefined],
+      ['Turn on dark mode', false],
+    ]);
+    expect(existsSync(join(dir, 'motion', 'lower-third-2'))).toBe(false);
+    // without titles and step zooms: those made before go
+    const none = await cli('--json', '-C', dir, 'suggest', '--no-step-titles', '--no-step-zooms');
+    expect((none.json as Result).steps).toEqual({ reached: 3, titles: 0, zooms: 0 });
+    expect([saved().texts, saved().overlays]).toEqual([[], []]);
+  }, 60_000);
 
   it('replaces only the zooms it made: hand-made ones stay, one switched off stays off, a kind switched off is not made', async () => {
     const dir = temp();
@@ -728,7 +838,7 @@ const pngSize = (file: string) => {
   return [bytes.readUInt32BE(16), bytes.readUInt32BE(20)];
 };
 
-describe.runIf(process.platform === 'win32')('cuttle suggest reads the screen (Windows OCR)', () => {
+describe.runIf(process.platform === 'win32' || process.platform === 'darwin')('cuttle suggest reads the screen (the system OCR)', () => {
   it('masks what the screen shows that is private, follows text that scrolls, and keeps the words asked for', async () => {
     const off = process.env.CUTTLE_OCR;
     delete process.env.CUTTLE_OCR;
@@ -738,8 +848,9 @@ describe.runIf(process.platform === 'win32')('cuttle suggest reads the screen (W
       // a 1280×720 screen: an email address, a shell line with a token that scrolls up 30 px a
       // second, and a name (Windows OCR drops a line that is one long NAME_WITH_UNDERSCORES=value
       // word in a large font; with a word before it, it reads it)
-      // the drive's colon escaped for the option and again for the graph
-      const text = (value: string, x: number, y: string) => `drawtext=fontfile=C\\\\:/Windows/Fonts/consola.ttf:fontsize=28:fontcolor=white:x=${x}:y=${y}:text='${value}'`;
+      // a monospaced font of the system's (on Windows the drive's colon escaped for the option and again for the graph)
+      const font = process.platform === 'win32' ? 'C\\\\:/Windows/Fonts/consola.ttf' : '/System/Library/Fonts/Menlo.ttc';
+      const text = (value: string, x: number, y: string) => `drawtext=fontfile=${font}:fontsize=28:fontcolor=white:x=${x}:y=${y}:text='${value}'`;
       const graph = ['color=c=0x1e1e1e:s=1280x720:r=30:d=8', text('Signed in as lena.mueller@example.com', 80, '80'), text('export GITHUB_TOKEN=ghp_1234567890abcdefghijklmnop', 80, '420-t*30'), text('Thanks, Lena Müller', 80, '640')].join(',');
       const made = spawnSync('ffmpeg', ['-hide_banner', '-v', 'error', '-f', 'lavfi', '-i', graph, '-c:v', 'libx264', '-preset', 'ultrafast', '-g', '30', '-pix_fmt', 'yuv420p', '-y', join(dir, 'takes', '1', 'screen.mp4')]);
       expect(made.status, String(made.stderr)).toBe(0);
@@ -750,9 +861,12 @@ describe.runIf(process.platform === 'win32')('cuttle suggest reads the screen (W
       type Rect = [number, number, number, number];
       type Mask = { label: string; from: number; to: number; rect: Rect; moves?: { at: number; rect: Rect }[]; auto?: string; style?: string };
       const first = (await cli('--json', '-C', dir, 'suggest', '--no-crop', '--mask', 'Lena Müller')).json as { privacy: { read: boolean; masks: number }; notes: string[] };
-      expect(first.privacy).toEqual({ read: true, masks: 3, notifications: 0 });
-      expect(first.notes.some((note) => /^read the screen's text in \d+ frames \(.+\), into takes\/1\/screen-text\.jsonl$/.test(note))).toBe(true);
       const file = JSON.parse(readFileSync(join(dir, 'cuttle.json'), 'utf8')) as { masks: Mask[]; sources: { screenText?: string }; privacy?: { words: string[] } };
+      // what the OCR read and masked, said when the count is off (another machine's OCR may read differently)
+      const read = () =>
+        [...file.masks.map((mask) => `${mask.label} ${mask.from}–${mask.to} ${mask.rect.join(',')} moves ${mask.moves?.length ?? 0}`), ...readFileSync(join(dir, 'takes', '1', 'screen-text.jsonl'), 'utf8').split('\n').filter(Boolean).slice(0, 6)].join('\n');
+      expect(first.privacy, read()).toEqual({ read: true, masks: 3, notifications: 0 });
+      expect(first.notes.some((note) => /^read the screen's text in \d+ frames \(.+\), into takes\/1\/screen-text\.jsonl$/.test(note))).toBe(true);
       expect(file.sources.screenText).toBe('takes/1/screen-text.jsonl');
       expect(file.privacy).toEqual({ words: ['Lena Müller'] });
       const byLabel = (label: string) => file.masks.find((mask) => mask.label === label)!;
@@ -775,6 +889,50 @@ describe.runIf(process.platform === 'win32')('cuttle suggest reads the screen (W
       if (off !== undefined) process.env.CUTTLE_OCR = off;
     }
   }, 120_000);
+});
+
+describe('cuttle suggest --length', () => {
+  it('cuts where the video rests to fit, keeps the answer, says how short it can get, and keeps the analysis for the app', async () => {
+    const dir = temp();
+    takeFixture(dir);
+    const fit = (await cli('--json', '-C', dir, 'suggest', '--no-crop', '--no-privacy', '--length', '6')).json as { length: { target: number; before: number; length: number; reached: boolean }; notes: string[] };
+    // about 10.4 s of video; the waiting (sped up 3×) changes on screen and goes first; the
+    // typing, the answer and each scene's first second stay, so 6 s is out of reach
+    expect(fit.length).toMatchObject({ target: 6, reached: false });
+    expect(fit.length.length).toBeLessThan(fit.length.before - 1);
+    expect(fit.notes.at(-1)).toMatch(/^shortest without cutting speech, clicks, typing, a zoom or a text: [\d.]+ s \(6 s asked\)$/);
+    const file = JSON.parse(readFileSync(join(dir, 'cuttle.json'), 'utf8')) as { cuts: { from: number; to: number; auto?: string; label?: string }[]; zooms: { at: number; duration: number; auto?: string }[] };
+    const cuts = file.cuts.filter((cut) => cut.auto === 'length');
+    expect(cuts.length).toBeGreaterThan(0);
+    expect(cuts.every((cut) => cut.label === 'Fit to 6 s')).toBe(true);
+    const answer = file.zooms.find((zoom) => zoom.auto === 'answer')!;
+    for (const cut of cuts) expect(cut.to <= answer.at || cut.from >= answer.at + answer.duration).toBe(true);
+    // the screen's analysis, kept in the project for the app's Length control
+    expect(existsSync(join(dir, '.cuttle', 'analysis', 'takes_1_screen.mp4.json'))).toBe(true);
+    expect((await cli('--json', '-C', dir, 'suggest', '--length', '0')).json).toMatchObject({ error: { code: 'usage' } });
+  });
+
+  it('fits after the edits with cuttle fit, takes the fit out with --off, and asks for a length', async () => {
+    const dir = temp();
+    takeFixture(dir);
+    await cli('--json', '-C', dir, 'suggest', '--no-crop', '--no-privacy');
+    type Fit = { written: boolean; target: number; before: number; length: number; reached: boolean; notes: string[] };
+    const fit = (await cli('--json', '-C', dir, 'fit', '9')).json as Fit;
+    expect(fit).toMatchObject({ written: true, target: 9, reached: true });
+    expect(fit.length).toBeLessThanOrEqual(9.125);
+    expect(fit.notes[0]).toMatch(/^cut [\d.]+ s where the video rests \(\d+ cuts?\) to fit 9 s: [\d.]+ s now$/);
+    const lengthCuts = () => (JSON.parse(readFileSync(join(dir, 'cuttle.json'), 'utf8')) as { cuts?: { auto?: string }[] }).cuts?.filter((cut) => cut.auto === 'length') ?? [];
+    expect(lengthCuts().length).toBeGreaterThan(0);
+    // the same again: nothing to write
+    expect(((await cli('--json', '-C', dir, 'fit', '9')).json as Fit).written).toBe(false);
+    const off = (await cli('--json', '-C', dir, 'fit', '--off')).json as Fit;
+    expect(off).toMatchObject({ written: true, notes: ['the length fit is taken out'] });
+    expect(off.length).toBeCloseTo(fit.before, 3);
+    expect(lengthCuts()).toEqual([]);
+    const none = await cli('--json', '-C', dir, 'fit');
+    expect(none.code).toBe(1);
+    expect(none.json).toMatchObject({ error: { code: 'usage' } });
+  });
 });
 
 describe('cuttle suggest masks notifications', () => {

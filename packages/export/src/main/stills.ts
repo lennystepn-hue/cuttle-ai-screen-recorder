@@ -1,12 +1,14 @@
 import { mkdir, readdir, rename, rm, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
+import type { CuttleProject } from '@cuttle/project';
 import { app } from 'electron';
 import { ExportError } from '../errors';
 import { withFormat, type ExportFormat } from '../formats';
 import { CHANNELS, type PageStillsSuccess, type StillsJob } from '../job';
 import { cancelledError, defaultPageDir, runPage, watchdog, whenCancelled } from './export';
 import { FileHost } from './files';
-import { loadSources } from './sources';
+import { MotionHost, serveMotion, type MotionItemReport } from './motion-host';
+import { loadSources, motionPages, motionTake } from './sources';
 import { openExportWindow, type ExportWindow } from './window';
 
 export interface StillsOptions {
@@ -31,6 +33,8 @@ export interface StillsOptions {
   pageDir?: string;
   /** Cancels: the window closes and `renderStills` rejects with `cancelled`. */
   signal?: AbortSignal;
+  /** Renders another version of the project (its folder's files): `cuttle motion check` shows one page as a scene. */
+  project?: (project: CuttleProject) => CuttleProject;
 }
 
 export interface StillsResult {
@@ -43,6 +47,8 @@ export interface StillsResult {
   /** The output size (each still's size). */
   width: number;
   height: number;
+  /** What the motion items' pages said (errors and console), when the project has any. */
+  motion?: MotionItemReport[];
   stats: { gpu: string; totalMs: number };
 }
 
@@ -76,17 +82,21 @@ export async function renderStills(opts: StillsOptions): Promise<StillsResult> {
   const sources = await loadSources(resolve(opts.projectDir));
   for (const warning of sources.warnings) console.warn(`warning: ${warning}`);
   if (opts.signal?.aborted) throw cancelledError();
-  const project = withFormat(sources.project, opts.format);
+  const project = withFormat(opts.project ? opts.project(sources.project) : sources.project, opts.format);
+  const motionFiles = opts.project ? await motionPages(resolve(opts.projectDir), project) : sources.motion;
+  const take = motionFiles ? (sources.motionTake ?? (await motionTake(resolve(opts.projectDir), project))) : undefined;
   const columns = opts.sheet ? Math.max(1, Math.round(opts.sheet.columns ?? DEFAULT_SHEET_COLUMNS)) : undefined;
   const job: StillsJob = {
     kind: 'stills',
     project,
-    screen: sources.screen,
+    ...(sources.screen && { screen: sources.screen }),
     webcam: sources.webcam,
     events: sources.events,
     ...(sources.transcript && { transcript: sources.transcript }),
     stills: sources.stills,
     backgroundImage: sources.backgroundImage,
+    watermarkImage: sources.watermarkImage,
+    ...(motionFiles && { motion: motionFiles }),
     times: opts.times,
     ...(columns !== undefined && { sheet: { columns } }),
   };
@@ -102,10 +112,11 @@ export async function renderStills(opts: StillsOptions): Promise<StillsResult> {
 
   const cancel = whenCancelled(opts.signal);
   const guard = watchdog();
-  const images = [...Object.values(sources.stills), ...(sources.backgroundImage ? [sources.backgroundImage] : [])];
+  const images = [...Object.values(sources.stills), ...[sources.backgroundImage, sources.watermarkImage].filter((path): path is string => path !== undefined)];
   // Reads only: stills mode writes PNGs through writeStill, never into a video file.
-  const host = new FileHost([sources.screen, ...(sources.webcam ? [sources.webcam.path] : [])], join(outDir, '.unused'), images);
+  const host = new FileHost([...(sources.screen ? [sources.screen] : []), ...(sources.webcam ? [sources.webcam.path] : [])], join(outDir, '.unused'), images);
   let window: ExportWindow | undefined;
+  const motion = motionFiles && take ? new MotionHost(project, motionFiles, take) : undefined;
   try {
     window = await openExportWindow(opts.pageDir ?? defaultPageDir());
     const ipc = window.win.webContents.ipc;
@@ -131,8 +142,10 @@ export async function renderStills(opts: StillsOptions): Promise<StillsResult> {
       guard.progress(done);
       opts.onProgress?.(done, total);
     });
+    serveMotion(ipc, motion, guard.alive);
     const page = await runPage<PageStillsSuccess>(window, guard.stalled, cancel.promise);
     if (opts.signal?.aborted) throw cancelledError();
+    const said = await motion?.close();
     await publish(work, outDir, [...names.values()], opts.clean ?? false);
     return {
       stills: opts.times.map((t, n) => {
@@ -142,6 +155,7 @@ export async function renderStills(opts: StillsOptions): Promise<StillsResult> {
       ...(columns !== undefined && { sheet: join(outDir, SHEET_NAME) }),
       width: page.width,
       height: page.height,
+      ...(said && { motion: said }),
       stats: { gpu: page.gpu, totalMs: Math.round(performance.now() - started) },
     };
   } catch (error) {
@@ -150,6 +164,7 @@ export async function renderStills(opts: StillsOptions): Promise<StillsResult> {
   } finally {
     guard.stop();
     cancel.dispose();
+    await motion?.close().catch(() => {});
     if (window && !window.win.isDestroyed()) window.win.destroy();
     await host.close();
     // A folder that cannot be removed now must not replace the result or the real error.

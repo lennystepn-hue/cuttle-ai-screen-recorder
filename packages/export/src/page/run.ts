@@ -30,9 +30,10 @@ function probeMaxTextureSize(): number {
   return size;
 }
 
-function checkClipRanges(job: PageJob, screen: VideoFile): void {
+function checkClipRanges(job: PageJob, screen: VideoFile | undefined): void {
   job.project.scenes.forEach((scene, index) => {
-    if (scene.type === 'clip' && scene.to > screen.end + END_TOLERANCE_SECONDS) {
+    if (scene.type === 'clip' && !screen) throw new PageError('invalid-project', `scenes[${index}] is a clip, but the project has no screen recording`);
+    if (scene.type === 'clip' && screen && scene.to > screen.end + END_TOLERANCE_SECONDS) {
       throw new PageError(
         'invalid-project',
         `scenes[${index}] ends at ${scene.to} s, but the screen recording ends at ${screen.end.toFixed(3)} s`,
@@ -59,30 +60,35 @@ async function withRendering<T>(job: PageJob, makePlan: (timeline: Timeline) => 
   const { project } = job;
   const [assets, screen, webcam] = await Promise.all([
     loadEngineAssets(),
-    openVideo(job.screen, 'the screen recording'),
+    job.screen ? openVideo(job.screen, 'the screen recording') : undefined,
     job.webcam ? openVideo(job.webcam.path, 'the webcam recording') : undefined,
   ]);
   const canvas = new OffscreenCanvas(1, 1);
   let background: ImageBitmap | undefined;
+  let watermark: ImageBitmap | undefined;
   let sources: SceneSources | undefined;
   let renderer: Renderer | undefined;
   try {
     checkClipRanges(job, screen);
+    // without a take, the output's size stands in for the screen's (no clip shows it)
+    const screenSize = screen?.size ?? { width: project.output.width, height: project.output.height };
     const timeline = createTimeline(project, {
-      screenSize: screen.size,
+      screenSize,
       cursor: job.events ? createCursorTrack(job.events) : undefined,
       ...(job.transcript && { transcript: job.transcript }),
       ...(job.captions !== undefined && { captions: job.captions }),
     });
     const plan = makePlan(timeline);
     if (job.backgroundImage) background = await loadImage(job.backgroundImage, probeMaxTextureSize(), 'the background image');
-    renderer = createRenderer(canvas, project, { assets, screenSize: screen.size, backgroundImage: background });
+    if (job.watermarkImage) watermark = await loadImage(job.watermarkImage, probeMaxTextureSize(), 'the watermark image');
+    renderer = createRenderer(canvas, project, { assets, screenSize, backgroundImage: background, ...(watermark && { watermarkImage: watermark }) });
     const gl = canvas.getContext('webgl2')!;
     const maxTextureSize = gl.getParameter(gl.MAX_TEXTURE_SIZE) as number;
     sources = new SceneSources(
       plan,
       { screen, webcam: webcam && job.webcam ? { ...webcam, offset: job.webcam.offset } : undefined, stills: job.stills, maxTextureSize },
       lookahead,
+      { project, spans: timeline.spans, stateAt: (frame) => timeline.frameAt(frame / plan.fps), ahead: job.kind === 'video' },
     );
     return await body({ timeline, plan, renderer, canvas, gl, sources });
   } finally {
@@ -91,7 +97,8 @@ async function withRendering<T>(job: PageJob, makePlan: (timeline: Timeline) => 
     // Free the context now instead of waiting for GC (browsers keep only ~16 live WebGL contexts).
     (canvas.getContext('webgl2') as WebGL2RenderingContext | null)?.getExtension('WEBGL_lose_context')?.loseContext();
     background?.close();
-    screen.input.dispose();
+    watermark?.close();
+    screen?.input.dispose();
     webcam?.input.dispose();
   }
 }
@@ -107,6 +114,7 @@ async function exportVideo(job: ExportJob): Promise<PageSuccess> {
         const t0 = performance.now();
         const state = timeline.frameAt(frame / fps);
         const frameSources = await sources.sourcesFor(frame, state);
+        await sources.transition(state, () => renderer.layerPixels(state, frameSources));
         const t1 = performance.now();
         renderer.render(state, frameSources);
         // render() throws on a lost context too; this catches a loss between render and capture.
@@ -182,7 +190,9 @@ async function renderStills(job: StillsJob): Promise<PageStillsSuccess> {
       const unique = [...new Set(byTime)].sort((a, b) => a - b);
       for (const [done, frame] of unique.entries()) {
         const state = timeline.frameAt(frame / fps);
-        renderer.render(state, await sources.sourcesFor(frame, state));
+        const frameSources = await sources.sourcesFor(frame, state);
+        await sources.transition(state, () => renderer.layerPixels(state, frameSources));
+        renderer.render(state, frameSources);
         if (gl.isContextLost()) throw new Error('the WebGL context was lost while rendering stills');
         const image = await png(canvas);
         for (const [n, frameOfTime] of byTime.entries()) {

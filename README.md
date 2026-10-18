@@ -120,8 +120,10 @@ Ctrl+Shift+Alt+S stops and Ctrl+Shift+Alt+M sets a marker. The bar's Script hold
 the demo (a title each, and what to say; a pasted list becomes steps). While recording, a prompter
 by the HUD shows the step now, its note and the step after it, never in the video:
 Ctrl+Shift+Alt+N (or Next) goes on, Ctrl+Shift+Alt+B back, each step is a marker of the take, and
-the script is kept in the project for the next take. The export puts the steps into the video as
-its chapters (players list them), and its sheet lists them to copy into a YouTube description.
+the script is kept in the project for the next take. Cuttle's cut titles each step (a caption, or
+a lower third or title from the motion kit) and zooms on where it happens, listed in the Auto tab.
+The export puts the steps into the video as its chapters (players list them), and its sheet lists
+them to copy into a YouTube description.
 Pause (the HUD, or Ctrl+Shift+Alt+P)
 records nothing until you resume; the pieces are joined at the stop. Restart is a held press: the
 take is put aside, the countdown starts again, and the editor offers "Undo restart". The editor

@@ -1423,6 +1423,14 @@ describe.runIf(enabled)('the Cuttle app', () => {
     await expect.poll(() => opened.evaluate(() => (window as unknown as { __cuttleCheck: Check }).__cuttleCheck.doc().undo), { timeout: 15_000 }).toBe("Cuttle's cut");
     await expect.poll(() => opened.locator('.flag span').allTextContents(), { timeout: 15_000 }).toContain('2 · Turn on dark mode');
     await shotOf('47b-step-pins', '/editor.html', `${basename(dir)} · Cuttle`);
+    // the cut titled the steps the video shows: a title over step 2, listed in the Auto tab
+    const titled = JSON.parse(readFileSync(join(dir, 'cuttle.json'), 'utf8')) as { texts?: { text: string; auto?: string }[] };
+    expect(titled.texts?.filter((text) => text.auto === 'title').map((text) => text.text)).toContain('Turn on dark mode');
+    await click(opened, '#tab-auto');
+    await opened.waitForSelector('[data-testid=auto-group-titles]');
+    await click(opened, '[data-testid=auto-group-titles] .auto-toggle');
+    await shotOf('47c-step-titles', '/editor.html', `${basename(dir)} · Cuttle`);
+    await click(opened, '#tab-selection');
     // Record again, once the take is in: the picker opens with the project's script
     await expect.poll(() => opened.locator('[data-testid=project-status]').count(), { timeout: 30_000 }).toBe(0);
     await click(opened, '[data-testid=record-again]');

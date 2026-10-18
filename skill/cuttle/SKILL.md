@@ -47,6 +47,12 @@ permission, 3 render, 130 cancelled.
   private windows, to switch on Do not disturb (Cuttle masks the notifications it sees, but none is
   better), and to use a clean folder or browser profile.
 - The project folder: a new one per demo (`record` creates it).
+- A demo with steps (open this, then that) gets a script: write the steps into `cuttle.json`
+  before the take (`script`, see [project.md](project.md); `cuttle init "<project>"` makes the
+  folder first). The take starts at the first step, Ctrl+Shift+Alt+N moves to the next one
+  (Ctrl+Shift+Alt+B back), and each step becomes a `step` marker. The prompter that shows the
+  steps during the take is the app's: when the user records from the app ("Record again"), it
+  sits by the recording bar. For `cuttle record`, list the steps for the user before the take.
 
 ## 2. Record
 
@@ -78,7 +84,8 @@ cuttle -C "<project>" record --monitor 0 --until-file "<project>/stop" --until-c
 - `--max <seconds>` is the safety net (it counts recorded time, not pauses). The user can also stop
   with Ctrl+Shift+Alt+S, add a marker with Ctrl+Shift+Alt+M and pause or resume with
   Ctrl+Shift+Alt+P (Alt is Option on a Mac; nothing is recorded while paused; the pieces are
-  joined at the stop). Other
+  joined at the stop). With a script, Ctrl+Shift+Alt+N goes to the next step and
+  Ctrl+Shift+Alt+B back, and the output shows each step (`step 2/5: Open the settings`). Other
   sources: `--window "<part of the title>"`, `--region x,y,w,h` (pixels of `--monitor`).
   `--countdown 3` is the default.
 - A project open in the Cuttle app is refused (`project-open`): the app records it itself

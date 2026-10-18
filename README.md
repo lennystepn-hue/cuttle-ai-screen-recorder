@@ -116,7 +116,11 @@ that is open in the app ("Record again" records it there).
 (Ctrl+Shift+Option+R on a Mac) shows a picker over every display: the window under the pointer lights up (the display where there is none), a drag draws a
 region, and the bar sets the camera, the mic and when to stop (your stop, Claude's answer, an idle
 screen). After the countdown only a small HUD remains, which never appears in the video;
-Ctrl+Shift+Alt+S stops and Ctrl+Shift+Alt+M sets a marker. Pause (the HUD, or Ctrl+Shift+Alt+P)
+Ctrl+Shift+Alt+S stops and Ctrl+Shift+Alt+M sets a marker. The bar's Script holds the steps of
+the demo (a title each, and what to say; a pasted list becomes steps). While recording, a prompter
+by the HUD shows the step now, its note and the step after it, never in the video:
+Ctrl+Shift+Alt+N (or Next) goes on, Ctrl+Shift+Alt+B back, each step is a marker of the take, and
+the script is kept in the project for the next take. Pause (the HUD, or Ctrl+Shift+Alt+P)
 records nothing until you resume; the pieces are joined at the stop. Restart is a held press: the
 take is put aside, the countdown starts again, and the editor offers "Undo restart". The editor
 opens on the take at once while `suggest` cuts it in the background. "Record again" adds a take to

@@ -21,6 +21,7 @@ type Page = Window &
     __cuttleDraw(ms: number, view?: import('../src/motion/runtime').MotionView): Promise<number>;
     __cuttleReady(): Promise<void>;
     __cuttleErrors: string[];
+    __cuttleSounds: import('../src/motion/runtime').PageSound[];
     seen: unknown[];
   };
 
@@ -172,5 +173,27 @@ describe('the motion runtime', () => {
     (win as unknown as { release(): void }).release();
     await new Promise((done) => setTimeout(done, 0));
     expect(ready).toBe(true);
+  });
+
+  it('gathers the sounds the page asks for: into the item or at a second of the video, once each, at a level from 0 to 1', async () => {
+    const win = page(
+      '',
+      `cuttle.sound('whoosh', { at: 0.3, volume: 0.7 });
+       cuttle.sound('whoosh', { at: 0.3, volume: 0.7 });
+       cuttle.sound('pop', { videoTime: 12.5, volume: 3 });
+       cuttle.sound('sounds/ding.wav');
+       cuttle.sound('');
+       setTimeout(() => cuttle.sound('tick', { volume: -1 }), 400);`,
+      { ...INIT, start: 10 },
+    );
+    expect(win.__cuttleSounds).toEqual([
+      { sound: 'whoosh', at: 0.3, volume: 0.7 },
+      { sound: 'pop', video: 12.5, volume: 1 },
+      { sound: 'sounds/ding.wav', at: 0, volume: 0.8 },
+    ]);
+    expect(win.__cuttleErrors).toEqual(['Error: cuttle.sound needs the name of a sound']);
+    // without a moment: the moment it is asked, in the item's seconds
+    await win.__cuttleDraw(500);
+    expect(win.__cuttleSounds.at(-1)).toEqual({ sound: 'tick', at: 0.4, volume: 0 });
   });
 });

@@ -95,6 +95,14 @@ export interface CuttleTake extends Omit<TakeData, 'cursor'> {
   readonly view: MotionView;
 }
 
+/** A sound a page asks for (`cuttle.sound`): seconds into its showing (`at`) or an output second (`video`). */
+export interface PageSound {
+  sound: string;
+  at?: number;
+  video?: number;
+  volume: number;
+}
+
 /** The page's `window.cuttle`. */
 export interface CuttleApi {
   /** Seconds into this item. */
@@ -113,6 +121,13 @@ export interface CuttleApi {
   ready(promise: Promise<unknown>): void;
   /** The take (empty lists when the item has no take). */
   readonly take: CuttleTake;
+  /**
+   * Asks for a sound (a built-in, as `cuttle sound list` names them, or a file of the project) at `at`
+   * seconds into this item, or at `videoTime` (an output second); without either, now. Ask when the
+   * page loads (or in `cuttle.ready`): the sounds are gathered from the page's start. The same sound at
+   * the same moment counts once.
+   */
+  sound(name: string, options?: { at?: number; videoTime?: number; volume?: number }): void;
 }
 
 export function motionRuntime(init: MotionInit): void {
@@ -244,6 +259,10 @@ export function motionRuntime(init: MotionInit): void {
     },
   };
 
+  /** The sounds the page asked for (the renderer reads them). */
+  const sounds: PageSound[] = [];
+  page.__cuttleSounds = sounds;
+
   const api: CuttleApi = {
     get time() {
       return now / 1000;
@@ -260,6 +279,16 @@ export function motionRuntime(init: MotionInit): void {
     onFrame: (draw) => void drawers.push(draw),
     ready: (promise) => void holds.push(Promise.resolve(promise).catch(note)),
     take,
+    sound: (name, options = {}) => {
+      if (typeof name !== 'string' || name === '') return void note(new Error('cuttle.sound needs the name of a sound'));
+      const volume = Math.min(1, Math.max(0, Number(options.volume ?? 0.8)));
+      const asked: PageSound =
+        options.videoTime !== undefined && Number.isFinite(Number(options.videoTime))
+          ? { sound: name, video: Number(options.videoTime), volume }
+          : { sound: name, at: Number.isFinite(Number(options.at)) ? Number(options.at) : now / 1000, volume };
+      const key = JSON.stringify(asked);
+      if (!sounds.some((known) => JSON.stringify(known) === key)) sounds.push(asked);
+    },
   };
   page.cuttle = api;
 

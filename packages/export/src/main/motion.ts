@@ -10,7 +10,7 @@ import { extname, isAbsolute, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { KIT_FOLDER, withImportMap } from '@cuttle/motion-kit';
 import { BrowserWindow, screen, session, type NativeImage, type Session } from 'electron';
-import { motionRuntime, type MotionInit, type MotionView } from '../motion/runtime';
+import { motionRuntime, type MotionInit, type MotionView, type PageSound } from '../motion/runtime';
 
 export const MOTION_SCHEME = 'cuttle-motion';
 
@@ -408,6 +408,14 @@ export class MotionPage {
   /** The size frames come out at. */
   private get size(): { width: number; height: number } {
     return this.options.frameSize ?? { width: this.options.init.width, height: this.options.init.height };
+  }
+
+  /** The sounds the page asked for so far (`cuttle.sound`). */
+  async sounds(): Promise<PageSound[]> {
+    if (this.win.isDestroyed()) return [];
+    return ((await this.win.webContents.executeJavaScript('window.__cuttleSounds ?? []').catch(() => [])) as PageSound[]).filter(
+      (sound) => typeof sound?.sound === 'string' && typeof sound.volume === 'number' && (typeof sound.at === 'number' || typeof sound.video === 'number'),
+    );
   }
 
   /** What went wrong in the page so far (uncaught errors and rejections), and its console. */

@@ -124,6 +124,28 @@ describe('the soundtrack\'s plan', () => {
     expect(plan!.video.duration).toBe(4);
   });
 
+  it('plays the sounds motion pages ask for with the project\'s, in order, also without music or sounds of its own', async () => {
+    const dir = temp();
+    mkdirSync(join(dir, 'sounds'));
+    writeFileSync(join(dir, 'sounds', 'ding.wav'), 'RIFF');
+    const asked = [
+      { at: 3.5, sound: 'sounds/ding.wav', volume: 0.5 },
+      { at: 0.3, sound: 'whoosh', volume: 0.7 },
+      { at: 2, sound: 'sounds/none.wav', volume: 0.8 },
+    ];
+    const alone = await planSoundtrack(dir, project({}), NO_TAKE, asked);
+    expect(alone!.page).toBeUndefined();
+    expect(alone!.sounds).toEqual([
+      { at: 0.3, sound: 'whoosh', volume: 0.7 },
+      { at: 3.5, sound: 'sounds/ding.wav', volume: 0.5, url: 'cuttle-motion://project/sounds/ding.wav' },
+    ]);
+    expect(alone!.skipped).toEqual(['sounds/none.wav: not a file in the project']);
+    const both = await planSoundtrack(dir, project({ sounds: [{ sound: 'pop', at: 1 }] }), NO_TAKE, asked.slice(0, 2));
+    expect(both!.sounds.map((cue) => [cue.at, cue.sound])).toEqual([[0.3, 'whoosh'], [1, 'pop'], [3.5, 'sounds/ding.wav']]);
+    // the effects off: the pages' sounds go too
+    expect(await planSoundtrack(dir, project({ look: { audio: { effects: false } } }), NO_TAKE, asked)).toBeUndefined();
+  });
+
   it('refuses a music page outside the project, and names one that is missing', async () => {
     const dir = temp();
     await expect(planSoundtrack(dir, project({ music: { src: '../x.html' } }), NO_TAKE)).rejects.toThrow(/outside the project/);

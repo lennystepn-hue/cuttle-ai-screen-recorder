@@ -2062,9 +2062,28 @@ button.chip-status:hover {
   justify-content: space-between;
   gap: 12px;
 }
+/* a state word beside a switch gives way (with an ellipsis) before the row runs out of its panel */
 .field.inline .field-input {
-  flex: none;
+  flex: 0 1 auto;
+  min-width: 0;
   min-height: 0;
+}
+.field.inline > .field-label,
+.field-text + .field-input {
+  flex: none;
+}
+/* an inline row's name with its note under it: it gives way and wraps, the control keeps its place */
+.field-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.field-text em {
+  color: var(--faint);
+  font-size: var(--size-xs);
+  font-style: normal;
+  line-height: 1.35;
 }
 .hint-list {
   margin: 0;

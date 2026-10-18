@@ -241,6 +241,11 @@ commands. It writes `out/16x9.mp4` (or `-o <file>`); the JSON has the frames, th
 encoder (`stats`). For 9:16, check `preview --format 9:16` first. Render each format the user
 wants. Tell the user the file's path and length. Do not upload it anywhere.
 
+With a script, the video file has the steps as its chapters (`chapters` in the JSON, output
+seconds). `cuttle -C "<project>" --json chapters` gives them as lines for a YouTube description
+(`youtube`) and says why YouTube would not show them (`problems`: fewer than three, or one shorter
+than 10 s). Give the user the lines when the video goes to YouTube.
+
 ## When something fails
 
 - `device-not-found`: run `cuttle --json devices`. Names must match exactly (`--mic "<name>"`).

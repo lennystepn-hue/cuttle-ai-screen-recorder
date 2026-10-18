@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { copyFile, readdir, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises';
 import { basename, dirname, join, resolve } from 'node:path';
-import { app, BrowserWindow, dialog, Menu, screen, session, shell, type Session, type WebContents } from 'electron';
+import { app, BrowserWindow, clipboard, dialog, Menu, screen, session, shell, type Session, type WebContents } from 'electron';
 import { PROJECT_FILE, backupFile, writeProjectFile, type ProjectFile } from '@cuttle/core';
 import { parseProject } from '@cuttle/project';
 import { plainIssue } from '../shared/format';
@@ -206,6 +206,8 @@ async function editorWindow(dir: string, key: string, file: ProjectFile, release
       if (!isInside(target, dir, process.platform)) throw new Error('only files inside the project can be shown');
       shell.showItemInFolder(target);
     },
+    // the check never touches this computer's clipboard: it keeps what was copied
+    'export:copy': (text) => (CHECK ? void ((globalThis as { __copied?: string }).__copied = text) : clipboard.writeText(text)),
     'media:state': () => media.current(),
     'media:retry': () => void media.start(),
     'export:targets': async (formats) =>

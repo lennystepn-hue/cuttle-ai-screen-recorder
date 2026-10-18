@@ -1,11 +1,12 @@
 // The export sheet: formats (the project's own size first), encoder, which files it writes and what
-// they replace, a check of things worth a second look, progress, cancel, and the files at the end.
+// they replace, a check of things worth a second look, progress, cancel, and the files at the end
+// with their chapters (from the script's steps) to copy into a YouTube description.
 // Closing it while an export runs keeps the export running (the title bar shows it).
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { EXPORT_FORMATS } from '@cuttle/export/formats';
 import { formatBytes, formatDuration, formatTime } from '../../shared/format';
 import type { ExportTarget } from '../../shared/ipc';
-import { sceneSpans } from '@cuttle/timeline';
+import { sceneSpans, stepChapters, youtubeChapters, type Chapter } from '@cuttle/timeline';
 import { exportChecks } from '../../shared/timeline-model';
 import { bridge } from '../bridge';
 import { CheckIcon, CloseIcon, FolderIcon } from '../icons';
@@ -33,6 +34,7 @@ export function ExportSheet() {
   const started = useStore(store, (state) => state.exportStarted);
   const format = useStore(store, (state) => state.format);
   const project = useStore(store, (state) => state.doc?.project);
+  const markers = useStore(store, (state) => state.media?.markers);
   const output = project?.output;
   const own = ownFormat(output);
   // The project's own size first; a preset of the same size would write the same video again.
@@ -102,6 +104,8 @@ export function ExportSheet() {
   }, [open]);
 
   const checks = useMemo(() => (project ? exportChecks(project, sceneSpans(project.scenes, project.cuts)) : []), [project]);
+  // the script's steps the take reached: the video's chapters
+  const chapters = useMemo(() => (project ? stepChapters(project.script, markers ?? [], sceneSpans(project.scenes, project.cuts)) : []), [project, markers]);
 
   if (!open) return null;
 
@@ -181,6 +185,14 @@ export function ExportSheet() {
                       .{kind}
                     </button>
                   ))}
+                </span>
+              </div>
+            )}
+            {chapters.length > 0 && (
+              <div className="row" data-testid="export-chapters">
+                Chapters
+                <span>
+                  {chapters.length} from the script, in the video file
                 </span>
               </div>
             )}
@@ -267,6 +279,7 @@ export function ExportSheet() {
                   <small>
                     {targetName(file.format, output)} · {formatDuration(file.seconds)} · {formatBytes(file.bytes)}
                     {file.subtitles && ` · with ${file.subtitles.map((path) => `.${path.split('.').at(-1)}`).join(' and ')}`}
+                    {file.chapters && ` · ${file.chapters.length} chapter${file.chapters.length === 1 ? '' : 's'}`}
                   </small>
                 </div>
                 <button className="ghost" onClick={() => void bridge.invoke('project:reveal', file.out)} title="Show in folder">
@@ -275,6 +288,7 @@ export function ExportSheet() {
                 </button>
               </div>
             ))}
+            {end.files.some((file) => file.chapters) && <ChapterList chapters={end.files.find((file) => file.chapters)!.chapters!} />}
             <div className="actions">
               {end.state === 'done' ? (
                 <>
@@ -299,6 +313,33 @@ export function ExportSheet() {
           </>
         )}
       </div>
+    </div>
+  );
+}
+
+/** The chapters an export wrote, as lines for a YouTube description, with a button that copies them and why YouTube would not show them. */
+function ChapterList({ chapters }: { chapters: Chapter[] }) {
+  const [copied, setCopied] = useState(false);
+  const { text, problems } = youtubeChapters(chapters);
+  const copy = () =>
+    void bridge.invoke('export:copy', text).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    });
+  return (
+    <div className="chapter-list" data-testid="export-chapter-list">
+      <div className="chapter-head">
+        <b>Chapters in the video</b>
+        <button className="ghost" onClick={copy} title="Copy the lines for a YouTube description" data-testid="export-copy-chapters">
+          {copied ? 'Copied' : 'Copy for YouTube'}
+        </button>
+      </div>
+      <pre>{text}</pre>
+      {problems.map((problem) => (
+        <div key={problem} className="note">
+          {problem}
+        </div>
+      ))}
     </div>
   );
 }

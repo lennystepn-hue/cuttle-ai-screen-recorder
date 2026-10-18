@@ -20,6 +20,8 @@ export interface RenderResult {
   seconds: number;
   /** Subtitle files written next to it (`--srt`, `--vtt`). */
   subtitles?: string[];
+  /** The chapters in the video file, from the script's steps (output seconds). */
+  chapters?: { at: number; end: number; title: string; step: string }[];
   stats: { gpu: string; codec: string; hardwareAcceleration: string; bitrate: number; totalMs: number } & Record<string, unknown>;
 }
 
@@ -45,6 +47,7 @@ export async function renderCommand(projectDir: string, args: RenderArgs, output
     [
       `rendered ${result.out}: ${result.frames} frames, ${result.seconds.toFixed(2)} s, in ${(result.stats.totalMs / 1000).toFixed(1)} s`,
       ...(result.subtitles ?? []).map((path) => `subtitles: ${path}`),
+      ...(result.chapters ? [`chapters: ${result.chapters.length} in the video (cuttle chapters lists them for a YouTube description)`] : []),
     ].join('\n'),
   );
   return result;

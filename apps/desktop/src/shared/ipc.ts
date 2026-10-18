@@ -3,6 +3,7 @@
 // their window's channels.
 import { z } from 'zod';
 import type { ParamDeclaration } from '@cuttle/export/motion-params';
+import type { Chapter } from '@cuttle/timeline';
 import { MOTION_TEMPLATES, MUSIC_TEMPLATES } from '@cuttle/motion-kit';
 import { ID_PATTERN, SCRIPT_MAX_STEPS, STEP_NOTE_MAX, STEP_TITLE_MAX } from '@cuttle/project';
 import type { LengthReport } from './media-jobs';
@@ -67,6 +68,8 @@ export interface ExportFile {
   bytes: number;
   /** The subtitle files written next to it. */
   subtitles?: string[];
+  /** The chapters in it, from the script's steps. */
+  chapters?: Chapter[];
 }
 
 export type ExportEnd =
@@ -308,6 +311,8 @@ export const REQUESTS = {
   // editor
   'project:info': z.undefined(),
   'project:reveal': z.string().max(4096).optional(),
+  /** Text for the clipboard: the chapters for a YouTube description. */
+  'export:copy': z.string().max(20_000),
   'media:state': z.undefined(),
   'media:retry': z.undefined(),
   'export:targets': z.array(z.enum(EXPORT_TARGETS)).min(1).max(4),
@@ -503,6 +508,7 @@ export const MAX_PROJECT_BYTES = 4 * 1024 * 1024;
 export interface Responses {
   'project:info': ProjectInfo;
   'project:reveal': void;
+  'export:copy': void;
   'media:state': MediaState;
   'media:retry': void;
   /** Where each format would be written, and when an export already there was made (epoch ms). */

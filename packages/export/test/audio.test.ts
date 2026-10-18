@@ -151,6 +151,11 @@ describe('muxArgs', () => {
     expect(muxArgs({ video: 'v.mp4', sound: 's.wav', graph: 'G', out: 'o.mp4' }).join(' ')).toContain('-i v.mp4 -i s.wav -filter_complex G');
   });
 
+  it('takes the chapters from their metadata file, the input after the sound', () => {
+    expect(muxArgs({ video: 'v.mp4', mic: 'm.m4a', sound: 's.wav', graph: 'G', chapters: 'c.txt', out: 'o.mp4' }).join(' ')).toContain('-i v.mp4 -i m.m4a -i s.wav -i c.txt -filter_complex G -map 0:v:0 -map [aout] -map_chapters 3 -c:v copy');
+    expect(muxArgs({ video: 'v.mp4', graph: 'G', chapters: 'c.txt', out: 'o.mp4' }).join(' ')).toContain('-i v.mp4 -i c.txt -filter_complex G -map 0:v:0 -map [aout] -map_chapters 1 -c:v copy');
+  });
+
   it('reads a long graph from a file (Windows limits a command line to 32 767 characters)', () => {
     const args = muxArgs({ video: 'v.mp4', mic: 'm.m4a', graph: 'G', graphFile: 'audio.graph', out: 'o.mp4' });
     expect(args.join(' ')).toContain('-/filter_complex audio.graph -map 0:v:0');

@@ -15,6 +15,7 @@ export {
   type SceneSpan,
 } from './time';
 export { occurrences, rampAmount, type Occurrence } from './occurrences';
+export { CHAPTER_SLIP_SECONDS, YOUTUBE_CHAPTERS, chapterTime, stepChapters, youtubeChapters, type Chapter } from './chapters';
 export { ZOOM_MOVE_SECONDS, ZOOM_RAMP_SECONDS, fitZoomRect, zoomRectAt, zoomTargetAt } from './zoom';
 export { TEXT_FADE_SECONDS, activeMasks, activeTexts, badgeFor, maskRectAt, type ActiveText } from './overlays';
 export { CLICK_EFFECT_SECONDS, createCursorTrack, cursorAt, smoothedPath, type CursorFrame, type CursorTrack } from './cursor';

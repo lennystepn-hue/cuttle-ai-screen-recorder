@@ -1150,8 +1150,8 @@ button.chip-status:hover {
   overflow: auto;
 }
 
-/* loading and errors */
-.loading {
+/* the project opening (its own name: a status line that is loading must not cover the window) and errors */
+.opening {
   position: fixed;
   inset: 0;
   z-index: 10;

@@ -1879,6 +1879,11 @@ describe.runIf(enabled)('the Cuttle app', () => {
     await chooseIn(page, '[data-testid=add-music]', 'Pulse');
     await expect.poll(() => saved().music?.src).toBe('music/pulse/index.html');
     expect(existsSync(join(dir, 'music', 'pulse', 'index.html'))).toBe(true);
+    // while it renders, its state is a line in the panel and the editor stays in sight (a state's "loading" once took the window's loading cover)
+    const rendering = await page.waitForSelector('[data-testid=music-state].loading', { timeout: 30_000 });
+    expect((await rendering.boundingBox())!.height).toBeLessThan(60);
+    expect(await page.evaluate(() => document.elementFromPoint(innerWidth / 2, 22)?.closest('.titlebar') !== null)).toBe(true);
+    await shotOf('40a-music-rendering', '/editor.html', 'music-editor · Cuttle');
     await expect.poll(async () => (await now()).sound.status.state, { timeout: 90_000 }).toBe('ready');
     await expect.poll(async () => (await now()).sound.track, { timeout: 20_000 }).toBe((await now()).sound.status.key);
     const first = (await now()).sound;

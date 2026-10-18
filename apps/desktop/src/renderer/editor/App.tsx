@@ -59,7 +59,7 @@ export function App() {
       <ExportSheet />
       <CommandMenu />
       {phase === 'loading' && (
-        <div className="loading">
+        <div className="opening">
           <div className="spinner" role="status" aria-label="Opening the project" />
         </div>
       )}

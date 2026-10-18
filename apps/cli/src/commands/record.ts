@@ -36,7 +36,9 @@ export interface RecordResult {
 
 /**
  * `cuttle record`: records a take into the project (created when missing) and points the project at
- * it. Ctrl+C (`signal`) stops the recording like the stop hotkey; the take is kept.
+ * it. Ctrl+C (`signal`) stops the recording like the stop hotkey; the take is kept. With a script in
+ * the project, the take starts at its first step and the step keys move through them (each a
+ * `step` marker); each step is printed as the take reaches it.
  */
 export async function recordCommand(projectDir: string, args: RecordArgs, output: Output, signal: AbortSignal): Promise<RecordResult> {
   // The app records an open project itself (its editor hidden, so it is not in the take).
@@ -52,6 +54,11 @@ export async function recordCommand(projectDir: string, args: RecordArgs, output
   // Read (or created) now, so a broken project stops the command before anything is recorded.
   const before = projectExists(projectDir) ? await readProjectFile(projectDir) : (await writeProjectFile(newProjectFile(projectDir), 'record')).file;
   if (signal.aborted) throw new CliError('cancelled', 'stopped before the recording started');
+  const script = before.project.script;
+  const stepLine = (id: string | undefined) => {
+    const index = script.findIndex((step) => step.id === id);
+    return index < 0 ? undefined : `step ${index + 1}/${script.length}: ${script[index]!.title}`;
+  };
 
   const recording = record({
     projectDir: before.dir,
@@ -67,13 +74,16 @@ export async function recordCommand(projectDir: string, args: RecordArgs, output
     ...(args.countdown !== undefined && { countdownSeconds: args.countdown }),
     drawMouse: args.drawMouse ?? false,
     backend: args.backend,
+    ...(script.length > 0 && { steps: script.map((step) => step.id) }),
     onEvent(event) {
       if (event.type === 'countdown') output.info(`recording in ${event.seconds} …`);
       if (event.type === 'recording') output.info(`recording ${event.dir}; stop: Ctrl+C or ${HOTKEYS.stop}, marker: ${HOTKEYS.marker}, pause: ${HOTKEYS.pause}, a slip: ${HOTKEYS.retake}`);
+      if (event.type === 'recording' && script.length > 0) output.info(`script: ${script.length} steps; next step: ${HOTKEYS.next}, back: ${HOTKEYS.previous}`);
       if (event.type === 'paused') output.info(`paused: nothing is recorded until ${HOTKEYS.pause} again`);
       if (event.type === 'resuming') output.info('resuming …');
       if (event.type === 'resumed') output.info('recording again');
-      if (event.type === 'marker') output.info(`marker ${event.marker.kind}${event.marker.label ? ` ${event.marker.label}` : ''} at ${event.marker.t.toFixed(2)} s`);
+      if (event.type === 'marker' && event.marker.kind === 'step') output.info(`${stepLine(event.marker.label) ?? `step ${event.marker.label}`} at ${event.marker.t.toFixed(2)} s`);
+      else if (event.type === 'marker') output.info(`marker ${event.marker.kind}${event.marker.label ? ` ${event.marker.label}` : ''} at ${event.marker.t.toFixed(2)} s`);
       if (event.type === 'warning') output.warn(event.message);
       if (event.type === 'stopping') output.info(`stopping (${event.reason}) …`);
     },

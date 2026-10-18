@@ -359,6 +359,41 @@ describe('cuttle transcript', () => {
   });
 });
 
+describe('cuttle chapters', () => {
+  it("lists the video's chapters from the script's steps, as a YouTube description has them", async () => {
+    const dir = temp();
+    takeFixture(dir);
+    const path = join(dir, 'cuttle.json');
+    const raw = JSON.parse(readFileSync(path, 'utf8'));
+    expect((await cli('-C', dir, 'chapters')).stdout).toBe('no chapters: the project has no script ("script" in cuttle.json)\n');
+    writeFileSync(join(dir, 'takes', '1', 'markers.json'), JSON.stringify({ version: 1, markers: [{ t: 0, kind: 'step', label: 'step1' }, { t: 3.5, kind: 'step', label: 'step2' }, { t: 6, kind: 'step', label: 'step3' }] }));
+    writeFileSync(
+      path,
+      JSON.stringify({
+        ...raw,
+        sources: { ...raw.sources, markers: 'takes/1/markers.json' },
+        script: [{ id: 'step1', title: 'Open the settings' }, { id: 'step2', title: 'Turn on dark mode' }, { id: 'step3', title: 'Export the video' }],
+        // the take from 0.5 s on: step 2 shows at 3 s of the video, step 3 at 5.5 s
+        scenes: [{ type: 'clip', from: 0.5, to: 8 }],
+      }),
+    );
+    const { code, json } = await cli('--json', '-C', dir, 'chapters');
+    expect(code).toBe(0);
+    expect(json).toEqual({
+      chapters: [
+        { at: 0, end: 3, title: 'Open the settings', step: 'step1' },
+        { at: 3, end: 5.5, title: 'Turn on dark mode', step: 'step2' },
+        { at: 5.5, end: 7.5, title: 'Export the video', step: 'step3' },
+      ],
+      youtube: '0:00 Open the settings\n0:03 Turn on dark mode\n0:05 Export the video',
+      problems: ['YouTube needs each chapter to last 10 s or more; shorter: “Open the settings” (3 s), “Turn on dark mode” (2.5 s), “Export the video” (2 s).'],
+    });
+    expect((await cli('-C', dir, 'chapters')).stdout).toBe(
+      '0:00 Open the settings\n0:03 Turn on dark mode\n0:05 Export the video\nnote: YouTube needs each chapter to last 10 s or more; shorter: “Open the settings” (3 s), “Turn on dark mode” (2.5 s), “Export the video” (2 s).\n',
+    );
+  });
+});
+
 describe('cuttle suggest and recover', () => {
   let fixture: string;
   beforeAll(() => {

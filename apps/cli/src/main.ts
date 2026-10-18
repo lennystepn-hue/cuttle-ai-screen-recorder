@@ -12,6 +12,7 @@ import { previewCommand } from './commands/preview';
 import { recordCommand } from './commands/record';
 import { recoverCommand } from './commands/recover';
 import { renderCommand } from './commands/render';
+import { chaptersCommand } from './commands/chapters';
 import { suggestCommand } from './commands/suggest';
 import { modelsDownloadCommand, modelsListCommand, modelsRemoveCommand } from './commands/models';
 import { transcribeCommand } from './commands/transcribe';
@@ -366,6 +367,11 @@ export async function runCli(argv: readonly string[], streams?: Streams): Promis
     .option('--vtt', 'the captions as WebVTT')
     .option('--text', 'the words as plain text')
     .action(action((output, project, options: { srt?: boolean; vtt?: boolean; text?: boolean }) => transcriptCommand(project, options, output)));
+
+  program
+    .command('chapters')
+    .description("the video's chapters from the script's steps: as the export writes them into the MP4, and as lines for a YouTube description")
+    .action(action((output, project) => chaptersCommand(project, output)));
 
   program
     .command('recover <take>')

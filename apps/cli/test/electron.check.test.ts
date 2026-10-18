@@ -121,6 +121,35 @@ describe.runIf(enabled)('cuttle in Electron', () => {
     }
   }, 240_000);
 
+  it("writes the script's steps into the video as its chapters, where the take reached them", () => {
+    const file = join(project, 'cuttle.json');
+    const before = readFileSync(file, 'utf8');
+    const raw = JSON.parse(before) as { sources: Record<string, string> };
+    const markersFile = join(project, raw.sources.markers!);
+    const markers = readFileSync(markersFile, 'utf8');
+    writeFileSync(markersFile, JSON.stringify({ version: 1, markers: [{ t: 0, kind: 'step', label: 'step1' }, { t: 1.5, kind: 'step', label: 'step2' }] }));
+    writeFileSync(file, JSON.stringify({ ...raw, script: [{ id: 'step1', title: 'Open the settings' }, { id: 'step2', title: 'Turn on dark mode' }] }));
+    try {
+      const out = join(project, 'out', 'chapters.mp4');
+      const { code, json } = cuttle('-C', project, 'render', '-o', out);
+      expect(code).toBe(0);
+      const seconds = json.seconds as number;
+      expect(json.chapters).toEqual([
+        { at: 0, end: 1.5, title: 'Open the settings', step: 'step1' },
+        // to the end of the scenes (the video's own length is whole frames)
+        { at: 1.5, end: expect.closeTo(seconds, 1), title: 'Turn on dark mode', step: 'step2' },
+      ]);
+      const chapters = JSON.parse(spawnSync('ffprobe', ['-v', 'error', '-show_chapters', '-of', 'json', out], { encoding: 'utf8' }).stdout) as { chapters: { start_time: string; tags: { title: string } }[] };
+      expect(chapters.chapters.map((chapter) => [Number(chapter.start_time), chapter.tags.title])).toEqual([
+        [0, 'Open the settings'],
+        [1.5, 'Turn on dark mode'],
+      ]);
+    } finally {
+      writeFileSync(file, before);
+      writeFileSync(markersFile, markers);
+    }
+  }, 120_000);
+
   it('checks a motion page: each way it moves lands on the frame, the same on every run, and it says nothing', () => {
     mkdirSync(join(project, 'motion', 'check'), { recursive: true });
     copyFileSync(MOTION_PAGE, join(project, 'motion', 'check', 'index.html'));

@@ -559,7 +559,7 @@ async function record(target: PickedTarget, display: PickerDisplay, displays: Pi
         () => {},
       );
       const hud = overlay({ ...hudPosition(displays, display.id, area, HUD_SIZE), ...HUD_SIZE }, 'hud.cjs', { focusable: false, movable: true });
-      const hudState: HudState = { phase: 'countdown', markers: 0 };
+      const hudState: HudState = { phase: 'countdown', markers: 0, ...(choices.mic && { mic: true }) };
       // a check of the drive or the window still under way may note something after the HUD closed
       const showHud = () => !hud.isDestroyed() && send(hud.webContents, 'hud:state', { ...hudState });
       /** The last warning: a pause shows its own note, the resume brings the warning back. */
@@ -683,6 +683,9 @@ async function record(target: PickedTarget, display: PickerDisplay, displays: Pi
             if (event.marker.kind === 'retake') hudState.retakes = (hudState.retakes ?? 0) + 1;
             else hudState.markers++;
             showHud();
+            return;
+          case 'level':
+            if (!hud.isDestroyed()) send(hud.webContents, 'hud:level', { rms: event.rms, peak: event.peak });
             return;
           case 'warning': {
             const warning = hudWarning(event.message);

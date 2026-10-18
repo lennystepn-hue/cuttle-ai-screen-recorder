@@ -1,5 +1,5 @@
-// The recording HUD: the time, a warning when there is one, restart, the mistake key, a marker,
-// pause and Stop. It
+// The recording HUD: the time, the mic's level, a warning when there is one, restart, the mistake
+// key, a marker, pause and Stop. It
 // is never in the video (content protection), never takes the focus (the recorded window keeps it),
 // and its area is a dead zone for the input log. Its width is fixed, so Stop never moves under the
 // pointer. Restart asks for a press held 600 ms, so a stray click does not put a take aside.
@@ -54,6 +54,7 @@ export function Hud() {
         <span className="time" data-testid="hud-time">
           {clock(seconds)}
         </span>
+        {state.mic && <MicLevel live={state.phase === 'recording'} />}
         <span className={`note${state.tone === 'warn' && !hint ? ' warn' : ''}`} title={hint ?? state.detail ?? state.message} role="status" data-testid="hud-note">
           {hint ? (
             <span>{hint}</span>
@@ -119,6 +120,37 @@ export function Hud() {
         </button>
       </div>
     </div>
+  );
+}
+
+/** Where the mic's bars light up (dBFS of its level); the top one turns red when the mic clips. */
+const BARS = [-55, -45, -35, -25, -15];
+/** A level this close to full scale (dBFS) clips. */
+const CLIPS = -1;
+
+/**
+ * The mic's level: five bars that light up as it hears something, so a mic that hears nothing shows
+ * at once. They rise with the sound and fall back slowly; dark while the take does not record.
+ */
+function MicLevel({ live }: { live: boolean }) {
+  const [shown, setShown] = useState({ rms: -90, peak: -90 });
+  useEffect(
+    () =>
+      bridge.on('hud:level', (level) =>
+        // up at once, down by 6 dB a tenth of a second
+        setShown((before) => ({ rms: Math.max(level.rms, before.rms - 6), peak: level.peak })),
+      ),
+    [],
+  );
+  const rms = live ? shown.rms : -90;
+  const lit = BARS.filter((at) => rms >= at).length;
+  const clips = live && shown.peak >= CLIPS;
+  return (
+    <span className="level" role="meter" aria-label="Mic level" aria-valuemin={-90} aria-valuemax={0} aria-valuenow={Math.round(rms)} title={lit === 0 ? 'The mic hears nothing: muted, or the wrong mic?' : 'The mic’s level'} data-testid="hud-level" data-level={lit}>
+      {BARS.map((at, i) => (
+        <i key={at} className={i < lit ? (clips && i === BARS.length - 1 ? 'on clip' : 'on') : undefined} style={{ height: 4 + i * 2.5 }} />
+      ))}
+    </span>
   );
 }
 

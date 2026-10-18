@@ -70,7 +70,7 @@ export const WINDOW_CHANNELS = {
   },
   hud: {
     requests: ['hud:stop', 'hud:marker', 'hud:retake', 'hud:pause', 'hud:resume', 'hud:restart'],
-    events: ['hud:state', 'app:motion'],
+    events: ['hud:state', 'hud:level', 'app:motion'],
   },
   prompter: {
     requests: ['prompter:next', 'prompter:previous', 'prompter:size'],

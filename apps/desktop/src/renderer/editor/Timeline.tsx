@@ -19,6 +19,7 @@ import {
   groupPins,
   pinGroupDetail,
   pinGroupName,
+  soundName,
   timelineModel,
   waveformColumns,
   type OverlayBlock,
@@ -129,6 +130,7 @@ export function Timeline() {
   const pps = useStore(store, (state) => state.pxPerSecond);
   const selection = useStore(store, (state) => state.selection);
   const motionStatus = useStore(store, (state) => state.motionStatus);
+  const pageSounds = useStore(store, (state) => state.soundStatus.pageSounds);
   const snapOn = useStore(store, (state) => state.snap);
   const peaksState = useStore(store, (state) => state.mediaState.peaks.state);
   const peaksPath = useStore(store, (state) => state.mediaState.peaks.path);
@@ -522,7 +524,7 @@ export function Timeline() {
                 )}
                 {LANES.map((lane) => (
                   <div key={lane.kind} className="tl-row" style={{ position: 'absolute', top: tops[lane.kind], height: heights[lane.kind], left: 0, right: 0 }}>
-                    {model.lanes[lane.kind].blocks.length === 0 && model.lanes[lane.kind].cutOut === 0 && (
+                    {model.lanes[lane.kind].blocks.length === 0 && model.lanes[lane.kind].cutOut === 0 && !(lane.kind === 'sound' && pageSounds?.length) && (
                       <span className="lane-hint" style={{ top: '50%', left: view.left + 10 }}>
                         <kbd>{LANE_HINTS[lane.kind][0]}</kbd> {LANE_HINTS[lane.kind][1]}
                       </span>
@@ -553,6 +555,17 @@ export function Timeline() {
                         </button>
                       );
                     })}
+                    {/* the sounds motion pages ask for: where they play, theirs to move */}
+                    {lane.kind === 'sound' &&
+                      pageSounds?.map((mark, index) => (
+                        <i
+                          key={`${mark.item}@${mark.at}#${index}`}
+                          className="page-sound"
+                          style={{ left: mark.at * pps }}
+                          title={`${soundName(mark.sound)} at ${formatTime(mark.at)}: ${mark.item} asks for it (its page moves it)`}
+                          data-testid="page-sound"
+                        />
+                      ))}
                   </div>
                 ))}
                 <MusicLane model={model} top={tops.music} height={heights.music} pps={pps} view={view} duration={duration} selected={isSelected(selection, 'music', 'music')} />

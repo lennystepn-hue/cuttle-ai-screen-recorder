@@ -1,11 +1,11 @@
 // An editor's music and sounds: the soundtrack the export would mix (the music page Claude wrote,
-// rendered as long as the video, and the project's sounds), rendered again a moment after each edit
-// and each change to the music's files, so the editor plays what the export makes.
+// rendered as long as the video, the project's sounds and those its motion pages ask for), rendered
+// again a moment after each edit and each change to their files, so the editor plays what the export makes.
 import { createHash } from 'node:crypto';
 import { watch, type FSWatcher } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { isAbsolute, relative, resolve, sep } from 'node:path';
-import { motionTake, planSoundtrack, renderSoundtrack, type MusicStems } from '@cuttle/export';
+import { motionPages, motionSoundCues, motionTake, planSoundtrack, renderSoundtrack, type MusicStems, type PageSoundCache } from '@cuttle/export';
 import { declaredParams } from '@cuttle/export/motion-params';
 import { MUSIC_TEMPLATES } from '@cuttle/motion-kit';
 import { copyTemplate } from '@cuttle/motion-kit/files';
@@ -43,6 +43,9 @@ export class EditorSound {
   private again = false;
   /** Changes to the music's files and Reloads: part of what a render is kept by. */
   private changes = 0;
+  /** What each motion page asked for (`cuttle.sound`), until a file in `motion/` changes. */
+  private readonly pageSounds: PageSoundCache = new Map();
+  private pageChanges = 0;
   private current: { key: string; stems: MusicStems; speech: { start: number; end: number }[] } | undefined;
   private status: SoundStatusView = { state: 'none', errors: [], console: [], skipped: [] };
   private watcher: FSWatcher | undefined;
@@ -81,23 +84,31 @@ export class EditorSound {
       const parsed = parseProject(shown.raw);
       if (!parsed.ok) return;
       const project = parsed.project;
-      const plan = await planSoundtrack(this.dir, project, await motionTake(this.dir, project)).catch((error: Error) => {
+      const take = await motionTake(this.dir, project);
+      // a page that is missing shows in the motion preview; the others' sounds play
+      const pages = await motionPages(this.dir, project).catch(() => undefined);
+      const asked = await motionSoundCues(project, pages, take, { cache: this.pageSounds, changes: this.pageChanges });
+      // where they play, for the Sound lane
+      const pageSounds = asked.items.flatMap((item) => item.cues.map((cue) => ({ at: cue.at, sound: cue.sound, item: item.name })));
+      const plan = await planSoundtrack(this.dir, project, take, asked.cues).catch((error: Error) => {
         this.setStatus({ state: 'failed', version: shown.version, failure: error.message, errors: [], console: [], skipped: [] });
         return null;
       });
       if (plan === null) return;
+      plan?.skipped.push(...asked.errors);
+      // watched also while nothing plays: a page that starts to ask for sounds is heard at once
+      if (plan || pages) this.watchFiles();
       if (!plan) {
         this.current = undefined;
-        this.setStatus({ state: 'none', version: shown.version, errors: [], console: [], skipped: [] });
+        this.setStatus({ state: 'none', version: shown.version, errors: [], console: [], skipped: asked.errors });
         return;
       }
-      this.watchFiles();
       const key = createHash('sha256').update(JSON.stringify({ plan, changes: this.changes })).digest('hex').slice(0, 24);
       if (this.current?.key === key) {
-        this.setStatus({ ...this.status, version: shown.version });
+        this.setStatus({ ...this.status, version: shown.version, pageSounds });
         return;
       }
-      this.setStatus({ ...this.status, state: 'rendering', version: shown.version });
+      this.setStatus({ ...this.status, state: 'rendering', version: shown.version, pageSounds });
       try {
         const stems = await renderSoundtrack(this.dir, plan);
         if (this.disposed) return;
@@ -112,9 +123,10 @@ export class EditorSound {
           errors: report.errors,
           console: report.console,
           skipped: result.skipped,
+          pageSounds,
         });
       } catch (error) {
-        this.setStatus({ state: 'failed', version: shown.version, failure: (error as Error).message, errors: [], console: [], skipped: [] });
+        this.setStatus({ state: 'failed', version: shown.version, failure: (error as Error).message, errors: [], console: [], skipped: [], pageSounds });
       }
     } finally {
       this.running = false;
@@ -156,15 +168,19 @@ export class EditorSound {
     this.schedule();
   }
 
-  /** Watches the project's folder for changes to the music's pages and the sounds' files. */
+  /** Watches the project's folder for changes to the music's pages, the sounds' files and the motion pages. */
   private watchFiles(): void {
     if (this.watcher) return;
     try {
       this.watcher = watch(this.dir, { recursive: true }, (_event, name) => {
         if (!name) return;
         const top = name.split(/[\\/]/)[0];
-        if (top !== 'music' && top !== 'sounds') return;
-        this.changes++;
+        if (top === 'motion') {
+          // a page may now ask for other sounds: asked again, and the music rendered only if they changed
+          this.pageChanges++;
+          this.pageSounds.clear();
+        } else if (top === 'music' || top === 'sounds') this.changes++;
+        else return;
         this.schedule();
       });
       this.watcher.on('error', () => {

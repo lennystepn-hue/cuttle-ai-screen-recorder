@@ -236,6 +236,14 @@ export interface SoundStatusView {
   console: string[];
   /** Sounds that could not play. */
   skipped: string[];
+  /** The sounds the motion pages asked for (`cuttle.sound`), in output seconds, with the item's name. */
+  pageSounds?: PageSoundView[];
+}
+
+export interface PageSoundView {
+  at: number;
+  sound: string;
+  item: string;
 }
 
 /** A rendered soundtrack: each stem interleaved stereo float at `rate`, the music's peaks for its lane, the speech it goes down for. */

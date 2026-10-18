@@ -19,9 +19,17 @@ export function captureHelper(chosen = process.env.CUTTLE_CAPTURE_HELPER): strin
   return [join(here, 'cuttle-capture'), join(here, '..', 'native', 'macos', 'cuttle-capture')].map(unpacked).find((file) => existsSync(file));
 }
 
-/** The helper's arguments: the area's display, its crop in the display's pixels, the pointer, the processes left out. */
+/**
+ * The helper's arguments: the area's display, its crop in the display's pixels, the pointer, the
+ * processes left out; for a window take the window itself at the crop's size (nothing over it shows,
+ * Cuttle's windows neither).
+ */
 export function helperArgs(area: ScreenArea, drawMouse: boolean, hide: readonly number[]): string[] {
   const { monitor, crop } = area;
+  if (area.window !== undefined) {
+    const { width, height } = crop ?? monitor.bounds;
+    return ['--display', String(monitor.displayId ?? 0), '--window', String(area.window), '--size', `${width},${height}`, '--fps', String(FRAME_RATE), ...(drawMouse ? ['--cursor'] : [])];
+  }
   return [
     '--display', String(monitor.displayId ?? 0),
     '--fps', String(FRAME_RATE),

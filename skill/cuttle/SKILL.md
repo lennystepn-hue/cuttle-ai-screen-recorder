@@ -34,7 +34,10 @@ permission, 3 render, 130 cancelled.
 
 - What the demo shows, and how it ends (Claude's answer, a page, a result on screen).
 - Which screen: run `cuttle --json devices` and name the monitors (index, size, primary) and
-  matching windows. A window (`--window`) or a region keeps the video small and private.
+  matching windows. A window (`--window`) or a region keeps the video small and private. On a Mac
+  a window take records that window by itself: the user may switch to other apps (and to you)
+  meanwhile, and only what is done in the window is logged. On Windows the screen where the window
+  is is recorded: keep the window in front.
 - The format: 16:9 for X, YouTube and LinkedIn; 9:16 for Shorts, Reels and TikTok; 1:1 for feeds.
   X takes H.264 up to 1920×1200; keep demos under 60 s. A 16:9 screen fills only about a third
   of a 9:16 video: for 9:16 record a narrow window or region, or plan tight zooms.

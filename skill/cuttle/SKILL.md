@@ -1,6 +1,6 @@
 ---
 name: cuttle
-description: Records the screen and turns the take into a polished demo video with the cuttle CLI (cuts, speed-ups, zooms, masks over private data, a framed window on a designed background, captions, an end card; MP4 in 16:9, 1:1 or 9:16). Use when the user wants to record a demo, a screencast or screen recording, a launch or product video, a video of what Claude Code built, or to edit or re-render a cuttle project (cuttle.json).
+description: Records the screen and turns the take into a polished demo video with the cuttle CLI (cuts, speed-ups, zooms, masks over private data, a framed window on a designed background, captions, motion graphics written in code, music composed for the video, an end card; MP4 in 16:9, 1:1 or 9:16). Use when the user wants to record a demo, a screencast or screen recording, a launch or product video, a video of what Claude Code built, or to edit or re-render a cuttle project (cuttle.json).
 ---
 
 # Cuttle: screen recordings that edit themselves
@@ -199,6 +199,17 @@ Then refine `cuttle.json` ([project.md](project.md)) and preview again:
   Read the sheet, fix every error, then look at it in the video with `preview --at`. A video made
   only of motion scenes (a promo, a reel) needs no recording: `cuttle init "<folder>"`, then the
   pages.
+- **Music.** Give the video music written for it: read [music.md](music.md), start from a template
+  (`cuttle -C "<project>" --json music new pulse`; `music templates` lists the moods), then make the
+  page this video's own (tempo, key, chords, instruments, how it builds over the scenes, hits on the
+  cuts). Never ship a template unchanged: no two videos should sound alike. Check it with
+  `cuttle -C "<project>" --json music check`: it renders the music alone into `preview/music.wav`
+  and `preview/music.png` and reports each part's level, the hits on the scene changes, the
+  loudness and the page's errors. Read the sheet, fix the errors, check again. It goes down under
+  speech by itself; `music set --volume`, `--duck` and `--param` tune it. Ask the user before
+  adding music to a video with a voice that should stand alone.
+- **Sounds.** A sound at a moment, without the music: `cuttle -C "<project>" --json sound add whoosh --at 12.4`
+  (source seconds) or `--scene s5 --at 0.2`; `sound list` has the built-in sounds.
 - **End card.** A `card` scene at the end with the product name and URL, or a `motion` scene.
 
 ## 4. Render

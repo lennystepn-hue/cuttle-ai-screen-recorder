@@ -27,7 +27,8 @@ const REPO = fileURLToPath(new URL('../../', import.meta.url)).replace(/\\/g, '/
 const skill = readFileSync(join(SKILL_DIR, 'SKILL.md'), 'utf8');
 const reference = readFileSync(join(SKILL_DIR, 'project.md'), 'utf8');
 const motion = readFileSync(join(SKILL_DIR, 'motion.md'), 'utf8');
-const docs = [skill, reference, motion];
+const music = readFileSync(join(SKILL_DIR, 'music.md'), 'utf8');
+const docs = [skill, reference, motion, music];
 
 const dirs: string[] = [];
 afterAll(() => Promise.all(dirs.map((dir) => rm(dir, { recursive: true, force: true }))));
@@ -69,9 +70,9 @@ async function help(command: string): Promise<string> {
 
 /** `--flag` as a whole option in a help text (not `--until` inside `--until-file`). */
 const hasFlag = (text: string, flag: string) => new RegExp(`${flag}(?![\\w-])`).test(text);
-const COMMANDS = ['devices', 'record', 'suggest', 'transcribe', 'models', 'transcript', 'preview', 'fit', 'frame', 'capture-page', 'motion check', 'motion new', 'motion templates', 'init', 'render', 'recover'];
+const COMMANDS = ['devices', 'record', 'suggest', 'transcribe', 'models', 'transcript', 'preview', 'fit', 'frame', 'capture-page', 'motion check', 'motion new', 'motion templates', 'music new', 'music templates', 'music set', 'music check', 'sound add', 'sound list', 'init', 'render', 'recover'];
 /** Commands with subcommands: the subcommand is part of the command (`motion check`). */
-const GROUPS = ['motion'];
+const GROUPS = ['motion', 'music', 'sound'];
 
 describe('the cuttle commands in the skill', () => {
   // Code blocks and inline code: what Claude runs.
@@ -154,7 +155,7 @@ describe('skill/install.mjs', () => {
     const config = temp();
     expect(install(config).status).toBe(0);
     const target = join(config, 'skills', 'cuttle');
-    expect(readdirSync(target).sort()).toEqual(['.cuttle-skill.json', 'SKILL.md', 'motion.md', 'project.md']);
+    expect(readdirSync(target).sort()).toEqual(['.cuttle-skill.json', 'SKILL.md', 'motion.md', 'music.md', 'project.md']);
     const installed = readFileSync(join(target, 'SKILL.md'), 'utf8');
     expect(installed).not.toContain('{{REPO}}');
     expect(installed).toContain(`(\`${REPO}\`)`);

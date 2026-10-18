@@ -8,7 +8,7 @@ errors, and every command names the path of a problem, counting from 0
 ## Times and pixels
 
 - **Source seconds** are seconds of the take's screen track (`takes/<n>/screen.mp4`). Scenes cut
-  and speed them up. `zooms`, `masks`, `texts` and motion `overlays` use source seconds too, so
+  and speed them up. `zooms`, `masks`, `texts`, motion `overlays` and `sounds` use source seconds too, so
   they stay on their content; they show only while a clip scene covers that source time. In a clip at speed `s`, `d`
   source seconds last `d / s` output seconds: a 3 s caption over a 12× clip is on screen for a
   quarter second, so give it `"duration": 36` there.
@@ -48,7 +48,9 @@ errors, and every command names the path of a problem, counting from 0
   "zooms": [{ "id": "z1", "label": "Answer", "at": 121, "duration": 4, "rect": [0, 600, 1400, 788] }],
   "masks": [{ "from": 0, "to": 128, "rect": [2200, 0, 360, 40], "style": "fill" }],
   "texts": [{ "at": 2, "duration": 3, "text": "One prompt", "style": "pill", "position": "bottom" }],
-  "overlays": [{ "id": "o1", "label": "Callout", "src": "motion/callout/index.html", "at": 121, "duration": 4 }]
+  "overlays": [{ "id": "o1", "label": "Callout", "src": "motion/callout/index.html", "at": 121, "duration": 4 }],
+  "music": { "src": "music/pulse/index.html", "params": { "key": "E" }, "volume": 0.7 },
+  "sounds": [{ "id": "a1", "sound": "whoosh", "at": 120.3 }]
 }
 ```
 
@@ -76,7 +78,7 @@ screen showed where; never edit it.
 | `frame` | `enabled` (`true`), `style` (`mac-dark`, `mac-light`, `browser-light`, `none`), `title` (`""`), `radius` (`14`), `shadow` (`true`) |
 | `cursor` | `enabled` (`true`), `style` (`system`, `arrow-white`, `arrow-black`, `dot`, `ring`, `spotlight`), `size` (`1`, up to 4), `color` (`"#D97757"`: tints dot, ring, spotlight and the click ripple), `clickEffect` (`ripple`, `none`), `smoothing` (`0.5`: 0 draws the path as recorded, up to 1 very smooth; clicks stay exact) |
 | `webcam` | `enabled` (`false`), `shape` (`circle`, `rounded`, `squircle`, `square`), `corner` (`bottom-left`, `bottom-right`, `top-left`, `top-right`), `size` (`0.18` of the output's short side, up to 0.5), `position` (`{ x, y }`: the bubble's centre as a share of the video, 0–1; it replaces `corner`), `border` (`true`: a white ring), `shadow` (`true`), `mirror` (`false`: flipped left to right) |
-| `audio` | `enabled` (`true`), `muteSpedUp` (`true`: sped-up clips are silent), `cleanup` (`true`: the cleaned-up mic plays, where there is one), `typing` (`true`: a key click for each key typed, where the clip is heard), `typingVolume` (`0.5`, 0 to 1) |
+| `audio` | `enabled` (`true`), `muteSpedUp` (`true`: sped-up clips are silent), `cleanup` (`true`: the cleaned-up mic plays, where there is one), `typing` (`true`: a key click for each key typed, where the clip is heard), `typingVolume` (`0.5`, 0 to 1), `effects` (`true`: the `sounds` and the music page's effects), `effectsVolume` (`0.8`, 0 to 1) |
 | `transition` | `enabled` (`true`: a crossfade between scenes), `duration` (`0.3` s, up to 2) |
 
 Two clips where the second starts where the first ends (within 1 ms), as `suggest`'s speed-ups and
@@ -148,6 +150,19 @@ only tagged items. **When you change a tagged item's time, place or size, remove
 it is yours and the next `suggest` keeps it (switching it on or off keeps the tag). `autoEdits`
 (`clickZooms`, `answerZoom`, `crop`, `privacy`, `retakes`, `fillers`, `pauses`, `typingZooms`,
 `dialogZooms`: all `true`) holds which kinds are made at all; one set to `false` is not made again.
+
+## Music and sounds
+
+`music` is the video's music: a page that composes it in WebAudio for this video
+(`music/<name>/index.html`; [music.md](music.md) is the guide). `src`, `params` (`{ "name": value }`
+for the page), `volume` (`0.8`, 0 to 1), `duck` (`12`: dB it goes down under speech; 0 not at all),
+`network` (`false`) and `enabled` (`true`). It is rendered as long as the video and follows every
+edit. Without `music` the video has none.
+
+`sounds` are single sounds at moments: `sound` (a built-in sound, `cuttle sound list`, or a file of
+the project: WAV, MP3, M4A, OGG, FLAC), `at` (source seconds: it plays wherever the video shows that
+moment, and not where it is cut), or `scene` (a scene's id) with `at` seconds into that scene,
+`volume` (`0.8`), `enabled` (`true`), and an `id` (`a1`) and `label`.
 
 ## Motion pages
 

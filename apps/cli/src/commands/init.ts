@@ -15,6 +15,6 @@ export async function init(dir: string, output: Output): Promise<InitResult> {
   await mkdir(target, { recursive: true });
   const { file } = await writeProjectFile(newProjectFile(target), 'init');
   const result = { project: file.path };
-  output.result(result, () => `created ${file.path}\nnext: cuttle record (in that folder)`);
+  output.result(result, () => `created ${file.path}\nnext: cuttle record (in that folder), or motion scenes for a video without a recording (cuttle motion new title)`);
   return result;
 }

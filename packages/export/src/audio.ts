@@ -7,6 +7,8 @@ export const AUDIO_SAMPLE_RATE = 48_000;
 export const AUDIO_BITRATE = '160k';
 /** Shortest fade at a cut, so hard cuts do not click. */
 const MIN_FADE_SECONDS = 0.01;
+/** The soundtrack's ceiling under the mic: about -1 dBFS. */
+const LIMIT = 0.89;
 /**
  * Silence (input samples) appended before `atempo`: it returns several hundred samples fewer than
  * (to − from) / speed and needs input past the end to flush, so the clip's sound reaches its
@@ -113,8 +115,11 @@ export function atempoChain(speed: number): string[] {
  * labelled `[aout]`: 48 kHz stereo, exactly the sum of the segments' samples long. `micOffset` is
  * how many seconds after the screen track the mic started (negative: before); the mic is shifted
  * once so its time 0 is the screen track's time 0. Without mic segments the graph is silence only.
+ * `typingInput`: the typing sounds' track (on the output timeline already), mixed in at its level.
+ * `soundInput`: the soundtrack instead (stereo: the music, the sounds and the typing clicks), mixed
+ * with the mic and then limited, so the sum cannot clip.
  */
-export function audioFilterGraph(segments: readonly AudioSegment[], micOffset = 0, micInput = 1): string {
+export function audioFilterGraph(segments: readonly AudioSegment[], micOffset = 0, micInput = 1, typingInput?: number, soundInput?: number): string {
   const filters: string[] = [];
   const micSegments = segments.filter((segment) => segment.mic !== undefined).length;
   if (micSegments > 0) {
@@ -154,7 +159,27 @@ export function audioFilterGraph(segments: readonly AudioSegment[], micOffset = 
     filters.push(`${chain.join(',')}[s${i}]`);
   });
   const inputs = segments.map((_, i) => `[s${i}]`).join('');
-  filters.push(`${inputs}concat=n=${segments.length}:v=0:a=1,pan=stereo|c0=c0|c1=c0[aout]`);
+  if (soundInput !== undefined) {
+    const total = segments.reduce((sum, segment) => sum + segment.samples, 0);
+    filters.push(
+      `${inputs}concat=n=${segments.length}:v=0:a=1,pan=stereo|c0=c0|c1=c0[voice]`,
+      [`[${soundInput}:a]aresample=${AUDIO_SAMPLE_RATE}`, 'aformat=sample_fmts=fltp:channel_layouts=stereo', 'apad', `atrim=end_sample=${total}`, 'asetpts=N/SR/TB[sound]'].join(','),
+      // added as they are, then kept below full scale (at four times the rate, so peaks between samples count)
+      `[voice][sound]amix=inputs=2:duration=first:normalize=0,aresample=${AUDIO_SAMPLE_RATE * 4},alimiter=limit=${LIMIT}:attack=1:release=60:level=false,aresample=${AUDIO_SAMPLE_RATE}[aout]`,
+    );
+    return filters.join(';');
+  }
+  if (typingInput === undefined) {
+    filters.push(`${inputs}concat=n=${segments.length}:v=0:a=1,pan=stereo|c0=c0|c1=c0[aout]`);
+    return filters.join(';');
+  }
+  const total = segments.reduce((sum, segment) => sum + segment.samples, 0);
+  filters.push(
+    `${inputs}concat=n=${segments.length}:v=0:a=1[base]`,
+    [`[${typingInput}:a]aresample=${AUDIO_SAMPLE_RATE}`, 'aformat=sample_fmts=fltp:channel_layouts=mono', 'apad', `atrim=end_sample=${total}`, 'asetpts=N/SR/TB[keys]'].join(','),
+    // added as they are: amix would otherwise halve both
+    '[base][keys]amix=inputs=2:duration=first:normalize=0,pan=stereo|c0=c0|c1=c0[aout]',
+  );
   return filters.join(';');
 }
 
@@ -170,14 +195,21 @@ export interface MuxArgsOptions {
   video: string;
   /** The mic file, when the graph uses it. */
   mic?: string;
+  /** The typing sounds' track, when the graph mixes it in (the input after the mic). */
+  typing?: string;
+  /** The soundtrack (music, sounds, typing), when the graph mixes it in (the input after the mic). */
+  sound?: string;
   graph: string;
   /** A file holding `graph`, used instead of the inline graph when given. */
   graphFile?: string;
+  /** The chapters as an ffmetadata file (the last input), when the video has any. */
+  chapters?: string;
   out: string;
 }
 
-/** ffmpeg arguments that add the audio to the video without re-encoding it: AAC 48 kHz, moov at the front. */
-export function muxArgs({ video, mic, graph, graphFile, out }: MuxArgsOptions): string[] {
+/** ffmpeg arguments that add the audio (and the chapters) to the video without re-encoding it: AAC 48 kHz, moov at the front. */
+export function muxArgs({ video, mic, typing, sound, graph, graphFile, chapters, out }: MuxArgsOptions): string[] {
+  const inputs = 1 + [mic, typing, sound].filter((input) => input !== undefined).length;
   return [
     '-hide_banner',
     '-nostdin',
@@ -187,11 +219,15 @@ export function muxArgs({ video, mic, graph, graphFile, out }: MuxArgsOptions): 
     '-i',
     video,
     ...(mic ? ['-i', mic] : []),
+    ...(typing ? ['-i', typing] : []),
+    ...(sound ? ['-i', sound] : []),
+    ...(chapters ? ['-i', chapters] : []),
     ...(graphFile ? ['-/filter_complex', graphFile] : ['-filter_complex', graph]),
     '-map',
     '0:v:0',
     '-map',
     '[aout]',
+    ...(chapters ? ['-map_chapters', String(inputs)] : []),
     '-c:v',
     'copy',
     '-c:a',

@@ -1,12 +1,13 @@
-// The recording HUD: the time, a warning when there is one, restart, the mistake key, a marker,
-// pause and Stop. It
-// is never in the video (content protection), never takes the focus (the recorded window keeps it),
+// The recording HUD: the time, the mic's level, a warning when there is one, restart, the mistake
+// key, a marker, pause and Stop, and under them the live captions when the take has them. It is
+// never in the video (content protection), never takes the focus (the recorded window keeps it),
 // and its area is a dead zone for the input log. Its width is fixed, so Stop never moves under the
 // pointer. Restart asks for a press held 600 ms, so a stray click does not put a take aside.
 import { useEffect, useRef, useState } from 'react';
 import type { HudState } from '../../shared/ipc';
 import { bridge } from '../bridge';
 import { Mark, WarningIcon } from '../icons';
+import { hotkey } from '../keys';
 
 const clock = (seconds: number) => `${Math.floor(seconds / 60)}:${String(Math.floor(seconds % 60)).padStart(2, '0')}`;
 /** How long Restart must be held. */
@@ -54,6 +55,7 @@ export function Hud() {
         <span className="time" data-testid="hud-time">
           {clock(seconds)}
         </span>
+        {state.mic && <MicLevel live={state.phase === 'recording'} />}
         <span className={`note${state.tone === 'warn' && !hint ? ' warn' : ''}`} title={hint ?? state.detail ?? state.message} role="status" data-testid="hud-note">
           {hint ? (
             <span>{hint}</span>
@@ -71,7 +73,7 @@ export function Hud() {
         <button
           className="retake"
           onClick={() => void bridge.invoke('hud:retake')}
-          title="A slip? Press it, then say or do the bit again: Cuttle cuts back to the pause before (Ctrl+Shift+Alt+X)"
+          title={`A slip? Press it, then say or do the bit again: Cuttle cuts back to the pause before (${hotkey('Ctrl+Shift+Alt+X')})`}
           aria-label="Mark a slip: cut back to the pause before"
           disabled={state.phase !== 'recording'}
           data-testid="hud-retake"
@@ -85,7 +87,7 @@ export function Hud() {
         <button
           className={`marker${flash ? ' flash' : ''}`}
           onClick={() => void bridge.invoke('hud:marker')}
-          title={`Set a marker (Ctrl+Shift+Alt+M)${state.markers > 0 ? `: ${state.markers} so far` : ''}`}
+          title={`Set a marker (${hotkey('Ctrl+Shift+Alt+M')})${state.markers > 0 ? `: ${state.markers} so far` : ''}`}
           aria-label="Set a marker"
           disabled={!live}
         >
@@ -97,7 +99,7 @@ export function Hud() {
         <button
           className={`pause${paused ? ' paused' : ''}`}
           onClick={() => void bridge.invoke(paused ? 'hud:resume' : 'hud:pause')}
-          title={paused ? 'Resume (Ctrl+Shift+Alt+P)' : 'Pause: nothing is recorded until you resume (Ctrl+Shift+Alt+P)'}
+          title={paused ? `Resume (${hotkey('Ctrl+Shift+Alt+P')})` : `Pause: nothing is recorded until you resume (${hotkey('Ctrl+Shift+Alt+P')})`}
           aria-label={paused ? 'Resume the recording' : 'Pause the recording'}
           aria-pressed={paused}
           disabled={!live}
@@ -114,11 +116,89 @@ export function Hud() {
             </svg>
           )}
         </button>
-        <button className="stop" onClick={() => void bridge.invoke('hud:stop')} title="Stop (Ctrl+Shift+Alt+S)" aria-label="Stop the recording" data-testid="hud-stop" disabled={state.phase === 'stopping'}>
+        <button className="stop" onClick={() => void bridge.invoke('hud:stop')} title={`Stop (${hotkey('Ctrl+Shift+Alt+S')})`} aria-label="Stop the recording" data-testid="hud-stop" disabled={state.phase === 'stopping'}>
           <i />
         </button>
       </div>
+      {state.captions && <Captions failed={state.captions.failed} live={state.phase === 'recording'} />}
     </div>
+  );
+}
+
+/** The live captions keep this many words: more than one line holds. */
+const LINE_WORDS = 24;
+
+/**
+ * The live captions: what the mic heard last, in one line under the bar, the newest words at its
+ * right end and the older ones fading out at its left. "Listening…" until the first words; dimmed
+ * while the take does not record.
+ */
+function Captions({ failed, live }: { failed: string | undefined; live: boolean }) {
+  // the last words heard, and the number of the first of them (a word keeps its number as the line
+  // moves on, so only new words fade in)
+  const [line, setLine] = useState<{ first: number; words: string[] }>({ first: 0, words: [] });
+  useEffect(
+    () =>
+      bridge.on('hud:caption', ({ words: heard }) =>
+        setLine((before) => {
+          const words = [...before.words, ...heard];
+          const dropped = Math.max(0, words.length - LINE_WORDS);
+          return { first: before.first + dropped, words: words.slice(dropped) };
+        }),
+      ),
+    [],
+  );
+  const { first, words } = line;
+  return (
+    <div className={`captions${live ? '' : ' resting'}${failed ? ' failed' : ''}`} role="log" aria-live="polite" aria-label="Live captions" title={failed ? `The live captions stopped: ${failed}` : 'What the mic hears, as Cuttle understands it (not saved)'} data-testid="hud-captions">
+      <span className="line">
+        {failed ? (
+          <span className="said">
+            <WarningIcon size={13} />
+            Live captions stopped
+          </span>
+        ) : words.length === 0 ? (
+          <span className="said waiting">Listening…</span>
+        ) : (
+          <span className="said">
+            {words.map((word, i) => (
+              <span key={first + i}>{word} </span>
+            ))}
+          </span>
+        )}
+      </span>
+    </div>
+  );
+}
+
+/** Where the mic's bars light up (dBFS of its level); the top one turns red when the mic clips. */
+const BARS = [-55, -45, -35, -25, -15];
+/** A level this close to full scale (dBFS) clips. */
+const CLIPS = -1;
+
+/**
+ * The mic's level: five bars that light up as it hears something, so a mic that hears nothing shows
+ * at once. They rise with the sound and fall back slowly; dark while the take does not record.
+ */
+function MicLevel({ live }: { live: boolean }) {
+  const [shown, setShown] = useState({ rms: -90, peak: -90 });
+  useEffect(
+    () =>
+      bridge.on('hud:level', (level) =>
+        // up at once, down by 6 dB a tenth of a second
+        setShown((before) => ({ rms: Math.max(level.rms, before.rms - 6), peak: level.peak })),
+      ),
+    [],
+  );
+  const rms = live ? shown.rms : -90;
+  const lit = BARS.filter((at) => rms >= at).length;
+  const clips = live && shown.peak >= CLIPS;
+  return (
+    <span className="level" role="meter" aria-label="Mic level" aria-valuemin={-90} aria-valuemax={0} aria-valuenow={Math.round(rms)} title={lit === 0 ? 'The mic hears nothing: muted, or the wrong mic?' : 'The mic’s level'} data-testid="hud-level" data-level={lit}>
+      {BARS.map((at, i) => (
+        <i key={at} className={i < lit ? (clips && i === BARS.length - 1 ? 'on clip' : 'on') : undefined} style={{ height: 4 + i * 2.5 }} />
+      ))}
+    </span>
   );
 }
 

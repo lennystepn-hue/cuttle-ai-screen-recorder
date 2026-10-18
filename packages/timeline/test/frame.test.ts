@@ -137,6 +137,23 @@ describe('crossfades', () => {
     expect(timeline.frameAt(5).layers).toHaveLength(1);
   });
 
+  it('hands a scene\'s transition page the two layers around its cut, with its own clock', () => {
+    const scenes = [JUMP[0], { ...JUMP[1], transition: { src: 'motion/fold/index.html', duration: 0.8 } }, JUMP[2]];
+    const paged = createTimeline(project({ transition: { enabled: false } }, { scenes }), { screenSize });
+    expect(paged.frameAt(9.5).transition).toBeUndefined();
+    const into = paged.frameAt(9.7);
+    expect(into.layers.map((layer) => [layer.index, layer.sourceTime])).toEqual([
+      [0, 19.7],
+      [1, 21],
+    ]);
+    expect(into.transition).toEqual({ sceneIndex: 1, key: 'transition:1', start: 9.6, local: 0.1, duration: 0.8 });
+    expect(paged.frameAt(10.3).transition?.local).toBeCloseTo(0.7, 6);
+    // the next boundary has no page: a cut, as the look says
+    expect(paged.frameAt(19.95).layers).toHaveLength(1);
+    // the look's crossfade elsewhere carries no page
+    expect(timeline.frameAt(9.9).transition).toBeUndefined();
+  });
+
   it('blends the outgoing and incoming scenes around a boundary', () => {
     const before = timeline.frameAt(9.9).layers;
     expect(before.map((l) => l.index)).toEqual([0, 1]);
@@ -396,5 +413,55 @@ describe('cuts and crops in the timeline', () => {
     expect(w / h).toBeCloseTo(2478 / 1237, 6);
     expect(x).toBeGreaterThanOrEqual(62);
     expect(y).toBeGreaterThanOrEqual(141);
+  });
+});
+
+describe('motion', () => {
+  const motion = (overrides: Record<string, unknown>) =>
+    createTimeline(
+      project(
+        { transition: { enabled: false } },
+        {
+          scenes: [
+            { type: 'motion', src: 'motion/intro/index.html', duration: 1 },
+            { type: 'clip', from: 10, to: 20 },
+            { type: 'clip', from: 20, to: 40, speed: 4 },
+          ],
+          zooms: [],
+          masks: [],
+          texts: [],
+          ...overrides,
+        },
+      ),
+      { screenSize },
+    );
+
+  it('shows a motion scene as a layer of its own, with its time and no overlays', () => {
+    const [layer] = motion({}).frameAt(0.5).layers;
+    expect(layer).toMatchObject({ index: 0, sceneIndex: 0, kind: 'motion', local: 0.5, progress: 0.5, overlays: [] });
+    expect(layer!.sourceTime).toBeUndefined();
+  });
+
+  it('gives an overlay a clock in output seconds that runs on across a continuous cut and a speed change', () => {
+    // source 18 to 24: 18–20 at 1× (output 9–11), then 20–24 at 4× (output 11–12)
+    const timeline = motion({ overlays: [{ src: 'motion/callouts/index.html', at: 18, duration: 6 }] });
+    expect(timeline.frameAt(8.5).layers[0]!.overlays).toEqual([]);
+    expect(timeline.frameAt(10).layers[0]!.overlays).toEqual([{ index: 0, key: '0@9', start: 9, local: 1, duration: 3 }]);
+    expect(timeline.frameAt(11.5).layers[0]).toMatchObject({ sceneIndex: 2, overlays: [{ index: 0, key: '0@9', start: 9, local: 2.5, duration: 3 }] });
+    expect(timeline.frameAt(12.25).layers[0]!.overlays).toEqual([]);
+  });
+
+  it('shows an overlay as often as its clips show its stretch, each showing with its own clock, and none when it is off', () => {
+    const twice = motion({
+      scenes: [
+        { type: 'clip', from: 10, to: 20 },
+        { type: 'clip', from: 15, to: 20 },
+      ],
+      overlays: [{ src: 'a.html', at: 16, duration: 2 }],
+    });
+    expect(twice.frameAt(7).layers[0]!.overlays).toEqual([{ index: 0, key: '0@6', start: 6, local: 1, duration: 2 }]);
+    expect(twice.frameAt(12).layers[0]!.overlays).toEqual([{ index: 0, key: '0@11', start: 11, local: 1, duration: 2 }]);
+    const off = motion({ overlays: [{ src: 'a.html', at: 12, duration: 2, enabled: false }] });
+    expect(off.frameAt(3).layers[0]!.overlays).toEqual([]);
   });
 });

@@ -1,6 +1,6 @@
 ---
 name: cuttle
-description: Records the screen and turns the take into a polished demo video with the cuttle CLI (cuts, speed-ups, zooms, masks over private data, a framed window on a designed background, captions, an end card; MP4 in 16:9, 1:1 or 9:16). Use when the user wants to record a demo, a screencast or screen recording, a launch or product video, a video of what Claude Code built, or to edit or re-render a cuttle project (cuttle.json).
+description: Records the screen and turns the take into a polished demo video with the cuttle CLI (cuts, speed-ups, zooms, masks over private data, a framed window on a designed background, captions, motion graphics written in code, music composed for the video, an end card; MP4 in 16:9, 1:1 or 9:16). Use when the user wants to record a demo, a screencast or screen recording, a launch or product video, a video of what Claude Code built, or to edit or re-render a cuttle project (cuttle.json).
 ---
 
 # Cuttle: screen recordings that edit themselves
@@ -34,11 +34,16 @@ permission, 3 render, 130 cancelled.
 
 - What the demo shows, and how it ends (Claude's answer, a page, a result on screen).
 - Which screen: run `cuttle --json devices` and name the monitors (index, size, primary) and
-  matching windows. A window (`--window`) or a region keeps the video small and private.
+  matching windows. A window (`--window`) or a region keeps the video small and private. On a Mac
+  a window take records that window by itself: the user may switch to other apps (and to you)
+  meanwhile, and only what is done in the window is logged. On Windows the screen where the window
+  is is recorded: keep the window in front.
 - The format: 16:9 for X, YouTube and LinkedIn; 9:16 for Shorts, Reels and TikTok; 1:1 for feeds.
   X takes H.264 up to 1920×1200; keep demos under 60 s. A 16:9 screen fills only about a third
   of a 9:16 video: for 9:16 record a narrow window or region, or plan tight zooms.
-- Webcam and mic only when asked (`--webcam`, `--mic`). A muted mic is reported as a warning.
+- Webcam and mic only when asked (`--webcam`, `--mic`). A muted mic is reported as a warning;
+  after the mic's first second the output says whether it hears sound (`mic: it hears sound`, or
+  `it hears almost nothing`: then ask the user to check the mic before going on).
   When the user will speak, Cuttle transcribes the mic on this computer and cuts filler words and
   pauses. That needs a speech model: `cuttle --json models` lists them. If none is downloaded, ask
   the user before `cuttle models download small` (488 MB, once). Tell them that a slip needs no
@@ -47,6 +52,12 @@ permission, 3 render, 130 cancelled.
   private windows, to switch on Do not disturb (Cuttle masks the notifications it sees, but none is
   better), and to use a clean folder or browser profile.
 - The project folder: a new one per demo (`record` creates it).
+- A demo with steps (open this, then that) gets a script: write the steps into `cuttle.json`
+  before the take (`script`, see [project.md](project.md); `cuttle init "<project>"` makes the
+  folder first). The take starts at the first step, Ctrl+Shift+Alt+N moves to the next one
+  (Ctrl+Shift+Alt+B back), and each step becomes a `step` marker. The prompter that shows the
+  steps during the take is the app's: when the user records from the app ("Record again"), it
+  sits by the recording bar. For `cuttle record`, list the steps for the user before the take.
 
 ## 2. Record
 
@@ -78,7 +89,8 @@ cuttle -C "<project>" record --monitor 0 --until-file "<project>/stop" --until-c
 - `--max <seconds>` is the safety net (it counts recorded time, not pauses). The user can also stop
   with Ctrl+Shift+Alt+S, add a marker with Ctrl+Shift+Alt+M and pause or resume with
   Ctrl+Shift+Alt+P (Alt is Option on a Mac; nothing is recorded while paused; the pieces are
-  joined at the stop). Other
+  joined at the stop). With a script, Ctrl+Shift+Alt+N goes to the next step and
+  Ctrl+Shift+Alt+B back, and the output shows each step (`step 2/5: Open the settings`). Other
   sources: `--window "<part of the title>"`, `--region x,y,w,h` (pixels of `--monitor`).
   `--countdown 3` is the default.
 - A project open in the Cuttle app is refused (`project-open`): the app records it itself
@@ -113,7 +125,10 @@ taskbar (from the window's content area the recorder saw, else from the screen's
 `--no-crop` leaves it out). It zooms on Claude's answer, on a dialog while it is open ("Dialog";
 `--no-dialog-zooms`), in where someone types, following the text along ("Typing": the camera
 moves on as the text leaves the middle of the view; `--no-typing-zooms`), and where clicks
-happen at normal speed ("Click", "Clicks"; `--no-click-zooms`; `--no-zoom` leaves out every zoom). Its `notes` say what it did, in
+happen at normal speed ("Click", "Clicks"; `--no-click-zooms`; `--no-zoom` leaves out every zoom).
+With a script, it titles each step where the video shows it (a text, or the step's `motion`
+template; `--no-step-titles`) and zooms on where each step happens ("Step 2"; `--no-step-zooms`),
+before the clicks' zooms. Its `notes` say what it did, in
 source seconds. It replaces every clip and the zooms it made before (tagged `auto`; masks, texts,
 cuts, stills, cards and zooms made by hand stay), so run it once, before your hand edits. Its clips and zooms have ids, and labels where Claude's markers say
 what they show ("Claude at work", "Answer"): keep them when you edit, and give items you add an
@@ -151,8 +166,8 @@ stills in `preview/`; add `-o "<folder>"` to keep a set.
 Then refine `cuttle.json` ([project.md](project.md)) and preview again:
 
 - **Privacy first.** `suggest` masks each notification (a toast, the notification centre) while it
-  was open (`auto: "notification"`). On Windows it also reads the screen's text (Windows' own OCR,
-  on this computer) and masks what it finds: email addresses, keys and tokens, the value of a `…KEY=`,
+  was open (`auto: "notification"`). It also reads the screen's text (Windows' own OCR or macOS's
+  Vision, on this computer) and masks what it finds: email addresses, keys and tokens, the value of a `…KEY=`,
   `…TOKEN=` or `password:` line, IBANs, card and phone numbers (masks tagged `auto: "privacy"`,
   following text that scrolls). Pass the user's name and address once with
   `--mask "<word>"` (kept in cuttle.json). This is a help, not a guarantee: the OCR misses small
@@ -173,16 +188,54 @@ Then refine `cuttle.json` ([project.md](project.md)) and preview again:
   - Masks apply to clips only: look at a captured page yourself before you add it.
 - **Story.** Trim what does not help. Keep the prompt readable (1.5 s or more) and the answer on
   screen for 2–3 s. A speed-up shows a "12× speed" badge.
+- **Length.** For a length the user names (X: under 60 s), fit it last, after your zooms and
+  texts: `cuttle -C "<project>" --json fit 45`. It cuts where the video rests (`auto: "length"`),
+  never speech, clicks, typing, a zoom or a text, and says the shortest it can make when the
+  length is out of reach. A new fit replaces the last; `fit --off` takes it out.
+  (`suggest --length 45` fits in the same run, before any hand edits.)
 - **Focus.** Add or fix `zooms` on what matters: 2–4 s on the answer or a result, with the rect
   read off a `frame --grid`. Over a sped-up clip, durations are source seconds: 3 s at 12× is a
   quarter second on screen (see project.md).
-- **Look.** Set `look.frame.title` (e.g. `claude · ~/demo`) and a background preset, and add a
-  `texts` caption where a step is not obvious.
+- **Look.** When `cuttle --json brand list` shows brand kits, ask which one the video wears and run
+  `cuttle -C "<project>" --json brand apply "<name>"`: the brand (name, URL, logo, colours, heading
+  font) for the motion pages, the background, frame and cursor. Without one, set `theme` (project.md)
+  and offer to keep it with `brand save`. Set `look.frame.title` (e.g. `claude · ~/demo`) and a
+  background: `cuttle -C "<project>" --json background gradient --from take` takes the product's own
+  colours, `background --wallpaper` puts the desktop's wallpaper behind the window, softened;
+  `flow`, `bokeh` and `dots` move quietly. The frame fits what was recorded: `windows-dark`, `terminal`,
+  `browser-dark`, or `iphone` and `android` around a phone-shaped take or page; `look.watermark` puts the
+  brand's logo in a corner. Add a `texts` caption where a step is not obvious. Typing clicks softly, a click per key where the clip
+  is heard (`look.audio.typing`, `typingVolume`); switch it off when the user wants a quiet video.
 - **Pages.** `cuttle -C "<project>" --json capture-page <url or file> --scroll --add` appends a
   scrolling still of a web page (the result the agent built); add `--wait 2500` for slow maps or
   fonts. It goes after every scene, so capture pages before you add the end card (or move the
   still in `scenes`).
-- **End card.** A `card` scene at the end with the product name and URL.
+- **Motion.** Anything a browser draws can be in the video, and you are free in what you make: a
+  kinetic intro, an end card with the product's look, a chart that builds, a 3D shot, a callout on
+  every click or a lower third over the clip. Read [motion.md](motion.md) first. Write a page into
+  `motion/<name>/index.html`, or start from a template
+  (`cuttle -C "<project>" --json motion new title --first`; `motion templates` lists them), add
+  it as a `motion` scene or to `overlays`, and check it before you preview the video:
+  `cuttle -C "<project>" --json motion check motion/<name>/index.html` renders it frame by frame
+  into `preview/motion-<name>/` (`--duration`, `--at`) and lists its `errors` and `console`.
+  Read the sheet, fix every error, then look at it in the video with `preview --at`. A video made
+  only of motion scenes (a promo, a reel) needs no recording: `cuttle init "<folder>"`, then the
+  pages.
+- **Music.** Give the video music written for it: read [music.md](music.md), start from a template
+  (`cuttle -C "<project>" --json music new pulse`; `music templates` lists the moods), then make the
+  page this video's own (tempo, key, chords, instruments, how it builds over the scenes, hits on the
+  cuts). Never ship a template unchanged: no two videos should sound alike. Check it with
+  `cuttle -C "<project>" --json music check`: it renders the music alone into `preview/music.wav`
+  and `preview/music.png` and reports each part's level, the hits on the scene changes, the
+  loudness and the page's errors. Read the sheet, fix the errors, check again. It goes down under
+  speech by itself; `music set --volume`, `--duck` and `--param` tune it. Ask the user before
+  adding music to a video with a voice that should stand alone.
+- **Sounds.** A sound at a moment, without the music: `cuttle -C "<project>" --json sound add whoosh --at 12.4`
+  (source seconds) or `--scene s5 --at 0.2`; `sound list` has the built-in sounds. A motion page
+  asks for its own with `cuttle.sound(…)` (motion.md); the templates come with theirs.
+- **Transitions.** A page in place of the crossfade into a scene: `cuttle -C "<project>" --json motion new fold --into <scene id>`
+  (motion.md). One or two a video, where something changes.
+- **End card.** A `card` scene at the end with the product name and URL, or a `motion` scene.
 
 ## 4. Render
 
@@ -195,6 +248,11 @@ With a transcript, `--srt` and `--vtt` also write the subtitles next to the vide
 commands. It writes `out/16x9.mp4` (or `-o <file>`); the JSON has the frames, the seconds and the
 encoder (`stats`). For 9:16, check `preview --format 9:16` first. Render each format the user
 wants. Tell the user the file's path and length. Do not upload it anywhere.
+
+With a script, the video file has the steps as its chapters (`chapters` in the JSON, output
+seconds). `cuttle -C "<project>" --json chapters` gives them as lines for a YouTube description
+(`youtube`) and says why YouTube would not show them (`problems`: fewer than three, or one shorter
+than 10 s). Give the user the lines when the video goes to YouTube.
 
 ## When something fails
 

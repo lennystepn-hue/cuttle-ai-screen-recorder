@@ -1,6 +1,6 @@
 import { utilityProcess, type UtilityProcess } from 'electron';
 import type { Bounds, Devices, RecordOptions, RecorderEvent, Take } from '@cuttle/recorder';
-import type { HostReply, HostRequest } from '../shared/recording';
+import type { HostReply, HostRequest, LiveRequest } from '../shared/recording';
 import { TEST_BACKEND } from './check';
 import { bundlePath } from './protocols';
 
@@ -15,8 +15,12 @@ export class RecordingError extends Error {
   }
 }
 
+/** What the live captions tell: words they heard (newest last), or why they stopped. */
+export type LiveNews = { words: string[] } | { failed: string };
+
 interface Running {
   onEvent: (event: RecorderEvent) => void;
+  onLive?: (news: LiveNews) => void;
   resolve: (take: Take) => void;
   reject: (error: Error) => void;
   /** The running ffmpegs' process ids, reported by the recorder as the tracks start (none while paused). */
@@ -79,6 +83,12 @@ export class RecorderHost {
         if (message.event.type === 'paused' && this.running) this.running.pids = [];
         this.running?.onEvent(message.event);
         return;
+      case 'live':
+        this.running?.onLive?.({ words: message.words });
+        return;
+      case 'live-failed':
+        this.running?.onLive?.({ failed: message.message });
+        return;
       case 'done': {
         const running = this.running;
         this.running = undefined;
@@ -106,11 +116,14 @@ export class RecorderHost {
     return this.running !== undefined;
   }
 
-  /** Records a take; resolves with it when the recording stops (by `stop()`, the hotkey or a trigger). */
-  record(options: Omit<RecordOptions, 'onEvent'>, onEvent: (event: RecorderEvent) => void): Promise<Take> {
+  /**
+   * Records a take; resolves with it when the recording stops (by `stop()`, the hotkey or a trigger).
+   * With `live`, the mic's words come to `onLive` while it records.
+   */
+  record(options: Omit<RecordOptions, 'onEvent' | 'onAudio'>, onEvent: (event: RecorderEvent) => void, live?: { request: LiveRequest; onLive: (news: LiveNews) => void }): Promise<Take> {
     if (this.running) return Promise.reject(new RecordingError('invalid-options', 'a recording is already running'));
-    const promise = new Promise<Take>((resolve, reject) => (this.running = { onEvent, resolve, reject, pids: [] }));
-    this.send({ type: 'start', options });
+    const promise = new Promise<Take>((resolve, reject) => (this.running = { onEvent, ...(live && { onLive: live.onLive }), resolve, reject, pids: [] }));
+    this.send({ type: 'start', options, ...(live && { live: live.request }) });
     return promise;
   }
 
@@ -125,6 +138,15 @@ export class RecorderHost {
   /** The mistake key: a `retake` marker. */
   retake(): void {
     if (this.running) this.send({ type: 'retake' });
+  }
+
+  /** The script's next step, or the one before: a `step` marker (nothing at either end). */
+  nextStep(): void {
+    if (this.running) this.send({ type: 'step', delta: 1 });
+  }
+
+  previousStep(): void {
+    if (this.running) this.send({ type: 'step', delta: -1 });
   }
 
   /** Pauses the take: every track stops until `resume()` (events `paused`, `resuming`, `resumed`). */

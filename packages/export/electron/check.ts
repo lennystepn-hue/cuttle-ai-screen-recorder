@@ -10,9 +10,9 @@ import { basename, join } from 'node:path';
 import { promisify } from 'node:util';
 import { parseProjectJson } from '@cuttle/project';
 import { sceneSpans, totalDuration } from '@cuttle/timeline';
-import { BrowserWindow, app } from 'electron';
+import { BrowserWindow, app, protocol } from 'electron';
 import { frameCount } from '../src/frame-plan';
-import { EXPORT_FORMATS, exportProject, isExportFormat, type EncoderPreference, type ExportError, type ExportErrorCode, type ExportFormat } from '../src/index';
+import { EXPORT_FORMATS, MOTION_SCHEME_PRIVILEGES, exportProject, isExportFormat, type EncoderPreference, type ExportError, type ExportErrorCode, type ExportFormat } from '../src/index';
 import { createFixtureProject, type FixtureLayout } from '../test/fixture';
 
 const run = promisify(execFile);
@@ -192,6 +192,7 @@ process.on('uncaughtException', (error) => {
   app.exit(1);
 });
 app.on('window-all-closed', () => {});
+protocol.registerSchemesAsPrivileged([MOTION_SCHEME_PRIVILEGES]);
 app.whenReady().then(async () => {
   let ok = false;
   try {

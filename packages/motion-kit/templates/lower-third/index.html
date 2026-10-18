@@ -1,0 +1,123 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Lower third</title>
+    <!-- A name and a role over the video: an accent bar grows, a glass card wipes open from it, the
+         name and the role rise out of their masks; at the end it all folds back. A short swoosh as
+         the name lands (the "sounds" param). -->
+    <script type="application/json" id="cuttle-params">
+      [
+        { "name": "name", "label": "Name", "type": "text", "default": "Lena Müller" },
+        { "name": "role", "label": "Role", "type": "text", "default": "Founder · Cuttle" },
+        { "name": "side", "label": "Side", "type": "select", "default": "left", "options": ["left", "right"] },
+        { "name": "place", "label": "Place", "type": "select", "default": "bottom", "options": ["bottom", "top"] },
+        { "name": "sounds", "label": "Sounds", "type": "bool", "default": true }
+      ]
+    </script>
+    <style>
+      :root {
+        --u: calc(100vmin / 1080);
+      }
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        overflow: hidden;
+        background: transparent;
+      }
+      .third {
+        position: absolute;
+        display: flex;
+        align-items: stretch;
+        gap: calc(14 * var(--u));
+        left: calc(90 * var(--u));
+        bottom: calc(150 * var(--u));
+      }
+      .right .third {
+        left: auto;
+        right: calc(90 * var(--u));
+        flex-direction: row-reverse;
+      }
+      .top .third {
+        bottom: auto;
+        top: calc(110 * var(--u));
+      }
+      .bar {
+        width: calc(8 * var(--u));
+        border-radius: calc(4 * var(--u));
+        background: var(--cuttle-accent);
+        box-shadow: 0 0 calc(30 * var(--u)) color-mix(in srgb, var(--cuttle-accent) 70%, transparent);
+        transform-origin: bottom;
+      }
+      .card {
+        padding: calc(24 * var(--u)) calc(38 * var(--u)) calc(26 * var(--u));
+        border-radius: calc(16 * var(--u));
+        background: rgba(14, 14, 20, 0.8);
+        border: calc(1 * var(--u)) solid rgba(255, 255, 255, 0.09);
+        box-shadow: 0 calc(24 * var(--u)) calc(60 * var(--u)) rgba(0, 0, 0, 0.35);
+      }
+      .mask {
+        overflow: hidden;
+      }
+      .name {
+        font: 700 calc(50 * var(--u)) / 1.15 var(--cuttle-display);
+        /* the brand's heading font as it is: a face with one weight (Bebas Neue, Instrument Serif) is not made bold */
+        font-synthesis: none;
+        font-stretch: 105%;
+        letter-spacing: -0.015em;
+        color: #fff;
+      }
+      .role {
+        margin-top: calc(6 * var(--u));
+        display: flex;
+        align-items: center;
+        gap: calc(12 * var(--u));
+        font: 500 calc(30 * var(--u)) / 1.3 var(--cuttle-font);
+        color: rgba(255, 255, 255, 0.72);
+      }
+      .role i {
+        width: calc(9 * var(--u));
+        height: calc(9 * var(--u));
+        border-radius: 50%;
+        background: var(--cuttle-accent);
+      }
+    </style>
+  </head>
+  <body>
+    <div class="third">
+      <div class="bar" id="bar"></div>
+      <div class="card" id="card">
+        <div class="mask"><div class="name" id="name"></div></div>
+        <div class="mask"><div class="role" id="role-line"><i></i><span id="role"></span></div></div>
+      </div>
+    </div>
+    <script type="module">
+      import { at, ease } from 'cuttle';
+
+      const { params, duration } = cuttle;
+      document.body.classList.add(params.side === 'right' ? 'right' : 'left', params.place === 'top' ? 'top' : 'bottom');
+      document.getElementById('name').textContent = params.name || '';
+      document.getElementById('role').textContent = params.role || '';
+      const bar = document.getElementById('bar');
+      const card = document.getElementById('card');
+      const name = document.getElementById('name');
+      const role = document.getElementById('role-line');
+      const right = params.side === 'right';
+      if (params.sounds !== false) cuttle.sound('swoosh-in', { at: 0.4, volume: 0.6 });
+
+      cuttle.onFrame((t) => {
+        // out: the last 0.7 s, in the reverse order
+        const out = duration - 0.7;
+        const grow = at(t, 0, 0.4, ease.outExpo) * (1 - at(t, out + 0.45, 0.25, ease.in));
+        bar.style.transform = `scaleY(${grow})`;
+        const open = at(t, 0.12, 0.65, ease.smooth) * (1 - at(t, out + 0.15, 0.4, ease.inOut));
+        card.style.clipPath = right ? `inset(0 0 0 ${(1 - open) * 100}%)` : `inset(0 ${(1 - open) * 100}% 0 0)`;
+        const n = at(t, 0.35, 0.6, ease.outExpo) * (1 - at(t, out, 0.3, ease.in));
+        name.style.transform = `translateY(${(1 - n) * 110}%)`;
+        const r = at(t, 0.5, 0.6, ease.outExpo) * (1 - at(t, out, 0.25, ease.in));
+        role.style.transform = `translateY(${(1 - r) * 110}%)`;
+      });
+    </script>
+  </body>
+</html>

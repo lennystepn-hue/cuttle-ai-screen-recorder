@@ -1,4 +1,5 @@
 import type { CuttleProject, InputEvent, TranscriptWord } from '@cuttle/project';
+import type { MotionView } from './motion/runtime';
 
 /**
  * Contract between the main process and the export page. Pure types and constants: both sides
@@ -10,12 +11,51 @@ export type EncoderPreference = 'auto' | 'hardware' | 'software';
 /** Why an export failed; the CLI maps these to exit codes (see `ExportError`). */
 export type ExportErrorCode = 'invalid-project' | 'missing-file' | 'invalid-media' | 'ffmpeg-missing' | 'render' | 'cancelled';
 
+/** The job's motion pages (absolute paths), which the main process renders: the folder they may read, and each item's page. */
+export interface MotionPages {
+  root: string;
+  /** Scene index → its page. */
+  scenes: Record<number, string>;
+  /** Overlay index → its page. */
+  overlays: Record<number, string>;
+  /** Scene index → the page of the transition into it. */
+  transitions: Record<number, string>;
+}
+
+/** A motion page's frame: premultiplied RGBA, top row first (what the engine draws as `MotionPixels`). */
+export interface MotionPixels {
+  width: number;
+  height: number;
+  data: Uint8Array;
+}
+
+/** A frame of one showing of a motion item, which the page asks the main process for. */
+export interface MotionFrameRequest {
+  /** The showing: `scene:<index>`, `overlay:` and the overlay's `ActiveOverlay.key`, or a transition's `ActiveTransition.key`. */
+  key: string;
+  kind: 'scene' | 'overlay' | 'transition';
+  /** Its place in the project's `scenes` or `overlays` (a transition's: the scene it goes into). */
+  index: number;
+  /** Frame n is n / fps seconds into the showing. */
+  frame: number;
+  /** Where the showing starts in the video, and how long it lasts (output seconds). */
+  start: number;
+  duration: number;
+  /** The screen recording's size (source px). */
+  screen: { width: number; height: number };
+  /** An overlay's frame: where the clip under it shows the take. */
+  view?: MotionView;
+  /** A transition's frame: the outgoing and the incoming frame it draws from (the output's size, opaque). */
+  between?: { from: MotionPixels; to: MotionPixels };
+}
+
 /** Everything the page needs for one export. Paths are absolute; the page may read only these files. */
 export interface ExportJob {
   kind: 'video';
   /** Output size already set to the export format. */
   project: CuttleProject;
-  screen: string;
+  /** The screen recording; absent in a project without clips. */
+  screen?: string;
   /** Present when the webcam bubble is on. `offset`: seconds the webcam started after the screen. */
   webcam?: { path: string; offset: number };
   /** Present when the cursor is on and the project has events. */
@@ -28,6 +68,10 @@ export interface ExportJob {
   stills: Record<number, string>;
   /** Image for `look.background.preset: 'image'`. */
   backgroundImage?: string;
+  /** The watermark's image (`look.watermark.image`, else the brand's logo), when it is on. */
+  watermarkImage?: string;
+  /** Present when the project has motion scenes or overlays. */
+  motion?: MotionPages;
   encoder: EncoderPreference;
 }
 
@@ -99,6 +143,10 @@ export interface ExportHost {
   progress(done: number, total: number): void;
   /** Writes a PNG of a stills job: `still-<n>` (0-based, in the order of `times`) or `sheet`. */
   writeStill(name: string, data: Uint8Array): Promise<void>;
+  /** A motion item's frame (frames of one showing only go forward; an earlier one starts it again). */
+  motionFrame(request: MotionFrameRequest): Promise<MotionPixels>;
+  /** A showing is over: its page closes. */
+  motionDone(key: string): void;
 }
 
 /** IPC channel names; keep electron/export-page/preload.cjs in sync. */
@@ -110,4 +158,6 @@ export const CHANNELS = {
   write: 'cuttle-export:write',
   progress: 'cuttle-export:progress',
   writeStill: 'cuttle-export:write-still',
+  motionFrame: 'cuttle-export:motion-frame',
+  motionDone: 'cuttle-export:motion-done',
 } as const;

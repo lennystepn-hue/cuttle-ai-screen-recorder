@@ -24,6 +24,15 @@ export function uploadTexture(gl: WebGL2RenderingContext, texture: WebGLTexture,
   if (mipmaps) gl.generateMipmap(gl.TEXTURE_2D);
 }
 
+/** Uploads RGBA bytes that are premultiplied already, top row first, as they are. */
+export function uploadPixels(gl: WebGL2RenderingContext, texture: WebGLTexture, pixels: { width: number; height: number; data: Uint8Array }): void {
+  gl.bindTexture(gl.TEXTURE_2D, texture);
+  gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+  gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
+  gl.pixelStorei(gl.UNPACK_ALIGNMENT, 4);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, pixels.width, pixels.height, 0, gl.RGBA, gl.UNSIGNED_BYTE, pixels.data);
+}
+
 /** Pixel size of anything `texImage2D` accepts. */
 export function sourceSize(source: TexImageSource): Size {
   if ('displayWidth' in source) return { width: source.displayWidth, height: source.displayHeight }; // VideoFrame

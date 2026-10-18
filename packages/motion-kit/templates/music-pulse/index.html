@@ -1,0 +1,124 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <!--
+      Pulse: driving electronic music for a launch or a demo with momentum. Four on the floor where the
+      video is busy, a pad and a sub where it breathes, risers into the scene changes and a hit on each,
+      a whoosh on each zoom. The tempo is fitted so the scene changes fall on beats.
+      Change anything: it is a starting point for this video's own music.
+    -->
+    <script type="application/json" id="cuttle-params">
+      [
+        { "name": "key", "label": "Key", "type": "select", "default": "D", "options": ["C", "C#", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B"] },
+        { "name": "mode", "label": "Mode", "type": "select", "default": "minor", "options": ["minor", "dorian", "major", "mixolydian"] },
+        { "name": "progression", "label": "Chords", "type": "text", "default": "i VI III VII" },
+        { "name": "bpm", "label": "Tempo (0: fitted to the cuts)", "type": "number", "default": 0, "min": 0, "max": 180 },
+        { "name": "drive", "label": "Drive (0 to 1)", "type": "number", "default": 0.7, "min": 0, "max": 1 },
+        { "name": "energies", "label": "Energy by scene (Hook=3, s4=1)", "type": "text", "default": "" },
+        { "name": "hits", "label": "Risers and hits on the cuts", "type": "bool", "default": true }
+      ]
+    </script>
+  </head>
+  <body>
+    <script type="module">
+      import { song, kick, clap, hat, shaker, crash, bass, sub, pad, pluck, tom, fx, progression, voiceLead, sections, fitTempo, arp } from 'cuttle/sound';
+
+      cuttle.music((audio) => {
+        const { video, params } = audio;
+        const fitted = fitTempo(video, { min: 114, max: 128 });
+        const bpm = params.bpm > 0 ? params.bpm : fitted.bpm;
+        const s = song(audio, { bpm, offset: params.bpm > 0 ? 0 : fitted.offset, key: params.key, mode: params.mode, swing: 0.03 });
+        const chords = voiceLead(progression(params.key, params.mode, params.progression, 3), { low: 'G2', high: 'D4' });
+        // "Hook=3, s4=1": a scene's energy (0 quiet … 3 full) by its label or id
+        const energy = Object.fromEntries(String(params.energies ?? '').split(',').map((pair) => pair.split('=').map((x) => x.trim())).filter(([k, v]) => k && v !== undefined && v !== ''));
+        const parts = sections(video, { energy });
+        const partAt = (t) => parts.find((part) => t >= part.start && t < part.end);
+        const energyAt = (t) => partAt(t)?.energy ?? 2;
+        // inside a long part the music moves in 8-bar phrases: a groove, then a lift with the arpeggio
+        const lifted = (t) => {
+          const part = partAt(t);
+          return part ? Math.floor((s.barAt(t) - s.barAt(part.start) + 0.01) / 8) % 2 === 1 : false;
+        };
+        const drive = Number(params.drive);
+
+        const k = kick(s, { tone: 46, punch: 1.1, drive: 0.2 + 0.3 * drive });
+        const cl = clap(s, { gain: 0.6 });
+        const hh = hat(s, { gain: 0.26 });
+        const sh = shaker(s);
+        const cr = crash(s);
+        const low = bass(s, { cutoff: 380 + 260 * drive, envelope: 3.5, drive: 0.35 });
+        const deep = sub(s, { gain: 0.45 });
+        const air = pad(s, { voices: 3, detune: 16, cutoff: 1300, attack: 0.9, gain: 0.11 });
+        const arpeggio = pluck(s, { cutoff: 1100, gain: 0.11, decay: 0.16 });
+        const fill = tom(s, { gain: 0.6 });
+
+        const kicks = [];
+        let previous = -1;
+        for (const { bar, t } of s.bars(-1, video.duration)) {
+          const notes = chords[((bar % chords.length) + chords.length) % chords.length];
+          const energy = energyAt(Math.max(0, t));
+          // the pad holds the chord everywhere, brighter as the energy rises
+          air.play(Math.max(0, t), notes.map((n) => n + 12), s.bar, { velocity: 0.35 + 0.2 * energy, brightness: 0.5 + 0.25 * energy });
+          if (energy <= 1) deep.play(Math.max(0, t), notes[0] - 12, s.bar * 0.95, { velocity: 0.5 });
+          // a crash where the music lifts
+          if (energy > previous && previous >= 0 && energy >= 2 && t >= 0) cr.hit(t, 0.7);
+          previous = energy;
+          for (let beat = 0; beat < 4; beat++) {
+            const bt = s.time(bar, beat);
+            if (bt < 0 || bt >= video.duration) continue;
+            const e = energyAt(bt);
+            if (e >= 2) {
+              k.hit(bt, beat === 0 ? 1 : 0.92);
+              kicks.push(bt);
+              if (beat % 2 === 1) cl.hit(bt, 0.85);
+              hh.hit(s.time(bar, beat + 0.5), 0.75, { open: beat === 3 && e >= 3 });
+              low.play(bt, notes[0] - 12, s.beat * 0.45, { velocity: 0.9 });
+              low.play(s.time(bar, beat + 0.5), notes[0] - (beat === 3 ? 0 : 12), s.beat * 0.45, { velocity: 0.75 });
+            }
+            if (e >= 3) {
+              hh.hit(s.time(bar, beat + 0.25), 0.3);
+              hh.hit(s.time(bar, beat + 0.75), 0.35);
+              sh.hit(s.time(bar, beat + 0.5), 0.6);
+            }
+          }
+          // sixteenths over the chord where the video is busiest, and in the lifts
+          if (energy >= 3 || (energy >= 2 && (lifted(Math.max(0, t)) || drive > 0.85))) {
+            const line = arp(notes.map((n) => n + 24), { pattern: 'updown', octaves: 1 });
+            for (let i = 0; i < 16; i++) {
+              const at = s.time(bar, i / 4);
+              if (at >= 0 && at < video.duration && energyAt(at) >= 2) arpeggio.play(at, line[i % line.length], s.beat / 4, { velocity: i % 4 === 0 ? 1 : 0.7, pan: i % 2 ? 0.35 : -0.35 });
+            }
+          }
+          // a tom fill in the last beat before the music lifts
+          const next = s.time(bar + 1);
+          if (next < video.duration && energyAt(next) > energy) {
+            [0, 0.25, 0.5, 0.75].forEach((x, i) => fill.hit(s.time(bar, 3 + x), 0.55 + i * 0.12, ['D3', 'A2', 'F2', 'D2'][i]));
+          }
+        }
+        // the pad and the bass make room for the kick
+        s.duck(s.pads, kicks, { depth: 0.55, release: 0.22 });
+        s.duck(s.bassBus, kicks, { depth: 0.35, release: 0.12 });
+
+        // the scene changes: a riser into each, a hit on it
+        if (params.hits) {
+          for (const cut of video.cuts.filter((c) => !c.jump)) {
+            const before = video.scenes.find((scene) => Math.abs(scene.end - cut.t) < 1e-3);
+            const room = before ? before.end - before.start : 2;
+            fx.riser(audio, cut.t, { length: Math.min(1.8, room * 0.6), volume: 0.5 });
+            fx.impact(audio, cut.t, { volume: 0.6 });
+          }
+          if (video.duration > 1) fx.subDrop(audio, 0.02, { volume: 0.6 });
+        }
+        // air past the camera on each zoom
+        for (const zoom of video.zooms) fx.whoosh(audio, zoom.start + 0.15, { length: 0.6, volume: 0.3 });
+
+        return {
+          bpm,
+          key: `${params.key} ${params.mode}`,
+          sections: parts.map((part) => ({ start: part.start, end: part.end, name: part.name, energy: part.energy })),
+        };
+      });
+    </script>
+  </body>
+</html>

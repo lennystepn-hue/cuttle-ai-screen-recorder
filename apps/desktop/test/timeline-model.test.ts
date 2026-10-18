@@ -86,12 +86,85 @@ describe('timelineModel', () => {
     ]);
   });
 
+  it('draws motion overlays on a lane of their own, named by their page, and counts those no clip shows', () => {
+    const motion = project({
+      scenes: [
+        { type: 'clip', from: 0, to: 4 },
+        { type: 'motion', src: 'motion/title/index.html', duration: 2 },
+      ],
+      overlays: [
+        { src: 'motion/lower-third/index.html', at: 1, duration: 2, label: 'Name' },
+        { src: 'motion/click-callouts/index.html', at: 0, duration: 4 },
+        { src: 'motion/late.html', at: 9, duration: 1 },
+      ],
+    });
+    const motionSpans = sceneSpans(motion.scenes);
+    const lanes = timelineModel(motion, motionSpans, []);
+    expect(lanes.scenes.map((scene) => [scene.kind, scene.title])).toEqual([
+      ['clip', 'Clip'],
+      ['motion', 'title'],
+    ]);
+    // overlapping ones on rows of their own
+    expect(lanes.lanes.motion.blocks.map((block) => [block.title, block.start, block.end, block.row])).toEqual([
+      ['click-callouts', 0, 4, 0],
+      ['Name', 1, 3, 1],
+    ]);
+    expect(lanes.lanes.motion.cutOutItems.map((item) => item.title)).toEqual(['late']);
+    expect(exportChecks(motion, motionSpans)).toEqual(['1 motion overlay is cut out: no clip shows it.']);
+  });
+
+  it('draws sounds as chips where the video plays them, in a scene that far in, and the music over the whole video', () => {
+    const sounds = project({
+      scenes: [
+        { type: 'card', id: 'c1', title: 'Hi', duration: 2 },
+        { type: 'clip', from: 0, to: 4 },
+        { type: 'clip', from: 2, to: 6, speed: 2 },
+      ],
+      sounds: [
+        { id: 'a1', sound: 'whoosh', at: 3 },
+        { id: 'a2', sound: 'sounds/ding.wav', at: 1.5, scene: 'c1', label: 'Hello' },
+        { id: 'a3', sound: 'pop', at: 9 },
+        { id: 'a4', sound: 'tick', at: 3, enabled: false },
+      ],
+      music: { src: 'music/pulse/index.html', enabled: false },
+    });
+    const model = timelineModel(sounds, sceneSpans(sounds.scenes), []);
+    // 3 s is in both clips: at 2 + 3 and at 6 + (3 − 2) / 2
+    expect(model.lanes.sound.blocks.map((block) => [block.id, block.title, block.start, block.end - block.start, block.enabled])).toEqual([
+      ['a2', 'Hello', 1.5, 0.5, true],
+      ['a1', 'whoosh', 5, 0.5, true],
+      ['a4', 'tick', 5, 0.5, false],
+      ['a1', 'whoosh', 6.5, 0.5, true],
+      ['a4', 'tick', 6.5, 0.5, false],
+    ]);
+    expect(model.lanes.sound.rows).toBe(2);
+    expect(model.lanes.sound.cutOutItems).toEqual([{ id: 'a3', title: 'pop' }]);
+    expect(model.music).toEqual({ title: 'pulse', src: 'music/pulse/index.html', enabled: false });
+    expect(timelineModel(demo, spans, []).music).toBeUndefined();
+    expect(exportChecks(sounds, sceneSpans(sounds.scenes))).toEqual(['1 sound is cut out: no clip shows it.']);
+  });
+
   it('pins markers where a clip shows them; a cut-out marker has no pin', () => {
     expect(model.markers.map((pin) => [pin.t, pin.kind])).toEqual([
       [2.5, 'prompt'],
       [3.25, 'tool'],
       [4.75, 'answer'],
     ]);
+  });
+
+  it("names a step's pin by its number and title in the script, and by its id when the script lost it", () => {
+    const scripted = project({ ...demo, script: [{ id: 'step1', title: 'Open the settings' }, { id: 'step2', title: 'Turn on dark mode' }] });
+    const steps = timelineModel(scripted, spans, [
+      { t: 0, kind: 'step', label: 'step1' },
+      { t: 2, kind: 'step', label: 'step2' },
+      { t: 9, kind: 'step', label: 'step9' },
+    ]).markers;
+    expect(steps.map((pin) => [pin.t, pin.label])).toEqual([
+      [0, '1 · Open the settings'],
+      [2, '2 · Turn on dark mode'],
+      [4.75, 'step9'],
+    ]);
+    expect(groupPins(steps, 1).map(pinGroupName)).toEqual(['1 · Open the settings', '2 · Turn on dark mode', 'step9']);
   });
 });
 

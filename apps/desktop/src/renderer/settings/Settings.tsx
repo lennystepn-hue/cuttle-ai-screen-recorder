@@ -4,6 +4,7 @@ import { useEffect, useLayoutEffect, useRef, useState, type ComponentType, type 
 import type { Motion, RequestArgument, SettingsPage, SettingsView, SpeechLanguage, SpeechModelName, SpeechStatus, ToolsStatus } from '../../shared/ipc';
 import { bridge } from '../bridge';
 import { CheckIcon, CloseIcon, CopyIcon, FolderIcon, GearIcon, Mark, MaskIcon, MicIcon, RecordIcon, TerminalIcon, WarningIcon } from '../icons';
+import { hotkeyKeys } from '../keys';
 import { Select } from '../Select';
 import { PrivacySettings } from './PrivacySettings';
 
@@ -38,13 +39,11 @@ function ago(at: number): string {
 /** A request's failure, said in its first line (the rest is for logs). */
 const firstLine = (error: unknown) => (error instanceof Error ? error.message : String(error)).replace(/^Error invoking remote method '[^']+': (Error: )?/, '').split('\n')[0]!;
 
-/** The modifier keys as a Mac names them. */
-const MAC_KEYS: Record<string, string> = { Ctrl: '⌃', Shift: '⇧', Alt: '⌥', Cmd: '⌘' };
-/** Keys as the editor writes them: one chip per key (the Mac's symbols on a Mac). */
+/** A recording hotkey: one chip per key (the Mac's symbols, in its order, on a Mac). */
 const Keys = ({ keys }: { keys: string }) => (
   <span className="keys">
-    {keys.split('+').map((key) => (
-      <kbd key={key}>{MAC ? (MAC_KEYS[key] ?? key) : key}</kbd>
+    {hotkeyKeys(keys).map((key) => (
+      <kbd key={key}>{key}</kbd>
     ))}
   </span>
 );
@@ -377,6 +376,26 @@ function SpeechSettings({ view, change }: { view: SettingsView | undefined; chan
           label="Language"
           testid="speech-language"
         />
+      </Row>
+      <Row
+        label="Live captions while recording"
+        hint={
+          status && !status.models.some((entry) => entry.installed)
+            ? 'The HUD shows what the mic hears as you speak. It needs a speech model: download one above.'
+            : 'The HUD shows what the mic hears as you speak, with the fastest model downloaded. Nothing of it is saved.'
+        }
+      >
+        <button
+          className="toggle"
+          role="switch"
+          aria-checked={view?.speech.live ?? true}
+          aria-label="Live captions while recording"
+          disabled={!view}
+          onClick={() => view && change({ speechLive: !view.speech.live })}
+          data-testid="speech-live"
+        >
+          <i />
+        </button>
       </Row>
     </>
   );

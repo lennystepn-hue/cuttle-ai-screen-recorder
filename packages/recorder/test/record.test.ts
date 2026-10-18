@@ -28,6 +28,9 @@ function probe(file: string) {
   return { ...streams[0], duration: Number(format.duration) };
 }
 
+/** A spoken sentence, for the spoken test mic. */
+const SPEECH = join(import.meta.dirname, '..', '..', 'core', 'test', 'fixtures', 'speech', 'en.m4a');
+
 const read = (projectDir: string, file: string) => readFileSync(join(projectDir, file), 'utf8');
 
 function markersOf(projectDir: string, file: string) {
@@ -80,13 +83,13 @@ describe.concurrent('record (test backend)', () => {
     });
     expect(probe(join(projectDir, take.screen))).toEqual({ codec_name: 'h264', width: 1280, height: 720, color_transfer: 'bt709', duration: expect.closeTo(take.seconds, 1) });
     expect(probe(join(projectDir, take.webcam!))).toMatchObject({ codec_name: 'h264', width: 640, height: 480, color_transfer: 'bt709' });
-    expect(probe(join(projectDir, take.mic!))).toMatchObject({ codec_name: 'aac', sample_rate: '48000', duration: expect.closeTo(3, 0) });
-
     const takeFile = parseTakeJson(read(projectDir, 'takes/1/take.json'));
     if (!takeFile.ok) throw new Error(JSON.stringify(takeFile.issues));
     // each track's start is recorded (the engine lines them up); a loaded machine starts one late
     expect(Math.abs(trackOffset(takeFile.take, 'webcam')!)).toBeLessThan(0.5);
     expect(Math.abs(trackOffset(takeFile.take, 'mic')!)).toBeLessThan(0.5);
+    // the mic runs to the stop from its own start: as long as the take, and as much longer as it started earlier
+    expect(probe(join(projectDir, take.mic!))).toMatchObject({ codec_name: 'aac', sample_rate: '48000', duration: expect.closeTo(take.seconds - trackOffset(takeFile.take, 'mic')!, 0) });
 
     const { events: input, issues } = parseEventsJsonl(read(projectDir, take.events));
     expect(issues).toEqual([]);
@@ -100,10 +103,53 @@ describe.concurrent('record (test backend)', () => {
       { t: expect.closeTo(markedSecond, 1), kind: 'manual', label: 'one second' },
       { t: expect.closeTo(slipSecond, 1), kind: 'retake' },
     ]);
-    expect(events.map((event) => event.type)).toEqual(['processes', 'recording', 'marker', 'marker', 'stopping']);
+    expect(events.filter((event) => event.type !== 'level').map((event) => event.type)).toEqual(['processes', 'recording', 'marker', 'marker', 'stopping']);
+    // the mic's level while it records: the test mic's sine at 1/8 of full scale is about -21 dBFS
+    const levels = events.flatMap((event) => (event.type === 'level' ? [event.rms] : []));
+    expect(levels.length).toBeGreaterThan(15);
+    expect(levels.every((rms) => rms > -22.5 && rms < -19.5)).toBe(true);
     // screen, webcam and mic: the app kills these when its recorder host dies
     const processes = events[0]!;
     expect(processes.type === 'processes' && processes.pids.length === 3 && processes.pids.every(Number.isInteger)).toBe(true);
+  }, SLOW);
+
+  it("moves through the script's steps: the first at the first frame, then a marker for each move, none past either end", async () => {
+    const projectDir = project();
+    const events: RecorderEvent[] = [];
+    const moves: number[] = [];
+    const recording = record({
+      ...test,
+      projectDir,
+      steps: ['step1', 'step2', 'step3'],
+      stop: { maxSeconds: 2.5 },
+      onEvent: (event) => {
+        events.push(event);
+        if (event.type !== 'recording') return;
+        setTimeout(() => {
+          recording.previous(); // at the first step: nothing
+          moves.push(Date.now() / 1000);
+          recording.next();
+        }, 700);
+        setTimeout(() => {
+          moves.push(Date.now() / 1000);
+          recording.next();
+          recording.next(); // past the last: nothing
+          recording.previous();
+        }, 1400);
+      },
+    });
+    const take = await recording.done;
+    const takeFile = parseTakeJson(read(projectDir, 'takes/1/take.json'));
+    if (!takeFile.ok) throw new Error(JSON.stringify(takeFile.issues));
+    const [second, third] = moves.map((at) => at - takeFile.take.tracks.screen.start);
+    expect(markersOf(projectDir, take.markers)).toEqual([
+      { t: 0, kind: 'step', label: 'step1' },
+      { t: expect.closeTo(second!, 1), kind: 'step', label: 'step2' },
+      { t: expect.closeTo(third!, 1), kind: 'step', label: 'step3' },
+      { t: expect.closeTo(third!, 1), kind: 'step', label: 'step2' },
+    ]);
+    // each step reaches the host as a marker event, the first right after the recording one
+    expect(events.filter((event) => event.type === 'recording' || event.type === 'marker').map((event) => (event.type === 'marker' ? event.marker.label : event.type))).toEqual(['recording', 'step1', 'step2', 'step3', 'step2']);
   }, SLOW);
 
   it('stops once untilFile exists', async () => {
@@ -140,12 +186,84 @@ describe.concurrent('record (test backend)', () => {
   it('stops when asked and warns about a silent microphone', async () => {
     const projectDir = project();
     const warnings: string[] = [];
-    const recording = record({ ...test, projectDir, mic: 'Silent Test Microphone', stop: {}, onEvent: (event) => event.type === 'warning' && warnings.push(event.message) });
+    const levels: number[] = [];
+    const recording = record({
+      ...test,
+      projectDir,
+      mic: 'Silent Test Microphone',
+      stop: {},
+      onEvent: (event) => {
+        if (event.type === 'warning') warnings.push(event.message);
+        if (event.type === 'level') levels.push(event.rms, event.peak);
+      },
+    });
     await sleep(2000);
     const take = await recording.stop();
     expect(take.stopReason).toBe('stop');
     expect(take.warnings).toEqual(['the microphone "Silent Test Microphone" records silence: it may be muted, or blocked for desktop apps (Windows: Settings > Privacy & security > Microphone)']);
     expect(warnings).toEqual(take.warnings);
+    // its level says so too: digital silence
+    expect(levels.length).toBeGreaterThan(0);
+    expect(new Set(levels)).toEqual(new Set([-90]));
+  }, SLOW);
+
+  it("hands the mic's samples to onAudio while it records: whole samples, as long as the take", async () => {
+    const projectDir = project();
+    const chunks: Uint8Array[] = [];
+    let recordingSeen = false;
+    let early = 0;
+    const take = await record({
+      ...test,
+      projectDir,
+      mic: 'Test Microphone',
+      stop: { maxSeconds: 1.5 },
+      onEvent: (event) => {
+        if (event.type === 'recording') recordingSeen = true;
+      },
+      onAudio: (samples) => {
+        if (!recordingSeen) early++;
+        chunks.push(samples.slice());
+      },
+    }).done;
+    expect(early).toBe(0);
+    expect(chunks.every((samples) => samples.length % 2 === 0)).toBe(true);
+    const seconds = chunks.reduce((sum, samples) => sum + samples.length, 0) / 2 / 16_000;
+    expect(seconds).toBeGreaterThan(take.seconds - 0.5);
+    expect(seconds).toBeLessThan(take.seconds + 0.5);
+  }, SLOW);
+
+  it('stops handing samples to an onAudio that throws, with a warning, and keeps the take', async () => {
+    let calls = 0;
+    const take = await record({
+      ...test,
+      projectDir: project(),
+      mic: 'Test Microphone',
+      stop: { maxSeconds: 1.5 },
+      onAudio: () => {
+        calls++;
+        throw new Error('listener bug');
+      },
+    }).done;
+    expect(calls).toBe(1);
+    expect(take.mic).toBe('takes/1/mic.m4a');
+    expect(take.warnings).toEqual(['onAudio failed: listener bug']);
+  }, SLOW);
+
+  it('records the spoken test mic: the sound file CUTTLE_TEST_SPEECH names, looped', async () => {
+    process.env.CUTTLE_TEST_SPEECH = SPEECH;
+    const levels: number[] = [];
+    const take = await record({
+      ...test,
+      projectDir: project(),
+      mic: 'Spoken Test Microphone',
+      stop: { maxSeconds: 2 },
+      onEvent: (event) => event.type === 'level' && levels.push(event.rms),
+    }).done;
+    expect(take.warnings).toEqual([]);
+    expect(take.mic).toBe('takes/1/mic.m4a');
+    // speech: loud and quiet tenths of a second
+    expect(Math.max(...levels)).toBeGreaterThan(-35);
+    expect(Math.min(...levels)).toBeLessThan(Math.max(...levels) - 10);
   }, SLOW);
 
   it('turns a throwing onEvent into a warning instead of a failed take', async () => {
@@ -222,6 +340,8 @@ describe.concurrent('record (test backend)', () => {
       [{ stop: { maxSeconds: 0 } }, 'invalid-options'],
       [{ stop: { untilFile: flag } }, 'invalid-options'],
       [{ countdownSeconds: -1 }, 'invalid-options'],
+      [{ steps: ['step1', 'step1'] }, 'invalid-options'],
+      [{ steps: [''] }, 'invalid-options'],
       [{ mic: 'No Such Microphone' }, 'device-not-found'],
       [{ source: { kind: 'monitor', index: 7 } }, 'device-not-found'],
     ];
@@ -264,8 +384,10 @@ describe.concurrent('pausing a take (test backend)', () => {
     const elapsed = Date.now() / 1000 - started;
 
     expect(take.stopReason).toBe('max-seconds');
-    // 5 s of take (room for two segments that start late on a loaded machine), and at least a second more of pauses on the clock
-    expect(take.seconds).toBeCloseTo(5, 0);
+    // 5 s of take (room for three segments that start or stop late on a loaded machine, as GitHub's
+    // macOS runners are), and at least a second more of pauses on the clock
+    expect(take.seconds).toBeGreaterThan(4.5);
+    expect(take.seconds).toBeLessThan(6);
     expect(elapsed).toBeGreaterThan(take.seconds + 1);
     expect(events.filter((type) => type === 'paused')).toHaveLength(2);
     expect(events.filter((type) => type === 'resumed')).toHaveLength(2);

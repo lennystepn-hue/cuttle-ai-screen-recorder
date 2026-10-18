@@ -1,12 +1,12 @@
 /** The lists whose items carry ids, and the prefix of the ids Cuttle gives their new items. */
-export const ID_PREFIXES = { scenes: 's', zooms: 'z', masks: 'm', texts: 't', cuts: 'c' } as const;
+export const ID_PREFIXES = { scenes: 's', zooms: 'z', masks: 'm', texts: 't', overlays: 'o', cuts: 'c', sounds: 'a' } as const;
 
 export type IdList = keyof typeof ID_PREFIXES;
 
-/** The ids a project's items use; the project may be parsed or as written (unchecked). */
-export function usedIds(project: Partial<Record<IdList, unknown>>): Set<string> {
+/** The ids a project's items use, its script's steps' too; the project may be parsed or as written (unchecked). */
+export function usedIds(project: Partial<Record<IdList | 'script', unknown>>): Set<string> {
   const ids = new Set<string>();
-  for (const list of Object.keys(ID_PREFIXES) as IdList[]) {
+  for (const list of [...(Object.keys(ID_PREFIXES) as IdList[]), 'script' as const]) {
     const items = project[list];
     if (!Array.isArray(items)) continue;
     for (const item of items) {

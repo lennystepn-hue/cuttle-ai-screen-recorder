@@ -24,6 +24,8 @@ const SIZE = { width: 820, height: 620 };
 const WELCOME_SIZE = { width: 640, height: 640 };
 
 let current: BrowserWindow | undefined;
+/** The window while it closes: asked again meanwhile, a new one opens once it is gone (it would show nothing). */
+let closing: Promise<void> | undefined;
 
 /** Characters Windows does not take in a folder name. */
 const BAD_NAME = /[<>:"/\\|?*\u0000-\u001f]|^\.+$/;
@@ -51,6 +53,7 @@ async function viewNow(): Promise<SettingsView> {
 
 /** Shows the settings window (`welcome`: the first run; `page`: at that page), or brings it forward. */
 export async function openSettings(options: { welcome?: boolean; page?: SettingsPage } = {}): Promise<BrowserWindow> {
+  if (closing) await closing;
   if (current && !current.isDestroyed()) {
     if (options.page) send(current.webContents, 'settings:page', options.page);
     bringToFront(current);
@@ -90,6 +93,7 @@ export async function openSettings(options: { welcome?: boolean; page?: Settings
         if (change.motion !== undefined) settings.motion = change.motion;
         if (change.speechModel !== undefined) settings.speech.model = change.speechModel;
         if (change.speechLanguage !== undefined) settings.speech.language = change.speechLanguage;
+        if (change.speechLive !== undefined) settings.speech.live = change.speechLive;
         if (change.privacyRead !== undefined) settings.privacy.read = change.privacyRead;
         // each word once, as it was first written
         if (change.privacyWords !== undefined) settings.privacy.words = change.privacyWords.filter((word, k, all) => all.findIndex((other) => other.toLowerCase() === word.toLowerCase()) === k);
@@ -166,6 +170,12 @@ export async function openSettings(options: { welcome?: boolean; page?: Settings
   }
   window.on('closed', () => {
     if (current === window) current = undefined;
+  });
+  window.on('close', () => {
+    if (current === window) closing ??= new Promise((resolve) => window.once('closed', () => resolve()));
+  });
+  window.on('closed', () => {
+    closing = undefined;
   });
   // which projects are open changes while the window is away
   window.on('focus', () => void viewNow().then(changed));

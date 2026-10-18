@@ -3,6 +3,7 @@
 import { useEffect } from 'react';
 import { bridge } from '../bridge';
 import { ChevronIcon, CloseIcon, FolderIcon, Mark } from '../icons';
+import { hotkey } from '../keys';
 
 export function Pill() {
   useEffect(() => {
@@ -16,7 +17,7 @@ export function Pill() {
     <div className="pill-wrap">
       <div className="pill" role="toolbar" aria-label="Cuttle">
         <Mark size={36} />
-        <button className="main" onClick={() => void bridge.invoke('pill:record')} title="Pick a screen, a window or a region (Ctrl+Shift+Alt+R)" data-testid="new-recording">
+        <button className="main" onClick={() => void bridge.invoke('pill:record')} title={`Pick a screen, a window or a region (${hotkey('Ctrl+Shift+Alt+R')})`} data-testid="new-recording">
           <i />
           New recording <kbd>Ctrl Shift Alt R</kbd>
         </button>

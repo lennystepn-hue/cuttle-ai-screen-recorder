@@ -1,12 +1,18 @@
 import { Command, CommanderError, InvalidArgumentError, Option } from 'commander';
+import { backgroundCommand, type BackgroundArgs } from './commands/background';
+import { brandApplyCommand, brandListCommand, brandRemoveCommand, brandSaveCommand } from './commands/brand';
 import { capturePageCommand } from './commands/capture-page';
 import { devices } from './commands/devices';
+import { fitCommand } from './commands/fit';
 import { frameCommand } from './commands/frame';
 import { init } from './commands/init';
+import { motionCheckCommand, motionNewCommand, motionTemplatesCommand } from './commands/motion';
+import { musicCheckCommand, musicNewCommand, musicSetCommand, musicTemplatesCommand, soundAddCommand, soundListCommand } from './commands/music';
 import { previewCommand } from './commands/preview';
 import { recordCommand } from './commands/record';
 import { recoverCommand } from './commands/recover';
 import { renderCommand } from './commands/render';
+import { chaptersCommand } from './commands/chapters';
 import { suggestCommand } from './commands/suggest';
 import { modelsDownloadCommand, modelsListCommand, modelsRemoveCommand } from './commands/models';
 import { transcribeCommand } from './commands/transcribe';
@@ -37,6 +43,21 @@ const pixels = (value: string): number => {
   return parsed;
 };
 const collect = (value: string, previous: number[] = []): number[] => [...previous, seconds(value)];
+const fraction = (value: string): number => {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed < 0 || parsed > 1) throw new InvalidArgumentError('expected a number from 0 to 1');
+  return parsed;
+};
+const degrees = (value: string): number => {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed < 0 || parsed > 360) throw new InvalidArgumentError('expected degrees from 0 to 360');
+  return parsed;
+};
+const decibels = (value: string): number => {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed < 0 || parsed > 40) throw new InvalidArgumentError('expected decibels from 0 to 40');
+  return parsed;
+};
 
 /** `--json` before a `--`: usage errors then answer in JSON too. */
 const wantsJson = (argv: readonly string[]): boolean => {
@@ -136,7 +157,7 @@ export async function runCli(argv: readonly string[], streams?: Streams): Promis
 
   program
     .command('suggest')
-    .description('propose scenes (quiet start and end trimmed, idle cut, waiting sped up, cropped to the content), a zoom on the answer, zooms on dialogs, zooms that follow typing and zooms on clicks')
+    .description("propose scenes (quiet start and end trimmed, idle cut, waiting sped up, cropped to the content), a zoom on the answer, zooms on dialogs, zooms that follow typing and zooms on clicks, and the script's steps' titles and zooms")
     .option('--claude [cwd]', "read Claude Code's transcript for a take without Claude markers (default: here)")
     .option('--no-zoom', 'no zooms (neither on the answer, nor on dialogs, nor on typing, nor on clicks)')
     .option('--no-crop', 'no crop to the content (a browser\'s page without its tabs and bars)')
@@ -145,11 +166,14 @@ export async function runCli(argv: readonly string[], streams?: Streams): Promis
     .option('--no-dialog-zooms', 'no zooms on dialogs')
     .option('--no-typing-zooms', 'no zooms that follow typing')
     .option('--no-click-zooms', 'no zooms on clicks (the answer zoom stays)')
+    .option('--no-step-zooms', "no zooms on where the script's steps happen")
+    .option('--no-step-titles', "no titles for the script's steps")
     .option('--no-speech', 'leave the speech out: no filler, pause or spoken retake cuts, and speech does not keep a stretch')
     .option('--no-transcribe', 'do not transcribe the mic first (when it has no transcript and a speech model is there)')
+    .option('--length <seconds>', 'fit the video to this length: what rests is cut, never speech, clicks or typing', positive)
     .option('--dry-run', 'print the suggestion, leave cuttle.json as it is')
     .action(
-      action((output, project, { mask, ...options }: { claude?: string | true; zoom: boolean; crop: boolean; privacy: boolean; mask: string[]; dialogZooms: boolean; typingZooms: boolean; clickZooms: boolean; speech: boolean; transcribe: boolean; dryRun?: boolean }) =>
+      action((output, project, { mask, ...options }: { claude?: string | true; zoom: boolean; crop: boolean; privacy: boolean; mask: string[]; dialogZooms: boolean; typingZooms: boolean; clickZooms: boolean; stepZooms: boolean; stepTitles: boolean; speech: boolean; transcribe: boolean; length?: number; dryRun?: boolean }) =>
         suggestCommand(project, { ...options, ...(mask.length > 0 && { maskWords: mask }) }, output),
       ),
     );
@@ -190,6 +214,108 @@ export async function runCli(argv: readonly string[], streams?: Streams): Promis
       ),
     );
 
+  const motion = program.command('motion').description('motion pages: scenes and overlays drawn by code (HTML, CSS, canvas, WebGL)');
+  motion
+    .command('new <template>')
+    .description('copy a template into motion/<name>/ and add it: a scene at the end, an overlay over the clips, or the transition into a scene (motion templates lists them)')
+    .option('--name <name>', 'the folder in motion/ (default: the template\'s name)')
+    .option('--at <seconds>', 'an overlay\'s start, in source seconds (default: the first clip\'s start)', seconds)
+    .option('--duration <seconds>', 'how long it lasts (default: the template\'s; a callout or caption overlay: the whole take)', positive)
+    .option('--first', 'a scene goes first instead of last (an intro)')
+    .option('--into <scene>', 'a transition: the scene it leads into, by id or place from 0 (default: the second scene)')
+    .action(action((output, project, template: string, options: { name?: string; at?: number; duration?: number; first?: boolean; into?: string }) => motionNewCommand(project, template, options, output)));
+  motion
+    .command('templates')
+    .description('the templates motion new copies: their kind and what they show')
+    .action(action((output) => motionTemplatesCommand(output)));
+  motion
+    .command('check <src>')
+    .description('render a motion page frame by frame as the export draws it: PNGs, a contact sheet, its errors and console')
+    .option('--duration <seconds>', 'how long it lasts (default: as in cuttle.json, else 3)', positive)
+    .option('--at <seconds...>', 'seconds into it (default: 8 from its start to its end)', collect)
+    .option('--format <format>', '16:9, 1:1 or 9:16 (default: the project output)')
+    .option('-o, --out <dir>', 'folder for the PNGs (default: preview/motion-<name>/ in the project)')
+    .action(
+      action((output, project, src: string, options: { duration?: number; at?: number[]; format?: string; out?: string }) =>
+        withSignal(output, (signal) => motionCheckCommand(project, src, options, output, signal)),
+      ),
+    );
+
+  const music = program.command('music').description('the video\'s music: a page that composes it for this video in WebAudio, fitted to its scenes and cuts');
+  music
+    .command('new <template>')
+    .description('copy a music template into music/<name>/ and make it the video\'s music (music templates lists them)')
+    .option('--name <name>', 'the folder in music/ (default: the template\'s name)')
+    .action(action((output, project, template: string, options: { name?: string }) => musicNewCommand(project, template, options, output)));
+  music
+    .command('templates')
+    .description('the music templates music new copies')
+    .action(action((output) => musicTemplatesCommand(output)));
+  music
+    .command('set')
+    .description('the music\'s level, its duck under speech, its page\'s params, its page, or on and off')
+    .option('--volume <0-1>', 'its level', (value: string) => fraction(value))
+    .option('--duck <dB>', 'how far it goes down under speech (0: not at all)', (value: string) => decibels(value))
+    .option('--param <name=value...>', 'a param of the page (name= removes it)', (value: string, previous: string[] = []) => [...previous, value])
+    .option('--src <page>', 'another page in the project')
+    .option('--on', 'play it')
+    .option('--off', 'leave it out')
+    .action(action((output, project, options: { volume?: number; duck?: number; param?: string[]; src?: string; on?: boolean; off?: boolean }) => musicSetCommand(project, options, output)));
+  music
+    .command('check')
+    .description('render the music and sounds alone: a WAV, a sheet of the waveforms over the scenes, loudness, hits on the scene changes, errors')
+    .option('--src <page>', 'check this page instead of the project\'s music')
+    .option('-o, --out <dir>', 'folder for music.wav and music.png (default: preview/ in the project)')
+    .action(action((output, project, options: { src?: string; out?: string }) => withSignal(output, (signal) => musicCheckCommand(project, options, output, signal))));
+
+  program
+    .command('background')
+    .argument('[preset]', 'sunset-sky, aurora, mesh, solid, image, gradient, flow, bokeh or dots (default: the one it has, or what the options ask for)')
+    .description('the background behind the window: a preset, a gradient of your colours or the product\'s, an image or the desktop\'s wallpaper, softened and darkened')
+    .option('--colors <list>', 'colours, comma-separated: a gradient\'s stops (2 to 4), or the tints of mesh, flow, bokeh and dots')
+    .option('--from <source>', 'the colours read off "take" (the screen recording), "logo" (the brand\'s) or an image file')
+    .option('--angle <degrees>', 'a gradient\'s direction: 0 to the top, 90 to the right (default 135)', degrees)
+    .option('--radial', 'a gradient from the centre out')
+    .option('--linear', 'a gradient along its angle (the default)')
+    .option('--color <hex>', 'the solid background\'s colour')
+    .option('--image <file>', 'an image (copied into images/ when it is outside the project)')
+    .option('--wallpaper', 'the desktop\'s wallpaper as the image, softened (copied into images/)')
+    .option('--blur <0-1>', 'how soft the image is: 0 sharp, 1 a wash of its colours', fraction)
+    .option('--dim <0-0.8>', 'how much darker the image is', fraction)
+    .action(action((output, project, preset: string | undefined, options: BackgroundArgs) => backgroundCommand(project, preset, options, output)));
+
+  const brand = program.command('brand').description('brand kits: a project\'s theme (name, URL, logo, colours, heading font), background, frame and cursor, saved once and applied with one command');
+  brand
+    .command('list', { isDefault: true })
+    .description('the saved brand kits, and where they are kept')
+    .action(action((output) => brandListCommand(output)));
+  brand
+    .command('save <name>')
+    .description('save the project\'s brand as a kit (replaces a kit of that name), with copies of its logo and background image')
+    .action(action((output, project, name: string) => brandSaveCommand(project, name, output)));
+  brand
+    .command('apply <name>')
+    .description('set a kit\'s theme, background, frame style and cursor in the project (its files are copied into brand/)')
+    .action(action((output, project, name: string) => brandApplyCommand(project, name, output)));
+  brand
+    .command('remove <name>')
+    .description('remove a saved kit (projects keep what it set)')
+    .action(action((output, _project, name: string) => brandRemoveCommand(name, output)));
+
+  const sound = program.command('sound').description('sounds at moments of the video: built-in effects or files of the project');
+  sound
+    .command('list')
+    .description('the built-in sounds')
+    .action(action((output) => soundListCommand(output)));
+  sound
+    .command('add <sound>')
+    .description('a built-in sound or a file of the project at a moment: source seconds (where the video shows it), or --scene seconds into a scene')
+    .requiredOption('--at <seconds>', 'source seconds, or seconds into --scene', seconds)
+    .option('--scene <id>', 'a scene\'s id: --at counts from its start')
+    .option('--volume <0-1>', 'its level (default 0.8)', (value: string) => fraction(value))
+    .option('--label <text>', 'a name for it')
+    .action(action((output, project, name: string, options: { at: number; scene?: string; volume?: number; label?: string }) => soundAddCommand(project, name, options, output)));
+
   program
     .command('capture-page <target>')
     .description('a web page (URL or file) as a PNG in stills/, optionally as a still scene')
@@ -205,6 +331,13 @@ export async function runCli(argv: readonly string[], streams?: Streams): Promis
         withSignal(output, (signal) => capturePageCommand(project, target, options, output, signal)),
       ),
     );
+
+  program
+    .command('fit')
+    .description('fit the video to a length after your edits: cut where it rests, never speech, clicks, typing, a zoom or a text (cuts tagged "length"; a new fit replaces them)')
+    .argument('[seconds]', 'the length in seconds', positive)
+    .option('--off', 'take the fit out: the full length again')
+    .action(action((output, project, length: number | undefined, options: { off?: boolean }) => fitCommand(project, length, options.off === true, output)));
 
   program
     .command('frame')
@@ -236,6 +369,11 @@ export async function runCli(argv: readonly string[], streams?: Streams): Promis
     .option('--vtt', 'the captions as WebVTT')
     .option('--text', 'the words as plain text')
     .action(action((output, project, options: { srt?: boolean; vtt?: boolean; text?: boolean }) => transcriptCommand(project, options, output)));
+
+  program
+    .command('chapters')
+    .description("the video's chapters from the script's steps: as the export writes them into the MP4, and as lines for a YouTube description")
+    .action(action((output, project) => chaptersCommand(project, output)));
 
   program
     .command('recover <take>')

@@ -2,12 +2,15 @@
 // WebCodecs). Started by the Node CLI (electron-runner.ts) with one base64 JSON request and an IPC
 // channel, which carries the answer back and a cancel in; progress and warnings go to stderr.
 // Loaded by bootstrap.ts, which handles uncaught exceptions.
-import { app } from 'electron';
-import { SUBTITLE_FORMATS, exportProject, isExportFormat, renderStills, type EncoderPreference, type ExportFormat, type SubtitleFormat } from '@cuttle/export';
+import { app, protocol } from 'electron';
+import { MOTION_SCHEME_PRIVILEGES, SUBTITLE_FORMATS, checkMusic, exportProject, isExportFormat, renderStills, type EncoderPreference, type ExportFormat, type SubtitleFormat } from '@cuttle/export';
 import { capturePage } from './capture-page';
 import { failure, finish } from './finish';
-import { decodeRequest, type CancelMessage, type ElectronRequest, type ElectronResponse } from './protocol';
+import { decodeRequest, type CancelMessage, type ElectronRequest, type ElectronResponse, type MotionCheck } from './protocol';
+import type { CuttleProject } from '@cuttle/project';
 
+// Motion pages are served from a scheme of their own, which must be known before the app is ready.
+protocol.registerSchemesAsPrivileged([MOTION_SCHEME_PRIVILEGES]);
 // The export window is the app's only window; closing it must not quit before the job is done.
 app.on('window-all-closed', () => {});
 // The CLI cancels over IPC (Ctrl+C in its console never reaches this process on Windows); a signal
@@ -49,6 +52,20 @@ function subtitleFormats(formats: readonly string[]): SubtitleFormat[] {
   return formats as SubtitleFormat[];
 }
 
+/**
+ * The project with the checked page as its only scene, or the checked overlay as its only one (its look
+ * and output stay); a transition page in the project as it is, between the two scenes it joins.
+ */
+function motionCheckProject(project: CuttleProject, check: MotionCheck): CuttleProject {
+  if (check.transition !== undefined) return project;
+  if (check.overlay !== undefined) {
+    const overlay = project.overlays[check.overlay];
+    return { ...project, overlays: overlay ? [overlay] : [] };
+  }
+  const { overlay: _overlay, transition: _transition, ...page } = check;
+  return { ...project, scenes: [{ type: 'motion', label: 'check', ...page }], overlays: [], cuts: [] };
+}
+
 async function handle(request: ElectronRequest): Promise<unknown> {
   switch (request.command) {
     case 'render':
@@ -70,11 +87,14 @@ async function handle(request: ElectronRequest): Promise<unknown> {
         times: request.times,
         ...exportFormat(request.format),
         ...(request.sheet && { sheet: request.sheet }),
+        ...(request.motion && { project: (project: CuttleProject) => motionCheckProject(project, request.motion!) }),
         signal: cancel.signal,
         onProgress: progress('stills', request.quiet),
       });
     case 'capture-page':
       return capturePage(request, cancel.signal);
+    case 'music':
+      return checkMusic({ projectDir: request.projectDir, out: request.out, ...(request.sheet && { sheet: request.sheet }), ...(request.src && { src: request.src }) });
   }
 }
 

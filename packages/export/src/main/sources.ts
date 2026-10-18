@@ -1,7 +1,20 @@
 import { readFile, stat } from 'node:fs/promises';
-import { dirname, join, resolve } from 'node:path';
-import { parseEventsJsonl, parseProjectJson, parseTakeJson, parseTranscriptJson, trackOffset, type CuttleProject, type InputEvent, type TakeFile, type TranscriptWord } from '@cuttle/project';
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
+import {
+  parseEventsJsonl,
+  parseMarkersJson,
+  parseProjectJson,
+  parseTakeJson,
+  parseTranscriptJson,
+  trackOffset,
+  type CuttleProject,
+  type InputEvent,
+  type TakeFile,
+  type TranscriptWord,
+} from '@cuttle/project';
 import { ExportError } from '../errors';
+import type { MotionPages } from '../job';
+import type { TakeInputs } from '../motion/take';
 
 /** cuttle.json inside the project folder. */
 export const PROJECT_FILE = 'cuttle.json';
@@ -11,14 +24,22 @@ export const TAKE_FILE = 'take.json';
 /** The project's files resolved and checked, ready for an export. */
 export interface ProjectSources {
   project: CuttleProject;
-  screen: string;
+  /** The screen recording; absent in a project without clips (motion, stills and cards only), which needs no take. */
+  screen?: string;
   webcam?: { path: string; offset: number };
   mic?: { path: string; offset: number };
   events?: InputEvent[];
+  /** The take's key counts, for the typing sounds (loaded whether the cursor shows or not). */
+  keys?: InputEvent[];
   /** The take's transcript (source seconds), for captions and subtitle files. */
   transcript?: TranscriptWord[];
   stills: Record<number, string>;
   backgroundImage?: string;
+  /** The watermark's image, when it is on: its own, else the brand's logo. */
+  watermarkImage?: string;
+  /** The motion items' pages, when the project has any, and the take as they see it. */
+  motion?: MotionPages;
+  motionTake?: TakeInputs;
   /** Every file the project names (cuttle.json and take.json included): the output must not replace one. */
   inputs: string[];
   /** Things the export goes on without, but the user should know (e.g. a take.json that does not apply). */
@@ -55,6 +76,46 @@ async function existing(projectDir: string, relative: string, what: string, medi
   if (!info.isFile()) throw new ExportError('missing-file', `${what} is a folder, not a file: ${path}`);
   if (media && info.size === 0) throw new ExportError('invalid-media', `${what} is empty (0 bytes): ${path}`);
   return path;
+}
+
+/**
+ * The pages of the project's motion scenes and overlays, checked: each a file inside the project
+ * folder (the only files a page may read). Undefined when the project has none.
+ */
+export async function motionPages(projectDir: string, project: CuttleProject): Promise<MotionPages | undefined> {
+  const root = resolve(projectDir);
+  const pages: MotionPages = { root, scenes: {}, overlays: {}, transitions: {} };
+  const page = async (src: string, name: string): Promise<string> => {
+    const rel = relative(root, resolve(root, src));
+    if (rel === '' || rel === '..' || rel.startsWith(`..${sep}`) || isAbsolute(rel)) {
+      throw new ExportError('invalid-project', `${name}.src must be a file in the project folder, not ${src}`);
+    }
+    return existing(root, src, `page of ${name}`);
+  };
+  for (const [index, scene] of project.scenes.entries()) {
+    if (scene.type === 'motion') pages.scenes[index] = await page(scene.src, `scenes[${index}]`);
+    if (scene.transition?.enabled) pages.transitions[index] = await page(scene.transition.src, `scenes[${index}].transition`);
+  }
+  for (const [index, overlay] of project.overlays.entries()) pages.overlays[index] = await page(overlay.src, `overlays[${index}]`);
+  const count = Object.keys(pages.scenes).length + Object.keys(pages.overlays).length + Object.keys(pages.transitions).length;
+  return count > 0 ? pages : undefined;
+}
+
+/**
+ * The take as motion pages see it: all its input events (whether the cursor shows or not), its words
+ * and Claude's markers. A file that is missing or does not read leaves its list empty: a page that
+ * follows the take shows nothing there, the video still renders.
+ */
+export async function motionTake(projectDir: string, project: CuttleProject): Promise<TakeInputs> {
+  const read = async (path: string | undefined) => (path === undefined ? undefined : readFile(resolve(projectDir, path), 'utf8').catch(() => undefined));
+  const [events, transcript, markers] = await Promise.all([read(project.sources.events), read(project.sources.transcript), read(project.sources.markers)]);
+  const words = transcript === undefined ? undefined : parseTranscriptJson(transcript);
+  const marks = markers === undefined ? undefined : parseMarkersJson(markers);
+  return {
+    events: events === undefined ? [] : parseEventsJsonl(events).events,
+    words: words?.ok ? words.transcript.words : [],
+    markers: marks?.ok ? marks.markers : [],
+  };
 }
 
 async function readTake(screen: string): Promise<{ path: string; take?: TakeFile; warning?: string } | undefined> {
@@ -103,30 +164,35 @@ export async function loadSources(projectDir: string): Promise<ProjectSources> {
   if (project.scenes.length === 0) throw new ExportError('invalid-project', `${projectPath} has no scenes`);
   const { look, sources } = project;
 
-  const screen = await existing(projectDir, sources.screen, 'screen recording (sources.screen)');
-  const takeFile = await readTake(screen);
+  // A video of motion scenes, stills and cards shows nothing of a take: it needs no recording.
+  const clips = project.scenes.some((scene) => scene.type === 'clip');
+  const screen = clips ? await existing(projectDir, sources.screen, 'screen recording (sources.screen)') : undefined;
+  const takeFile = screen ? await readTake(screen) : undefined;
   const take = takeFile?.take;
   // Every file the project names, including sources the look switches off: the output must not
   // replace a recording just because this export does not read it.
-  const named = [sources.webcam, sources.mic, sources.cleanMic, sources.events, sources.markers, sources.transcript, look.background.image].filter((path) => path !== undefined);
-  const inputs = [resolve(projectPath), screen, join(dirname(screen), TAKE_FILE), ...named.map((path) => resolve(projectDir, path))];
-  const result: ProjectSources = { project, screen, stills: {}, inputs, warnings: takeFile?.warning ? [takeFile.warning] : [] };
+  const named = [sources.screen, sources.webcam, sources.mic, sources.cleanMic, sources.events, sources.markers, sources.transcript, look.background.image, look.watermark.image, project.theme.logo].filter((path) => path !== undefined);
+  const inputs = [resolve(projectPath), ...(screen ? [join(dirname(screen), TAKE_FILE)] : []), ...named.map((path) => resolve(projectDir, path))];
+  const result: ProjectSources = { project, ...(screen && { screen }), stills: {}, inputs, warnings: takeFile?.warning ? [takeFile.warning] : [] };
 
-  if (look.webcam.enabled && sources.webcam) {
+  if (screen && look.webcam.enabled && sources.webcam) {
     const path = await existing(projectDir, sources.webcam, 'webcam recording (sources.webcam)');
     result.webcam = { path, offset: offsetFor(take, 'webcam', path, screen) };
   }
-  if (look.audio.enabled && sources.mic) {
+  if (screen && look.audio.enabled && sources.mic) {
     const path = await existing(projectDir, sources.mic, 'mic recording (sources.mic)');
     // the cleaned-up mic plays in its place, in step with it (take.json describes the mic itself)
     const clean = look.audio.cleanup && sources.cleanMic ? await existing(projectDir, sources.cleanMic, 'cleaned-up mic (sources.cleanMic)') : undefined;
     result.mic = { path: clean ?? path, offset: offsetFor(take, 'mic', path, screen) };
   }
-  if (look.cursor.enabled && sources.events) {
+  const typing = look.audio.enabled && look.audio.typing;
+  if (screen && (look.cursor.enabled || typing) && sources.events) {
     const path = await existing(projectDir, sources.events, 'input events (sources.events)', false);
     const events = parseEventsJsonl(await readFile(path, 'utf8'));
     if (events.issues.length > 0) throw new ExportError('invalid-project', `${path} is invalid:\n${issuesText(events.issues)}`);
-    result.events = events.events;
+    // the page draws the cursor from them only while it shows
+    if (look.cursor.enabled) result.events = events.events;
+    if (typing) result.keys = events.events.filter((event) => event.type === 'keys');
   }
   if (sources.transcript) {
     // without it the video has no captions: worth a warning, not a failed export
@@ -143,6 +209,14 @@ export async function loadSources(projectDir: string): Promise<ProjectSources> {
   }
   if (look.background.preset === 'image' && look.background.image) {
     result.backgroundImage = await existing(projectDir, look.background.image, 'background image (look.background.image)');
+  }
+  const mark = look.watermark.enabled ? (look.watermark.image ?? project.theme.logo) : undefined;
+  if (mark) result.watermarkImage = await existing(projectDir, mark, look.watermark.image ? 'watermark image (look.watermark.image)' : 'the brand logo (theme.logo), shown as the watermark');
+  const motion = await motionPages(projectDir, project);
+  if (motion) {
+    result.motion = motion;
+    result.motionTake = await motionTake(projectDir, project);
+    result.inputs.push(...Object.values(motion.scenes), ...Object.values(motion.overlays));
   }
   return result;
 }

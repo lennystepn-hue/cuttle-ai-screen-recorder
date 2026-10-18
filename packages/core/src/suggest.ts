@@ -1,18 +1,20 @@
 import { readFile } from 'node:fs/promises';
 import { dirname, join, relative, resolve, sep } from 'node:path';
-import { newId, parseEventsJsonl, parseProject, parseTakeJson, usedIds, type InputEvent, type Marker, type Rect, type ScreenTextFrame, type TranscriptFile } from '@cuttle/project';
-import { clickZooms, sceneSpans, shownClicks } from '@cuttle/timeline';
+import { newId, parseEventsJsonl, parseProject, parseTakeJson, usedIds, type InputEvent, type Marker, type Rect, type ScreenTextFrame, type StepMotion, type TranscriptFile } from '@cuttle/project';
+import { clickZooms, sceneSpans, shownClicks, stepMoves, stepZooms } from '@cuttle/timeline';
 import { CoreError } from './errors';
 import { readProjectFile, writeProjectFile } from './project-file';
 import { areaStretches, bandCrop, cropPieces, type CropStretch } from './suggest/crop';
 import { dialogZooms } from './suggest/dialogs';
 import { readScreenText, withPrivacyMasks, type RawMask } from './privacy/apply';
 import { SCREEN_TEXT_FILE, framesToRead, readFrames, writeScreenText } from './privacy/read';
-import { analyseScreen, grabGray, grayFrames, screenBands } from './suggest/media';
+import { cachedAnalysis, grabGray, grayFrames, screenBands } from './suggest/media';
+import { withLengthFit } from './suggest/length';
 import { suggestClips } from './suggest/plan';
 import { changedRegion, zoomRect } from './suggest/region';
 import { union } from './suggest/spans';
 import { screenStretches, typingZooms, type ScreenChange } from './suggest/typing';
+import { withStepTitles, type StepTitles } from './suggest/steps';
 import { takeClock, transcriptMarkers } from './suggest/transcript';
 import { readMarkers, speechActivity, withSpeechCuts, wordStretches } from './speech/apply';
 import type { RawCut } from './speech/edits';
@@ -33,6 +35,15 @@ export interface SuggestOptions {
   typingZooms?: boolean;
   /** Zooms on dialogs (default true; `zoom: false` turns them off too). */
   dialogZooms?: boolean;
+  /** A zoom on where each step of the script happens (default true; `zoom: false` turns them off too). */
+  stepZooms?: boolean;
+  /** A title where the video shows each step of the script reached (default true). */
+  stepTitles?: boolean;
+  /**
+   * Copies a motion template into the project for the step titles that name one (`script[].motion`)
+   * and gives its page (`motion/<name>/index.html`); without it, those titles are texts too.
+   */
+  motionPage?: (template: StepMotion) => Promise<string | undefined>;
   /** Crops each clip to the content (default true): the window's content area, else the picture's still edges. */
   crop?: boolean;
   /** Masks what the screen showed that is private (default true): its text is read first where it was not yet. */
@@ -46,6 +57,8 @@ export interface SuggestOptions {
   speech?: boolean;
   /** Transcribe the mic first when it has no transcript and a speech model is downloaded (default true). */
   transcribe?: boolean;
+  /** Fit the video to this many seconds: what rests is cut, never speech, clicks or typing. */
+  length?: number;
   /** Status for people while it runs. */
   onStatus?: (text: string) => void;
   /** The transcription's progress, 0 to 1. */
@@ -68,6 +81,10 @@ export interface SuggestResult {
   speech: { from: 'transcript' | 'mic' | 'none'; fillers: number; pauses: number; retakes: number };
   /** Whether the screen's text was there to mask from, and how many privacy and notification masks were made. */
   privacy: { read: boolean; masks: number; notifications: number };
+  /** The script's steps the take reached, and the titles and zooms made for them. */
+  steps: { reached: number; titles: number; zooms: number };
+  /** With `length`: the asked length, the video's length before and after the fit, and whether it fits. */
+  length?: { target: number; before: number; length: number; reached: boolean };
   notes: string[];
   /** Where the markers came from. */
   markers: { from: 'take' | 'transcript' | 'none'; count: number };
@@ -104,8 +121,9 @@ export async function suggestProject(projectDir: string, args: SuggestOptions = 
   const { sources } = file.project;
   const screen = resolve(file.dir, sources.screen);
   args.onStatus?.('reading the screen recording …');
-  // the display's scale (take.json): zooms show as much of its interface as on a screen at 100 %
-  const screenInfo = { ...(await analyseScreen(screen)), ...(await takeScale(dirname(screen))) };
+  // kept in the project, for the steps after suggest (the app's length fit); with the display's scale
+  // (take.json): zooms show as much of its interface as on a screen at 100 %
+  const screenInfo = { ...(await cachedAnalysis(screen, file.dir)), ...(await takeScale(dirname(screen))) };
   if (screenInfo.duration <= 0) throw new CoreError('invalid-media', `${screen} has no video frames`);
   let transcript: TranscriptFile | undefined;
   let speech: { spans: { from: number; to: number }[]; from: SuggestResult['speech']['from'] } = { spans: [], from: 'none' };
@@ -187,12 +205,12 @@ export async function suggestProject(projectDir: string, args: SuggestOptions = 
   }
   // The zooms suggest made before are replaced; the others stay, and the new ones avoid them.
   const rawZooms = (file.raw.zooms as SuggestedZoom[] | undefined) ?? [];
-  const isOurs = (zoom: { auto?: string }) => zoom.auto === 'answer' || zoom.auto === 'dialog' || zoom.auto === 'typing' || zoom.auto === 'click';
+  const isOurs = (zoom: { auto?: string }) => zoom.auto === 'answer' || zoom.auto === 'dialog' || zoom.auto === 'typing' || zoom.auto === 'click' || zoom.auto === 'step';
   const kept = rawZooms.filter((zoom) => !isOurs(zoom));
   const switchedOff = file.project.zooms.filter((zoom) => isOurs(zoom) && !zoom.enabled);
   if (kept.length > 0) notes.push(`kept ${kept.length} zoom${kept.length === 1 ? '' : 's'} made or changed by hand`);
   const zooms: SuggestedZoom[] = [];
-  const add = (zoom: SuggestedZoom & { auto: 'answer' | 'dialog' | 'typing' | 'click' }) => zooms.push(staysOff(zoom, switchedOff) ? { ...zoom, enabled: false } : zoom);
+  const add = (zoom: SuggestedZoom & { auto: 'answer' | 'dialog' | 'typing' | 'click' | 'step' }) => zooms.push(staysOff(zoom, switchedOff) ? { ...zoom, enabled: false } : zoom);
   const first = suggestion.clips[0];
   const last = suggestion.clips.at(-1);
   const keptOverlaps = (at: number, end: number) => kept.some((zoom) => at < zoom.at + zoom.duration && zoom.at < end);
@@ -238,6 +256,16 @@ export async function suggestProject(projectDir: string, args: SuggestOptions = 
       );
     }
   }
+  // The script's steps: one zoom each on where it happens, before the clicks' zooms, which keep clear of them
+  const moves = stepMoves(file.project.script, markers);
+  let stepped = 0;
+  if (args.zoom !== false && args.stepZooms !== false && file.project.autoEdits.stepZooms && moves.length > 0) {
+    for (const zoom of stepZooms(moves, events, shown, screenInfo, [...kept, ...zooms])) {
+      add({ id: newId('zooms', taken), label: `Step ${zoom.move.number}`, at: zoom.at, duration: zoom.duration, rect: zoom.rect, auto: 'step' });
+      stepped++;
+    }
+    if (stepped > 0) notes.push(`${stepped} zoom${stepped === 1 ? '' : 's'} on where the script's steps happen`);
+  }
   if (args.zoom !== false && args.clickZooms !== false && file.project.autoEdits.clickZooms && events.length > 0) {
     const there = [...kept, ...zooms];
     const followed = clickZooms(events, shown, screenInfo, there);
@@ -264,13 +292,35 @@ export async function suggestProject(projectDir: string, args: SuggestOptions = 
     if (text?.made) file.raw.sources = { ...(file.raw.sources as object), screenText: text.made };
   }
 
+  // The steps' titles, where the video shows each step reached (at the top when subtitles take the bottom)
+  let titles: StepTitles | undefined;
+  if (moves.length > 0 || [...file.project.texts, ...file.project.overlays].some((item) => item.auto === 'title')) {
+    const position = sources.transcript !== undefined && file.project.captions.enabled ? 'top' : 'bottom';
+    const make = args.stepTitles !== false && file.project.autoEdits.stepTitles;
+    titles = await withStepTitles(file.raw, file.project, { moves, clips: shown, position, make, ...(args.motionPage && !args.dryRun && { page: args.motionPage }) }, taken);
+    notes.push(...titles.notes);
+  }
+
   const allZooms = [...kept, ...zooms].sort((a, b) => a.at - b.at);
+  // The length fit, last: what rests goes until the video fits, around the cuts and zooms made above.
+  let length: SuggestResult['length'];
+  if (args.length !== undefined) {
+    const shaped = parseProject({ ...file.raw, scenes, ...(cuts && { cuts }), zooms: allZooms });
+    if (shaped.ok) {
+      const fit = withLengthFit({ ...file.raw, ...(cuts && { cuts }) }, shaped.project, { speech: speech.spans, events, still: screenInfo.still, duration: screenInfo.duration }, args.length, taken);
+      notes.push(...fit.notes);
+      cuts = fit.cuts;
+      length = { target: fit.target, before: fit.before, length: fit.length, reached: fit.reached };
+    }
+  }
   let backup: string | undefined;
   if (!args.dryRun) {
     file.raw.scenes = scenes;
     file.raw.zooms = allZooms;
     if (cuts && (cuts.length > 0 || file.raw.cuts !== undefined)) file.raw.cuts = cuts;
     if (masks) file.raw.masks = masks;
+    if (titles?.texts) file.raw.texts = titles.texts;
+    if (titles?.overlays) file.raw.overlays = titles.overlays;
     if (words.length > file.project.privacy.words.length) file.raw.privacy = { ...(file.raw.privacy as object), words };
     ({ backup } = await writeProjectFile(file, 'suggest', { backup: true }));
   }
@@ -281,6 +331,8 @@ export async function suggestProject(projectDir: string, args: SuggestOptions = 
     ...(cuts && { cuts }),
     speech: { from: speech.from, ...made },
     privacy,
+    steps: { reached: moves.length, titles: titles?.made ?? 0, zooms: stepped },
+    ...(length && { length }),
     notes,
     markers: { from, count: markers.length },
     written: !args.dryRun,

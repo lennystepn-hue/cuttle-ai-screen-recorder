@@ -1,13 +1,15 @@
 // The picker: one transparent window per display, over everything. Hovering lights the window under
 // the pointer (the display where there is none), dragging draws a region; the bar sets the camera,
-// the mic and when to stop, and Enter records. Never in a recording (content protection). The bar,
-// the label and the camera bubble keep clear of what is about to be recorded where there is room.
+// the mic, when to stop and the script, and Enter records. Never in a recording (content protection).
+// The bar, the label and the camera bubble keep clear of what is about to be recorded where there is room.
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
-import type { PickedTarget, PickerSetup, Rect, RecordChoices } from '../../shared/ipc';
+import type { PickedTarget, PickerSetup, Rect, RecordChoices, ScriptStep } from '../../shared/ipc';
 import { barPlacement, bubblePlacement, bubbleSize, dragRect, labelPlacement, matchMediaDevice, windowsAt } from '../../shared/recording';
 import { bridge } from '../bridge';
 import { FolderIcon, MicIcon, WarningIcon } from '../icons';
 import { Select } from '../Select';
+import { hotkey } from '../keys';
+import { ScriptIcon, ScriptPanel, writtenSteps } from './Script';
 
 type Mode = 'auto' | 'screen' | 'window' | 'region';
 type Shown = { kind: 'screen' | 'window' | 'region'; rect: Rect; title: string; pixels: { width: number; height: number }; window?: number; of?: [number, number] };
@@ -70,6 +72,8 @@ export function Picker() {
   const [setup, setSetup] = useState<PickerSetup>();
   const [active, setActive] = useState(false);
   const [choices, setChoices] = useState<RecordChoices>({ stop: 'none' });
+  const [script, setScript] = useState<ScriptStep[]>([]);
+  const [scriptOpen, setScriptOpen] = useState(false);
   const [mode, setMode] = useState<Mode>('auto');
   const [pointer, setPointer] = useState<{ x: number; y: number }>();
   const [cycle, setCycle] = useState(0);
@@ -85,9 +89,11 @@ export function Picker() {
       setSetup(next);
       setActive(next.active);
       setChoices(next.choices);
+      setScript(next.script);
     });
     const offActive = bridge.on('picker:active', ({ display }) => setActive((current) => (setup ? display === setup.display.id : current)));
     const offChoices = bridge.on('picker:choices', (next) => setChoices(next));
+    const offScript = bridge.on('picker:script', (next) => setScript(next));
     const offDevices = bridge.on('picker:devices', ({ cameras, mics, choices: listed }) => {
       setSetup((current) => (current ? { ...current, cameras, mics, listingDevices: false } : current));
       setChoices(listed);
@@ -97,11 +103,13 @@ export function Picker() {
       setSetup(initial);
       setActive(initial.active);
       setChoices(initial.choices);
+      setScript(initial.script);
     });
     return () => {
       offOpen();
       offActive();
       offChoices();
+      offScript();
       offDevices();
     };
   }, [setup?.display.id]);
@@ -149,6 +157,10 @@ export function Picker() {
     void bridge.invoke('picker:record', target);
   }, [display, shown, recordReason]);
 
+  const updateScript = (steps: ScriptStep[]) => {
+    setScript(steps);
+    void bridge.invoke('picker:script', steps);
+  };
   const updateChoices = (change: Partial<RecordChoices>) => {
     const next = { ...choices, ...change };
     setChoices(next);
@@ -162,7 +174,7 @@ export function Picker() {
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       const key = event.key;
-      const inField = event.target instanceof HTMLSelectElement || event.target instanceof HTMLInputElement;
+      const inField = event.target instanceof HTMLSelectElement || event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement;
       if (key === 'Escape') return void bridge.invoke('picker:cancel');
       if (key === 'Enter') {
         if (inField) return;
@@ -193,6 +205,7 @@ export function Picker() {
       if (lower === 'c' && setup && setup.cameras.length > 0) return updateChoices({ camera: choices.camera ? undefined : firstCamera(setup.cameras) });
       if (lower === 'm' && setup && setup.mics.length > 0) return updateChoices({ mic: choices.mic ? undefined : setup.mics[0] });
       if (lower === 'o') return updateChoices({ stop: STOPS[(STOPS.indexOf(choices.stop) + 1) % STOPS.length]! });
+      if (lower === 'p') return setScriptOpen((open) => !open);
       if (region && key.startsWith('Arrow')) {
         event.preventDefault();
         const step = event.shiftKey ? 10 : 1 / (display?.scaleFactor ?? 1);
@@ -269,6 +282,7 @@ export function Picker() {
   const kindName = shown?.kind === 'screen' ? 'Screen' : shown?.kind === 'window' ? 'Window' : 'Region';
   const effective = shown?.kind ?? (mode === 'auto' ? 'screen' : mode);
   const notice = blocked ?? setup.warning;
+  const steps = writtenSteps(script);
 
   return (
     <div className={`picker${active ? '' : ' inactive'}`} onPointerMove={onMove} onPointerDown={onDown} onPointerUp={onUp} data-testid="picker">
@@ -310,7 +324,7 @@ export function Picker() {
             </span>
             <span>drag for a region</span>
             <span>
-              <kbd>Ctrl+Shift+Alt+S</kbd> stops
+              <kbd>{hotkey('Ctrl+Shift+Alt+S')}</kbd> stops
             </span>
           </div>
           {choices.camera && bubbleAt && <CameraBubble name={choices.camera} size={bubble} left={bubbleAt.left} top={bubbleAt.top} />}
@@ -388,6 +402,23 @@ export function Picker() {
                   </button>
                 ))}
             </div>
+            <div className={`opt${steps > 0 ? ' on' : ''}`}>
+              <button
+                className="toggle"
+                onClick={() => setScriptOpen((open) => !open)}
+                aria-expanded={scriptOpen}
+                aria-controls="script-panel"
+                title="The script: steps the prompter shows while you record, never in the video (P)"
+                data-testid="picker-script"
+              >
+                <ScriptIcon />
+                <span className="name">
+                  Script
+                  <small>{steps === 0 ? 'none' : `${steps} step${steps === 1 ? '' : 's'}`}</small>
+                </span>
+              </button>
+            </div>
+            {scriptOpen && <ScriptPanel steps={script} onChange={updateScript} onClose={() => setScriptOpen(false)} place={barAt.y > work.y + work.height / 2 ? 'above' : 'below'} />}
             <div className="divider" />
             <span title={recordReason ?? 'Record (Enter)'}>
               <button className="rec" onClick={record} disabled={!!recordReason} data-testid="picker-record">

@@ -1,9 +1,11 @@
-// Reading the screen's text with Windows' own OCR (Windows.Media.Ocr): a Windows PowerShell 5.1
-// helper, started once, reads PNG files one request per line on stdin and answers one JSON line
-// each. Nothing leaves this computer.
+// Reading the screen's text with the system's own OCR: on Windows Windows.Media.Ocr through a
+// Windows PowerShell 5.1 helper, on macOS the Vision framework through the recorder's cuttle-capture
+// (`cuttle-capture ocr`, native/macos/capture.swift). Either, started once, reads PNG files one
+// request per line on stdin and answers one JSON line each. Nothing leaves this computer.
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { createInterface } from 'node:readline';
 import type { Rect, ScreenTextLine } from '@cuttle/project';
+import { captureHelper } from '@cuttle/recorder';
 import { CoreError } from '../errors';
 
 /**
@@ -48,7 +50,7 @@ while ($null -ne ($line = [Console]::In.ReadLine())) {
 }
 `;
 
-/** Pictures are read at up to twice their size (the OCR reads small text much better so). */
+/** Pictures are read at up to twice their size on Windows (its OCR reads small text much better so; Vision needs no help). */
 export const OCR_SCALE = 2;
 
 /** What the helper answers to a picture: its lines, each a list of words with their rects. */
@@ -73,17 +75,32 @@ export class ScreenReader {
     private readonly answers: AsyncIterator<string>,
     /** The largest picture side the OCR takes. */
     readonly maxSide: number,
-    /** The OCR's language (from the person's Windows languages). */
+    /** The OCR's languages (from the person's Windows or macOS languages), comma separated. */
     readonly language: string,
+    /** Whether pictures are read larger than they are (Windows' OCR), up to `OCR_SCALE`. */
+    private readonly upscales: boolean,
   ) {}
 
-  /** Starts the helper; `ocr-missing` where it cannot run (not Windows, PowerShell refused, no OCR language). */
+  /**
+   * Starts the helper; `ocr-missing` where it cannot run (neither Windows nor macOS, PowerShell
+   * refused, no OCR language, cuttle-capture not built).
+   */
   static async start(): Promise<ScreenReader> {
     // the switch first: it says the same on every platform (the checks and the tests set it)
     if (process.env.CUTTLE_OCR === 'off') throw new CoreError('ocr-missing', 'reading the screen is switched off (CUTTLE_OCR=off)');
-    if (process.platform !== 'win32') throw new CoreError('ocr-missing', "the screen's text is read with Windows' own OCR, which this system does not have");
-    const encoded = Buffer.from(SCRIPT, 'utf16le').toString('base64');
-    const child = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', encoded], { windowsHide: true });
+    let child: ChildProcessWithoutNullStreams;
+    if (process.platform === 'win32') {
+      const encoded = Buffer.from(SCRIPT, 'utf16le').toString('base64');
+      child = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', encoded], { windowsHide: true });
+    } else if (process.platform === 'darwin') {
+      // CUTTLE_CAPTURE_HELPER=none chooses avfoundation for the screen: the helper still reads text
+      const chosen = process.env.CUTTLE_CAPTURE_HELPER;
+      const helper = captureHelper(chosen === 'none' ? '' : chosen);
+      if (!helper) throw new CoreError('ocr-missing', "the screen's text is read by cuttle-capture, which was not built here (xcode-select --install, then pnpm install)");
+      child = spawn(helper, ['ocr']);
+    } else {
+      throw new CoreError('ocr-missing', "the screen's text is read with Windows' or macOS's own OCR, which this system does not have");
+    }
     child.stdin.setDefaultEncoding('utf8');
     const answers = createInterface({ input: child.stdout, crlfDelay: Infinity })[Symbol.asyncIterator]();
     let stderr = '';
@@ -95,12 +112,12 @@ export class ScreenReader {
       child.kill();
       throw new CoreError('ocr-missing', hello ? 'Windows has no OCR language installed (Settings > Time & language > Language)' : `the OCR helper did not start${stderr ? `: ${stderr.trim().split(/\r?\n/)[0]}` : ''}`);
     }
-    return new ScreenReader(child, answers, hello.max ?? 10_000, hello.language ?? '');
+    return new ScreenReader(child, answers, hello.max ?? 10_000, (hello.language ?? '').split(',').filter(Boolean).join(', '), process.platform === 'win32');
   }
 
-  /** The text of a PNG of `width` × `height`, read at up to `OCR_SCALE` times its size; rects in its pixels. */
+  /** The text of a PNG of `width` × `height` (on Windows read at up to `OCR_SCALE` times its size); rects in its pixels. */
   async read(path: string, width: number, height: number): Promise<ScreenTextLine[]> {
-    const scale = Math.max(1, Math.min(OCR_SCALE, this.maxSide / Math.max(width, height)));
+    const scale = this.upscales ? Math.max(1, Math.min(OCR_SCALE, this.maxSide / Math.max(width, height))) : 1;
     this.child.stdin.write(`${JSON.stringify({ path, scale })}\n`);
     const next = await this.answers.next();
     if (next.done) throw new CoreError('ocr-missing', 'the OCR helper stopped');

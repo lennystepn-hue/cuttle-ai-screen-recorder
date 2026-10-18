@@ -1,17 +1,23 @@
 import { randomUUID } from 'node:crypto';
 import { mkdir, mkdtemp, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { basename, dirname, join, resolve } from 'node:path';
+import { basename, dirname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { applyCaptionFixes, captionCues, captionWords, sceneSpans, toSrt, toVtt } from '@cuttle/timeline';
+import { applyCaptionFixes, captionCues, captionWords, sceneSpans, stepChapters, toSrt, toVtt, typingClicks, type Chapter } from '@cuttle/timeline';
 import { app } from 'electron';
 import { INLINE_GRAPH_LIMIT, audioFilterGraph, muxArgs, planAudio } from '../audio';
+import { chapterMetadata } from '../chapters';
 import { ExportError } from '../errors';
 import { withFormat, type ExportFormat } from '../formats';
 import { CHANNELS, type EncoderPreference, type ExportJob, type PageResult, type PageStillsSuccess, type PageSuccess } from '../job';
 import { checkFfmpeg, runFfmpeg } from './ffmpeg';
 import { FileHost } from './files';
-import { loadSources, samePath } from './sources';
+import { MotionHost, motionWarnings, serveMotion, type MotionItemReport } from './motion-host';
+import { motionSoundCues } from './motion-sounds';
+import { loadSources, motionTake, samePath } from './sources';
+import { planSoundtrack, renderSoundtrack, writeSoundTrack, type SoundtrackPlan } from './soundtrack';
+import type { MusicStems } from './music';
+import { writeTypingTrack } from './typing-track';
 import { openExportWindow, type ExportWindow } from './window';
 
 export interface ExportOptions {
@@ -57,8 +63,47 @@ export interface ExportResult {
   seconds: number;
   /** The subtitle files written next to it. */
   subtitles?: string[];
+  /** The chapters in the video file, from the script's steps (`stepChapters`), when it has any. */
+  chapters?: Chapter[];
+  /** What the motion items' pages said (errors and console), when the project has any. */
+  motion?: MotionItemReport[];
+  /** The music and sounds, when the project has any: what the page made and said, and sounds that could not play. */
+  music?: SoundtrackReport;
   stats: ExportStats;
 }
+
+/** What rendering a project's music and sounds came to. */
+export interface SoundtrackReport {
+  /** The music page, relative to the project folder (none: the sounds alone). */
+  src?: string;
+  /** What the page told about its music (bpm, key, sections). */
+  info: MusicStems['result']['info'];
+  /** Each stem's highest sample before its level. */
+  peaks: MusicStems['result']['peaks'];
+  nodes: number;
+  renderMs: number;
+  /** Sounds that could not play. */
+  skipped: string[];
+  errors: string[];
+  console: string[];
+}
+
+/** The report of a rendered soundtrack. */
+export function soundtrackReport(projectDir: string, plan: SoundtrackPlan, stems: MusicStems): SoundtrackReport {
+  const { result, report } = stems;
+  return {
+    ...(plan.page && { src: relativeSrc(projectDir, plan.page) }),
+    info: result.info,
+    peaks: result.peaks,
+    nodes: result.nodes,
+    renderMs: result.renderMs,
+    skipped: result.skipped,
+    errors: report.errors,
+    console: report.console,
+  };
+}
+
+const relativeSrc = (projectDir: string, page: string) => relative(resolve(projectDir), page).split(sep).join('/');
 
 /** Without a newly rendered frame for this long the export counts as stalled (a hung encoder or decoder). */
 const STALL_SECONDS = 60;
@@ -210,13 +255,15 @@ export async function exportProject(opts: ExportOptions): Promise<ExportResult> 
   const job: ExportJob = {
     kind: 'video',
     project,
-    screen: sources.screen,
+    ...(sources.screen && { screen: sources.screen }),
     webcam: sources.webcam,
     events: sources.events,
     ...(sources.transcript && { transcript: sources.transcript }),
     ...(opts.captions !== undefined && { captions: opts.captions }),
     stills: sources.stills,
     backgroundImage: sources.backgroundImage,
+    watermarkImage: sources.watermarkImage,
+    ...(sources.motion && { motion: sources.motion }),
     encoder: opts.encoder ?? 'auto',
   };
   try {
@@ -231,11 +278,17 @@ export async function exportProject(opts: ExportOptions): Promise<ExportResult> 
   let work: string | undefined;
   let files: FileHost | undefined;
   let window: ExportWindow | undefined;
+  const motion = sources.motion && sources.motionTake ? new MotionHost(project, sources.motion, sources.motionTake) : undefined;
+  // the music and sounds render beside the frames, in a page of their own; checked here, so a missing
+  // music page fails before the frames, and planned again with the sounds the motion pages ask for
+  const take = sources.motionTake ?? (await motionTake(projectDir, project));
+  await planSoundtrack(projectDir, project, take);
+  let soundtrack: Promise<{ plan: SoundtrackPlan; stems: MusicStems } | undefined> | undefined;
   try {
     work = await mkdtemp(join(tmpdir(), WORK_PREFIX));
     const video = join(work, 'video.mp4');
-    const images = [...Object.values(sources.stills), ...(sources.backgroundImage ? [sources.backgroundImage] : [])];
-    const host = new FileHost([sources.screen, ...(sources.webcam ? [sources.webcam.path] : [])], video, images);
+    const images = [...Object.values(sources.stills), ...[sources.backgroundImage, sources.watermarkImage].filter((path): path is string => path !== undefined)];
+    const host = new FileHost([...(sources.screen ? [sources.screen] : []), ...(sources.webcam ? [sources.webcam.path] : [])], video, images);
     files = host;
     window = await openExportWindow(opts.pageDir ?? defaultPageDir());
     throwIfCancelled();
@@ -255,20 +308,63 @@ export async function exportProject(opts: ExportOptions): Promise<ExportResult> 
       guard.progress(done);
       opts.onProgress?.(done, total);
     });
+    serveMotion(ipc, motion, guard.alive);
+    soundtrack = (async () => {
+      const asked = await motionSoundCues(project, sources.motion, take);
+      const plan = await planSoundtrack(projectDir, project, take, asked.cues);
+      if (!plan) return void asked.errors.forEach((error) => console.warn(`warning: ${error}`));
+      plan.skipped.push(...asked.errors);
+      return { plan, stems: await renderSoundtrack(projectDir, plan) };
+    })();
+    soundtrack.catch(() => {});
 
     const page = await runPage<PageSuccess>(window, guard.stalled, cancel.promise);
     guard.stop();
+    const said = await motion?.close();
+    for (const warning of motionWarnings(said ?? [])) console.warn(`warning: ${warning}`);
     // The window stays open until the end: closing an app's last window quits it by default.
     await host.close(); // flushes the video-only MP4 before ffmpeg reads it
 
     const audioStarted = performance.now();
     const seconds = page.frames / project.output.fps;
-    const segments = planAudio({ spans: sceneSpans(project.scenes, project.cuts), look: project.look, mic: sources.mic !== undefined, seconds });
+    const spans = sceneSpans(project.scenes, project.cuts);
+    const segments = planAudio({ spans, look: project.look, mic: sources.mic !== undefined, seconds });
     const usesMic = segments.some((segment) => segment.mic !== undefined);
-    const graph = audioFilterGraph(segments, sources.mic?.offset ?? 0);
+    // the typing sounds: a track of their own on the video's timeline, mixed in after the mic
+    const clicks = typingClicks(spans, sources.keys ?? [], project.look.audio);
+    // with music or sounds, one stereo soundtrack holds them and the typing clicks; else the clicks alone
+    const rendered = await soundtrack.catch((error: Error) => {
+      throw new ExportError('render', `the music could not be rendered: ${error.message}`, { cause: error });
+    });
+    let musicReport: SoundtrackReport | undefined;
+    let typing: string | undefined;
+    let sound: string | undefined;
+    if (rendered) {
+      const { plan, stems } = rendered;
+      musicReport = soundtrackReport(projectDir, plan, stems);
+      for (const warning of [...musicReport.errors, ...musicReport.skipped]) console.warn(`warning: music${musicReport.src ? ` (${musicReport.src})` : ''}: ${warning}`);
+      sound = join(work, 'sound.wav');
+      await writeSoundTrack(sound, {
+        seconds,
+        stems,
+        ...(project.music?.enabled && { music: { volume: project.music.volume, duck: project.music.duck } }),
+        speech: plan.video.speech,
+        effectsVolume: project.look.audio.effects ? project.look.audio.effectsVolume : 0,
+        ...(clicks.length > 0 && { typing: { clicks, volume: project.look.audio.typingVolume } }),
+      });
+    } else if (clicks.length > 0) {
+      typing = join(work, 'typing.wav');
+      await writeTypingTrack(typing, clicks, project.look.audio.typingVolume, seconds);
+    }
+    const extra = usesMic ? 2 : 1;
+    const graph = audioFilterGraph(segments, sources.mic?.offset ?? 0, 1, typing ? extra : undefined, sound ? extra : undefined);
     const graphFile = graph.length > INLINE_GRAPH_LIMIT ? join(work, 'audio.graph') : undefined;
     if (graphFile) await writeFile(graphFile, graph);
-    await runFfmpeg(muxArgs({ video, mic: usesMic ? sources.mic?.path : undefined, graph, graphFile, out: partial }), signal);
+    // the script's steps as the video's chapters, where the take reached them
+    const chapters = stepChapters(project.script, take.markers, spans);
+    const chapterFile = chapters.length > 0 ? join(work, 'chapters.txt') : undefined;
+    if (chapterFile) await writeFile(chapterFile, chapterMetadata(chapters));
+    await runFfmpeg(muxArgs({ video, mic: usesMic ? sources.mic?.path : undefined, typing, sound, graph, graphFile, ...(chapterFile && { chapters: chapterFile }), out: partial }), signal);
     throwIfCancelled();
     try {
       await rename(partial, out);
@@ -291,6 +387,9 @@ export async function exportProject(opts: ExportOptions): Promise<ExportResult> 
       frames: page.frames,
       seconds,
       ...(written.length > 0 && { subtitles: written }),
+      ...(chapters.length > 0 && { chapters }),
+      ...(said && { motion: said }),
+      ...(musicReport && { music: musicReport }),
       stats: {
         gpu: page.gpu,
         codec: page.codec,
@@ -308,6 +407,7 @@ export async function exportProject(opts: ExportOptions): Promise<ExportResult> 
   } finally {
     guard.stop();
     cancel.dispose();
+    await motion?.close().catch(() => {});
     if (window && !window.win.isDestroyed()) window.win.destroy();
     await files?.close();
     if (work) {

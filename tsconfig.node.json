@@ -4,5 +4,5 @@
     "types": ["node"],
     "allowImportingTsExtensions": true
   },
-  "include": ["vitest.config.ts", "tools", "packages/engine/electron/vite.config.ts"]
+  "include": ["vitest.config.ts", "tools", "packages/engine/electron/vite.config.ts", "packages/motion-kit/src", "packages/motion-kit/test"]
 }

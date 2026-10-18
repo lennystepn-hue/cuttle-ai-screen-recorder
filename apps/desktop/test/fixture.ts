@@ -43,13 +43,61 @@ export function makePrivateFixture(dir: string): void {
   const take = join(dir, 'takes', '1');
   mkdirSync(take, { recursive: true });
   // the drive's colon escaped for the option and again for the graph
-  const text = (value: string, y: number) => `drawtext=fontfile=C\\\\:/Windows/Fonts/consola.ttf:fontsize=28:fontcolor=white:x=80:y=${y}:text='${value}'`;
+  // a monospaced font of the system's (on Windows the drive's colon escaped for the option and again for the graph)
+  const font = process.platform === 'win32' ? 'C\\\\:/Windows/Fonts/consola.ttf' : '/System/Library/Fonts/Menlo.ttc';
+  const text = (value: string, y: number) => `drawtext=fontfile=${font}:fontsize=28:fontcolor=white:x=80:y=${y}:text='${value}'`;
   const graph = ['color=c=0x1e1e1e:s=1280x720:r=30:d=8', text('Signed in as lena.mueller@example.com', 80), text('npm run build', 300)].join(',');
   ffmpeg(['-f', 'lavfi', '-i', graph, '-c:v', 'libx264', '-preset', 'ultrafast', '-g', '30', '-pix_fmt', 'yuv420p', join(take, 'screen.mp4')]);
   const toast = (t: number, open: boolean) => ({ t, type: 'window', id: 7, kind: 'notification', rect: [880, 600, 380, 110], open });
   writeFileSync(join(take, 'events.jsonl'), [toast(3, true), toast(5, false)].map((event) => `${JSON.stringify(event)}\n`).join(''));
   writeFileSync(join(take, 'take.json'), JSON.stringify({ version: 1, tracks: { screen: { file: 'screen.mp4', start: 100 } } }));
   const project = { version: 1, output: FIXTURE_OUTPUT, sources: { screen: 'takes/1/screen.mp4', events: 'takes/1/events.jsonl' }, scenes: [{ type: 'clip', id: 's1', from: 0, to: 8 }] };
+  writeFileSync(join(dir, 'cuttle.json'), `${JSON.stringify(project, null, 2)}\n`);
+}
+
+/**
+ * A take that mostly rests: 20 s of a still screen, clicks at 3 and 15 s, no mic. One clip over
+ * the whole take; the length fit has plenty to cut.
+ */
+export function makeRestingFixture(dir: string): void {
+  const take = join(dir, 'takes', '1');
+  mkdirSync(take, { recursive: true });
+  ffmpeg(['-f', 'lavfi', '-i', 'color=c=0x202020:s=1280x720:r=30:d=20', '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', join(take, 'screen.mp4')]);
+  const click = (t: number) => ({ t, type: 'click', x: 640, y: 360, button: 'left' });
+  writeFileSync(join(take, 'events.jsonl'), [click(3), click(15)].map((event) => `${JSON.stringify(event)}\n`).join(''));
+  writeFileSync(join(take, 'take.json'), JSON.stringify({ version: 1, tracks: { screen: { file: 'screen.mp4', start: 100 } } }));
+  const project = { version: 1, output: FIXTURE_OUTPUT, sources: { screen: 'takes/1/screen.mp4', events: 'takes/1/events.jsonl' }, scenes: [{ type: 'clip', id: 's1', from: 0, to: 20 }] };
+  writeFileSync(join(dir, 'cuttle.json'), `${JSON.stringify(project, null, 2)}\n`);
+}
+
+/**
+ * A take with motion: a still screen (dark grey) for 5 s, a 1 s motion scene before it (a page that
+ * fills the frame with magenta) and a motion overlay over source 1 to 4 s (a green bar across the
+ * bottom fifth, clear above it, shown by the motion kit's helper).
+ */
+export function makeMotionFixture(dir: string): void {
+  const take = join(dir, 'takes', '1');
+  mkdirSync(take, { recursive: true });
+  ffmpeg(['-f', 'lavfi', '-i', 'color=c=0x202020:s=1280x720:r=30:d=5', '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', join(take, 'screen.mp4')]);
+  for (const [name, body] of [
+    ['intro', '<body style="margin:0;background:#ff00ff"></body>'],
+    // the bar shows only through the kit's helper: the app serves the motion kit
+    ['bar', '<body style="margin:0"><div id="bar" style="position:absolute;left:0;right:0;bottom:0;height:20%;background:#00ff00;opacity:0"></div><script type="module">import { at } from "cuttle"; cuttle.onFrame((t) => (bar.style.opacity = String(at(t, 0, 0.001))));</script></body>'],
+  ] as const) {
+    mkdirSync(join(dir, 'motion', name), { recursive: true });
+    writeFileSync(join(dir, 'motion', name, 'index.html'), `<!doctype html>${body}`);
+  }
+  const project = {
+    version: 1,
+    output: FIXTURE_OUTPUT,
+    sources: { screen: 'takes/1/screen.mp4' },
+    look: { transition: { enabled: false } },
+    scenes: [
+      { type: 'motion', id: 's1', src: 'motion/intro/index.html', duration: 1 },
+      { type: 'clip', id: 's2', from: 0, to: 5 },
+    ],
+    overlays: [{ id: 'o1', src: 'motion/bar/index.html', at: 1, duration: 3 }],
+  };
   writeFileSync(join(dir, 'cuttle.json'), `${JSON.stringify(project, null, 2)}\n`);
 }
 

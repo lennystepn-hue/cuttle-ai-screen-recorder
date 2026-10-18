@@ -390,8 +390,11 @@ body.transparent #root {
 /* HUD: never in the video, never takes the focus */
 .hud-wrap {
   height: 100%;
-  display: grid;
-  place-items: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
 }
 .hud {
   width: 492px;
@@ -485,6 +488,27 @@ body.transparent #root {
   min-width: 52px;
   color: var(--text);
 }
+/* the mic's level: five bars by the time, rising as it hears something */
+.hud .level {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 14px;
+  margin: 0 10px 0 0;
+  flex: none;
+}
+.hud .level i {
+  width: 3px;
+  border-radius: 1px;
+  background: var(--raised-active);
+  transition: background 80ms linear;
+}
+.hud .level i.on {
+  background: var(--caption);
+}
+.hud .level i.clip {
+  background: var(--recording);
+}
 .hud .sep {
   width: 1px;
   height: 22px;
@@ -537,6 +561,59 @@ body.transparent #root {
   background: rgba(79, 209, 161, 0.14);
 }
 
+/* the live captions under the bar: the newest words at the right, the older ones fading out at the left */
+.captions {
+  width: 492px;
+  height: 30px;
+  display: flex;
+  padding: 0 14px;
+  border-radius: 12px;
+  background: var(--overlay);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45), 0 0 0 1px rgba(255, 255, 255, 0.07);
+  color: var(--text);
+  font-size: var(--size-s);
+  -webkit-app-region: drag;
+}
+.captions .line {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  overflow: hidden;
+  -webkit-mask: linear-gradient(to right, transparent 0, #000 48px);
+  mask: linear-gradient(to right, transparent 0, #000 48px);
+}
+.captions .said {
+  flex: none;
+  white-space: nowrap;
+}
+.captions .said > span {
+  animation: heard 240ms ease-out;
+}
+.captions .waiting,
+.captions.resting {
+  color: var(--muted);
+}
+.captions.failed {
+  color: var(--card);
+}
+.captions.failed .line {
+  justify-content: flex-start;
+  -webkit-mask: none;
+  mask: none;
+}
+.captions.failed .said {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+@keyframes heard {
+  from {
+    opacity: 0;
+  }
+}
+
 @keyframes pop {
   from {
     transform: scale(0.85);
@@ -550,11 +627,303 @@ body.transparent #root {
 }
 @media (prefers-reduced-motion: reduce) {
   :root:not([data-motion='full']) .countdown b,
-  :root:not([data-motion='full']) .hud .dot {
+  :root:not([data-motion='full']) .hud .dot,
+  :root:not([data-motion='full']) .captions .said > span {
     animation: none;
   }
 }
 :root[data-motion='reduce'] .countdown b,
-:root[data-motion='reduce'] .hud .dot {
+:root[data-motion='reduce'] .hud .dot,
+:root[data-motion='reduce'] .captions .said > span {
   animation: none;
+}
+
+/* the prompter: the step now in large type, its note, and the step after it; as wide as the HUD */
+.prompter-wrap {
+  padding: 10px;
+}
+.prompter {
+  width: 492px;
+  padding: 12px 14px 12px 16px;
+  border-radius: 16px;
+  background: var(--overlay);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45), 0 0 0 1px rgba(255, 255, 255, 0.07);
+  -webkit-app-region: drag;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.prompter-progress {
+  display: flex;
+  gap: 3px;
+  margin: 0 2px 2px 0;
+}
+.prompter-progress i {
+  flex: 1;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--raised-active);
+  transition: background var(--normal);
+}
+.prompter-progress i.done {
+  background: rgba(217, 119, 87, 0.45);
+}
+.prompter-progress i.now {
+  background: var(--accent);
+}
+.prompter-head {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.prompter-count {
+  flex: 1;
+  min-width: 0;
+  color: var(--muted);
+  font-size: var(--size-s);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.prompter-count small {
+  font-size: inherit;
+  font-weight: 400;
+  color: var(--faint);
+}
+.prompter-head button {
+  -webkit-app-region: no-drag;
+  height: 30px;
+  border-radius: 9px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--muted);
+}
+.prompter-head button.back {
+  width: 30px;
+  justify-content: center;
+}
+.prompter-head button.next {
+  padding: 0 8px 0 12px;
+  background: var(--raised);
+  color: var(--text);
+  font-weight: 600;
+}
+.prompter-head button:hover:not(:disabled) {
+  background: var(--raised-hover);
+  color: var(--text);
+}
+.prompter-head button:disabled {
+  opacity: 0.4;
+}
+.prompter-title {
+  margin: 0;
+  font-size: var(--size-xl);
+  font-weight: 600;
+  line-height: 1.25;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+.prompter-note {
+  margin: 0;
+  font-size: var(--size-l);
+  line-height: 1.45;
+  color: #c9c9d1;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 290px;
+  overflow-y: auto;
+  -webkit-app-region: no-drag;
+}
+.prompter-then {
+  margin-top: 4px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+  color: var(--faint);
+  font-size: var(--size-s);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.prompter-then b {
+  color: var(--muted);
+  font-weight: 500;
+  margin-left: 4px;
+}
+
+/* the script: a panel by the bar (over it in the lower half of the display), a row per step */
+.script-panel {
+  position: absolute;
+  right: 0;
+  width: 440px;
+  max-width: calc(100vw - 32px);
+  max-height: min(62vh, 560px);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 10px 10px 14px;
+  border-radius: 16px;
+  background: var(--overlay);
+  box-shadow: var(--shadow-float);
+  backdrop-filter: blur(20px);
+  white-space: normal;
+  cursor: default;
+}
+.script-panel.above {
+  bottom: calc(100% + 10px);
+}
+.script-panel.below {
+  top: calc(100% + 10px);
+}
+.script-head {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 2px 8px;
+  padding-right: 4px;
+}
+.script-head b {
+  font-size: var(--size-l);
+  color: var(--text);
+}
+.script-head span {
+  grid-column: 1;
+  color: var(--muted);
+  font-size: var(--size-s);
+  line-height: 1.4;
+}
+.script-close {
+  grid-column: 2;
+  grid-row: 1 / 3;
+  align-self: start;
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+}
+.script-close:hover {
+  background: var(--raised-hover);
+  color: var(--text);
+}
+.script-steps {
+  list-style: none;
+  margin: 0;
+  padding: 0 4px 0 0;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.script-step {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 6px;
+  border-radius: 11px;
+  background: var(--raised);
+}
+.script-step:focus-within {
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+}
+.script-number {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  margin-top: 4px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--muted);
+  background: var(--raised-active);
+}
+.script-fields {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.script-fields input,
+.script-fields textarea {
+  width: 100%;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  padding: 4px 6px;
+  border-radius: 6px;
+  resize: none;
+  user-select: text;
+}
+.script-fields input {
+  font-weight: 600;
+}
+.script-fields textarea {
+  font-size: var(--size-s);
+  color: #c9c9d1;
+  line-height: 1.4;
+  max-height: 120px;
+  overflow-y: auto;
+}
+.script-fields input::placeholder,
+.script-fields textarea::placeholder {
+  color: var(--faint);
+  font-weight: 400;
+}
+.script-fields input:focus,
+.script-fields textarea:focus {
+  background: rgba(255, 255, 255, 0.04);
+}
+.script-remove {
+  flex: none;
+  width: 24px;
+  height: 24px;
+  margin-top: 3px;
+  border-radius: 7px;
+  display: grid;
+  place-items: center;
+  color: var(--faint);
+  opacity: 0;
+}
+.script-step:hover .script-remove,
+.script-step:focus-within .script-remove {
+  opacity: 1;
+}
+.script-remove:hover {
+  background: var(--raised-hover);
+  color: var(--text);
+}
+.script-foot {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding-right: 4px;
+}
+.script-add {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 12px;
+  border-radius: 9px;
+  background: var(--raised);
+  color: var(--text);
+  font-weight: 500;
+}
+.script-add:hover:not(:disabled) {
+  background: var(--raised-hover);
+}
+.script-add:disabled {
+  opacity: 0.4;
+}
+.script-foot span {
+  color: var(--faint);
+  font-size: var(--size-s);
 }

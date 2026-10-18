@@ -3,15 +3,26 @@
 // ffmpeg reads the frames (rawvideo) and does the rest, as with the other platforms' captures.
 //
 //   cuttle-capture --display <CGDirectDisplayID> [--crop x,y,w,h] [--fps 30] [--cursor] [--exclude-pid <pid>]...
+//   cuttle-capture --display <CGDirectDisplayID> --window <CGWindowID> --size w,h [--fps 30] [--cursor]
 //
-// The crop is in the display's backing pixels. ScreenCaptureKit delivers a frame only when the screen
+// The crop is in the display's backing pixels. With --window the window itself is captured, at
+// --size pixels: what lies over it, and what is done elsewhere meanwhile, is not in the take. ScreenCaptureKit delivers a frame only when the screen
 // changes; the last one is written again on every tick, so ffmpeg gets a constant frame rate. Exits when
 // ffmpeg closes the pipe; exit code 3 when screen recording is not allowed, 2 for other failures.
+//
+//   cuttle-capture ocr
+//
+// Reads the text of pictures with the Vision framework, for the privacy masks: as Windows' OCR helper
+// in core's privacy/ocr.ts, one request per line on stdin ({"path"}), one JSON line per answer
+// ({"lines": [[{"t", "r": [x, y, w, h]}]]}, in the picture's pixels), after a first line that says it
+// is ready and in which languages. Nothing leaves this computer.
 import CoreGraphics
 import CoreMedia
 import CoreVideo
 import Foundation
+import ImageIO
 import ScreenCaptureKit
+import Vision
 
 func fail(_ code: Int32, _ message: String) -> Never {
   FileHandle.standardError.write("cuttle-capture: \(message)\n".data(using: .utf8)!)
@@ -31,6 +42,8 @@ struct Options {
   var cursor = false
   var excluded: Set<pid_t> = []
   var verbose = false
+  var window: CGWindowID?
+  var size: CGSize?
 }
 
 func parse() -> Options {
@@ -43,6 +56,11 @@ func parse() -> Options {
     case "--cursor": options.cursor = true
     case "--verbose": options.verbose = true
     case "--exclude-pid": options.excluded.insert(required(args.next().flatMap(Int32.init), "--exclude-pid needs a process id"))
+    case "--window": options.window = required(args.next().flatMap(UInt32.init), "--window needs a window id")
+    case "--size":
+      let parts = (args.next() ?? "").split(separator: ",").compactMap { Double($0) }
+      guard parts.count == 2, parts[0] >= 2, parts[1] >= 2 else { fail(2, "--size needs w,h") }
+      options.size = CGSize(width: parts[0], height: parts[1])
     case "--crop":
       let parts = (args.next() ?? "").split(separator: ",").compactMap { Double($0) }
       guard parts.count == 4 else { fail(2, "--crop needs x,y,w,h") }
@@ -50,6 +68,7 @@ func parse() -> Options {
     default: fail(2, "unknown argument \(arg)")
     }
   }
+  if options.window != nil && options.size == nil { fail(2, "--window needs --size") }
   return options
 }
 
@@ -103,7 +122,66 @@ final class Frames: NSObject, SCStreamOutput, SCStreamDelegate {
   }
 }
 
+/** One JSON line on stdout. */
+func answer(_ value: [String: Any]) {
+  let data = (try? JSONSerialization.data(withJSONObject: value)) ?? Data("{\"error\":\"no JSON\"}".utf8)
+  FileHandle.standardOutput.write(data)
+  FileHandle.standardOutput.write(Data("\n".utf8))
+}
+
+/** The words of a recognized line (as Windows' OCR splits them: at spaces), each with its rect in the picture's pixels. */
+func words(of candidate: VNRecognizedText, in size: CGSize) -> [[String: Any]] {
+  let text = candidate.string
+  let tenth = { (value: CGFloat) in (Double(value) * 10).rounded() / 10 }
+  return text.split(whereSeparator: { $0.isWhitespace }).compactMap { word in
+    guard let box = try? candidate.boundingBox(for: word.startIndex..<word.endIndex)?.boundingBox else { return nil }
+    // Vision's rects are shares of the picture from its bottom-left corner
+    let rect = VNImageRectForNormalizedRect(box, Int(size.width), Int(size.height))
+    return ["t": String(word), "r": [tenth(rect.minX), tenth(size.height - rect.maxY), tenth(rect.width), tenth(rect.height)]]
+  }
+}
+
+/** `cuttle-capture ocr`: pictures' text through Vision until stdin closes. */
+func readText() -> Never {
+  let probe = VNRecognizeTextRequest()
+  probe.recognitionLevel = .accurate
+  let supported = (try? probe.supportedRecognitionLanguages()) ?? []
+  // the person's languages Vision reads, in their order; English where none is
+  var languages = Locale.preferredLanguages.compactMap { wanted in
+    supported.first { $0 == wanted } ?? supported.first { $0.split(separator: "-").first == wanted.split(separator: "-").first }
+  }
+  if languages.isEmpty { languages = ["en-US"] }
+  languages = languages.reduce(into: []) { if !$0.contains($1) { $0.append($1) } }
+  answer(["ready": true, "language": languages.joined(separator: ","), "max": 16384])
+  while let line = readLine() {
+    autoreleasepool {
+      guard let request = (try? JSONSerialization.jsonObject(with: Data(line.utf8))) as? [String: Any], let path = request["path"] as? String else {
+        return answer(["error": "a request is {\"path\": …}"])
+      }
+      guard let source = CGImageSourceCreateWithURL(URL(fileURLWithPath: path) as CFURL, nil), let image = CGImageSourceCreateImageAtIndex(source, 0, nil) else {
+        return answer(["error": "cannot open \(path)"])
+      }
+      let read = VNRecognizeTextRequest()
+      read.recognitionLevel = .accurate
+      read.recognitionLanguages = languages
+      // what is on the screen as it is written: no words "corrected" into others (addresses, keys)
+      read.usesLanguageCorrection = false
+      read.minimumTextHeight = 0
+      do {
+        try VNImageRequestHandler(cgImage: image, options: [:]).perform([read])
+      } catch {
+        return answer(["error": error.localizedDescription])
+      }
+      let size = CGSize(width: image.width, height: image.height)
+      let lines = (read.results ?? []).compactMap { $0.topCandidates(1).first }.map { words(of: $0, in: size) }.filter { !$0.isEmpty }
+      answer(["lines": lines])
+    }
+  }
+  exit(0)
+}
+
 signal(SIGPIPE, SIG_IGN)
+if CommandLine.arguments.dropFirst().first == "ocr" { readText() }
 let options = parse()
 func say(_ message: String) {
   if options.verbose { FileHandle.standardError.write("cuttle-capture: \(message)\n".data(using: .utf8)!) }
@@ -124,15 +202,27 @@ Task {
     let pixelHeight = mode?.pixelHeight ?? display.height
     let scale = Double(pixelWidth) / Double(display.width)
     let excluded = content.applications.filter { options.excluded.contains($0.processID) }
-    let filter = SCContentFilter(display: display, excludingApplications: excluded, exceptingWindows: [])
-
     let config = SCStreamConfiguration()
-    let crop = options.crop ?? CGRect(x: 0, y: 0, width: pixelWidth, height: pixelHeight)
-    if options.crop != nil {
-      config.sourceRect = CGRect(x: crop.minX / scale, y: crop.minY / scale, width: crop.width / scale, height: crop.height / scale)
+    let filter: SCContentFilter
+    if let id = options.window, let size = options.size {
+      // the window by itself, wherever it is and whatever lies over it, without its shadow
+      guard let window = content.windows.first(where: { $0.windowID == id }) else { fail(2, "there is no window \(id) (closed, or on another desktop)") }
+      filter = SCContentFilter(desktopIndependentWindow: window)
+      config.width = Int(size.width)
+      config.height = Int(size.height)
+      if #available(macOS 14.0, *) {
+        config.ignoreShadowsSingleWindow = true
+        config.preservesAspectRatio = true
+      }
+    } else {
+      filter = SCContentFilter(display: display, excludingApplications: excluded, exceptingWindows: [])
+      let crop = options.crop ?? CGRect(x: 0, y: 0, width: pixelWidth, height: pixelHeight)
+      if options.crop != nil {
+        config.sourceRect = CGRect(x: crop.minX / scale, y: crop.minY / scale, width: crop.width / scale, height: crop.height / scale)
+      }
+      config.width = Int(crop.width)
+      config.height = Int(crop.height)
     }
-    config.width = Int(crop.width)
-    config.height = Int(crop.height)
     config.pixelFormat = kCVPixelFormatType_32BGRA
     config.colorSpaceName = CGColorSpace.sRGB
     config.minimumFrameInterval = CMTime(value: 1, timescale: CMTimeScale(options.fps))
@@ -144,7 +234,7 @@ Task {
     let stream = SCStream(filter: filter, configuration: config, delegate: frames)
     try stream.addStreamOutput(frames, type: .screen, sampleHandlerQueue: DispatchQueue(label: "cuttle.frames"))
     try await stream.startCapture()
-    say("capturing \(config.width)x\(config.height), leaving out \(excluded.map(\.applicationName))")
+    say(options.window.map { "capturing window \($0) at \(config.width)x\(config.height)" } ?? "capturing \(config.width)x\(config.height), leaving out \(excluded.map(\.applicationName))")
 
     let out = FileHandle.standardOutput.fileDescriptor
     let timer = DispatchSource.makeTimerSource(queue: DispatchQueue(label: "cuttle.ticks"))

@@ -4,23 +4,24 @@ import { loadEngineAssets, type EngineAssets } from '@cuttle/engine';
 import { withFormat, type ExportFormat } from '@cuttle/export/formats';
 import type { CuttleProject } from '@cuttle/project';
 import type { Command, EditLimits } from '../../shared/document';
-import type { ExportEnd, ExportProgress, ExportTarget, MediaState, ProjectInfo, ProjectStatus } from '../../shared/ipc';
+import type { ExportEnd, ExportProgress, ExportTarget, MediaState, MotionStatusView, ProjectInfo, ProjectStatus, SoundStatusView } from '../../shared/ipc';
 import type { OverlayKind } from '../../shared/timeline-model';
 import { bridge } from '../bridge';
 import { beforeClose, dismissToast, edit, flush, offerUndoRestart, openDocument, outsideChange, redo, toast, undo, type DocState } from './doc';
 import { ensureMedia, openProjectMedia, openVideo, type EditorMedia } from './media';
 import { Player, type PlayerState } from './player';
+import type { Soundtrack } from './soundtrack';
 import { createStore } from './store';
 
 /** What is selected: a scene or an overlay by id, an overlay with the stretch of the video where it was clicked. */
-/** What is selected; a `crop` is a clip's (its id is the clip's). */
-export type Selection = { kind: 'scene' | OverlayKind | 'cut' | 'crop'; id: string; start?: number; end?: number };
+/** What is selected; a `crop` is a clip's (its id is the clip's); the `music` is the project's one (its id is `music`). */
+export type Selection = { kind: 'scene' | OverlayKind | 'cut' | 'crop' | 'music'; id: string; start?: number; end?: number };
 
 /** The tools: V selects; Z and M draw zooms and masks in the source view; T adds a caption. */
 export type Tool = 'select' | 'zoom' | 'mask' | 'caption' | 'crop';
 
 /** The look's parts, as the Look tab lists them. */
-export type LookSection = 'background' | 'window' | 'cursor' | 'camera' | 'subtitles' | 'sound' | 'video';
+export type LookSection = 'brand' | 'watermark' | 'background' | 'window' | 'cursor' | 'camera' | 'subtitles' | 'sound' | 'video';
 
 export interface EditorState {
   phase: 'loading' | 'ready' | 'failed';
@@ -56,6 +57,14 @@ export interface EditorState {
   status?: ProjectStatus;
   /** The command menu (Ctrl+K) is open. */
   menuOpen: boolean;
+  /** The motion items' pages in the preview: loading, ready or failed, and what they said. */
+  motionStatus: MotionStatusView[];
+  /** Counts the changes to the project's files (a motion page edited): what was read from them is read again. */
+  motionFiles: number;
+  /** The music and sounds: rendering, ready or failed, and what the music page said. */
+  soundStatus: SoundStatusView;
+  /** The soundtrack rendered last (it plays while a newer one renders). */
+  soundtrack?: Soundtrack;
 }
 
 export const store = createStore<EditorState>({
@@ -71,6 +80,9 @@ export const store = createStore<EditorState>({
   exportUnseen: false,
   pxPerSecond: 0,
   menuOpen: false,
+  motionStatus: [],
+  motionFiles: 0,
+  soundStatus: { state: 'none', errors: [], console: [], skipped: [] },
 });
 
 let player: Player | undefined;
@@ -127,8 +139,11 @@ export async function openSession(canvas: HTMLCanvasElement): Promise<void> {
       assets,
       project: shownProject()!,
       onChange: (state) => store.set({ player: state }),
+      // the check compares the editor's motion frames with the export's
+      fullSizeMotion: query.get('check') === '1',
     });
     store.set({ phase: 'ready', media });
+    player.setSoundtrack(store.get().soundtrack);
     await player.seek(0);
     followDocument();
     if (query.get('check') === '1') exposeCheckHook(canvas);
@@ -140,6 +155,16 @@ export async function openSession(canvas: HTMLCanvasElement): Promise<void> {
     bridge.on('project:file', (event) => void outsideChange(event));
     // A restarted take: the one before it is kept aside, and can be the take again.
     bridge.on('project:restarted', ({ discarded }) => offerUndoRestart(discarded));
+    // a motion page changed (Claude edited it): its frames, params and errors anew
+    bridge.on('motion:status', (statuses) => store.set({ motionStatus: statuses }));
+    // the music and sounds: each version of the project renders in the main process, and plays here once it is in
+    bridge.on('sound:status', (status) => void applySoundStatus(status));
+    followSound();
+    void bridge.invoke('sound:status').then(applySoundStatus);
+    bridge.on('motion:changed', ({ files }) => {
+      store.set({ motionFiles: files });
+      player?.motionFilesChanged();
+    });
     // what happened to the take (an undone restart), once it is in
     bridge.on('project:note', ({ text }) => toast(text));
   } catch (error) {
@@ -147,7 +172,54 @@ export async function openSession(canvas: HTMLCanvasElement): Promise<void> {
   }
 }
 
-const LISTS = { scene: 'scenes', zoom: 'zooms', mask: 'masks', caption: 'texts', cut: 'cuts', crop: 'scenes' } as const;
+const LISTS = { scene: 'scenes', zoom: 'zooms', mask: 'masks', caption: 'texts', motion: 'overlays', cut: 'cuts', crop: 'scenes', sound: 'sounds' } as const;
+
+/** Whether the selected item is still in the project. */
+function stillThere(selection: Selection, project: CuttleProject): boolean {
+  if (selection.kind === 'music') return project.music !== undefined;
+  return (project[LISTS[selection.kind]] as { id?: string }[]).some((item) => item.id === selection.id);
+}
+
+/**
+ * Whether a project may have music or sounds (to render, or to stop rendering once it has none): its
+ * own, or ones its motion pages ask for.
+ */
+const hasSound = (project: CuttleProject) =>
+  project.music !== undefined ||
+  project.sounds.length > 0 ||
+  project.overlays.length > 0 ||
+  project.scenes.some((scene) => scene.type === 'motion' || scene.transition !== undefined);
+
+/** The document's project goes to the main process at each edit: it renders its music and sounds a moment later. */
+function followSound(): void {
+  let last: CuttleProject | undefined;
+  let version = 0;
+  const send = () => {
+    const project = store.get().doc?.project;
+    if (!project || project === last) return;
+    const before = last;
+    last = project;
+    if (!hasSound(project) && !(before && hasSound(before))) return;
+    void bridge.invoke('sound:project', { version: ++version, raw: project as unknown as Record<string, unknown> }).catch(() => {});
+  };
+  store.subscribe(send);
+  send();
+}
+
+/** A new state of the soundtrack: a new render is fetched and plays from then on; none stops it. */
+async function applySoundStatus(status: SoundStatusView): Promise<void> {
+  store.set({ soundStatus: status });
+  if (status.state === 'none') {
+    store.set({ soundtrack: undefined });
+    player?.setSoundtrack(undefined);
+    return;
+  }
+  if (!status.key || status.key === store.get().soundtrack?.key) return;
+  const track = await bridge.invoke('sound:soundtrack', status.key).catch(() => null);
+  if (!track || store.get().soundStatus.key !== track.key) return;
+  store.set({ soundtrack: track });
+  player?.setSoundtrack(track);
+}
 
 /** The player follows the document (edits, previews, outside changes) and the previewed format. */
 function followDocument(): void {
@@ -156,7 +228,7 @@ function followDocument(): void {
   store.subscribe(() => {
     // a selection whose item an undo or an outside change removed is cleared
     const { selection, doc } = store.get();
-    if (selection && doc && !(doc.project[LISTS[selection.kind]] as { id?: string }[]).some((item) => item.id === selection.id)) select(undefined);
+    if (selection && doc && !stillThere(selection, doc.project)) select(undefined);
     const next = shownProject();
     if (next === last || !next) return;
     last = next;
@@ -178,7 +250,16 @@ function exposeCheckHook(canvas: HTMLCanvasElement): void {
     __cuttleCheck: {
       seek: (t: number) => player?.seek(t),
       playback: () => player?.stats(),
-      state: () => ({ ...store.get().player, duration: player?.duration ?? 0, mediaState: store.get().mediaState, proxyInUse, selection: store.get().selection, tool: store.get().tool }),
+      state: () => ({
+        ...store.get().player,
+        duration: player?.duration ?? 0,
+        mediaState: store.get().mediaState,
+        proxyInUse,
+        selection: store.get().selection,
+        tool: store.get().tool,
+        motion: { status: store.get().motionStatus, files: store.get().motionFiles },
+        sound: { status: store.get().soundStatus, track: store.get().soundtrack?.key, seconds: store.get().soundtrack ? store.get().soundtrack!.music.length / 2 / store.get().soundtrack!.rate : 0 },
+      }),
       pixels: () => canvas.toDataURL('image/png'),
       /** Switches to the proxy (the check runs with `?proxy=off` to compare frames of the take first). */
       useProxy: async () => {
@@ -196,6 +277,8 @@ function exposeCheckHook(canvas: HTMLCanvasElement): void {
       redo,
       flush,
       select: (selection: Selection | undefined) => select(selection),
+      /** The timeline's scale: pixels a second. */
+      pps: () => store.get().pxPerSecond,
       tool: (tool: Tool) => setTool(tool),
     },
   });

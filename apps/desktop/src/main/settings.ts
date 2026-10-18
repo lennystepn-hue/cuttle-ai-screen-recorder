@@ -28,15 +28,19 @@ const SettingsSchema = z.object({
   launchAtLogin: z.boolean().catch(false).default(false),
   /** Motion in the app's windows: the OS's "reduce motion" (system), or always reduced, or always full. */
   motion: z.enum(MOTIONS).catch('system').default('system'),
-  /** Transcribing a take after its cut: the speech model (`small` until the person picks), and the language spoken. */
+  /**
+   * Transcribing a take after its cut: the speech model (`small` until the person picks), and the
+   * language spoken. `live`: the HUD shows what the mic hears while a take records.
+   */
   speech: z
     .object({
       model: z.enum(['off', ...SPEECH_MODEL_NAMES]).catch('small').default('small'),
       language: z.enum(SPEECH_LANGUAGES).catch('auto').default('auto'),
+      live: z.boolean().catch(true).default(true),
     })
-    .catch({ model: 'small' as const, language: 'auto' as const })
-    .default({ model: 'small' as const, language: 'auto' as const }),
-  /** The privacy step after a take's cut: read the screen's text (Windows' OCR) to mask what it showed, and the words always masked. */
+    .catch({ model: 'small' as const, language: 'auto' as const, live: true })
+    .default({ model: 'small' as const, language: 'auto' as const, live: true }),
+  /** The privacy step after a take's cut: read the screen's text (Windows' OCR, macOS's Vision) to mask what it showed, and the words always masked. */
   privacy: z
     .object({
       read: z.boolean().catch(true).default(true),

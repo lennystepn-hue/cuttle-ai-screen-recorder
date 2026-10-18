@@ -7,7 +7,7 @@ import { takeKey } from './take';
 
 export type Raw = Record<string, unknown>;
 export type ListName = IdList;
-export type OverlayList = 'zooms' | 'masks' | 'texts';
+export type OverlayList = 'zooms' | 'masks' | 'texts' | 'overlays' | 'sounds';
 type Item = Record<string, unknown>;
 
 /** What a command may need to clamp to: the take's length and the screen's size. */
@@ -48,7 +48,11 @@ export type Command =
   /** The words spoken in [at, end) read as `text` ("" for none); `undefined` takes the fixes there away. */
   | { type: 'caption-fix'; at: number; end: number; text: string | undefined }
   /** Replaces every scene (Show raw take). */
-  | { type: 'scenes'; scenes: Item[] };
+  | { type: 'scenes'; scenes: Item[] }
+  /** Sets fields of the music (`undefined` removes a field); `null` removes the music. */
+  | { type: 'music'; fields: Item | null }
+  /** Sets fields of the theme, the project's brand (`undefined` removes a field); `replace`: `fields` are the whole theme (a brand kit applied). */
+  | { type: 'theme'; fields: Item; replace?: boolean };
 
 /** A command that cannot run: its item is gone (`gone`) or the result is not a valid project (`invalid`). */
 export class DocumentError extends Error {
@@ -76,7 +80,7 @@ const clampNumber = (value: number, min: number, max: number) => Math.min(Math.m
 
 /** Gives every scene, overlay and cut without an id one (`s3`, `z1` …); returns the same object when all have one. */
 export function ensureIds(raw: Raw): Raw {
-  const lists = (['scenes', 'zooms', 'masks', 'texts', 'cuts'] as const).filter((list) => items(raw, list).some((item) => typeof item.id !== 'string'));
+  const lists = (['scenes', 'zooms', 'masks', 'texts', 'overlays', 'cuts', 'sounds'] as const).filter((list) => items(raw, list).some((item) => typeof item.id !== 'string'));
   if (lists.length === 0) return raw;
   const next = structuredClone(raw);
   const taken = usedIds(next);
@@ -162,6 +166,11 @@ function clampItem(list: ListName, item: Item, limits: EditLimits): void {
     } else item.duration = round(Math.max(frame, Number(item.duration)));
     return;
   }
+  if (list === 'sounds') {
+    item.at = round(Math.max(0, Number(item.at)));
+    if (item.volume !== undefined) item.volume = round(clampNumber(Number(item.volume), 0, 1));
+    return;
+  }
   if (list === 'masks' || list === 'cuts') {
     item.from = round(Math.max(0, Number(item.from)));
     item.to = round(Math.max(Number(item.from) + frame, Number(item.to)));
@@ -228,10 +237,10 @@ export function applyCommand(raw: Raw, command: Command, limits: EditLimits = {}
       if ((to - from) / speed < 1 / (limits.fps ?? 30) - 1e-9) throw new DocumentError('invalid', `the clip is too short for ${round(speed)}×`);
       item.speed = round(speed);
       touched.push(['scenes', item]);
-      // Captions and zooms made by hand inside the clip keep their output length: a 3 s caption stays
-      // 3 s at 12×. A zoom suggest made stays on what it follows (clicks, typing, a dialog): stretched,
-      // it would move on after the clicks it moves to, and run into the next zoom.
-      for (const name of ['zooms', 'texts'] as const) {
+      // Captions, motion overlays and zooms made by hand inside the clip keep their output length: a 3 s
+      // caption stays 3 s at 12×. A zoom suggest made stays on what it follows (clicks, typing, a dialog):
+      // stretched, it would move on after the clicks it moves to, and run into the next zoom.
+      for (const name of ['zooms', 'texts', 'overlays'] as const) {
         for (const overlay of items(next, name)) {
           const at = Number(overlay.at);
           const duration = Number(overlay.duration);
@@ -284,6 +293,8 @@ export function applyCommand(raw: Raw, command: Command, limits: EditLimits = {}
     case 'delete': {
       const { index } = find(next, command.list, command.id);
       list(command.list).splice(index, 1);
+      // a scene takes the sounds placed in it along
+      if (command.list === 'scenes' && Array.isArray(next.sounds)) next.sounds = (next.sounds as Item[]).filter((sound) => sound.scene !== command.id);
       break;
     }
     case 'duplicate': {
@@ -319,6 +330,21 @@ export function applyCommand(raw: Raw, command: Command, limits: EditLimits = {}
       else parent[last] = structuredClone(command.value);
       break;
     }
+    case 'music': {
+      if (command.fields === null) delete next.music;
+      else {
+        const music = (next.music && typeof next.music === 'object' ? next.music : (next.music = {})) as Item;
+        setFields(music, structuredClone(command.fields));
+        if (typeof music.volume === 'number') music.volume = round(clampNumber(music.volume, 0, 1));
+        if (typeof music.duck === 'number') music.duck = round(clampNumber(music.duck, 0, 40));
+      }
+      break;
+    }
+    case 'theme': {
+      const theme = (!command.replace && next.theme && typeof next.theme === 'object' ? next.theme : (next.theme = {})) as Item;
+      setFields(theme, structuredClone(command.fields));
+      break;
+    }
     case 'output': {
       const output = (next.output && typeof next.output === 'object' ? next.output : (next.output = {})) as Item;
       output.width = command.width;
@@ -350,6 +376,9 @@ export function applyCommand(raw: Raw, command: Command, limits: EditLimits = {}
       next.scenes = structuredClone(command.scenes);
       const ids = ensureIds(next);
       next.scenes = ids.scenes;
+      // sounds placed in scenes that are gone go with them
+      const kept = new Set(items(next, 'scenes').map((scene) => scene.id));
+      if (Array.isArray(next.sounds)) next.sounds = (next.sounds as Item[]).filter((sound) => sound.scene === undefined || kept.has(sound.scene));
       break;
     }
   }
@@ -412,7 +441,15 @@ export function replayCommands(raw: Raw, commands: readonly Command[], limits: E
   return { raw: current, dropped };
 }
 
-const NOUNS: Record<ListName, [string, string]> = { scenes: ['scene', 'scenes'], zooms: ['zoom', 'zooms'], masks: ['mask', 'masks'], texts: ['caption', 'captions'], cuts: ['cut', 'cuts'] };
+const NOUNS: Record<ListName, [string, string]> = {
+  scenes: ['scene', 'scenes'],
+  zooms: ['zoom', 'zooms'],
+  masks: ['mask', 'masks'],
+  texts: ['caption', 'captions'],
+  overlays: ['motion overlay', 'motion overlays'],
+  cuts: ['cut', 'cuts'],
+  sounds: ['sound', 'sounds'],
+};
 const noun = (list: ListName, count: number) => `${count} ${NOUNS[list][count === 1 ? 0 : 1]}`;
 
 /**
@@ -423,9 +460,9 @@ export function describeChange(before: CuttleProject, after: CuttleProject): str
   return changeParts(before, after).join(' · ') || 'no visible change';
 }
 
-/** The first item added or changed between two versions (scenes, then zooms, masks, captions, cuts), to show it. */
+/** The first item added or changed between two versions (scenes, then zooms, masks, captions, motion overlays, cuts, sounds), to show it. */
 export function firstChanged(before: CuttleProject, after: CuttleProject): { list: ListName; id: string } | undefined {
-  for (const list of ['scenes', 'zooms', 'masks', 'texts', 'cuts'] as const) {
+  for (const list of ['scenes', 'zooms', 'masks', 'texts', 'overlays', 'cuts', 'sounds'] as const) {
     const old = new Map(before[list].map((item) => [item.id, JSON.stringify(item)]));
     const found = after[list].find((item) => item.id !== undefined && old.get(item.id) !== JSON.stringify(item));
     if (found?.id) return { list, id: found.id };
@@ -435,7 +472,7 @@ export function firstChanged(before: CuttleProject, after: CuttleProject): { lis
 
 function changeParts(before: CuttleProject, after: CuttleProject): string[] {
   const parts: string[] = [];
-  for (const list of ['scenes', 'zooms', 'masks', 'texts', 'cuts'] as const) {
+  for (const list of ['scenes', 'zooms', 'masks', 'texts', 'overlays', 'cuts', 'sounds'] as const) {
     const key = (item: { id?: string }, index: number) => item.id ?? `#${index}`;
     const old = new Map(before[list].map((item, index) => [key(item, index), JSON.stringify(item)]));
     const now = new Map(after[list].map((item, index) => [key(item, index), JSON.stringify(item)]));
@@ -446,7 +483,9 @@ function changeParts(before: CuttleProject, after: CuttleProject): string[] {
     if (removed) parts.push(`${noun(list, removed)} removed`);
     if (changed) parts.push(`${noun(list, changed)} changed`);
   }
+  if (JSON.stringify(before.music) !== JSON.stringify(after.music)) parts.push(!before.music ? 'music added' : !after.music ? 'the music removed' : 'the music changed');
   if (JSON.stringify(before.look) !== JSON.stringify(after.look)) parts.push('the look changed');
+  if (JSON.stringify(before.theme) !== JSON.stringify(after.theme)) parts.push('the brand changed');
   if (JSON.stringify(before.autoEdits) !== JSON.stringify(after.autoEdits)) parts.push('the automatic edits changed');
   if (JSON.stringify(before.output) !== JSON.stringify(after.output)) parts.push('the output size changed');
   if (JSON.stringify(before.captions) !== JSON.stringify(after.captions)) parts.push('the subtitles changed');

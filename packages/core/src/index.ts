@@ -1,6 +1,7 @@
 // @cuttle/core: what the CLI and the app do to a project folder, in Node: read and write cuttle.json
 // as written (with backups), point the project at a take, suggest scenes, recover a take, grab a
-// frame, run ffmpeg, and transcribe the mic (the speech models, whisper, the speech edits).
+// frame, run ffmpeg, transcribe the mic (the speech models, whisper, live captions, the speech
+// edits), keep brand kits, and read a product's colours and the desktop's wallpaper for a background.
 export { CoreError, type CoreErrorCode } from './errors';
 export { EDITOR_LOCK, editorLockOf, type EditorLock } from './editor-lock';
 export { ffmpegPath, runFfmpeg } from './ffmpeg';
@@ -9,13 +10,15 @@ export { samePath, useTake, type TakeFiles } from './use-take';
 export { suggestProject, type SuggestOptions, type SuggestResult } from './suggest';
 export { recoverTake, type RecoverResult } from './recover';
 export { GRID_STEP, grabFrame, gridFilter, type FrameOptions, type FrameResult } from './frame';
-export { analyseScreen, grabGray, parseAnalysis, probeScreen, streamSeconds, type Gray, type ScreenAnalysis } from './suggest/media';
+export { ANALYSIS_DIR, analyseScreen, cachedAnalysis, grabGray, parseAnalysis, probeScreen, streamSeconds, type Gray, type ScreenAnalysis } from './suggest/media';
+export { applyLengthFit, withLengthFit, withoutLengthFit, type LengthApplied, type LengthFitResult, type LengthInput } from './suggest/length';
 export { RULES, suggestClips, type SuggestInput, type SuggestedClip, type Suggestion } from './suggest/plan';
 export { changedRegion, zoomRect } from './suggest/region';
 export { gaps, length, union, type Span } from './suggest/spans';
 export { transcriptMarkers } from './suggest/transcript';
 export { DEFAULT_MODEL, MODEL_NAMES, SPEECH_MODELS, chooseModel, downloadFile, downloadModel, installedModels, modelInstalled, modelPath, modelUrl, modelsDir, removeModel, speechModel, type DownloadOptions, type ModelName, type SpeechModel } from './speech/models';
 export { filterValue, hasWhisper, NO_WHISPER, parseWhisperCliJson, parseWhisperLines, runWhisper, whisperCliPath, whisperEngine, type HeardWord, type WhisperEngine, type WhisperOptions } from './speech/whisper';
+export { LIVE_RATE, LIVE_RULES, liveCaptions, liveModel, quietestCut, withoutEchoes, type LiveCaptions, type LiveMode, type LiveOptions } from './speech/live';
 export { LEVEL_SECONDS, SPEECH_RULES, micLevels, speechStretches } from './speech/levels';
 export { ALIGN_RULES, alignWords, guessLanguage, type Alignment } from './speech/align';
 export { SPEECH_EDIT_RULES, fillerCuts, fillerWords, inputSpans, mergeCuts, pauseCuts, restingAt, speechCuts, type RawCut, type SpeechCut, type SpeechEditInput } from './speech/edits';
@@ -32,3 +35,8 @@ export { READ_RULES, SCREEN_TEXT_FILE, framesToRead, readFrames, writeScreenText
 export { applyPrivacy, readScreenTake, readScreenText, withPrivacyMasks, type PrivacyInput, type PrivacyMasksResult, type PrivacyResult, type RawMask } from './privacy/apply';
 export { NOTIFICATION_RULES, notificationMasks, type NotificationMask } from './privacy/notifications';
 export { CLEAN_MIC_FILE, cleanMic, cleanupFilter, denoiseLatency } from './speech/cleanup';
+export { BRAND_FILE, PROJECT_BRAND_DIR, applyBrand, brandFields, brandSlug, brandsDir, findBrand, listBrands, removeBrand, saveBrand, type Brand, type BrandFields } from './brands';
+export { keepInProject } from './keep-file';
+export { PALETTE_RULES, imagePalette, paletteOf, takePalette } from './palette';
+export { importWallpaper, wallpaperFile } from './wallpaper';
+export { parseRegWallpaper } from './wallpaper-win32';

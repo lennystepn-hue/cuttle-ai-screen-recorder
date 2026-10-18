@@ -23,4 +23,10 @@ describe('the macOS capture helper', () => {
     expect(screenLatency('windows', false)).toBe(0);
     expect(screenLatency('test', false)).toBe(0);
   });
+
+  it('takes a window by itself, at its size', () => {
+    expect(helperArgs({ monitor, crop: { x: 200, y: 240, width: 1400, height: 440 }, window: 7610 }, false, [4242])).toEqual([
+      '--display', '1', '--window', '7610', '--size', '1400,440', '--fps', '30',
+    ]);
+  });
 });

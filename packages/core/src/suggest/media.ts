@@ -1,4 +1,6 @@
 // What suggest needs from the screen track, read with ffmpeg.
+import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
+import { dirname, join, relative, sep } from 'node:path';
 import { CoreError } from '../errors';
 import { runFfmpeg } from '../ffmpeg';
 import type { ScreenBands } from './crop';
@@ -24,6 +26,31 @@ export async function analyseScreen(path: string): Promise<ScreenAnalysis> {
     '-f', 'null', '-',
   ]);
   return parseAnalysis(stderr);
+}
+
+/**
+ * Where `analyseScreen`'s results are kept, in the project (`.cuttle/analysis/`, beside the app's
+ * other caches): never in a take's folder, which a restart moves and the take menu deletes.
+ */
+export const ANALYSIS_DIR = join('.cuttle', 'analysis');
+
+/**
+ * `analyseScreen` of the project's (`projectDir`) screen track `path`, kept in `ANALYSIS_DIR`: read
+ * again only when the track changed (its size or its time), so a step after suggest (the length
+ * fit) does not decode the take again.
+ */
+export async function cachedAnalysis(path: string, projectDir: string): Promise<ScreenAnalysis> {
+  const name = relative(projectDir, path).split(sep).join('_').replace(/[^\w.-]/g, '_');
+  const file = join(projectDir, ANALYSIS_DIR, `${name}.json`);
+  const { size, mtimeMs } = await stat(path);
+  const kept = JSON.parse(await readFile(file, 'utf8').catch(() => 'null')) as { version?: number; size?: number; mtimeMs?: number; analysis?: ScreenAnalysis } | null;
+  if (kept?.version === 1 && kept.size === size && kept.mtimeMs === mtimeMs && Array.isArray(kept.analysis?.still)) return kept.analysis;
+  const analysis = await analyseScreen(path);
+  // a folder that cannot be written only means the next step reads the take again
+  await mkdir(dirname(file), { recursive: true })
+    .then(() => writeFile(file, `${JSON.stringify({ version: 1, size, mtimeMs, analysis })}\n`))
+    .catch(() => {});
+  return analysis;
 }
 
 /** Reads the log of `analyseScreen`'s ffmpeg run. */

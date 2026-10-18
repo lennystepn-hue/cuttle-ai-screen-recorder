@@ -2,9 +2,14 @@
 // what a window may send. The main process checks each request against it; the preloads expose only
 // their window's channels.
 import { z } from 'zod';
-import type { PickedTarget, PickerDisplay, PickerWindow, RecordChoices } from './recording';
+import type { ParamDeclaration } from '@cuttle/export/motion-params';
+import type { Chapter } from '@cuttle/timeline';
+import { MOTION_TEMPLATES, MUSIC_TEMPLATES } from '@cuttle/motion-kit';
+import { ID_PATTERN, SCRIPT_MAX_STEPS, STEP_NOTE_MAX, STEP_TITLE_MAX } from '@cuttle/project';
+import type { LengthReport } from './media-jobs';
+import type { PickedTarget, PickerDisplay, PickerWindow, PrompterState, RecordChoices, ScriptStep } from './recording';
 
-export type { PickedTarget, PickerDisplay, PickerWindow, Rect, RecordChoices } from './recording';
+export type { PickedTarget, PickerDisplay, PickerWindow, PrompterState, Rect, RecordChoices, ScriptStep } from './recording';
 
 export const EXPORT_FORMATS = ['16:9', '1:1', '9:16'] as const;
 /** What an export makes: the project's own output size, or a preset. */
@@ -65,6 +70,8 @@ export interface ExportFile {
   bytes: number;
   /** The subtitle files written next to it. */
   subtitles?: string[];
+  /** The chapters in it, from the script's steps. */
+  chapters?: Chapter[];
 }
 
 export type ExportEnd =
@@ -88,6 +95,8 @@ export interface PickerSetup {
   warning?: string;
   /** Cameras and mics are still being listed (DirectShow takes a moment): the bar says so. */
   listingDevices?: boolean;
+  /** The script the take records with: the project's (`script` in cuttle.json), or what was typed for it since. */
+  script: ScriptStep[];
 }
 
 /** What the HUD shows. */
@@ -106,6 +115,10 @@ export interface HudState {
   detail?: string;
   /** `warn`: a warning (amber); `info`: a state ("Stopping…"). */
   tone?: 'warn' | 'info';
+  /** The take records a mic: the HUD shows its level (`hud:level`). */
+  mic?: boolean;
+  /** The take has live captions: the HUD shows them under its bar (`hud:caption`); `failed` says why they stopped. */
+  captions?: { failed?: string };
 }
 
 /** What the main process is doing to a project, shown in its editor's title bar. */
@@ -173,8 +186,8 @@ export interface SettingsView {
   mic?: string;
   launchAtLogin: boolean;
   motion: Motion;
-  /** Transcribing a take after its cut: the model (or off) and the language spoken. */
-  speech: { model: SpeechModelName | 'off'; language: SpeechLanguage };
+  /** Transcribing a take after its cut: the model (or off) and the language spoken; `live`: captions in the HUD while it records. */
+  speech: { model: SpeechModelName | 'off'; language: SpeechLanguage; live: boolean };
   /** After a take's cut: read the screen's text to mask what it showed, and the words always masked. */
   privacy: { read: boolean; words: string[] };
   /** `open`: the project is open in Cuttle, here (`here`) or on the computer named. */
@@ -182,7 +195,121 @@ export interface SettingsView {
   version: string;
 }
 
+/** The params a motion page declares (its `cuttle-params`), and what is wrong with the declaration. */
+export interface MotionParams {
+  params: ParamDeclaration[];
+  issues: string[];
+}
+
+/** What a motion item's page is doing in the editor's preview, and what it said (as @cuttle/export's MotionStatus). */
+export interface MotionStatusView {
+  /** `scenes[2]` or `overlays[0]`. */
+  item: string;
+  src: string;
+  state: 'loading' | 'ready' | 'failed';
+  failure?: string;
+  errors: string[];
+  console: string[];
+}
+
+/** A motion frame for the player: the number of what drew it, and its pixels (none when the player's own copy is still right). */
+export type MotionFrameAnswer = { id: number; pixels?: { width: number; height: number; data: Uint8Array } } | null;
+
+/** Frames across a motion scene for its block on the timeline (none when the editor's strip is still right). */
+export type MotionStripAnswer = { id: number; frames?: { width: number; height: number; data: Uint8Array }[] } | null;
+
+/** The motion templates the editor offers (as @cuttle/motion-kit has them). */
+export const MOTION_TEMPLATE_NAMES = MOTION_TEMPLATES.map((template) => template.name) as [string, ...string[]];
+
+/** The music templates the editor offers (as @cuttle/motion-kit has them). */
+export const MUSIC_TEMPLATE_NAMES = MUSIC_TEMPLATES.map((template) => template.name) as [string, ...string[]];
+
+/** What the music page told about its music (as @cuttle/export's MusicInfo). */
+export interface MusicInfoView {
+  bpm?: number;
+  key?: string;
+  sections?: { start: number; end: number; name: string; energy?: number }[];
+}
+
+/**
+ * The editor's soundtrack (its music and sounds): `none` without music or sounds, `rendering` while it
+ * renders (`key` is then the last one rendered, which plays meanwhile), `ready`, or `failed`.
+ */
+export interface SoundStatusView {
+  state: 'none' | 'rendering' | 'ready' | 'failed';
+  /** The project version it is for. */
+  version?: number;
+  /** The rendered soundtrack to ask for (`sound:soundtrack`). */
+  key?: string;
+  info?: MusicInfoView | null;
+  renderMs?: number;
+  failure?: string;
+  errors: string[];
+  console: string[];
+  /** Sounds that could not play. */
+  skipped: string[];
+  /** The sounds the motion pages asked for (`cuttle.sound`), in output seconds, with the item's name. */
+  pageSounds?: PageSoundView[];
+}
+
+export interface PageSoundView {
+  at: number;
+  sound: string;
+  item: string;
+}
+
+/** A rendered soundtrack: each stem interleaved stereo float at `rate`, the music's peaks for its lane, the speech it goes down for. */
+export type SoundtrackAnswer = {
+  key: string;
+  rate: number;
+  music: Float32Array;
+  effects: Float32Array;
+  /** The music's peaks, 50 a second, 0–255. */
+  peaks: Uint8Array;
+  speech: { start: number; end: number }[];
+} | null;
+
+/** A saved brand kit, as the Look tab lists it: its name, and its accent, background and heading font for its chip. */
+export interface BrandView {
+  name: string;
+  accent: string;
+  background: { preset: string; color?: string; colors?: string[] };
+  font: string;
+}
+
+/** What applying a kit sets, its files already copied into the project: the whole theme, and the look's brand parts. */
+export interface BrandApplied {
+  theme: Record<string, unknown>;
+  background: Record<string, unknown>;
+  frame: { style: string };
+  cursor: { style: string; color: string };
+}
+
 const rect = z.strictObject({ x: z.number().finite(), y: z.number().finite(), width: z.number().finite().positive(), height: z.number().finite().positive() });
+const box = z.tuple([z.number().finite(), z.number().finite(), z.number().finite(), z.number().finite()]);
+/** A frame (premultiplied RGBA, top row first) whose bytes fit its size. */
+const pixels = z
+  .strictObject({ width: z.number().int().positive().max(8192), height: z.number().int().positive().max(8192), data: z.custom<Uint8Array>((value) => value instanceof Uint8Array, 'bytes') })
+  .refine((frame) => frame.data.byteLength === frame.width * frame.height * 4, { message: 'the bytes do not fit the size' });
+/** A motion frame the player asks for (as @cuttle/export's MotionFrameRequest); a transition's comes with the two frames it goes between. */
+const motionRequest = z.strictObject({
+  key: z.string().min(1).max(200),
+  kind: z.enum(['scene', 'overlay', 'transition']),
+  index: z.number().int().nonnegative().max(100_000),
+  frame: z.number().int().nonnegative().max(100_000_000),
+  start: z.number().finite().nonnegative(),
+  duration: z.number().finite().positive(),
+  screen: z.strictObject({ width: z.number().int().positive().max(32_768), height: z.number().int().positive().max(32_768) }),
+  view: z
+    .strictObject({
+      source: z.number().finite().nullable(),
+      zoom: box.nullable(),
+      content: box.nullable(),
+      cursor: z.strictObject({ x: z.number().finite(), y: z.number().finite() }).nullable(),
+    })
+    .optional(),
+  between: z.strictObject({ from: pixels, to: pixels }).optional(),
+});
 const deviceName = z.string().min(1).max(512);
 
 /** Requests (window → main), each with the schema of its argument. */
@@ -190,6 +317,8 @@ export const REQUESTS = {
   // editor
   'project:info': z.undefined(),
   'project:reveal': z.string().max(4096).optional(),
+  /** Text for the clipboard: the chapters for a YouTube description. */
+  'export:copy': z.string().max(20_000),
   'media:state': z.undefined(),
   'media:retry': z.undefined(),
   'export:targets': z.array(z.enum(EXPORT_TARGETS)).min(1).max(4),
@@ -232,6 +361,21 @@ export const REQUESTS = {
   'picker:cancel': z.undefined(),
   'picker:claude-folder': z.undefined(),
   'picker:retry': z.undefined(),
+  /** The script as typed so far (a step being written may have no title yet). */
+  'picker:script': z
+    .array(
+      z.strictObject({
+        id: z.string().regex(ID_PATTERN),
+        title: z.string().max(STEP_TITLE_MAX),
+        note: z.string().max(STEP_NOTE_MAX).optional(),
+      }),
+    )
+    .max(SCRIPT_MAX_STEPS),
+  // prompter
+  'prompter:next': z.undefined(),
+  'prompter:previous': z.undefined(),
+  /** The height its content needs (DIP, its margins included): the window takes it. */
+  'prompter:size': z.strictObject({ height: z.number().finite().positive().max(4000) }),
   // HUD
   'hud:stop': z.undefined(),
   'hud:marker': z.undefined(),
@@ -249,7 +393,20 @@ export const REQUESTS = {
       base: z.string().regex(/^[0-9a-f]{64}$/),
     })
     .refine((value) => JSON.stringify(value.raw).length <= MAX_PROJECT_BYTES, 'cuttle.json is too large'),
-  'project:import-image': z.strictObject({ purpose: z.enum(['still', 'background']) }),
+  'project:import-image': z.strictObject({ purpose: z.enum(['still', 'background', 'logo', 'watermark']) }),
+  /** The brand kits saved on this computer. */
+  'brand:list': z.undefined(),
+  /** Saves the project's brand, as this version of it has it, as a kit (a kit of that name is replaced). */
+  'brand:save': z
+    .strictObject({ name: z.string().trim().min(1).max(80), raw: z.record(z.string(), z.unknown()) })
+    .refine((value) => JSON.stringify(value.raw).length <= MAX_PROJECT_BYTES, 'cuttle.json is too large'),
+  /** Copies a kit's files into the project and answers what applying it sets (the page makes it one edit). */
+  'brand:apply': z.string().trim().min(1).max(80),
+  'brand:remove': z.string().trim().min(1).max(80),
+  /** The colours of the take's screen or of the brand's logo, for the background. */
+  'background:palette': z.strictObject({ from: z.enum(['take', 'logo']), logo: z.string().min(1).max(4096).optional() }),
+  /** The desktop's wallpaper, copied into the project's images/ for the background. */
+  'background:wallpaper': z.undefined(),
   'project:draft': z.strictObject({ raw: z.record(z.string(), z.unknown()) }).refine((value) => JSON.stringify(value.raw).length <= MAX_PROJECT_BYTES, 'cuttle.json is too large'),
   /** The page asks to be loaded anew (another take): a page cannot reload itself (navigation is refused). */
   'project:reload': z.undefined(),
@@ -270,6 +427,7 @@ export const REQUESTS = {
     motion: z.enum(MOTIONS).optional(),
     speechModel: z.enum(['off', ...SPEECH_MODEL_NAMES]).optional(),
     speechLanguage: z.enum(SPEECH_LANGUAGES).optional(),
+    speechLive: z.boolean().optional(),
     privacyRead: z.boolean().optional(),
     privacyWords: z.array(z.string().trim().min(1).max(PRIVACY_WORD_MAX)).max(PRIVACY_WORDS_MAX).optional(),
   }),
@@ -299,6 +457,53 @@ export const REQUESTS = {
   'speech:remove': z.enum(SPEECH_MODEL_NAMES),
   /** Reads the screen's text of the project's take again and masks what it showed (the Auto tab, Try again). */
   'project:read-screen': z.undefined(),
+  /** Fits the video to this many seconds where it rests, or takes the fit out (null). */
+  'project:fit-length': z.strictObject({ seconds: z.number().positive().max(36_000).nullable() }),
+  /** The project as the editor shows it now, numbered: motion frames are asked for by that number. */
+  'motion:project': z
+    .strictObject({ version: z.number().int().nonnegative(), raw: z.record(z.string(), z.unknown()) })
+    .refine((value) => JSON.stringify(value.raw).length <= MAX_PROJECT_BYTES, 'the project is too large'),
+  /**
+   * A frame of a motion item at the player's size: `mode` `seek` while paused, `play` while playing;
+   * `have`: the number of the player's own copy of that frame.
+   */
+  'motion:frame': z.strictObject({
+    version: z.number().int().nonnegative(),
+    request: motionRequest,
+    width: z.number().int().min(8).max(8192),
+    height: z.number().int().min(8).max(8192),
+    mode: z.enum(['seek', 'play']),
+    have: z.number().int().positive().optional(),
+  }),
+  /** Frames across a motion scene for its block on the timeline, small. */
+  'motion:strip': z.strictObject({
+    version: z.number().int().nonnegative(),
+    request: motionRequest,
+    frames: z.array(z.number().int().nonnegative().max(100_000_000)).min(1).max(16),
+    width: z.number().int().min(8).max(512),
+    height: z.number().int().min(8).max(512),
+    have: z.number().int().positive().optional(),
+  }),
+  /** The params a page declares (a page in the project, as an item's `src`). */
+  'motion:params': z.string().min(1).max(4096),
+  'motion:statuses': z.undefined(),
+  /** Loads an item's page again (`scenes[2]`, `overlays[0]`). */
+  'motion:reload': z.string().regex(/^(scenes|overlays)\[\d{1,6}\]$/),
+  /** Copies a template of the motion kit into the project's `motion/` folder. */
+  'motion:add-template': z.enum(MOTION_TEMPLATE_NAMES),
+  /** The project as the editor shows it now, numbered: its soundtrack renders a moment later. */
+  'sound:project': z
+    .strictObject({ version: z.number().int().nonnegative(), raw: z.record(z.string(), z.unknown()) })
+    .refine((value) => JSON.stringify(value.raw).length <= MAX_PROJECT_BYTES, 'the project is too large'),
+  /** The soundtrack rendered last, by its key (none when a newer one replaced it). */
+  'sound:soundtrack': z.string().regex(/^[0-9a-f]{8,64}$/),
+  'sound:status': z.undefined(),
+  /** The params the music page declares. */
+  'sound:params': z.string().min(1).max(4096),
+  /** Renders the music again. */
+  'sound:reload': z.undefined(),
+  /** Copies a music template into the project's `music/` folder. */
+  'sound:add-template': z.enum(MUSIC_TEMPLATE_NAMES),
 } as const;
 
 export type Request = keyof typeof REQUESTS;
@@ -310,6 +515,7 @@ export const MAX_PROJECT_BYTES = 4 * 1024 * 1024;
 export interface Responses {
   'project:info': ProjectInfo;
   'project:reveal': void;
+  'export:copy': void;
   'media:state': MediaState;
   'media:retry': void;
   /** Where each format would be written, and when an export already there was made (epoch ms). */
@@ -333,6 +539,10 @@ export interface Responses {
   'picker:cancel': void;
   'picker:claude-folder': string | undefined;
   'picker:retry': void;
+  'picker:script': void;
+  'prompter:next': void;
+  'prompter:previous': void;
+  'prompter:size': void;
   'hud:stop': void;
   'hud:marker': void;
   'hud:retake': void;
@@ -343,6 +553,14 @@ export interface Responses {
   'project:save': { hash: string } | { conflict: ProjectVersion & { origin: ChangeOrigin } } | { problem: string };
   /** An image chosen by the person, copied into the project when it lay outside (a path inside the project). */
   'project:import-image': { path: string } | undefined;
+  'brand:list': BrandView[];
+  /** The kits after the change, or why it could not be made. */
+  'brand:save': { brands: BrandView[] } | { problem: string };
+  'brand:apply': BrandApplied | { problem: string };
+  'brand:remove': { brands: BrandView[] } | { problem: string };
+  'background:palette': { colors: string[] } | { problem: string };
+  /** The wallpaper's path in the project, or why there is none. */
+  'background:wallpaper': { path: string } | { problem: string };
   /** The person's version a save conflict could not carry over, written to cuttle.json.draft. */
   'project:draft': void;
   'project:reload': void;
@@ -372,6 +590,23 @@ export interface Responses {
   'speech:remove': SpeechStatus;
   /** Started (the title bar shows it), or why not. */
   'project:read-screen': { started: true } | { problem: string };
+  /** What the fit did, once it is done, or why it could not. */
+  'project:fit-length': { report: LengthReport } | { problem: string };
+  'motion:project': void;
+  'motion:frame': MotionFrameAnswer;
+  'motion:strip': MotionStripAnswer;
+  'motion:params': MotionParams;
+  'motion:statuses': MotionStatusView[];
+  'motion:reload': void;
+  /** The page's path in the project (`motion/title/index.html`). */
+  'motion:add-template': { src: string };
+  'sound:project': void;
+  'sound:soundtrack': SoundtrackAnswer;
+  'sound:status': SoundStatusView;
+  'sound:params': MotionParams;
+  'sound:reload': void;
+  /** The page's path in the project (`music/pulse/index.html`). */
+  'sound:add-template': { src: string };
 }
 
 /** A version of cuttle.json: as written, and the SHA-256 of its bytes. */
@@ -388,8 +623,8 @@ export interface ProjectVersion {
  */
 export type ProjectFileEvent = (ProjectVersion & { origin: ChangeOrigin }) | { issues: string[] };
 
-/** Who changed cuttle.json outside the editor: another program, or the app's own cut, speech edits or privacy masks. */
-export type ChangeOrigin = 'outside' | 'suggest' | 'speech' | 'privacy';
+/** Who changed cuttle.json outside the editor: another program, or the app's own cut, speech edits, privacy masks or length fit. */
+export type ChangeOrigin = 'outside' | 'suggest' | 'speech' | 'privacy' | 'length';
 
 /** Events (main → window). */
 export interface Events {
@@ -402,9 +637,16 @@ export interface Events {
   'picker:devices': Pick<PickerSetup, 'cameras' | 'mics' | 'choices'>;
   'picker:active': { display: number };
   'picker:choices': RecordChoices;
+  /** The script, changed in another display's picker. */
+  'picker:script': ScriptStep[];
+  'prompter:state': PrompterState;
   /** `restart`: counting down again after a restart (the take before is kept). */
   'countdown:tick': { seconds: number; restart?: boolean };
   'hud:state': HudState;
+  /** The mic's level now (dBFS), ten times a second while the take records. */
+  'hud:level': { rms: number; peak: number };
+  /** Words the live captions heard since they last told, oldest first. */
+  'hud:caption': { words: string[] };
   /** What the main process is doing to the project (cutting the take), or nothing. */
   'project:status': ProjectStatus;
   'project:file': ProjectFileEvent;
@@ -421,6 +663,12 @@ export interface Events {
   'speech:status': SpeechStatus;
   /** Every window: how motion is set now (`data-motion` on the page's root). */
   'app:motion': Motion;
+  /** The motion items' pages in the editor's preview: loading, ready or failed, and what they said. */
+  'motion:status': MotionStatusView[];
+  /** The project's files changed (a page edited): motion frames are drawn anew. Counts the changes. */
+  'motion:changed': { files: number };
+  /** The soundtrack's state: rendering, ready (with its key), failed. */
+  'sound:status': SoundStatusView;
 }
 
 export type Event = keyof Events;

@@ -6,23 +6,27 @@ import { copyFile, mkdir, readdir, rename, rmdir, statfs } from 'node:fs/promise
 import { basename, dirname, join, relative, resolve, sep } from 'node:path';
 import { BrowserWindow, desktopCapturer, dialog, globalShortcut, screen, session, shell, systemPreferences, type Rectangle } from 'electron';
 import { PROJECT_FILE, newProjectFile, projectExists, readProjectFile, recoverTake, useTake, writeProjectFile } from '@cuttle/core';
+import { usedIds } from '@cuttle/project';
 import { focusWindow, recentClaudeFolders, type Devices, type RecorderEvent, type Take } from '@cuttle/recorder';
 import type { HudState, PickedTarget, PickerSetup, RecordChoices } from '../shared/ipc';
-import { captureSourceFor, hudPosition, hudWarning, recordingFailure, stopOptionsFor, type PickerDisplay, type PickerWindow } from '../shared/recording';
+import { captureSourceFor, hudPosition, hudWarning, recordingFailure, scriptForTake, stopOptionsFor, type PickerDisplay, type PickerWindow, type ScriptStep } from '../shared/recording';
 import { displayPixels, monitorOf, setMonitors, toDesktopPixels, toDip } from './desktop-pixels';
 import { CHECK, COUNTDOWN, HIDDEN, TEST_BACKEND } from './check';
 import { bindRequests, send } from './ipc';
 import { cutTake } from './media-service';
 import { APP_ORIGIN, serveApp, bundlePath } from './protocols';
-import { recorderHost, RecordingError } from './recorder-host';
+import { recorderHost, RecordingError, type LiveNews } from './recorder-host';
 import { findFfmpeg } from './tools';
 import { loadSettings, updateSettings } from './settings';
 import { maskPrivacy } from './privacy';
-import { transcribeProject } from './speech';
+import { openPrompter, type Prompter } from './prompter';
+import { liveRequest, transcribeProject } from './speech';
 import { editorWindowOf, expectSuggest, guard, hidePill, reopenEditor, sendToEditor, setEditorStatus, showPill, webPreferences } from './windows';
 
 /** The HUD's window (the HUD and a margin for its shadow): never in the video, and a dead zone for the input log. */
 const HUD_SIZE = { width: 512, height: 64 };
+/** With live captions: the strip of words under the bar. */
+const HUD_CAPTIONED_SIZE = { width: 512, height: 102 };
 /** The recorder host answers a listing in this time, or the picker says it cannot record. */
 const LISTING_TIMEOUT_MS = 10_000;
 
@@ -46,6 +50,17 @@ const finishing = new Set<string>();
 let writing: Promise<void> | undefined;
 /** The app quits: no recording starts any more, and a take written now is cut at its next open. */
 let quitting = false;
+/** The script the open pick records with: every display's picker edits this one. */
+let pickScript: ScriptStep[] = [];
+/** The project's script when the pick opened (JSON), what `pickScript` started from. */
+let pickBase = '[]';
+/**
+ * Scripts typed in a picker and not recorded with yet (the pick was cancelled), per project key
+ * ('' for a new project), with the project's script they started from: they come back in the next
+ * pick unless the project's script changed meanwhile (Claude wrote one).
+ */
+const scriptDrafts = new Map<string, { base: string; steps: ScriptStep[] }>();
+const draftKey = (dir: string | undefined) => (dir === undefined ? '' : keyOf(dir));
 
 /** Whether a take is being recorded into this project, or finished or cut for it: its takes stay as they are meanwhile. */
 export function takesBusy(dir: string): boolean {
@@ -221,6 +236,10 @@ export async function startPicking(projectDir?: string, options: { fromPill?: bo
     }
     const displays = pickerDisplays(devices);
     const choices = await choicesNow();
+    const saved = JSON.stringify(projectDir ? await savedScript(projectDir) : []);
+    const draft = scriptDrafts.get(draftKey(projectDir));
+    pickBase = saved;
+    pickScript = draft && draft.base === saved ? draft.steps : (JSON.parse(saved) as ScriptStep[]);
     const free = await freeBytes(projectDir ?? (await loadSettings()).projectsFolder);
     const warning = free !== undefined && free < tenMinutes(displays) ? `Only ${gigabytes(free)} free on this drive: a take longer than a few minutes may not fit.` : undefined;
     const countdown = await countdownSeconds();
@@ -249,6 +268,7 @@ function openPicker(display: PickerDisplay, displays: PickerDisplay[], devices: 
     listingDevices: !problem,
     ...((problem ?? unknown) && { problem: problem ?? unknown }),
     ...(warning && { warning }),
+    script: pickScript,
   };
   bindRequests(window.webContents, 'picker', {
     'picker:setup': () => picker.setup,
@@ -262,6 +282,14 @@ function openPicker(display: PickerDisplay, displays: PickerDisplay[], devices: 
       for (const other of pickers) {
         if (other.setup) other.setup.choices = next;
         if (other !== picker) send(other.window.webContents, 'picker:choices', next);
+      }
+    },
+    'picker:script': (steps) => {
+      pickScript = steps;
+      scriptDrafts.set(draftKey(pickingFor), { base: pickBase, steps });
+      for (const other of pickers) {
+        if (other.setup) other.setup.script = steps;
+        if (other !== picker) send(other.window.webContents, 'picker:script', steps);
       }
     },
     'picker:record': (target) => void beginRecording(target, displays),
@@ -415,6 +443,26 @@ async function removeIfEmpty(dir: string): Promise<boolean> {
   );
 }
 
+/** A project's script as cuttle.json has it (none when it has no file yet, or one that does not parse). */
+async function savedScript(dir: string): Promise<ScriptStep[]> {
+  if (!projectExists(dir)) return [];
+  const file = await readProjectFile(dir).catch(() => undefined);
+  return file?.project.script.map(({ id, title, note }) => ({ id, title, ...(note !== undefined && { note }) })) ?? [];
+}
+
+/** The script a take recorded with goes into cuttle.json; without one, the project keeps none. */
+function withScript(raw: Record<string, unknown>, script: readonly ScriptStep[]): void {
+  if (script.length > 0) raw.script = script;
+  else delete raw.script;
+}
+
+/** Writes the script a take recorded with into its project's cuttle.json. */
+async function keepScript(dir: string, script: readonly ScriptStep[]): Promise<void> {
+  const file = await readProjectFile(dir);
+  withScript(file.raw, script);
+  await writeProjectFile(file, 'record');
+}
+
 /** The take folder number a project uses now (`takes/<n>/screen.mp4`), if any. */
 function currentTake(raw: Record<string, unknown>): string | undefined {
   const screen = (raw.sources as { screen?: unknown } | undefined)?.screen;
@@ -442,6 +490,7 @@ async function beginRecording(target: PickedTarget, displays: PickerDisplay[]): 
   const display = displays.find((candidate) => candidate.id === target.display);
   const picked = pickers.find((picker) => picker.display === target.display)?.setup;
   const choices = picked?.choices ?? { stop: 'none' as const };
+  const steps = pickScript;
   const blocked = picked?.problem;
   let finished: () => void = () => {};
   writing = new Promise<void>((done) => (finished = done));
@@ -454,7 +503,7 @@ async function beginRecording(target: PickedTarget, displays: PickerDisplay[]): 
       if (blocked) say(blocked);
       return;
     }
-    opened = await record(target, display, displays, picked, choices);
+    opened = await record(target, display, displays, picked, choices, steps);
   } catch (error) {
     say(`Cuttle cannot record: ${(error as Error).message}`);
   } finally {
@@ -467,10 +516,11 @@ async function beginRecording(target: PickedTarget, displays: PickerDisplay[]): 
   }
 }
 
-/** Records a pick into its project; returns whether the editor opens on the take. */
-async function record(target: PickedTarget, display: PickerDisplay, displays: PickerDisplay[], picked: PickerSetup | undefined, choices: RecordChoices): Promise<boolean> {
+/** Records a pick into its project, with the script typed for it; returns whether the editor opens on the take. */
+async function record(target: PickedTarget, display: PickerDisplay, displays: PickerDisplay[], picked: PickerSetup | undefined, choices: RecordChoices, steps: ScriptStep[]): Promise<boolean> {
   const source = captureSourceFor(target, display);
   const created = !pickingFor;
+  const draft = draftKey(pickingFor);
   const projectDir = pickingFor ?? (await newProjectDir());
   const project = keyOf(projectDir);
   // The project's editor is not in its own take: hidden (its player paused) while it records again, shown after.
@@ -492,13 +542,16 @@ async function record(target: PickedTarget, display: PickerDisplay, displays: Pi
   let cutting = false;
   try {
     // The edit of the take the project uses now stays restorable ("Back to take n").
-    if (projectExists(projectDir)) {
-      const file = await readProjectFile(projectDir).catch(() => undefined);
-      const take = file && currentTake(file.raw);
-      if (take && existsSync(join(projectDir, 'takes', take))) await copyFile(join(projectDir, PROJECT_FILE), join(projectDir, 'takes', take, PROJECT_FILE)).catch(() => {});
-    }
+    const file = projectExists(projectDir) ? await readProjectFile(projectDir).catch(() => undefined) : undefined;
+    const take = file && currentTake(file.raw);
+    if (take && existsSync(join(projectDir, 'takes', take))) await copyFile(join(projectDir, PROJECT_FILE), join(projectDir, 'takes', take, PROJECT_FILE)).catch(() => {});
+    // the steps with a title, each with an id no other item of the project has
+    const script = scriptForTake(steps, usedIds({ ...file?.raw, script: [] }));
 
     const area = targetRect(target, display, picked);
+    // what the mic hears, in the HUD while the take records
+    const live = choices.mic ? await liveRequest().catch(() => undefined) : undefined;
+    const hudSize = live ? HUD_CAPTIONED_SIZE : HUD_SIZE;
     /** Takes a restart put aside, newest last (folders relative to the project). */
     const discarded: string[] = [];
     for (;;) {
@@ -510,8 +563,8 @@ async function record(target: PickedTarget, display: PickerDisplay, displays: Pi
         () => !HIDDEN && !countdown.isDestroyed() && countdown.showInactive(),
         () => {},
       );
-      const hud = overlay({ ...hudPosition(displays, display.id, area, HUD_SIZE), ...HUD_SIZE }, 'hud.cjs', { focusable: false, movable: true });
-      const hudState: HudState = { phase: 'countdown', markers: 0 };
+      const hud = overlay({ ...hudPosition(displays, display.id, area, hudSize), ...hudSize }, 'hud.cjs', { focusable: false, movable: true });
+      const hudState: HudState = { phase: 'countdown', markers: 0, ...(choices.mic && { mic: true }), ...(live && { captions: {} }) };
       // a check of the drive or the window still under way may note something after the HUD closed
       const showHud = () => !hud.isDestroyed() && send(hud.webContents, 'hud:state', { ...hudState });
       /** The last warning: a pause shows its own note, the resume brings the warning back. */
@@ -542,8 +595,11 @@ async function record(target: PickedTarget, display: PickerDisplay, displays: Pi
         },
       });
       bindRequests(countdown.webContents, 'countdown', {});
-      const deadZone = () => toDesktopPixels(hud.getBounds());
-      hud.on('moved', () => recorderHost.setDeadZones([deadZone()]));
+      // The script's steps in the prompter by the HUD, from the countdown on (the first can be read before the take runs).
+      let prompter: Prompter | undefined;
+      const deadZones = () => [hud, ...(prompter ? [prompter.window] : [])].filter((window) => !window.isDestroyed()).map((window) => toDesktopPixels(window.getBounds()));
+      if (script.length > 0) prompter = openPrompter(overlay, hud.getBounds(), display.workArea, script, () => recorderHost.setDeadZones(deadZones()));
+      hud.on('moved', () => recorderHost.setDeadZones(deadZones()));
       // Windows ends the session (sign out, shut down): the end waits while the take is stopped and written.
       hud.on('query-session-end', (event) => {
         event.preventDefault();
@@ -586,6 +642,13 @@ async function record(target: PickedTarget, display: PickerDisplay, displays: Pi
         }
       };
 
+      const onLive = (news: LiveNews) => {
+        if ('failed' in news) {
+          hudState.captions = { failed: news.failed };
+          showHud();
+        } else if (!hud.isDestroyed()) send(hud.webContents, 'hud:caption', { words: news.words });
+      };
+
       const onEvent = (event: RecorderEvent) => {
         switch (event.type) {
           case 'countdown':
@@ -594,11 +657,14 @@ async function record(target: PickedTarget, display: PickerDisplay, displays: Pi
           case 'recording':
             closeOverlays();
             takeDir = event.dir;
+            // the take goes into the project with its script: the draft is done
+            scriptDrafts.delete(draft);
             hudState.phase = 'recording';
             hudState.startedAt = Date.now();
             hudState.recorded = 0;
             if (!HIDDEN) hud.showInactive();
             showHud();
+            prompter?.setLive(true);
             watch = setInterval(() => void watchTake(), 2000);
             return;
           case 'paused':
@@ -624,10 +690,14 @@ async function record(target: PickedTarget, display: PickerDisplay, displays: Pi
             showHud();
             return;
           case 'marker':
-            // the mistake key's marker is a retake, not one of the person's markers
+            // a step of the script moves the prompter; the mistake key's marker is a retake: neither is one of the person's markers
+            if (event.marker.kind === 'step') return prompter?.reached(event.marker.label ?? '');
             if (event.marker.kind === 'retake') hudState.retakes = (hudState.retakes ?? 0) + 1;
             else hudState.markers++;
             showHud();
+            return;
+          case 'level':
+            if (!hud.isDestroyed()) send(hud.webContents, 'hud:level', { rms: event.rms, peak: event.peak });
             return;
           case 'warning': {
             const warning = hudWarning(event.message);
@@ -636,6 +706,7 @@ async function record(target: PickedTarget, display: PickerDisplay, displays: Pi
           }
           case 'stopping':
             hudState.phase = 'stopping';
+            prompter?.setLive(false);
             // a restart says so to the end ("Restarting…"), not "Stopping…"
             if (!restarting) note('Stopping…', 'Writing the take', 'info');
             return;
@@ -657,23 +728,26 @@ async function record(target: PickedTarget, display: PickerDisplay, displays: Pi
             ...(choices.mic && { mic: choices.mic }),
             stop: stopOptionsFor(choices),
             countdownSeconds: countdownFor,
-            deadZones: [deadZone()],
+            deadZones: deadZones(),
+            ...(script.length > 0 && { steps: script.map((step) => step.id) }),
             // macOS: the app's own windows (the HUD above all) stay out of the take, as Windows keeps them out by content protection
             hideWindowsOf: [process.pid],
           },
           onEvent,
+          live && { request: live, onLive },
         );
       } catch (error) {
         clearInterval(watch);
         closeOverlays();
         if (!hud.isDestroyed()) hud.destroy();
+        prompter?.destroy();
         if (error instanceof RecordingError && error.code === 'cancelled') {
           // cancelled after a restart: the take put aside is the take after all
           const previous = discarded.pop();
           if (previous) {
             const back = await bringBack(projectDir, previous);
             if (back) {
-              cutting = await recoverAndOpen(projectDir, back, '', showEditor, true);
+              cutting = await recoverAndOpen(projectDir, back, '', showEditor, true, script);
               return cutting;
             }
           }
@@ -685,7 +759,7 @@ async function record(target: PickedTarget, display: PickerDisplay, displays: Pi
         if (takeDir) {
           const previous = discarded.at(-1);
           if (previous) restarted.set(keyOf(projectDir), previous);
-          cutting = await recoverAndOpen(projectDir, takeDir, (error as Error).message, showEditor);
+          cutting = await recoverAndOpen(projectDir, takeDir, (error as Error).message, showEditor, false, script);
           if (!cutting) restarted.delete(keyOf(projectDir));
           return cutting;
         }
@@ -695,7 +769,7 @@ async function record(target: PickedTarget, display: PickerDisplay, displays: Pi
         if (back) {
           const failure = recordingFailure((error as Error).message);
           say(`The recording could not start again. ${failure.text} The take from before the restart is kept.`, failure.detail);
-          cutting = await recoverAndOpen(projectDir, back, '', showEditor, true);
+          cutting = await recoverAndOpen(projectDir, back, '', showEditor, true, script);
           return cutting;
         }
         await giveUp();
@@ -706,6 +780,7 @@ async function record(target: PickedTarget, display: PickerDisplay, displays: Pi
       clearInterval(watch);
       closeOverlays();
       if (!hud.isDestroyed()) hud.destroy();
+      prompter?.destroy();
       if (restarting && !quitting) {
         // put aside, not deleted ("Undo restart" in the editor), and counted down again
         const aside = await putAside(projectDir, take.dir).catch((error: Error) => {
@@ -720,7 +795,7 @@ async function record(target: PickedTarget, display: PickerDisplay, displays: Pi
       // the editor that opens on this take offers to bring back the one a restart put aside
       const restartedFrom = discarded.at(-1);
       if (restartedFrom) restarted.set(keyOf(projectDir), restartedFrom);
-      cutting = await finishTake(projectDir, take, showEditor);
+      cutting = await finishTake(projectDir, take, showEditor, script);
       if (!cutting) restarted.delete(keyOf(projectDir));
       return cutting;
     }
@@ -788,14 +863,17 @@ export async function undoRestart(projectDir: string, discarded: string): Promis
 
 /**
  * A take that ended badly (the capture failed after it started): `recover` repairs it and points the
- * project at it, and it is cut like any other; `quiet`: a take brought back, nothing to say.
- * Returns whether the cut started.
+ * project at it, and it is cut like any other; `quiet`: a take brought back, nothing to say. The
+ * `script` it recorded with goes into the project too (none given: the project's stays). Returns
+ * whether the cut started.
  */
-async function recoverAndOpen(projectDir: string, takeDir: string, why: string, showEditor: () => Promise<void>, quiet = false): Promise<boolean> {
+async function recoverAndOpen(projectDir: string, takeDir: string, why: string, showEditor: () => Promise<void>, quiet = false, script?: readonly ScriptStep[]): Promise<boolean> {
   const dir = resolve(projectDir);
   const failure = recordingFailure(why);
   try {
     const result = await recoverTake(dir, takeDir);
+    // a file that cannot take the script keeps its own: the take is what matters here
+    if (script) await keepScript(dir, script).catch(() => {});
     if (!quiet) say(`The recording stopped early. ${failure.text} Cuttle kept the ${Math.round(result.seconds)} s it had and opened it.`, [failure.detail, ...result.repaired].join('\n'));
   } catch (error) {
     await showEditor();
@@ -807,14 +885,15 @@ async function recoverAndOpen(projectDir: string, takeDir: string, why: string, 
 }
 
 /**
- * The take becomes the project's (its previous version kept as a backup), the editor opens on it, and
- * `suggest` cuts it; while the app quits, it is cut at the project's next open instead. Returns
- * whether the cut started.
+ * The take becomes the project's with the script it recorded with (its previous version kept as a
+ * backup), the editor opens on it, and `suggest` cuts it; while the app quits, it is cut at the
+ * project's next open instead. Returns whether the cut started.
  */
-async function finishTake(projectDir: string, take: Take, showEditor: () => Promise<void>): Promise<boolean> {
+async function finishTake(projectDir: string, take: Take, showEditor: () => Promise<void>, script: readonly ScriptStep[]): Promise<boolean> {
   try {
     const file = projectExists(projectDir) ? await readProjectFile(projectDir) : newProjectFile(projectDir);
     const hadEdit = useTake(file, take);
+    withScript(file.raw, script);
     await writeProjectFile(file, 'record', { backup: hadEdit });
   } catch (error) {
     await showEditor();

@@ -1,7 +1,7 @@
 .app {
   display: grid;
-  /* the video stays the largest part: the timeline takes a third of a small window */
-  grid-template-rows: 44px minmax(0, 1fr) var(--timeline-height, clamp(220px, 34vh, 320px));
+  /* the video stays the largest part: the timeline takes about a third of a small window, its lanes all shown at 900 px */
+  grid-template-rows: 44px minmax(0, 1fr) var(--timeline-height, clamp(220px, 40vh, 380px));
   /* the tools beside the video, the inspector on the right */
   grid-template-columns: 48px minmax(0, 1fr) 300px;
   height: 100%;
@@ -328,6 +328,20 @@ button.chip-status:hover {
   grid-template-columns: 1fr 1fr;
   gap: 8px 12px;
 }
+/* the transition a scene is gone into with: a part of its panel */
+.transition-in {
+  display: grid;
+  gap: 10px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+  justify-items: start;
+}
+.transition-in > * {
+  justify-self: stretch;
+}
+.transition-in > button {
+  justify-self: start;
+}
 .hint {
   color: var(--muted);
   font-size: var(--size-s);
@@ -380,6 +394,86 @@ button.chip-status:hover {
   display: grid;
   gap: 10px;
   padding: 2px 12px 12px;
+}
+/* the Brand part: saved kits as chips (a tile of the kit's background with its accent on it), each
+   with a quiet remove button that asks first */
+.kits {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.kit {
+  display: inline-flex;
+  align-items: center;
+  position: relative;
+}
+.kit .chip {
+  padding: 0 24px 0 5px;
+  gap: 7px;
+}
+.kit-tone {
+  position: relative;
+  width: 18px;
+  height: 18px;
+  border-radius: 9px;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.18);
+  overflow: hidden;
+}
+.kit-tone b {
+  position: absolute;
+  right: 3px;
+  bottom: 3px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.35);
+}
+.kit-remove {
+  position: absolute;
+  right: 5px;
+  width: 16px;
+  height: 16px;
+  border-radius: 8px;
+  display: grid;
+  place-items: center;
+  color: var(--faint);
+}
+.kit-remove:hover {
+  color: var(--text);
+  background: var(--raised-hover);
+}
+.kit-confirm {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 8px 8px 10px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--danger) 10%, transparent);
+  font-size: var(--size-s);
+}
+.kit-confirm span {
+  flex: 1;
+}
+.primary.danger {
+  background: var(--danger);
+  color: #1a0b0b;
+}
+.primary.danger:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--danger) 85%, white);
+}
+.logo-thumb {
+  width: 28px;
+  height: 28px;
+  flex: none;
+  object-fit: contain;
+  border-radius: 6px;
+  background: repeating-conic-gradient(var(--raised-hover) 0 25%, var(--raised) 0 50%) 0 0 / 8px 8px;
+}
+.kit-save {
+  display: flex;
+  gap: 6px;
+  min-width: 0;
+  flex: 1;
 }
 /* switches that read as words: on is filled, with a tick */
 .chips {
@@ -548,6 +642,28 @@ button.chip-status:hover {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+/* the video's length and its fit (Timeline.tsx's LengthControl) */
+.length-select {
+  color: var(--muted);
+}
+.length-fitted {
+  color: var(--accent);
+}
+.length-input {
+  width: 72px;
+  height: 22px;
+  padding: 0 6px;
+  border: 0;
+  border-radius: 6px;
+  background: var(--stage);
+  box-shadow: inset 0 0 0 1px var(--accent);
+  color: var(--text);
+  font: inherit;
+  user-select: text;
+}
+.length-input:focus-visible {
+  outline: none;
+}
 /* the lanes scroll up and down together with their names when they are taller than the panel */
 .tl-body {
   flex: 1;
@@ -714,6 +830,10 @@ button.chip-status:hover {
   background: linear-gradient(180deg, rgba(242, 179, 74, 0.26), rgba(242, 179, 74, 0.1));
   box-shadow: inset 0 0 0 1px rgba(242, 179, 74, 0.45);
 }
+.scene.motion {
+  background: linear-gradient(180deg, rgba(236, 111, 207, 0.26), rgba(236, 111, 207, 0.1));
+  box-shadow: inset 0 0 0 1px rgba(236, 111, 207, 0.5);
+}
 .item {
   position: absolute;
   height: 18px;
@@ -748,6 +868,73 @@ button.chip-status:hover {
   background: rgba(79, 209, 161, 0.13);
   box-shadow: inset 0 0 0 1px rgba(79, 209, 161, 0.5);
   color: var(--caption);
+}
+.item.motion {
+  background: rgba(236, 111, 207, 0.14);
+  box-shadow: inset 0 0 0 1px rgba(236, 111, 207, 0.5);
+  color: var(--motion);
+}
+.item.sound {
+  background: rgba(181, 224, 90, 0.16);
+  box-shadow: inset 0 0 0 1px rgba(181, 224, 90, 0.55);
+  color: var(--sound);
+  padding: 0 4px;
+}
+/* a sound a motion page asks for: a diamond where it plays (the page moves it, not a drag) */
+.page-sound {
+  position: absolute;
+  top: 50%;
+  width: 7px;
+  height: 7px;
+  margin: -4px 0 0 -4px;
+  transform: rotate(45deg);
+  border: 1.5px solid var(--sound);
+  background: rgba(181, 224, 90, 0.25);
+}
+/* the music: one block over the video, its waveform and its parts */
+.item.music {
+  height: auto;
+  background: rgba(232, 197, 71, 0.08);
+  box-shadow: inset 0 0 0 1px rgba(232, 197, 71, 0.4);
+  color: var(--music);
+  align-items: flex-start;
+  padding: 2px 8px;
+}
+.item.music.selected {
+  box-shadow: inset 0 0 0 1.5px var(--music), 0 0 0 1px rgba(232, 197, 71, 0.25);
+}
+.music-part {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  border-left: 1px dashed rgba(232, 197, 71, 0.45);
+  font-size: 10px;
+  font-weight: 600;
+  padding: 1px 4px;
+  color: rgba(232, 197, 71, 0.85);
+  pointer-events: none;
+  white-space: nowrap;
+}
+.music-state {
+  position: absolute;
+  right: 8px;
+  top: 2px;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--muted);
+  pointer-events: none;
+}
+.tl-canvas.music-wave {
+  pointer-events: none;
+  opacity: 0.85;
+}
+/* a motion item whose page cannot draw */
+.scene.failed,
+.item.failed {
+  box-shadow: inset 0 0 0 1.5px var(--danger);
+}
+.item.failed {
+  color: var(--danger);
 }
 .item.off {
   background-image: repeating-linear-gradient(135deg, transparent 0 5px, rgba(255, 255, 255, 0.05) 5px 10px);
@@ -950,6 +1137,35 @@ button.chip-status:hover {
   display: block;
   color: var(--muted);
 }
+/* the chapters an export wrote: the lines for a YouTube description, to copy */
+.chapter-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px 10px;
+  border-radius: 9px;
+  background: var(--raised);
+  font-size: var(--size-s);
+}
+.chapter-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.chapter-head b {
+  flex: 1;
+  min-width: 0;
+  font-weight: 500;
+}
+.chapter-list pre {
+  margin: 0;
+  max-height: 150px;
+  overflow: auto;
+  font: var(--size-s) / 1.6 var(--mono);
+  color: var(--text);
+  white-space: pre-wrap;
+  user-select: text;
+}
 .sheet .actions {
   display: flex;
   justify-content: flex-end;
@@ -963,8 +1179,8 @@ button.chip-status:hover {
   overflow: auto;
 }
 
-/* loading and errors */
-.loading {
+/* the project opening (its own name: a status line that is loading must not cover the window) and errors */
+.opening {
   position: fixed;
   inset: 0;
   z-index: 10;
@@ -1875,9 +2091,28 @@ button.chip-status:hover {
   justify-content: space-between;
   gap: 12px;
 }
+/* a state word beside a switch gives way (with an ellipsis) before the row runs out of its panel */
 .field.inline .field-input {
-  flex: none;
+  flex: 0 1 auto;
+  min-width: 0;
   min-height: 0;
+}
+.field.inline > .field-label,
+.field-text + .field-input {
+  flex: none;
+}
+/* an inline row's name with its note under it: it gives way and wraps, the control keeps its place */
+.field-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.field-text em {
+  color: var(--faint);
+  font-size: var(--size-xs);
+  font-style: normal;
+  line-height: 1.35;
 }
 .hint-list {
   margin: 0;
@@ -2200,6 +2435,65 @@ button.chip-status:hover {
 .bg-image {
   background: repeating-linear-gradient(45deg, var(--raised) 0 6px, var(--raised-hover) 6px 12px);
 }
+.bg-gradient {
+  background: linear-gradient(135deg in oklab, #7c5cff, #ff7ab6);
+}
+.bg-flow {
+  background:
+    radial-gradient(ellipse at 30% 40%, #d6457f 0, transparent 55%),
+    radial-gradient(ellipse at 78% 72%, #f3a55b 0, transparent 50%),
+    radial-gradient(ellipse at 72% 18%, #5b3fc0 0, transparent 60%),
+    #1a1446;
+}
+.bg-bokeh {
+  background:
+    radial-gradient(circle at 24% 30%, rgba(58, 109, 240, 0.6) 0 9%, transparent 10%),
+    radial-gradient(circle at 68% 58%, rgba(164, 92, 240, 0.5) 0 13%, transparent 14%),
+    radial-gradient(circle at 42% 82%, rgba(245, 107, 155, 0.45) 0 8%, transparent 9%),
+    radial-gradient(circle at 86% 24%, rgba(245, 178, 107, 0.45) 0 6%, transparent 7%),
+    linear-gradient(180deg, #111830, #070b1a);
+}
+.bg-dots {
+  background:
+    radial-gradient(circle at 40% 45%, rgba(124, 92, 255, 0.45), transparent 60%),
+    radial-gradient(circle, rgba(255, 255, 255, 0.4) 0 0.8px, transparent 1.3px) 0 0 / 6px 6px,
+    #0b0d12;
+}
+/* a coloured background's colours: a well each, a remove button on hover, + for one more */
+.color-stops {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+.color-stop {
+  position: relative;
+  display: inline-flex;
+}
+.stop-remove {
+  position: absolute;
+  top: -6px;
+  right: -7px;
+  width: 16px;
+  height: 16px;
+  border-radius: 8px;
+  display: grid;
+  place-items: center;
+  background: var(--raised-hover);
+  color: var(--muted);
+  box-shadow: 0 0 0 1px var(--line-strong);
+  opacity: 0;
+  transition: opacity var(--fast);
+}
+.color-stop:hover .stop-remove,
+.stop-remove:focus-visible {
+  opacity: 1;
+}
+.stop-add {
+  width: 28px;
+  padding: 0;
+  justify-content: center;
+}
 .path {
   flex: 1;
   min-width: 0;
@@ -2297,6 +2591,20 @@ button.chip-status:hover {
 .tl-bar .act.speed .select-trigger {
   min-width: 52px;
 }
+.tl-bar .select-trigger.motion-add,
+.tl-bar .select-trigger.music-add,
+.tl-bar .select-trigger.sound-add {
+  flex-shrink: 0;
+  height: 26px;
+  padding: 0 6px 0 8px;
+  border-radius: 7px;
+  gap: 4px;
+}
+.tl-bar .select-trigger:is(.motion-add, .music-add, .sound-add):hover:not(:disabled),
+.tl-bar .select-trigger:is(.motion-add, .music-add, .sound-add)[aria-expanded='true'] {
+  background: var(--raised);
+  color: var(--text);
+}
 /* what can be dragged says so */
 .scene,
 .item {
@@ -2306,7 +2614,7 @@ button.chip-status:hover {
 .item:active {
   cursor: grabbing;
 }
-@media (max-width: 1250px) {
+@media (max-width: 1500px) {
   .tl-status {
     display: none;
   }
@@ -2757,4 +3065,99 @@ button.chip-status:hover {
 .auto-note b {
   color: var(--text);
   font-weight: 600;
+}
+
+/* a motion item in the inspector: how its page is doing in the preview, its params, what it said */
+.motion-state {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: -4px 0 0;
+  padding: 7px 10px;
+  border-radius: 8px;
+  background: var(--raised);
+  color: var(--muted);
+  font-size: var(--size-s);
+  line-height: 1.4;
+}
+.motion-state i {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--faint);
+}
+.motion-state.ready i {
+  background: var(--ok);
+}
+.motion-state.warn i {
+  background: var(--card);
+}
+.motion-state.loading i {
+  background: var(--motion);
+  animation: fade 0.8s ease-in-out infinite alternate;
+}
+.motion-state.failed {
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 10%, transparent);
+}
+.motion-state.failed i {
+  background: var(--danger);
+}
+@media (prefers-reduced-motion: reduce) {
+  :root:not([data-motion='full']) .motion-state.loading i {
+    animation: none;
+  }
+}
+:root[data-motion='reduce'] .motion-state.loading i {
+  animation: none;
+}
+.field-label .links {
+  display: flex;
+  gap: 10px;
+}
+.motion-params {
+  display: grid;
+  gap: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+.motion-params .note.warning {
+  margin: 0;
+  color: var(--card);
+  font-size: var(--size-s);
+  line-height: 1.4;
+}
+.field-input > .narrow {
+  flex: 0 0 76px;
+  display: flex;
+}
+.motion-log {
+  display: grid;
+  gap: 6px;
+}
+.motion-log summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: var(--size-s);
+}
+.motion-log pre {
+  margin: 6px 0 0;
+  max-height: 180px;
+  overflow: auto;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--raised);
+  color: var(--muted);
+  font: var(--size-xs) / 1.5 var(--mono);
+  white-space: pre-wrap;
+  word-break: break-word;
+  user-select: text;
+}
+.motion-log details:first-child pre[data-testid='motion-errors'] {
+  color: var(--danger);
+}
+.motion-hint {
+  margin: 0;
+  font-size: var(--size-xs);
 }

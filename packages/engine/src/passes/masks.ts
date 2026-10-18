@@ -103,8 +103,8 @@ export class MaskPass {
           .use()
           .texture('u_tex', 0, screen)
           .vec2('u_texel', texel[0], texel[1])
-          .vec4('u_window', layout.window)
-          .float('u_radius', layout.radius);
+          .vec4('u_window', layout.clip)
+          .float('u_radius', layout.clipRadius);
         if (mask.style === 'fill') {
           shader.vec4('u_mask', uvRect(mask.rect, screenSize));
         } else {

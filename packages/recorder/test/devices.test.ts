@@ -61,7 +61,8 @@ describe('listDevices', () => {
     expect(monitors.filter((monitor) => monitor.primary).length).toBeLessThanOrEqual(1);
     for (const window of windows) expect(monitors.map((monitor) => monitor.index)).toContain(window.monitor);
     expect(Array.isArray(cameras) && Array.isArray(mics)).toBe(true);
-  });
+    // ffmpeg lists the cameras and mics (DirectShow) in seconds on a cold runner, not in 5
+  }, 30_000);
 
   it.runIf(process.platform === 'darwin')('lists the displays in avfoundation order with their backing pixels', async () => {
     const { monitors, windows } = await listDevices({ media: false });

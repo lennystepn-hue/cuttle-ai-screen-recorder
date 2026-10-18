@@ -91,6 +91,16 @@ describe('loadSources', () => {
     expect((await loadSources(gone)).warnings).toEqual(['take/transcript.json cannot be read: no captions']);
   });
 
+  it('reads the key counts for the typing sounds, also with the cursor off, and none with the sounds off', async () => {
+    const typed = '{"t":0,"type":"move","x":1,"y":2}\n{"t":1,"type":"keys","count":3}\n';
+    const dir = await projectDir({ sources: SOURCES, scenes: SCENES, look: { cursor: { enabled: false } } }, { ...MEDIA, 'take/events.jsonl': typed });
+    const sources = await loadSources(dir);
+    expect(sources.events).toBeUndefined();
+    expect(sources.keys).toEqual([{ t: 1, type: 'keys', count: 3 }]);
+    const off = await projectDir({ sources: SOURCES, scenes: SCENES, look: { cursor: { enabled: false }, audio: { typing: false } } }, { ...MEDIA, 'take/events.jsonl': typed });
+    expect((await loadSources(off)).keys).toBeUndefined();
+  });
+
   it('names a missing or empty media file, but accepts empty events', async () => {
     const noWebcam = Object.fromEntries(Object.entries(MEDIA).filter(([path]) => path !== 'take/webcam.mp4'));
     const missing = await projectDir({ sources: SOURCES, look: { webcam: { enabled: true } }, scenes: SCENES }, noWebcam);
@@ -163,6 +173,21 @@ describe('loadSources', () => {
     for (const file of ['take/webcam.mp4', 'take/mic.m4a', 'take/events.jsonl', 'bg.png', 'take/take.json']) {
       expect(inputs, file).toContain(join(dir, file));
     }
+  });
+
+  it('finds the watermark image when it is on: its own, else the brand logo; none when it is off', async () => {
+    const files = { ...MEDIA, 'brand/logo.svg': '<svg/>', 'images/mark.png': 'm' };
+    const ownDir = await projectDir({ sources: SOURCES, theme: { logo: 'brand/logo.svg' }, look: { watermark: { enabled: true, image: 'images/mark.png' } }, scenes: SCENES }, files);
+    expect((await loadSources(ownDir)).watermarkImage).toBe(join(ownDir, 'images', 'mark.png'));
+    const logoDir = await projectDir({ sources: SOURCES, theme: { logo: 'brand/logo.svg' }, look: { watermark: { enabled: true } }, scenes: SCENES }, files);
+    const logo = await loadSources(logoDir);
+    expect(logo.watermarkImage).toBe(join(logoDir, 'brand', 'logo.svg'));
+    expect(logo.inputs).toEqual(expect.arrayContaining([logo.watermarkImage]));
+    const off = await loadSources(await projectDir({ sources: SOURCES, theme: { logo: 'brand/logo.svg' }, scenes: SCENES }, files));
+    expect(off.watermarkImage).toBeUndefined();
+    // a watermark with no image and no logo shows its text: nothing to read
+    const text = await loadSources(await projectDir({ sources: SOURCES, look: { watermark: { enabled: true, text: 'acme.dev' } }, scenes: SCENES }, files));
+    expect(text.watermarkImage).toBeUndefined();
   });
 
   it('refuses a folder without cuttle.json and a project without scenes', async () => {

@@ -129,17 +129,18 @@ export class ProjectFileWatch {
 }
 
 /**
- * An image for a still or the background, as a project path: one inside the project as it is, one
- * outside copied into `images/` (a file of the same name and the same bytes there is that copy).
+ * An image for a still, the background or the logo, as a project path: one inside the project as it
+ * is, one outside copied into `images/` (a logo into `brand/`; a file of the same name and the same
+ * bytes there is that copy).
  */
 const sameBytes = async (a: string, b: string) => (await readFile(a)).equals(await readFile(b));
 
-export async function importImage(dir: string, file: string): Promise<string> {
+export async function importImage(dir: string, file: string, into = 'images'): Promise<string> {
   const root = await realpath(dir);
   const real = await realpath(file);
   const relativePath = (path: string) => relative(root, path).split(sep).join('/');
   if (isInside(real, root, process.platform)) return relativePath(real);
-  const folder = join(root, 'images');
+  const folder = join(root, into);
   await mkdir(folder, { recursive: true });
   const size = (await stat(real)).size;
   const stem = basename(real, extname(real)).replace(/[^\w.-]+/g, '-') || 'image';

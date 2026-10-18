@@ -9,7 +9,11 @@ export const MARKERS_VERSION = 1;
  * was submitted), `tool` (a tool call, labelled with the tool's name) and `answer` (the final answer).
  */
 /** `retake`: the person pressed the mistake key (a slip: Cuttle cuts back to the pause before it). */
-export const MARKER_KINDS = ['manual', 'prompt', 'tool', 'answer', 'retake'] as const;
+/**
+ * `step`: the script moved to a step, labelled with the step's id: the first step at the take's
+ * first frame, then each press of the step key (or the prompter's buttons), forward or back.
+ */
+export const MARKER_KINDS = ['manual', 'prompt', 'tool', 'answer', 'retake', 'step'] as const;
 
 /** One marker; `t` is in source seconds of the screen track, like events.jsonl. */
 export const MarkerSchema = z.strictObject({

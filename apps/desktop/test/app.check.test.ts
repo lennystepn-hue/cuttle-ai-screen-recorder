@@ -287,6 +287,8 @@ describe.runIf(enabled)('the Cuttle app', () => {
     mkdirSync(join(root, 'user-data'));
     // The screen is read after a take's cut only where the check asks for it (it says so in the settings).
     writeFileSync(join(root, 'user-data', 'settings.json'), JSON.stringify({ projectsFolder: join(root, 'projects'), privacy: { read: false } }));
+    // the logo the brand's file dialog picks
+    writeFileSync(join(root, 'nimbus.svg'), '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120"><rect width="120" height="120" rx="28" fill="#7C5CFF"/><path d="M34 86V34h12l28 34V34h12v52H74L46 52v34z" fill="#fff"/></svg>');
     models = createServer((request, response) => {
       if (request.url === '/ggml-base.bin' && BASE_MODEL) return void response.end(readFileSync(BASE_MODEL));
       if (request.url === '/ggml-small.bin') return void response.end('not a model');
@@ -314,6 +316,9 @@ describe.runIf(enabled)('the Cuttle app', () => {
         // the check's own models folder (empty at first), and the models from the check's server
         CUTTLE_MODELS_DIR: join(root, 'models'),
         CUTTLE_MODELS_URL: `http://127.0.0.1:${(models.address() as { port: number }).port}/`,
+        // the brand kits in a folder of the check's own, and the image a file dialog picks
+        CUTTLE_BRANDS_DIR: join(root, 'brands'),
+        CUTTLE_CHECK_IMAGE: join(root, 'nimbus.svg'),
       },
     });
     // Unhandled rejections in the main process are bugs: collect them for the last test.
@@ -1932,6 +1937,107 @@ describe.runIf(enabled)('the Cuttle app', () => {
     await page.keyboard.press('Escape');
     await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find((window) => window.getTitle() === 'music-editor · Cuttle')?.close());
   }, 300_000);
+
+  it('sets the brand in the Look tab and saves it as a kit; another project wears the kit with one click, its end card as the first one’s, as the export draws it', async () => {
+    const brands = join(root, 'brands');
+    type Branded = { theme?: Record<string, unknown>; look: { background?: { preset: string }; frame?: { style?: string }; cursor?: { style?: string; color?: string } }; scenes: { type: string; src?: string }[] };
+    const saved = (dir: string) => JSON.parse(readFileSync(join(dir, 'cuttle.json'), 'utf8')) as Branded;
+    const hooks = (page: Page) => ({
+      seek: (t: number) => page.evaluate((time) => (window as unknown as Hooked).__cuttleCheck.seek(time), t),
+      view: async () => decode(await page.evaluate(() => (window as unknown as Hooked).__cuttleCheck.pixels())),
+      state: () => page.evaluate(() => (window as unknown as Hooked).__cuttleCheck.state() as CheckState & { motion: { status: { src: string; state: string; errors: string[] }[] } }),
+    });
+    /** A project with an end card after its clip, open, its brand part open in the Look tab. */
+    const endCard = async (name: string) => {
+      const dir = join(root, name);
+      makeMotionFixture(dir);
+      const page = await openEditor(dir);
+      await page.waitForFunction(() => '__cuttleCheck' in window);
+      await hooks(page).seek(5.5);
+      await chooseIn(page, '[data-testid=add-motion]', 'End card');
+      await expect.poll(() => saved(dir).scenes.map((scene) => scene.src ?? scene.type)).toEqual(['motion/intro/index.html', 'clip', 'motion/end-card/index.html']);
+      await click(page, '#tab-look');
+      await click(page, '[data-testid=look-open-brand]');
+      await page.waitForSelector('[data-testid=brand-name]');
+      return { dir, page, ...hooks(page) };
+    };
+    // the end card settled: the mark landed, the URL typed, the call to action in
+    const cardAt = 9.4;
+    const settled = async (one: Awaited<ReturnType<typeof endCard>>) => {
+      await expect.poll(async () => (await one.state()).motion.status.find((status) => status.src === 'motion/end-card/index.html')?.state, { timeout: 60_000 }).toBe('ready');
+      await one.seek(cardAt);
+      return one.view();
+    };
+
+    // the first project: the brand set in the Look tab (a logo from a file, a font, an accent), the background its own
+    const first = await endCard('brand-first');
+    await first.page.fill('[data-testid=brand-name]', 'Nimbus');
+    await first.page.press('[data-testid=brand-name]', 'Enter');
+    await first.page.fill('[data-testid=brand-url]', 'nimbus.app');
+    await first.page.press('[data-testid=brand-url]', 'Enter');
+    await click(first.page, '[data-testid=brand-logo]');
+    await chooseIn(first.page, '[data-testid=brand-font]', 'Bebas Neue');
+    await first.page.evaluate(() => {
+      const input = document.querySelector('input[aria-label="Accent colour"]') as HTMLInputElement;
+      input.value = '#7c5cff';
+      input.dispatchEvent(new Event('change'));
+    });
+    await click(first.page, '[data-testid=look-open-background]');
+    await click(first.page, '.swatch-button.bg-mesh');
+    await expect.poll(() => saved(first.dir).theme).toEqual({ name: 'Nimbus', url: 'nimbus.app', logo: 'brand/nimbus.svg', font: 'Bebas Neue', accent: '#7C5CFF' });
+    expect(readFileSync(join(first.dir, 'brand', 'nimbus.svg'), 'utf8')).toContain('<svg');
+    // the end card wears it: the logo, the name's font, the URL, the accent; the editor draws it as `cuttle preview` does
+    const firstCard = await settled(first);
+    // the logo is there (the brand's accent fills it; a logo that did not load leaves its place empty)
+    const accentPixels = (png: PNG) => {
+      let count = 0;
+      for (let i = 0; i < png.data.length; i += 4) if (Math.abs(png.data[i]! - 0x7c) + Math.abs(png.data[i + 1]! - 0x5c) + Math.abs(png.data[i + 2]! - 0xff) < 40) count++;
+      return count;
+    };
+    expect(accentPixels(firstCard), 'the logo').toBeGreaterThan(400);
+    await first.page.evaluate(() => (window as unknown as Hooked).__cuttleCheck.flush());
+    const still = spawnSync('node', [CLI, '--json', '-C', first.dir, 'preview', '--at', String(cardAt), '-o', join(root, 'brand-stills')], { encoding: 'utf8', timeout: 120_000 });
+    expect(still.status, still.stderr).toBe(0);
+    const exportCard = PNG.sync.read(readFileSync((JSON.parse(still.stdout) as { stills: { file: string }[] }).stills[0]!.file));
+    const drawn = difference(firstCard, exportCard);
+    expect(drawn.mean, 'the end card: mean difference').toBeLessThan(0.5);
+    expect((await first.state()).motion.status.find((status) => status.src === 'motion/end-card/index.html')?.errors).toEqual([]);
+    // saved as a kit, under the brand's name: its files beside it, and the project wears it
+    await click(first.page, '[data-testid=look-open-brand]');
+    await first.page.waitForSelector('[data-testid=brand-save]:not([disabled])');
+    await click(first.page, '[data-testid=brand-save]');
+    await expect.poll(() => existsSync(join(brands, 'nimbus', 'brand.json'))).toBe(true);
+    expect(readdirSync(join(brands, 'nimbus')).sort()).toEqual(['brand.json', 'logo.svg']);
+    await expect.poll(() => saved(first.dir).theme?.kit).toBe('Nimbus');
+    await first.page.waitForSelector('[data-testid=brand-kit][aria-pressed=true]');
+    await shotOf('42-brand', '/editor.html', 'brand-first · Cuttle');
+    await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find((window) => window.getTitle() === 'brand-first · Cuttle')?.close());
+
+    // another project: the kit is one click; its end card is the first one's; undo takes it all back as one step
+    const second = await endCard('brand-second');
+    await second.page.waitForSelector('[data-testid=brand-kit]');
+    await click(second.page, '[data-testid=brand-kit]');
+    await expect.poll(() => saved(second.dir).theme).toEqual({ name: 'Nimbus', url: 'nimbus.app', logo: 'brand/nimbus-logo.svg', foreground: '#FFFFFF', font: 'Bebas Neue', accent: '#7C5CFF', kit: 'Nimbus' });
+    expect(saved(second.dir).look).toMatchObject({ background: { preset: 'mesh' }, frame: { style: 'mac-dark' }, cursor: { style: 'system', color: '#D97757' } });
+    expect(existsSync(join(second.dir, 'brand', 'nimbus-logo.svg'))).toBe(true);
+    const secondCard = await settled(second);
+    expect(difference(secondCard, firstCard).mean, 'the second end card against the first').toBeLessThan(0.5);
+    await shotOf('42b-brand-applied', '/editor.html', 'brand-second · Cuttle');
+    await second.page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+    await second.page.keyboard.press('Control+Z');
+    await expect.poll(() => saved(second.dir).theme).toBeUndefined();
+    expect(saved(second.dir).look.background).toBeUndefined();
+    await second.page.keyboard.press('Control+Shift+Z');
+    await expect.poll(() => saved(second.dir).theme?.kit).toBe('Nimbus');
+    // a kit is removed after a question; the project keeps what it set
+    await click(second.page, '.kit-remove');
+    await second.page.waitForSelector('.kit-confirm');
+    await click(second.page, '.kit-confirm .primary');
+    await expect.poll(() => existsSync(join(brands, 'nimbus'))).toBe(false);
+    await second.page.waitForSelector('[data-testid=brand-kit]', { state: 'detached' });
+    expect(saved(second.dir).theme?.kit).toBe('Nimbus');
+    await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find((window) => window.getTitle() === 'brand-second · Cuttle')?.close());
+  }, 240_000);
 
   it('had no unhandled rejection in the main process, and no error in the editor', async () => {
     expect(await app.evaluate(() => (globalThis as unknown as { __rejections: string[] }).__rejections)).toEqual([]);

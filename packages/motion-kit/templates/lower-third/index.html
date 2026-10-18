@@ -61,7 +61,9 @@
         overflow: hidden;
       }
       .name {
-        font: 700 calc(50 * var(--u)) / 1.15 'Archivo', var(--cuttle-font);
+        font: 700 calc(50 * var(--u)) / 1.15 var(--cuttle-display);
+        /* the brand's heading font as it is: a face with one weight (Bebas Neue, Instrument Serif) is not made bold */
+        font-synthesis: none;
         font-stretch: 105%;
         letter-spacing: -0.015em;
         color: #fff;

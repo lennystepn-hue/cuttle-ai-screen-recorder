@@ -181,8 +181,11 @@ Then refine `cuttle.json` ([project.md](project.md)) and preview again:
 - **Focus.** Add or fix `zooms` on what matters: 2–4 s on the answer or a result, with the rect
   read off a `frame --grid`. Over a sped-up clip, durations are source seconds: 3 s at 12× is a
   quarter second on screen (see project.md).
-- **Look.** Set `look.frame.title` (e.g. `claude · ~/demo`) and a background preset, and add a
-  `texts` caption where a step is not obvious. Typing clicks softly, a click per key where the clip
+- **Look.** When `cuttle --json brand list` shows brand kits, ask which one the video wears and run
+  `cuttle -C "<project>" --json brand apply "<name>"`: the brand (name, URL, logo, colours, heading
+  font) for the motion pages, the background, frame and cursor. Without one, set `theme` (project.md)
+  and offer to keep it with `brand save`. Set `look.frame.title` (e.g. `claude · ~/demo`) and a
+  background preset, and add a `texts` caption where a step is not obvious. Typing clicks softly, a click per key where the clip
   is heard (`look.audio.typing`, `typingVolume`); switch it off when the user wants a quiet video.
 - **Pages.** `cuttle -C "<project>" --json capture-page <url or file> --scroll --add` appends a
   scrolling still of a web page (the result the agent built); add `--wait 2500` for slow maps or

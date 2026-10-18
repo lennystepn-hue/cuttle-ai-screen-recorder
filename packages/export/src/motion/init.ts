@@ -1,24 +1,26 @@
-import type { BackgroundPreset, CuttleProject, MotionOverlay, MotionScene, SceneTransition } from '@cuttle/project';
+import { backgroundTone, type CuttleProject, type MotionOverlay, type MotionScene, type SceneTransition } from '@cuttle/project';
 import { TAKE_WORKER, type MotionInit } from './runtime';
+import { projectFileUrl } from './take';
 
-/** A dark tone of each background preset, for pages that draw their own background. */
-const BACKGROUND_TONES: Record<BackgroundPreset, string> = {
-  'sunset-sky': '#1b1c4a',
-  aurora: '#050816',
-  mesh: '#2a2140',
-  solid: '#16161a',
-  image: '#16161a',
-};
-
-/** The project's look as CSS variables for its pages. */
+/**
+ * The project's theme for its pages (`cuttle.theme`): its look and brand as CSS variables (the keys
+ * that start with `--`), and the brand's `name`, `url`, `logo` (its URL in the page, or "") and
+ * headings' `font`.
+ */
 export function motionTheme(project: CuttleProject): Record<string, string> {
   const { background, cursor } = project.look;
+  const { theme } = project;
   return {
-    '--cuttle-accent': cursor.color,
-    '--cuttle-bg': background.preset === 'solid' && background.color ? background.color : BACKGROUND_TONES[background.preset],
-    '--cuttle-fg': '#ffffff',
+    '--cuttle-accent': theme.accent ?? cursor.color,
+    '--cuttle-bg': theme.background ?? backgroundTone(background),
+    '--cuttle-fg': theme.foreground,
     '--cuttle-font': '"Inter", "Segoe UI", system-ui, sans-serif',
+    '--cuttle-display': `"${theme.font}", "Archivo", "Inter", system-ui, sans-serif`,
     '--cuttle-mono': '"JetBrains Mono", "Cascadia Mono", Consolas, monospace',
+    font: theme.font,
+    name: theme.name ?? '',
+    url: theme.url ?? '',
+    logo: theme.logo ? (projectFileUrl(theme.logo) ?? '') : '',
   };
 }
 

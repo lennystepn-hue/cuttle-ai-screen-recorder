@@ -47,7 +47,9 @@ export type Command =
   /** Replaces every scene (Show raw take). */
   | { type: 'scenes'; scenes: Item[] }
   /** Sets fields of the music (`undefined` removes a field); `null` removes the music. */
-  | { type: 'music'; fields: Item | null };
+  | { type: 'music'; fields: Item | null }
+  /** Sets fields of the theme, the project's brand (`undefined` removes a field); `replace`: `fields` are the whole theme (a brand kit applied). */
+  | { type: 'theme'; fields: Item; replace?: boolean };
 
 /** A command that cannot run: its item is gone (`gone`) or the result is not a valid project (`invalid`). */
 export class DocumentError extends Error {
@@ -333,6 +335,11 @@ export function applyCommand(raw: Raw, command: Command, limits: EditLimits = {}
       }
       break;
     }
+    case 'theme': {
+      const theme = (!command.replace && next.theme && typeof next.theme === 'object' ? next.theme : (next.theme = {})) as Item;
+      setFields(theme, structuredClone(command.fields));
+      break;
+    }
     case 'output': {
       const output = (next.output && typeof next.output === 'object' ? next.output : (next.output = {})) as Item;
       output.width = command.width;
@@ -473,6 +480,7 @@ function changeParts(before: CuttleProject, after: CuttleProject): string[] {
   }
   if (JSON.stringify(before.music) !== JSON.stringify(after.music)) parts.push(!before.music ? 'music added' : !after.music ? 'the music removed' : 'the music changed');
   if (JSON.stringify(before.look) !== JSON.stringify(after.look)) parts.push('the look changed');
+  if (JSON.stringify(before.theme) !== JSON.stringify(after.theme)) parts.push('the brand changed');
   if (JSON.stringify(before.autoEdits) !== JSON.stringify(after.autoEdits)) parts.push('the automatic edits changed');
   if (JSON.stringify(before.output) !== JSON.stringify(after.output)) parts.push('the output size changed');
   if (JSON.stringify(before.captions) !== JSON.stringify(after.captions)) parts.push('the subtitles changed');

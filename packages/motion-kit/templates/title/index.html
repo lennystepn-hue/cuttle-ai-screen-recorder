@@ -8,7 +8,7 @@
          words come in (the "sounds" param). -->
     <script type="application/json" id="cuttle-params">
       [
-        { "name": "title", "label": "Title", "type": "text", "default": "Built with Claude Code" },
+        { "name": "title", "label": "Title (empty: the brand's name)", "type": "text", "default": "" },
         { "name": "subtitle", "label": "Subtitle", "type": "text", "default": "" },
         { "name": "eyebrow", "label": "Small line above", "type": "text", "default": "" },
         { "name": "align", "label": "Align", "type": "select", "default": "center", "options": ["center", "left"] },
@@ -27,7 +27,9 @@
         overflow: hidden;
       }
       body {
-        font-family: 'Archivo', var(--cuttle-font);
+        font-family: var(--cuttle-display);
+        /* the brand's heading font as it is: a face with one weight (Bebas Neue, Instrument Serif) is not made bold */
+        font-synthesis: none;
         color: var(--cuttle-fg);
         display: grid;
         place-items: center;
@@ -112,7 +114,7 @@
       const { params, duration, size } = cuttle;
       document.body.classList.add(params.align === 'left' ? 'left' : 'center');
       const title = document.getElementById('title');
-      title.textContent = params.title || 'Title';
+      title.textContent = params.title || cuttle.theme.name || 'Built with Claude Code';
       const subtitle = document.getElementById('subtitle');
       subtitle.textContent = params.subtitle || '';
       const eyebrow = document.getElementById('eyebrow');
@@ -123,7 +125,7 @@
       // the title fits the width (once its font is in), then its words are split for their entrance
       let words = [];
       cuttle.ready(
-        document.fonts.load('800 100px Archivo').then(() => {
+        document.fonts.load(`800 100px "${cuttle.theme.font || 'Archivo'}"`).then(() => {
           fit(title, { width: size.width * 0.84, max: parseFloat(getComputedStyle(title).fontSize), min: 24 });
           words = split(title, 'word');
         }),

@@ -21,7 +21,7 @@ export type Selection = { kind: 'scene' | OverlayKind | 'cut' | 'crop' | 'music'
 export type Tool = 'select' | 'zoom' | 'mask' | 'caption' | 'crop';
 
 /** The look's parts, as the Look tab lists them. */
-export type LookSection = 'background' | 'window' | 'cursor' | 'camera' | 'subtitles' | 'sound' | 'video';
+export type LookSection = 'brand' | 'background' | 'window' | 'cursor' | 'camera' | 'subtitles' | 'sound' | 'video';
 
 export interface EditorState {
   phase: 'loading' | 'ready' | 'failed';

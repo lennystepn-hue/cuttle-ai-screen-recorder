@@ -13,12 +13,38 @@ describe('motion pages are told', () => {
     expect(motionTheme(project())).toEqual({
       '--cuttle-accent': '#D97757',
       '--cuttle-bg': '#1b1c4a',
-      '--cuttle-fg': '#ffffff',
+      '--cuttle-fg': '#FFFFFF',
       '--cuttle-font': '"Inter", "Segoe UI", system-ui, sans-serif',
+      '--cuttle-display': '"Archivo", "Archivo", "Inter", system-ui, sans-serif',
       '--cuttle-mono': '"JetBrains Mono", "Cascadia Mono", Consolas, monospace',
+      font: 'Archivo',
+      name: '',
+      url: '',
+      logo: '',
     });
     const solid = motionTheme(project({ look: { background: { preset: 'solid', color: '#102030' }, cursor: { color: '#00ff88' } } }));
     expect(solid).toMatchObject({ '--cuttle-accent': '#00ff88', '--cuttle-bg': '#102030' });
+  });
+
+  it('the brand over the look: its colours, its heading font, its name, URL and logo (a URL in the page)', () => {
+    const theme = motionTheme(
+      project({
+        look: { cursor: { color: '#00ff88' } },
+        theme: { name: 'Acme', url: 'acme.dev', logo: 'brand/acme logo.png', accent: '#3366FF', foreground: '#F0F0F0', background: '#0A0A14', font: 'Bebas Neue' },
+      }),
+    );
+    expect(theme).toMatchObject({
+      '--cuttle-accent': '#3366FF',
+      '--cuttle-bg': '#0A0A14',
+      '--cuttle-fg': '#F0F0F0',
+      '--cuttle-display': '"Bebas Neue", "Archivo", "Inter", system-ui, sans-serif',
+      font: 'Bebas Neue',
+      name: 'Acme',
+      url: 'acme.dev',
+      logo: 'cuttle-motion://project/brand/acme%20logo.png',
+    });
+    // a logo outside the project is not given to pages
+    expect(motionTheme(project({ theme: { logo: '../elsewhere.png' } })).logo).toBe('');
   });
 
   it('the format by its shape, or its size', () => {

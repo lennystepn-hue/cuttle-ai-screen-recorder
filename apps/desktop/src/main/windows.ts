@@ -10,6 +10,7 @@ import type { Event, Events, ExportEnd, ProjectFileEvent, ProjectStatus } from '
 import { isInside } from '../shared/media-path';
 import { takeKey } from '../shared/take';
 import { CHECK, CHECK_IMAGE, HIDDEN } from './check';
+import { applyProjectBrand, brandViews, removeProjectBrand, saveProjectBrand } from './brands';
 import { ExportRun, exportPath } from './export-service';
 import { bindRequests, send } from './ipc';
 import { ProjectMedia } from './media-service';
@@ -257,13 +258,18 @@ async function editorWindow(dir: string, key: string, file: ProjectFile, release
         CHECK_IMAGE ??
         (
           await dialog.showOpenDialog(window, {
-            title: purpose === 'still' ? 'An image for the page' : 'A background image',
+            title: purpose === 'still' ? 'An image for the page' : purpose === 'logo' ? 'The brand\'s logo' : 'A background image',
             properties: ['openFile'],
-            filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'webp'] }],
+            filters: [{ name: 'Images', extensions: purpose === 'logo' ? ['png', 'svg', 'webp', 'jpg', 'jpeg'] : ['png', 'jpg', 'jpeg', 'webp'] }],
           })
         ).filePaths[0];
-      return chosen ? { path: await importImage(dir, chosen) } : undefined;
+      // a logo goes into brand/, beside the files brand kits bring
+      return chosen ? { path: await importImage(dir, chosen, purpose === 'logo' ? 'brand' : 'images') } : undefined;
     },
+    'brand:list': () => brandViews(),
+    'brand:save': ({ name, raw }) => saveProjectBrand(dir, name, raw),
+    'brand:apply': (name) => applyProjectBrand(dir, name),
+    'brand:remove': (name) => removeProjectBrand(name),
   });
   editor.watch.start(file.hash);
   contents.on('did-finish-load', () => send(contents, 'project:status', editor.status ?? {}));

@@ -2,6 +2,7 @@ export {
   AUTO_KINDS,
   BACKGROUND_PRESETS,
   CAPTION_STYLES,
+  THEME_FONTS,
   CLICK_EFFECTS,
   CURRENT_VERSION,
   CURSOR_SHAPES,
@@ -26,6 +27,8 @@ export {
   type BackgroundPreset,
   type CaptionFix,
   type Captions,
+  type Theme,
+  type ThemeFont,
   type CaptionStyle,
   type CardScene,
   type MotionOverlay,
@@ -85,3 +88,5 @@ export {
   type MarkersFile,
   type MarkersParseResult,
 } from './markers';
+export { BRAND_VERSION, BrandKitSchema, parseBrandKitJson, type BrandKit, type BrandKitParseResult } from './brand';
+export { backgroundTone } from './theme';

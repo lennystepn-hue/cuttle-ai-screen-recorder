@@ -1,30 +1,111 @@
-# Cuttle
+<p align="center">
+  <img src="apps/desktop/assets/icon-mac.png" width="120" alt="Cuttle's icon: a cuttlefish on a coral tile" />
+</p>
 
-Screen recordings that edit themselves: record a monitor, region or window with webcam and mic,
-then turn the take into a polished demo with cuts, speed-ups, smooth zooms, masks, a framed window
-on a designed background, text overlays and an end card. A desktop app for people, a CLI and a
-skill for Claude, one project file (`cuttle.json`) and one render engine for both. Runs on
-Windows and macOS.
+<h1 align="center">Cuttle: the AI screen recorder that edits itself</h1>
 
-Status: phase 1 (engine, CLI, skill) done; phase 2 (the desktop app) in progress. Specs:
-`docs/superpowers/specs/2026-10-16-cuttle-design.md` and `2026-10-17-cuttle-desktop-design.md`;
-design mockups in `docs/design/desktop/`.
+<p align="center">
+  <b>Record your screen, or Claude Code at work. Cuttle cuts the waiting, zooms on what matters, masks your secrets and frames it into a demo you can post.</b><br />
+  On your computer, for macOS and Windows. A desktop app for people, a CLI and a skill for Claude.
+</p>
 
-## Packages
+<p align="center">
+  <a href="LICENSE"><img alt="MIT license" src="https://img.shields.io/badge/license-MIT-e57b55?style=flat-square" /></a>
+  <img alt="macOS and Windows" src="https://img.shields.io/badge/macOS%20%C2%B7%20Windows-14151d?style=flat-square&logo=apple&logoColor=white" />
+  <img alt="Made for Claude Code" src="https://img.shields.io/badge/made%20for-Claude%20Code-d97757?style=flat-square" />
+  <img alt="Runs locally" src="https://img.shields.io/badge/runs-locally-4fd1a1?style=flat-square" />
+</p>
 
-| Package | What it does |
-|---|---|
-| `@cuttle/project` | `cuttle.json` schema, defaults and readable validation errors |
-| `@cuttle/timeline` | What is on screen at any output time: scenes, speed, zooms, masks, texts, cursor, crossfades (none at a continuous cut), overlay ramps in output time |
-| `@cuttle/engine` | WebGL2 compositor: backgrounds, window frames, zoom, masks, cursors, webcam, texts, stills, cards, crossfades |
-| `@cuttle/export` | MP4 export in a hidden Electron window: decode, render, encode H.264, mux; mic cut to the scenes with ffmpeg (AAC) |
-| `@cuttle/recorder` | Records a take on Windows (ddagrab, DirectShow, a global input hook) and macOS (avfoundation, an event tap): a monitor, region or window, webcam and mic, input events, markers; stops by hotkey, time, a file, an idle screen or the end of a Claude Code turn |
-| `@cuttle/core` | Project operations for the CLI and the app: `cuttle.json` as written (hash-checked writes, backups), takes, suggest, recover, frame, ffmpeg |
-| `apps/cli` | The `cuttle` command: init, devices, record, suggest, preview, frame, capture-page, render, recover; `--json` for Claude |
-| `apps/desktop` | The Cuttle app (Electron, React): the pill and tray, an editor per project (the export's engine in the output view, played with the mic as the clock; a timeline with thumbnails, waveform, markers and input activity; the export sheet) |
-| `skill/` | The Claude skill: `SKILL.md` (the workflow) and `project.md` (the `cuttle.json` reference), installed by `pnpm skill:install` |
+<p align="center">
+  <a href="docs/media/cuttle-promo.mp4"><img src="docs/media/cuttle-promo.gif" width="880" alt="Cuttle's promo video: the cuttlefish draws itself, a window is recorded, the timeline cuts itself" /></a><br />
+  <sub>▶ <a href="docs/media/cuttle-promo.mp4">Watch the whole 40-second video</a>. It was made with Cuttle itself: every frame is a web page written in code, the music too.</sub>
+</p>
 
-## Setup
+---
+
+A raw screen recording is mostly waiting: the pause before you start, the moments you look for a
+button, five minutes of an agent thinking. Cuttle records the take and then edits it the way a
+video editor would. It cuts the idle stretches, speeds up the waiting, zooms in on your clicks and
+on what you type, hides API keys, email addresses and notifications, and puts the window on a
+designed background with your webcam, subtitles and music. Then it exports an MP4 for X, YouTube,
+LinkedIn or Reels. You can change every edit afterwards, in the app or in one plain file
+(`cuttle.json`) that Claude Code edits as well.
+
+## What it does
+
+<table>
+  <tr>
+    <td width="50%"><img src="docs/media/feature-record.jpg" alt="A terminal window with a recording frame round it, Cuttle's recording bar and a chat window over it" /></td>
+    <td width="50%"><img src="docs/media/feature-auto-edit.jpg" alt="Cuttle's timeline after its cut: 4:12 became 0:38" /></td>
+  </tr>
+  <tr>
+    <td valign="top"><b>Record a window, a screen or a region.</b> With your webcam and mic, a countdown and a small recording bar that never shows in the video. On a Mac a window take records only that window, so you can keep working (or chatting) beside it. Pause, mark a slip with one key, and keep a script of your steps in a prompter.</td>
+    <td valign="top"><b>It cuts itself.</b> Idle stretches out, waiting sped up with a speed badge, slips and long pauses gone, zooms placed where they belong. A take of four minutes becomes a tight demo, in seconds, on your computer.</td>
+  </tr>
+  <tr>
+    <td><img src="docs/media/feature-zoom.jpg" alt="A zoom that follows the typing in a form field" /></td>
+    <td><img src="docs/media/feature-privacy.jpg" alt="Keys, an email address and a notification masked in a terminal" /></td>
+  </tr>
+  <tr>
+    <td valign="top"><b>Zooms that follow you.</b> Smooth zooms on every click and on dialogs, gliding along each line you type and following the caret. A browser's tabs and bars are cropped away on their own.</td>
+    <td valign="top"><b>Secrets masked before you share.</b> Cuttle reads the screen's text on your computer (Windows' OCR, macOS's Vision) and masks API keys, tokens, email addresses, IBANs and card numbers, also while they scroll, and every notification that pops up. Add your own words to always hide.</td>
+  </tr>
+  <tr>
+    <td><img src="docs/media/feature-look.jpg" alt="The same take on a sunset background in a light window frame with a squircle webcam bubble" /></td>
+    <td><img src="docs/media/feature-voice.jpg" alt="Karaoke subtitles over a waveform, the filler words struck out" /></td>
+  </tr>
+  <tr>
+    <td valign="top"><b>Make it look designed.</b> Backgrounds (gradients, animated ones, your wallpaper), window frames from macOS to a phone, cursor styles, a webcam bubble you move and reshape after the take, brand kits, watermarks, motion titles and music written for the video.</td>
+    <td valign="top"><b>Fillers and pauses, gone.</b> Your voice is transcribed on your computer with Whisper. Filler words and long pauses are cut where the picture rests, subtitles come word by word (or karaoke), and the export writes SRT and VTT.</td>
+  </tr>
+  <tr>
+    <td><img src="docs/media/feature-claude-code.jpg" alt="cuttle record --until-claude, with Claude's prompt, work and answer as markers" /></td>
+    <td><img src="docs/media/feature-end.jpg" alt="Cuttle's end card with the repository's address" /></td>
+  </tr>
+  <tr>
+    <td valign="top"><b>Made for Claude Code.</b> <code>cuttle record --until-claude</code> stops when Claude has answered, and Claude's prompt, its tool calls and its answer become markers: the prompt stays readable, the work runs at 12×, the answer gets a zoom. With the skill installed, just ask Claude to record a demo of what it built.</td>
+    <td valign="top"><b>Export for every feed.</b> MP4 in 16:9, 1:1 and 9:16 with chapters from your script, rendered by the same WebGL engine the editor shows, frame for frame. Motion scenes (titles, end cards, a 3D laptop, transitions) are web pages Claude can write.</td>
+  </tr>
+</table>
+
+## The editor
+
+<p align="center"><img src="docs/media/app-editor.jpg" alt="Cuttle's editor with a Claude Code take: the framed video, the timeline with the prompt, 64× Claude at work, the answer, the result and the end card, zooms and a mask" /></p>
+
+Everything Cuttle did on its own is a normal edit you can change: drag a clip, trim it, set its
+speed, move a zoom, redraw a mask, switch a kind of edit off in the Auto tab. The look is a tab of
+its own, and the video you see is exactly what the export renders.
+
+<table>
+  <tr>
+    <td width="50%"><img src="docs/media/app-look-tab.jpg" alt="The Look tab: brand, watermark, backgrounds, window, cursor, camera, subtitles and sound" /></td>
+    <td width="50%"><img src="docs/media/app-editor-motion.jpg" alt="A motion scene in the editor: Claude's animated cuttlefish, live" /></td>
+  </tr>
+  <tr>
+    <td align="center"><sub>The Look tab: backgrounds, frames, cursor, camera, subtitles, sound</sub></td>
+    <td align="center"><sub>Motion scenes are web pages, drawn frame by frame (here the page Claude built)</sub></td>
+  </tr>
+  <tr>
+    <td><img src="docs/media/app-command-menu.jpg" alt="The command menu, searching for zoom" /></td>
+    <td><img src="docs/media/app-export.jpg" alt="The export sheet: 16:9, 1:1 or 9:16" /></td>
+  </tr>
+  <tr>
+    <td align="center"><sub>Every command and its keys (⌘K / Ctrl+K)</sub></td>
+    <td align="center"><sub>Export in 16:9, 1:1 or 9:16</sub></td>
+  </tr>
+  <tr>
+    <td><img src="docs/media/app-settings.jpg" alt="Cuttle's settings: recording, speech, privacy, Claude Code, projects, general" /></td>
+    <td><img src="docs/media/app-prompter.png" alt="The prompter: the step now, what to say, the step after" /><br /><br /><img src="docs/media/app-hud.png" alt="The recording bar: the timer, the mic's level, retake, slip, marker, pause, stop" /></td>
+  </tr>
+  <tr>
+    <td align="center"><sub>Settings</sub></td>
+    <td align="center"><sub>The prompter and the recording bar, never in the video</sub></td>
+  </tr>
+</table>
+
+## Get started
+
+Cuttle runs from this repository for now (no signed download yet).
 
 | | Windows | macOS (Apple silicon or Intel) |
 |---|---|---|
@@ -32,7 +113,7 @@ design mockups in `docs/design/desktop/`.
 | pnpm 11 | `corepack enable` (or `npm install -g pnpm@11`) | the same |
 | ffmpeg and ffprobe | `winget install Gyan.FFmpeg` | `brew install ffmpeg` |
 | Transcription (whisper) | in Gyan's ffmpeg (its `whisper` filter) | `brew install whisper-cpp` (no macOS ffmpeg has the filter; Cuttle runs `whisper-cli` instead) |
-| Permissions | none | the first recording asks for them (see below) |
+| Permissions | none | the first recording asks for them (below) |
 
 `pnpm install` also downloads Electron's binary for the platform. Native modules come prebuilt:
 koffi (the OS APIs) for both, uiohook-napi (the input hook) for Windows.
@@ -46,27 +127,45 @@ the app afterwards), *Microphone* and *Camera* (when a take uses them), *Input M
 is and a browser's page; without it zooms follow what the screen changes, a notification is
 masked on the whole right side of the screen and the crop comes from the picture).
 
-## Development
+Then:
 
 ```bash
+git clone https://github.com/lennystepn-hue/cuttle-ai-screen-recorder.git
+cd cuttle-ai-screen-recorder
 pnpm install
-pnpm exec playwright install chromium   # once: headless Chromium for the engine tests
-pnpm test                                # unit tests (Node) and engine golden images (Chromium)
-pnpm typecheck
-pnpm engine:electron                     # the engine goldens in a hidden Electron window (Windows; skipped on macOS, see main.mjs)
-pnpm export:check                        # export a testsrc fixture to 16:9, 1:1, 9:16 and check it with ffprobe
-pnpm recorder:real                       # record 3 s of the primary monitor and first mic for real, check, delete
-pnpm cli:check                           # build the CLI; preview, capture-page and render through it in Electron
-pnpm cuttle <command>                    # the built CLI without installing it (runs in the repo root)
+pnpm app          # the app: a pill near the top of the screen, an icon in the tray (menu bar)
 ```
 
-The checks of reading the screen draw their text with ffmpeg's `drawtext`: on macOS they need
-`brew install ffmpeg-full` (keg-only: put `$(brew --prefix ffmpeg-full)/bin` first on PATH), as
-Homebrew's `ffmpeg` has no `drawtext`.
+The first start offers to install the `cuttle` command and the Claude skill. To record, press
+"New recording" on the pill, or Ctrl+Shift+Alt+R (⌃⌥⇧R on a Mac).
 
-Export and recording need ffmpeg on PATH (or its path in `CUTTLE_FFMPEG`); `export:check` and the
-recorder tests also need ffprobe. Recording works on Windows and macOS; the recorder's tests use its
-`test` backend (ffmpeg test sources, synthetic input), which runs everywhere.
+## With Claude Code
+
+Install the command and the skill once (the app's first run does the same):
+
+```bash
+pnpm cli:install      # puts `cuttle` on your PATH
+pnpm skill:install    # the Claude skill: ~/.claude/skills/cuttle
+```
+
+Then ask Claude Code something like *"build a landing page and record a demo video of it"*, or type
+`/cuttle`. Claude sets up the recording, you give your prompt to Claude Code in the demo folder,
+the take stops by itself when Claude is done, and Claude cuts it, checks the stills for anything
+private and renders the MP4.
+
+**Details.** `pnpm skill:install` copies the skill into Claude Code's personal skills
+(`~/.claude/skills/cuttle/`, or under `CLAUDE_CONFIG_DIR`) with this repository's path filled in.
+`pnpm skill:uninstall` removes it; a `cuttle` skill it did not install is never touched. The skill
+needs `cuttle` on PATH (`pnpm cli:install`). Then ask Claude Code for a demo video, or type
+`/cuttle`.
+
+
+## Privacy
+
+Cuttle works on your computer. Recording, cutting, the screen's text (Windows' own OCR or macOS's
+Vision), transcription (Whisper models, downloaded once) and the export all run locally; nothing is
+uploaded. Masks over private things are suggestions to check, not a guarantee: look at the stills
+before you share a video.
 
 ## The desktop app
 
@@ -167,15 +266,53 @@ Every command takes `-C <project folder>` and `--json` (one JSON document on std
 `{ "error": { "code", "message" } }`). Exit codes: 0 ok, 1 usage or validation, 2 device or
 permission, 3 render, 130 cancelled with Ctrl+C.
 
-## The Claude skill
+## How it is built
 
-`pnpm skill:install` copies the skill into Claude Code's personal skills
-(`~/.claude/skills/cuttle/`, or under `CLAUDE_CONFIG_DIR`) with this repository's path filled in.
-`pnpm skill:uninstall` removes it; a `cuttle` skill it did not install is never touched. The skill
-needs `cuttle` on PATH (`pnpm cli:install`). Then ask Claude Code for a demo video, or type
-`/cuttle`.
+| Package | What it does |
+|---|---|
+| `@cuttle/project` | `cuttle.json` schema, defaults and readable validation errors |
+| `@cuttle/timeline` | What is on screen at any output time: scenes, speed, zooms, masks, texts, cursor, crossfades (none at a continuous cut), overlay ramps in output time |
+| `@cuttle/engine` | WebGL2 compositor: backgrounds, window frames, zoom, masks, cursors, webcam, texts, stills, cards, crossfades |
+| `@cuttle/export` | MP4 export in a hidden Electron window: decode, render, encode H.264, mux; mic cut to the scenes with ffmpeg (AAC) |
+| `@cuttle/recorder` | Records a take on Windows (ddagrab, DirectShow, a global input hook) and macOS (avfoundation, an event tap): a monitor, region or window, webcam and mic, input events, markers; stops by hotkey, time, a file, an idle screen or the end of a Claude Code turn |
+| `@cuttle/core` | Project operations for the CLI and the app: `cuttle.json` as written (hash-checked writes, backups), takes, suggest, recover, frame, ffmpeg |
+| `apps/cli` | The `cuttle` command: init, devices, record, suggest, preview, frame, capture-page, render, recover; `--json` for Claude |
+| `apps/desktop` | The Cuttle app (Electron, React): the pill and tray, an editor per project (the export's engine in the output view, played with the mic as the clock; a timeline with thumbnails, waveform, markers and input activity; the export sheet) |
+| `skill/` | The Claude skill: `SKILL.md` (the workflow) and `project.md` (the `cuttle.json` reference), installed by `pnpm skill:install` |
+
+## Development
+
+```bash
+pnpm install
+pnpm exec playwright install chromium   # once: headless Chromium for the engine tests
+pnpm test                                # unit tests (Node) and engine golden images (Chromium)
+pnpm typecheck
+pnpm engine:electron                     # the engine goldens in a hidden Electron window (Windows; skipped on macOS, see main.mjs)
+pnpm export:check                        # export a testsrc fixture to 16:9, 1:1, 9:16 and check it with ffprobe
+pnpm recorder:real                       # record 3 s of the primary monitor and first mic for real, check, delete
+pnpm cli:check                           # build the CLI; preview, capture-page and render through it in Electron
+pnpm cuttle <command>                    # the built CLI without installing it (runs in the repo root)
+```
+
+The checks of reading the screen draw their text with ffmpeg's `drawtext`: on macOS they need
+`brew install ffmpeg-full` (keg-only: put `$(brew --prefix ffmpeg-full)/bin` first on PATH), as
+Homebrew's `ffmpeg` has no `drawtext`.
+
+Export and recording need ffmpeg on PATH (or its path in `CUTTLE_FFMPEG`); `export:check` and the
+recorder tests also need ffprobe. Recording works on Windows and macOS; the recorder's tests use its
+`test` backend (ffmpeg test sources, synthetic input), which runs everywhere.
 
 Engine golden images live in `packages/engine/test/__golden__/`, one PNG per platform. A new
 scenario writes its PNG on the first run and fails once so you can look at it.
 `pnpm exec vitest run -u` rewrites goldens after an intended change of look; that run fails once
 for every rewritten PNG, so look at each one and run the tests again.
+
+## Contributing
+
+Issues and pull requests are welcome. Cuttle runs on Windows and macOS: a change made on one has to
+keep working on the other ([CLAUDE.md](CLAUDE.md) has the platform rules). Run `pnpm typecheck` and
+`pnpm test`, and `pnpm app:check` for a change to the app.
+
+## License
+
+[MIT](LICENSE) © 2026 Lenny Enderle

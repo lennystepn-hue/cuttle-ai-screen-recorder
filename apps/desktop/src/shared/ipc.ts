@@ -31,6 +31,8 @@ export interface ProjectInfo {
   hash: string;
   /** Seconds after the screen track that the webcam and mic started (take.json); 0 when unknown. */
   offsets: { webcam: number; mic: number };
+  /** The recorded display's pixels per point (take.json), when it says: zooms are sized by it. */
+  scale?: number;
 }
 
 /** The editor's background media: a 720p proxy of the screen track, a thumbnail strip, the mic's peaks. */

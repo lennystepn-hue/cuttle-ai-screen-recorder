@@ -146,6 +146,17 @@ export function edit(commands: Command[], label: string): boolean {
   return true;
 }
 
+/** The project as `commands` would leave it, without a change; undefined when they cannot run. */
+export function projectAfter(commands: Command[]): CuttleProject | undefined {
+  try {
+    let raw = doc().raw;
+    for (const command of commands) raw = applyCommand(raw, command, limits());
+    return parse(raw);
+  } catch {
+    return undefined;
+  }
+}
+
 /** Shows what a gesture would do while it runs (a drag); `edit` ends it. Undefined commands end it without a change. */
 export function preview(commands: Command[] | undefined): void {
   if (!commands) return setDoc({ preview: undefined });

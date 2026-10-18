@@ -121,8 +121,9 @@ export async function suggestProject(projectDir: string, args: SuggestOptions = 
   const { sources } = file.project;
   const screen = resolve(file.dir, sources.screen);
   args.onStatus?.('reading the screen recording …');
-  // kept in the project, for the steps after suggest (the app's length fit)
-  const screenInfo = await cachedAnalysis(screen, file.dir);
+  // kept in the project, for the steps after suggest (the app's length fit); with the display's scale
+  // (take.json): zooms show as much of its interface as on a screen at 100 %
+  const screenInfo = { ...(await cachedAnalysis(screen, file.dir)), ...(await takeScale(dirname(screen))) };
   if (screenInfo.duration <= 0) throw new CoreError('invalid-media', `${screen} has no video frames`);
   let transcript: TranscriptFile | undefined;
   let speech: { spans: { from: number; to: number }[]; from: SuggestResult['speech']['from'] } = { spans: [], from: 'none' };
@@ -509,6 +510,12 @@ const fromClaude = (marker: Marker) => marker.kind === 'prompt' || marker.kind =
 async function readEvents(path: string): Promise<InputEvent[] | undefined> {
   const text = await readFile(path, 'utf8').catch(() => undefined);
   return text === undefined ? undefined : parseEventsJsonl(text).events;
+}
+
+/** The recorded display's scale from the take.json next to the screen track, when it says one. */
+async function takeScale(takeDir: string): Promise<{ scale?: number }> {
+  const parsed = parseTakeJson(await readFile(join(takeDir, 'take.json'), 'utf8').catch(() => ''));
+  return parsed.ok && parsed.take.scale !== undefined ? { scale: parsed.take.scale } : {};
 }
 
 /** The screen track's start (wall-clock seconds) from the take.json next to it. */

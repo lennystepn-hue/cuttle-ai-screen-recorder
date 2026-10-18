@@ -26,7 +26,10 @@ export type Command =
   /** A clip's source range, or a still's or card's length. */
   | { type: 'trim'; id: string; from?: number; to?: number; duration?: number }
   | { type: 'move-scene'; id: string; index: number }
-  /** A clip's speed; zooms and captions entirely inside it keep their output length. */
+  /**
+   * A clip's speed. Captions and the zooms made by hand entirely inside it keep their output length;
+   * the zooms suggest made (`auto`) follow something in the take and stay where they are in it.
+   */
   | { type: 'speed'; id: string; speed: number }
   /** Moves an overlay by source seconds. */
   | { type: 'shift'; list: OverlayList; id: string; by: number }
@@ -234,12 +237,14 @@ export function applyCommand(raw: Raw, command: Command, limits: EditLimits = {}
       if ((to - from) / speed < 1 / (limits.fps ?? 30) - 1e-9) throw new DocumentError('invalid', `the clip is too short for ${round(speed)}×`);
       item.speed = round(speed);
       touched.push(['scenes', item]);
-      // Zooms, captions and motion overlays inside the clip keep their output length: a 3 s caption stays 3 s at 12×.
+      // Captions, motion overlays and zooms made by hand inside the clip keep their output length: a 3 s
+      // caption stays 3 s at 12×. A zoom suggest made stays on what it follows (clicks, typing, a dialog):
+      // stretched, it would move on after the clicks it moves to, and run into the next zoom.
       for (const name of ['zooms', 'texts', 'overlays'] as const) {
         for (const overlay of items(next, name)) {
           const at = Number(overlay.at);
           const duration = Number(overlay.duration);
-          if (at < from || at + duration > to) continue;
+          if (at < from || at + duration > to || (name === 'zooms' && overlay.auto !== undefined)) continue;
           overlay.duration = round(Math.min((duration / before) * speed, to - at));
           if (name === 'zooms') keepPath(overlay, { scale: Number(overlay.duration) / duration });
           touched.push([name, overlay]);

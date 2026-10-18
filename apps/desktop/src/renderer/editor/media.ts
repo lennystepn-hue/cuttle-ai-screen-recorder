@@ -151,6 +151,8 @@ async function placeholder(path?: string): Promise<ImageBitmap> {
  */
 export interface EditorMedia {
   screen: VideoSource;
+  /** The recorded display's pixels per point (take.json), when it says: zooms are sized by it. */
+  scale?: number;
   webcam?: VideoSource & { offset: number };
   mic?: AudioSource;
   /** The file `mic` was opened from: the mic, or its cleaned-up copy (`look.audio.cleanup`). */
@@ -200,7 +202,7 @@ async function optional<T>(media: Pick<EditorMedia, 'warnings' | 'failed'>, key:
 export async function openProjectMedia(info: ProjectInfo, project: CuttleProject): Promise<EditorMedia> {
   const { sources } = project;
   const screen = await openVideo(sources.screen, 'The screen recording');
-  const media: EditorMedia = { screen, events: [], markers: [], stills: new Map(), offsets: info.offsets, failed: new Set(), warnings: [] };
+  const media: EditorMedia = { screen, ...(info.scale !== undefined && { scale: info.scale }), events: [], markers: [], stills: new Map(), offsets: info.offsets, failed: new Set(), warnings: [] };
   if (sources.events) {
     const text = await optional(media, sources.events, async () => {
       const found = await fetchText(sources.events!);

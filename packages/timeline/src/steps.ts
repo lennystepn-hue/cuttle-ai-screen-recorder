@@ -2,7 +2,7 @@
 // step key left out), and a zoom on where each step happens. Pure: the chapters, and `suggest`'s
 // step titles and step zooms, are made from these.
 import type { InputEvent, Marker, Rect, ScriptStep } from '@cuttle/project';
-import { zoomRectFor, type ClipSpan } from './click-zooms';
+import { zoomRectFor, type ClipSpan, type ZoomScreen } from './click-zooms';
 
 /** A move to a step undone within this many seconds (the step key pressed by mistake, then back) is none. */
 export const STEP_SLIP_SECONDS = 2;
@@ -60,7 +60,7 @@ export interface StepZoom {
  * seconds, from a little before the first to a little after the last, ending before the next step.
  * None for a step without them, one the video speeds up (more than 2×), or where another zoom is.
  */
-export function stepZooms(moves: readonly StepMove[], events: readonly InputEvent[], clips: readonly ClipSpan[], screen: { width: number; height: number }, avoid: readonly { at: number; duration: number }[] = []): StepZoom[] {
+export function stepZooms(moves: readonly StepMove[], events: readonly InputEvent[], clips: readonly ClipSpan[], screen: ZoomScreen, avoid: readonly { at: number; duration: number }[] = []): StepZoom[] {
   const zooms: StepZoom[] = [];
   const shownSlowly = (t: number) => clips.some((clip) => t >= clip.from && t < clip.to && clip.speed <= STEP_ZOOM.maxSpeed);
   moves.forEach((move, i) => {

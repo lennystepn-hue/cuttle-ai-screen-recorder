@@ -13,8 +13,30 @@ export const CLUSTER_GAP_SECONDS = 3;
 export const CLUSTER_SPAN = 0.4;
 /** Room around the clicks, as a share of the screen's width. */
 export const PAD = 0.1;
-/** A zoom shows at least this share of the screen's width (at most about 2.2× zoom). */
+/** A zoom shows at least this share of the screen's width (at most about 2.2× zoom)… */
 export const MIN_WIDTH = 0.45;
+/**
+ * …and on a display that says its scale, at least this many of its points across (its pixels over
+ * its scale): as much of the interface as MIN_WIDTH shows of a 1920-pixel screen at 100 %, so a
+ * Retina Mac (1440 points across) or a laptop at 150 % is not zoomed deeper than that.
+ */
+export const MIN_POINTS = 860;
+
+/** The screen a zoom is made for: its size in pixels, and its pixels per point when the take says so. */
+export interface ZoomScreen {
+  width: number;
+  height: number;
+  scale?: number;
+}
+
+/**
+ * The narrowest view a zoom may have (px): `share` of the screen's width, and on a display with a
+ * scale at least as many points as MIN_POINTS is to MIN_WIDTH; never more than the screen.
+ */
+export function minZoomWidth(screen: ZoomScreen, share = MIN_WIDTH): number {
+  const points = screen.scale ? ((MIN_POINTS * share) / MIN_WIDTH) * screen.scale : 0;
+  return Math.min(screen.width, Math.max(share * screen.width, points));
+}
 /** A zoom that would show more than this share of the screen's area barely zooms: none. */
 export const MAX_AREA = 0.8;
 /** The zoom starts this long before the first click (it eases in for 0.6 s; output s)… */
@@ -73,11 +95,11 @@ const boxOf = (points: readonly { x: number; y: number }[]): Box => ({
 /** Whether a box of clicks is small enough for one zoom (`CLUSTER_SPAN` of the screen each way). */
 const fits = (box: Box, screen: { width: number; height: number }) => box.right - box.left <= CLUSTER_SPAN * screen.width && box.bottom - box.top <= CLUSTER_SPAN * screen.height;
 
-/** A box padded, made at least `MIN_WIDTH` wide in the screen's aspect, and kept on the screen. */
-export function zoomRectFor(box: Box, screen: { width: number; height: number }): Rect {
+/** A box padded, made at least `minZoomWidth` wide in the screen's aspect, and kept on the screen. */
+export function zoomRectFor(box: Box, screen: ZoomScreen): Rect {
   const pad = PAD * screen.width;
   const aspect = screen.width / screen.height;
-  let width = Math.max(box.right - box.left + 2 * pad, MIN_WIDTH * screen.width);
+  let width = Math.max(box.right - box.left + 2 * pad, minZoomWidth(screen));
   let height = Math.max(box.bottom - box.top + 2 * pad, width / aspect);
   width = Math.max(width, height * aspect);
   height = width / aspect;
@@ -112,7 +134,7 @@ export function shownClicks(events: readonly InputEvent[], clips: readonly ClipS
  * zooms already there (the answer zoom, zooms made by hand): clicks under one are left to it, no
  * click zoom overlaps one, and they count for the 5 output seconds between zoom starts.
  */
-export function clickZooms(events: readonly InputEvent[], clips: readonly ClipSpan[], screen: { width: number; height: number }, avoid: readonly { at: number; duration: number }[] = []): ClickZoom[] {
+export function clickZooms(events: readonly InputEvent[], clips: readonly ClipSpan[], screen: ZoomScreen, avoid: readonly { at: number; duration: number }[] = []): ClickZoom[] {
   const clipOf = (t: number) => clips.findIndex((clip) => t >= clip.from && t < clip.to);
   const outputAt = (t: number, index: number) => clips[index]!.start + (t - clips[index]!.from) / clips[index]!.speed;
   /** Output seconds where a zoom starts, when the video shows its source second. */
@@ -193,16 +215,25 @@ export function clickZooms(events: readonly InputEvent[], clips: readonly ClipSp
   const result: ClickZoom[] = [];
   let lastEnd = -Infinity;
   for (const zoom of chains) {
-    const rect = zoomRectFor(boxOf(zoom.stations[0]!.points), screen);
-    if ((rect[2] * rect[3]) / (screen.width * screen.height) > MAX_AREA) continue;
-    if (avoid.some((other) => zoom.at < other.at + other.duration && other.at < zoom.end)) continue;
-    // one at a time, and not too often (the zooms already there count)
-    const start = outputAt(zoom.at, zoom.clip);
-    if (start < lastEnd || starts.some((other) => Math.abs(start - other) < MIN_OUTPUT_GAP)) continue;
-    const moves = zoom.stations.slice(1).map((station) => ({ at: round(station.at), rect: zoomRectFor(boxOf(station.points), screen) }));
-    result.push({ at: round(zoom.at), duration: round(zoom.end - zoom.at), rect, ...(moves.length > 0 && { moves }), clicks: zoom.clicks });
-    starts.push(start);
-    lastEnd = outputAt(zoom.end, zoom.clip);
+    const s = clips[zoom.clip]!.speed;
+    // a chain that cannot start where it does (another zoom starts near it, or is still on) starts at
+    // a later station: its first clicks go without, the work after them is still followed
+    for (let first = 0; first < zoom.stations.length; first++) {
+      const stations = zoom.stations.slice(first);
+      const at = stations[0]!.at;
+      if ((zoom.end - at) / s < MIN_SECONDS - 1e-9) break;
+      const rect = zoomRectFor(boxOf(stations[0]!.points), screen);
+      if ((rect[2] * rect[3]) / (screen.width * screen.height) > MAX_AREA) continue;
+      if (avoid.some((other) => at < other.at + other.duration && other.at < zoom.end)) continue;
+      // one at a time, and not too often (the zooms already there count)
+      const start = outputAt(at, zoom.clip);
+      if (start < lastEnd || starts.some((other) => Math.abs(start - other) < MIN_OUTPUT_GAP)) continue;
+      const moves = stations.slice(1).map((station) => ({ at: round(station.at), rect: zoomRectFor(boxOf(station.points), screen) }));
+      result.push({ at: round(at), duration: round(zoom.end - at), rect, ...(moves.length > 0 && { moves }), clicks: stations.reduce((sum, station) => sum + station.points.length, 0) });
+      starts.push(start);
+      lastEnd = outputAt(zoom.end, zoom.clip);
+      break;
+    }
   }
   return result;
 }

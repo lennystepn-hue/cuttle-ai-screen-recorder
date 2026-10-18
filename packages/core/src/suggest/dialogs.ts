@@ -2,7 +2,7 @@
 // padded, from just before it opens to just after it closes. The recorder logs when one opens and
 // closes (`window` events). Pure.
 import type { InputEvent, Rect } from '@cuttle/project';
-import type { ClipSpan } from '@cuttle/timeline';
+import { minZoomWidth, type ClipSpan, type ZoomScreen } from '@cuttle/timeline';
 
 export const DIALOG_RULES = {
   /** A dialog open at least this long (output s) gets a zoom… */
@@ -33,7 +33,7 @@ export interface DialogZoom {
  * to `after` its closing (the take's end when it never closed), inside the clip it opened in, padded
  * as a click zoom is. None overlaps a zoom of `avoid` or another dialog's.
  */
-export function dialogZooms(events: readonly InputEvent[], clips: readonly ClipSpan[], screen: { width: number; height: number }, avoid: readonly { at: number; duration: number }[] = [], rules = DIALOG_RULES): DialogZoom[] {
+export function dialogZooms(events: readonly InputEvent[], clips: readonly ClipSpan[], screen: ZoomScreen, avoid: readonly { at: number; duration: number }[] = [], rules = DIALOG_RULES): DialogZoom[] {
   const windows = events.flatMap((event) => (event.type === 'window' && event.kind === 'dialog' ? [event] : [])).sort((a, b) => a.t - b.t);
   const result: DialogZoom[] = [];
   for (const opened of windows.filter((event) => event.open)) {
@@ -55,11 +55,11 @@ export function dialogZooms(events: readonly InputEvent[], clips: readonly ClipS
   return result;
 }
 
-/** The view on a dialog: padded by `pad` of its larger side, at least `minWidth` wide, in the screen's shape, on the screen. */
-function dialogRect([x, y, width, height]: Rect, screen: { width: number; height: number }, rules: typeof DIALOG_RULES): Rect {
+/** The view on a dialog: padded by `pad` of its larger side, at least `minWidth` wide (as many points on a scaled display), in the screen's shape, on the screen. */
+function dialogRect([x, y, width, height]: Rect, screen: ZoomScreen, rules: typeof DIALOG_RULES): Rect {
   const aspect = screen.width / screen.height;
   const pad = rules.pad * Math.max(width, height);
-  let w = Math.max(width + 2 * pad, (height + 2 * pad) * aspect, rules.minWidth * screen.width);
+  let w = Math.max(width + 2 * pad, (height + 2 * pad) * aspect, minZoomWidth(screen, rules.minWidth));
   w = Math.min(w, screen.width);
   const h = Math.min(w / aspect, screen.height);
   const left = Math.min(Math.max(x + width / 2 - w / 2, 0), screen.width - w);

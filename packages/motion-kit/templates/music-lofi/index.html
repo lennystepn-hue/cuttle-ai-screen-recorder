@@ -1,0 +1,102 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <!--
+      Lofi: a laid-back beat with swing, a warm electric piano on seventh chords, a round bass, and
+      the crackle of a record, all a little dark. Good under a coding session or a calm explanation.
+      Change anything: it is a starting point.
+    -->
+    <script type="application/json" id="cuttle-params">
+      [
+        { "name": "key", "label": "Key", "type": "select", "default": "Eb", "options": ["C", "Db", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B"] },
+        { "name": "chords", "label": "Chords", "type": "text", "default": "Ebmaj7 Cm7 Fm9 Bb7sus4" },
+        { "name": "bpm", "label": "Tempo (0: fitted to the cuts)", "type": "number", "default": 0, "min": 0, "max": 120 },
+        { "name": "swing", "label": "Swing (0 to 0.5)", "type": "number", "default": 0.22, "min": 0, "max": 0.5 },
+        { "name": "crackle", "label": "Record crackle", "type": "bool", "default": true },
+        { "name": "energies", "label": "Energy by scene (Intro=1, s4=3)", "type": "text", "default": "" }
+      ]
+    </script>
+  </head>
+  <body>
+    <script type="module">
+      import { song, kick, snare, hat, rim, bass, keys, pad, fx, chord, voiceLead, sections, fitTempo, steps } from 'cuttle/sound';
+
+      cuttle.music((audio) => {
+        const { video, params, context } = audio;
+        const fitted = fitTempo(video, { min: 76, max: 90, snap: 2 });
+        const bpm = params.bpm > 0 ? params.bpm : fitted.bpm;
+        const s = song(audio, { bpm, offset: params.bpm > 0 ? 0 : fitted.offset, key: params.key, mode: 'major', swing: Number(params.swing), reverb: 1.6, brightness: 0.3, delay: 0.5 });
+        const chords = voiceLead(String(params.chords).trim().split(/\s+/).map((symbol) => chord(symbol, 3)), { low: 'Bb2', high: 'F4' });
+        const energy = Object.fromEntries(String(params.energies ?? '').split(',').map((pair) => pair.split('=').map((x) => x.trim())).filter(([k, v]) => k && v));
+        const parts = sections(video, { energy });
+        const energyAt = (t) => parts.find((part) => t >= part.start && t < part.end)?.energy ?? 2;
+
+        // everything a little dark: a gentle low-pass on the drums and the keys
+        s.drums.input.disconnect();
+        const dusty = context.createBiquadFilter();
+        dusty.type = 'lowpass';
+        dusty.frequency.value = 6500;
+        s.drums.input.connect(dusty).connect(s.drums.duck);
+
+        const k = kick(s, { tone: 50, punch: 0.8, click: 0.15, drive: 0.35, gain: 0.85, decay: 0.38 });
+        const sn = snare(s, { tone: 170, snap: 0.55, decay: 0.16, gain: 0.55 });
+        const hh = hat(s, { gain: 0.16, tone: 0.8 });
+        const rm = rim(s, { gain: 0.18 });
+        const low = bass(s, { wave: 'triangle', cutoff: 420, envelope: 1.2, resonance: 1, drive: 0.2, sub: 0.7, gain: 0.42 });
+        const ep = keys(s, { type: 'epiano', gain: 0.13, decay: 2.6, tremolo: 0.22 });
+        const haze = pad(s, { wave: 'triangle', voices: 2, cutoff: 1100, attack: 1.2, release: 1.8, gain: 0.06 });
+
+        const KICK = steps('x......x..x.....');
+        const SNARE = steps('....x.......x...');
+        const HATS = steps('x.x.x.x.x.x.x.xo');
+        for (const { bar, t } of s.bars(-1, video.duration)) {
+          const notes = chords[((bar % chords.length) + chords.length) % chords.length];
+          const start = Math.max(0, t);
+          const e = energyAt(start);
+          // the chord on the one, and again, softer, on the "and" of two (a lazy push)
+          ep.play(start, notes, s.bar * 0.6, { velocity: 0.55 + 0.1 * e });
+          if (e >= 2) ep.play(s.time(bar, 1.5), notes.slice(1), s.beat * 1.2, { velocity: 0.4 });
+          haze.play(start, notes.map((n) => n + 12), s.bar, { velocity: 0.35 + 0.1 * e });
+          for (let i = 0; i < 16; i++) {
+            const at = s.time(bar, i / 4);
+            if (at < 0 || at >= video.duration) continue;
+            const ee = energyAt(at);
+            if (ee >= 2 && KICK[i]) k.hit(at, KICK[i]);
+            if (ee >= 2 && SNARE[i]) sn.hit(at, 0.9);
+            if (ee >= 1 && HATS[i]) hh.hit(at, HATS[i] * (0.6 + 0.4 * s.random()), { open: HATS[i] < 0.5 });
+            if (ee >= 3 && i % 8 === 6) rm.hit(at, 0.7);
+          }
+          if (e >= 1) {
+            low.play(start, notes[0] - 12, s.beat * 1.4, { velocity: 0.9 });
+            low.play(s.time(bar, 2.5), notes[0] - 12, s.beat * 0.9, { velocity: 0.7 });
+          }
+        }
+
+        // the record: a quiet hiss and crackles all through
+        if (params.crackle) {
+          const hiss = context.createBufferSource();
+          const length = Math.round(context.sampleRate * 2);
+          const buffer = context.createBuffer(1, length, context.sampleRate);
+          const data = buffer.getChannelData(0);
+          for (let i = 0; i < length; i++) data[i] = (Math.random() * 2 - 1) * 0.5 + (Math.random() < 0.0004 ? (Math.random() * 2 - 1) * 8 : 0);
+          hiss.buffer = buffer;
+          hiss.loop = true;
+          const tone = context.createBiquadFilter();
+          tone.type = 'bandpass';
+          tone.frequency.value = 3200;
+          tone.Q.value = 0.5;
+          const level = context.createGain();
+          level.gain.value = 0.018;
+          hiss.connect(tone).connect(level).connect(s.master);
+          hiss.start(0);
+        }
+        // a soft knock into each scene change, a tick on the clicks the video shows
+        for (const cut of video.cuts.filter((c) => !c.jump)) fx.reverseCymbal(audio, cut.t, { length: 1.2, volume: 0.35 });
+        for (const t of video.clicks) fx.tick(audio, t, { volume: 0.25 });
+
+        return { bpm, key: `${params.key} major`, sections: parts.map((part) => ({ start: part.start, end: part.end, name: part.name, energy: part.energy })) };
+      });
+    </script>
+  </body>
+</html>

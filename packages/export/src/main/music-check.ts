@@ -9,6 +9,7 @@ import { AUDIO_SAMPLE_RATE } from '../audio';
 import { ExportError } from '../errors';
 import { ffmpegPath } from './ffmpeg';
 import { soundtrackReport, type SoundtrackReport } from './export';
+import { motionSoundCues } from './motion-sounds';
 import { motionTake, loadSources } from './sources';
 import { duckEnvelope, planSoundtrack, renderSoundtrack, writeSoundTrack } from './soundtrack';
 
@@ -168,11 +169,13 @@ export async function checkMusic(options: MusicCheckOptions): Promise<MusicCheck
   let project = sources.project;
   if (options.src) project = { ...project, music: { volume: 0.8, duck: 12, network: false, params: {}, ...project.music, src: options.src, enabled: true } };
   const inputs = sources.motionTake ?? (await motionTake(projectDir, project));
-  const plan = await planSoundtrack(projectDir, project, inputs);
+  const asked = await motionSoundCues(project, sources.motion, inputs);
+  const plan = await planSoundtrack(projectDir, project, inputs, asked.cues);
   if (!plan) {
     const why = !project.look.audio.enabled ? 'the audio is off (look.audio.enabled)' : 'the project has no music and no sounds: add some with "cuttle music new" or "cuttle sound add"';
     throw new ExportError('invalid-project', why);
   }
+  plan.skipped.push(...asked.errors);
   const stems = await renderSoundtrack(projectDir, plan);
   const report = soundtrackReport(projectDir, plan, stems);
   const seconds = plan.video.duration;

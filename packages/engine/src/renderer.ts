@@ -4,7 +4,7 @@ import type { EngineAssets } from './assets';
 import { CAPTION_LOOKS, drawCaption } from './captions';
 import { createRenderTarget, deleteRenderTarget, type RenderTarget } from './gl/target';
 import { createTexture, sourceSize, uploadPixels, uploadTexture } from './gl/texture';
-import { placeBadge, placeOverlay, stillCrop, unitFor, uvRect, webcamRect, type Size, type WindowLayout } from './layout';
+import { placeBadge, placeOverlay, stillCrop, unitFor, uvRect, watermarkRect, webcamRect, type Size, type WindowLayout } from './layout';
 import { BackgroundPass } from './passes/background';
 import { ContentPass } from './passes/content';
 import { CursorPass } from './passes/cursor';
@@ -13,7 +13,7 @@ import { SpritePass } from './passes/sprite';
 import { WebcamPass } from './passes/webcam';
 import { WindowPass } from './passes/window';
 import type { FrameChrome } from './presets/frames';
-import { BADGE_STYLE, CARD_SUBTITLE_STYLE, CARD_TITLE_STYLE, TEXT_LABELS } from './presets/labels';
+import { BADGE_STYLE, CARD_SUBTITLE_STYLE, CARD_TITLE_STYLE, TEXT_LABELS, watermarkStyle } from './presets/labels';
 import { SpriteCache } from './sprites';
 import { frameLayout } from './view';
 
@@ -85,6 +85,8 @@ export interface RendererOptions {
   screenSize: Size;
   /** Required when `look.background.preset` is `image`. */
   backgroundImage?: ImageBitmap;
+  /** The watermark's image (its own, else the brand's logo); without it a watermark shows its text. */
+  watermarkImage?: ImageBitmap;
 }
 
 function hasPixels(source: TexImageSource): boolean {
@@ -165,6 +167,14 @@ export function createRenderer(canvas: HTMLCanvasElement | OffscreenCanvas, proj
   const motionTexture = texture(false);
   const fullFrame: Rect = [0, 0, output.width, output.height];
   let uploadedStill: ImageBitmap | undefined;
+  // the watermark: an image uploaded once, else its text (its own, else the brand's name)
+  const watermark = look.watermark.enabled ? look.watermark : undefined;
+  const watermarkText = watermark && !options.watermarkImage ? (watermark.text ?? project.theme.name ?? '').trim() : '';
+  let watermarkTexture: WebGLTexture | undefined;
+  if (watermark && options.watermarkImage && options.watermarkImage.width > 0) {
+    watermarkTexture = texture(true);
+    uploadTexture(gl, watermarkTexture, options.watermarkImage, true);
+  }
   let layerTarget: RenderTarget | undefined;
   let disposed = false;
   let drawn: DrawnText[] = [];
@@ -199,6 +209,8 @@ export function createRenderer(canvas: HTMLCanvasElement | OffscreenCanvas, proj
     content.draw(screenTexture, uvRect(zoom, screenSize), layout);
     masks.draw(layer.masks, screenTexture, screenSize, zoom, layout);
     if (layer.cursor) cursor.draw(layer.cursor, look.cursor, screenSize, zoom, layout);
+    // a device's camera over its screen
+    if (chrome) windowPass.drawOver(layout, chrome);
     // An empty webcam frame counts as missing: no bubble, as when the webcam track is shorter.
     const camera = look.webcam.enabled ? sources.webcams.get(layer.index) : undefined;
     if (camera && hasPixels(camera)) {
@@ -248,6 +260,7 @@ export function createRenderer(canvas: HTMLCanvasElement | OffscreenCanvas, proj
     const size = { width: image.width, height: image.height };
     const crop = stillCrop(size, { width: layout.content[2], height: layout.content[3] }, scene.motion, layer.progress);
     content.draw(stillTexture, uvRect(crop, size), layout, STILL_MATTE);
+    if (chrome) windowPass.drawOver(layout, chrome);
   }
 
   function drawCard(scene: CardScene): void {
@@ -299,6 +312,21 @@ export function createRenderer(canvas: HTMLCanvasElement | OffscreenCanvas, proj
     gl.clearColor(0, 0, 0, 1);
   }
 
+/** The watermark over everything, last, in its corner. */
+  function drawWatermark(): void {
+    if (!watermark) return;
+    const image = options.watermarkImage;
+    if (watermarkTexture && image) {
+      spritePass.draw(watermarkTexture, watermarkRect(output, watermark, image.width / image.height, webcamArea), watermark.opacity);
+      return;
+    }
+    if (watermarkText === '') return;
+    const height = Math.round(watermark.size * Math.min(output.width, output.height));
+    const sprite = sprites.label(watermarkText, watermarkStyle(height, unit), unit, output.width * 0.5);
+    const [x, y] = watermarkRect(output, watermark, sprite.box.width / sprite.box.height, webcamArea);
+    spritePass.drawSprite(sprite, x, y, watermark.opacity);
+  }
+
   /** One layer drawn whole into the offscreen target and read back, top row first. */
   function readLayer(layer: SceneFrame, sources: FrameSources, t: number): MotionPixels {
     layerTarget ??= createRenderTarget(gl, output);
@@ -326,6 +354,7 @@ export function createRenderer(canvas: HTMLCanvasElement | OffscreenCanvas, proj
         background.draw(state.t);
         drawMotion(between, `transition into scene ${state.transition!.sceneIndex}`);
         if (state.caption) drawCaptionOver(state.caption);
+        drawWatermark();
         sprites.endFrame();
         return;
       }
@@ -341,6 +370,7 @@ export function createRenderer(canvas: HTMLCanvasElement | OffscreenCanvas, proj
         spritePass.draw(layerTarget.texture, [0, 0, output.width, output.height], layer.opacity, true);
       }
       if (state.caption) drawCaptionOver(state.caption);
+      drawWatermark();
       sprites.endFrame();
     },
     layerPixels(state, sources) {

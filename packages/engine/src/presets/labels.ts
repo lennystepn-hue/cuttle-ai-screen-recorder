@@ -90,6 +90,11 @@ export const CARD_SUBTITLE_STYLE: LabelStyle = {
 };
 
 /** Window title; its colour comes from the frame style. */
+/** A text watermark `height` px high (white, a soft shadow so it reads on any picture), at `unit`. */
+export function watermarkStyle(height: number, unit: number): LabelStyle {
+  return { size: Math.max(6, (height / unit) * 0.72), weight: 600, color: '#FFFFFF', padX: 0, padY: 0, radius: 0, shadow: { blur: 6, y: 1, color: 'rgba(0, 0, 0, 0.45)' }, align: 'left' };
+}
+
 export function windowTitleStyle(color: string): LabelStyle {
   return { size: 14, weight: 400, color, padX: 0, padY: 0, radius: 0, align: 'center' };
 }

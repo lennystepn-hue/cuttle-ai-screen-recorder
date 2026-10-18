@@ -9,6 +9,7 @@ import {
   stillCrop,
   unitFor,
   uvRect,
+  watermarkRect,
   webcamRect,
   windowLayout,
 } from '../src/layout';
@@ -58,6 +59,51 @@ describe('windowLayout', () => {
 
   it('caps the radius at half the window size', () => {
     expect(windowLayout({ width: 200, height: 200 }, 1, { titleBar: 0, radius: 900 }).radius).toBeLessThanOrEqual(100);
+  });
+});
+
+describe('windowLayout for a device', () => {
+  const phone = { titleBar: 0, radius: 14, device: { bezel: 0.045, radius: 0.155 } };
+
+  it('fits a phone screen and its bezel, a share of its width, into the padded output', () => {
+    const layout = windowLayout(HD, 9 / 19.5, phone);
+    const [x, y, w, h] = layout.content;
+    // height-limited: 1080 - 2*64 = 952 rows for the screen and two bezels of 4.5 % of its width
+    expect(h + 2 * Math.round(0.045 * w)).toBeLessThanOrEqual(952);
+    expect(h).toBeGreaterThan(900);
+    expect(w / h).toBeCloseTo(9 / 19.5, 2);
+    const band = Math.round(0.045 * w);
+    expect(layout.window).toEqual([x - band, y - band, w + 2 * band, h + 2 * band]);
+    expect(layout.titleBar).toBe(0);
+    expect(layout.radius).toBeCloseTo(0.155 * layout.window[2], 6);
+    // the screen is clipped inside the bezel, its corners the body's less the bezel
+    expect(layout.clip).toEqual(layout.content);
+    expect(layout.clipRadius).toBeCloseTo(layout.radius - band, 6);
+    // centred
+    expect(Math.abs(x + w / 2 - HD.width / 2)).toBeLessThanOrEqual(1);
+  });
+
+  it('clips a window to the window, title bar and all, as before', () => {
+    const layout = windowLayout(HD, 16 / 9, { titleBar: 36, radius: 14 });
+    expect(layout.clip).toEqual(layout.window);
+    expect(layout.clipRadius).toBe(layout.radius);
+  });
+});
+
+describe('watermarkRect', () => {
+  it('sits in its corner, a margin from the edges, as high as its share of the short side', () => {
+    expect(watermarkRect(HD, { corner: 'bottom-right', size: 0.1 }, 2)).toEqual([1920 - 40 - 216, 1080 - 40 - 108, 216, 108]);
+    expect(watermarkRect(HD, { corner: 'top-left', size: 0.05 }, 1)).toEqual([40, 40, 54, 54]);
+  });
+
+  it('moves past the webcam bubble in the same corner: above it at the bottom, below it at the top', () => {
+    const bubble = webcamRect(HD, { corner: 'bottom-right', size: 0.18 });
+    const [, y, , h] = watermarkRect(HD, { corner: 'bottom-right', size: 0.06 }, 3, bubble);
+    expect(y + h).toBeLessThanOrEqual(bubble[1]);
+    const top = webcamRect(HD, { corner: 'top-left', size: 0.18 });
+    expect(watermarkRect(HD, { corner: 'top-left', size: 0.06 }, 3, top)[1]).toBeGreaterThanOrEqual(top[1] + top[3]);
+    // in another corner it stays
+    expect(watermarkRect(HD, { corner: 'top-right', size: 0.06 }, 3, bubble)[1]).toBe(40);
   });
 });
 

@@ -1,4 +1,4 @@
-import { BACKGROUND_PRESETS, CURSOR_SHAPES, CURSOR_STYLES, FRAME_STYLES, TEXT_STYLES } from '@cuttle/project';
+import { BACKGROUND_PRESETS, CURSOR_SHAPES, CURSOR_STYLES, DEVICE_FRAMES, FRAME_STYLES, TEXT_STYLES } from '@cuttle/project';
 import { describe, expect, it } from 'vitest';
 import { BACKGROUNDS } from '../src/presets/backgrounds';
 import { CURSOR_ART, CURSOR_GRID, cursorImageFor } from '../src/presets/cursors';
@@ -10,8 +10,12 @@ describe('preset registries', () => {
     for (const preset of BACKGROUND_PRESETS) expect(BACKGROUNDS[preset]).toContain('void main()');
   });
 
-  it('have chrome for every frame style; only "none" has no title bar', () => {
-    for (const style of FRAME_STYLES) expect(FRAME_CHROME[style].titleBar > 0).toBe(style !== 'none');
+  it('have chrome for every frame style; only "none" and the devices have no title bar, and only the devices a bezel and a camera', () => {
+    for (const style of FRAME_STYLES) {
+      const device = (DEVICE_FRAMES as readonly string[]).includes(style);
+      expect(FRAME_CHROME[style].titleBar > 0, style).toBe(style !== 'none' && !device);
+      expect(FRAME_CHROME[style].device !== undefined, style).toBe(device);
+    }
   });
 
   it('have a label style for every text style', () => {

@@ -23,20 +23,42 @@ export interface WindowLayout {
   radius: number;
   /** Title bar height in output px; 0 without one. */
   titleBar: number;
+  /**
+   * What the content, the masks and the cursor are clipped to, in output px, with its corner radius:
+   * the window (its rounded corners), or a device's screen inside its bezel.
+   */
+  clip: Rect;
+  clipRadius: number;
 }
 
 /**
  * Centres a window whose content has the aspect ratio `contentAspect` (width / height) in the
  * output, `WINDOW_PADDING` units from the edges. `chrome` sizes are in units. Without chrome the
- * content fills the output (letterboxed) with square corners. Results are whole pixels.
+ * content fills the output (letterboxed) with square corners. A `device` has no title bar but a
+ * bezel all round, its bezel and corner radius shares of the screen's short side (a phone held
+ * either way). Results are whole pixels.
  */
 export function windowLayout(
   output: Size,
   contentAspect: number,
-  chrome: { titleBar: number; radius: number } | null,
+  chrome: { titleBar: number; radius: number; device?: { bezel: number; radius: number } } | null,
 ): WindowLayout {
   const unit = unitFor(output);
   const padding = chrome ? WINDOW_PADDING * unit : 0;
+  if (chrome?.device) {
+    const { bezel, radius } = chrome.device;
+    // the screen as large as the output allows with the bezel (a share of its short side) around it
+    const short = Math.min(contentAspect, 1);
+    const exact = Math.min((output.width - 2 * padding) / (contentAspect + 2 * bezel * short), (output.height - 2 * padding) / (1 + 2 * bezel * short));
+    const height = Math.round(exact);
+    const width = Math.round(exact * contentAspect);
+    const band = Math.round(bezel * Math.min(width, height));
+    const x = Math.round((output.width - width) / 2);
+    const y = Math.round((output.height - height) / 2);
+    const window: Rect = [x - band, y - band, width + 2 * band, height + 2 * band];
+    const outer = Math.min(radius * Math.min(window[2], window[3]), window[2] / 2, window[3] / 2);
+    return { window, content: [x, y, width, height], radius: outer, titleBar: 0, clip: [x, y, width, height], clipRadius: Math.max(0, outer - band) };
+  }
   const titleBar = chrome ? Math.round(chrome.titleBar * unit) : 0;
   const availableWidth = output.width - 2 * padding;
   const availableHeight = output.height - 2 * padding - titleBar;
@@ -51,7 +73,8 @@ export function windowLayout(
   const x = Math.round((output.width - width) / 2);
   const y = Math.round((output.height - height - titleBar) / 2);
   const radius = chrome ? Math.min(chrome.radius * unit, width / 2, (height + titleBar) / 2) : 0;
-  return { window: [x, y, width, height + titleBar], content: [x, y + titleBar, width, height], radius, titleBar };
+  const window: Rect = [x, y, width, height + titleBar];
+  return { window, content: [x, y + titleBar, width, height], radius, titleBar, clip: window, clipRadius: radius };
 }
 
 /** Maps a point in source px to output px, for a screen cropped to `zoom` and shown in `content`. */
@@ -117,6 +140,26 @@ export function webcamRect(output: Size, webcam: Pick<Look['webcam'], 'corner' |
   const x = webcam.corner.endsWith('left') ? margin : output.width - margin - diameter;
   const y = webcam.corner.startsWith('top') ? margin : output.height - margin - diameter;
   return [x, y, diameter, diameter];
+}
+
+/** Space between the watermark and the output's edges, in units. */
+export const WATERMARK_MARGIN = 40;
+
+/**
+ * The watermark's rect in output px: `size` is its height as a share of the output's short side,
+ * `aspect` its own (width / height); in its `corner`, a margin from the edges, and past the
+ * webcam bubble (`avoid`) when they share a corner (above it at the bottom, below it at the top).
+ */
+export function watermarkRect(output: Size, watermark: Pick<Look['watermark'], 'corner' | 'size'>, aspect: number, avoid?: Rect): Rect {
+  const unit = unitFor(output);
+  const margin = Math.round(WATERMARK_MARGIN * unit);
+  const height = Math.round(watermark.size * Math.min(output.width, output.height));
+  const width = Math.min(Math.round(height * aspect), output.width - 2 * margin);
+  const x = watermark.corner.endsWith('left') ? margin : output.width - margin - width;
+  let y = watermark.corner.startsWith('top') ? margin : output.height - margin - height;
+  const rect: Rect = [x, y, width, height];
+  if (avoid && overlaps(rect, avoid)) y = watermark.corner.startsWith('top') ? avoid[1] + avoid[3] + Math.round(margin / 2) : avoid[1] - height - Math.round(margin / 2);
+  return [x, y, width, height];
 }
 
 /** Space between a text overlay and the output edge, in units. */

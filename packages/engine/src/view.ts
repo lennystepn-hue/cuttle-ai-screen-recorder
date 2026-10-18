@@ -5,7 +5,7 @@ import { FRAME_CHROME, type FrameChrome } from './presets/frames';
 /** The window for a frame style (none: the content fills the output); `aspect` is the content's. */
 export function frameLayout(output: Size, look: Pick<Look, 'frame'>, style: FrameStyle | null, aspect: number): { chrome: FrameChrome | null; layout: WindowLayout } {
   const chrome = style ? FRAME_CHROME[style] : null;
-  return { chrome, layout: windowLayout(output, aspect, chrome ? { titleBar: chrome.titleBar, radius: look.frame.radius } : null) };
+  return { chrome, layout: windowLayout(output, aspect, chrome ? { titleBar: chrome.titleBar, radius: look.frame.radius, ...(chrome.device && { device: chrome.device }) } : null) };
 }
 
 /** Where a clip shows the screen in a frame: the part of the screen recording and the rect of the output it fills. */

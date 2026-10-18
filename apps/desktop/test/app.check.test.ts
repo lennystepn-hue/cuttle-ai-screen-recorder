@@ -2342,6 +2342,40 @@ describe.runIf(enabled)('the Cuttle app', () => {
     await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find((window) => window.getTitle() === 'looks · Cuttle')?.close());
   }, 120_000);
 
+  it("exports the script's steps as the video's chapters, and lists them to copy for a YouTube description", async () => {
+    const dir = join(root, 'chapters');
+    makeFixture(dir);
+    // the take reached the steps at 0, 2 and 9 s: the video shows 9 s at 4.125 s (after 3 s at 1× and 5 s at 8×)
+    writeFileSync(join(dir, 'takes', '1', 'markers.json'), JSON.stringify({ version: 1, markers: [{ t: 0, kind: 'step', label: 'step1' }, { t: 2, kind: 'step', label: 'step2' }, { t: 9, kind: 'step', label: 'step3' }] }));
+    const path = join(dir, 'cuttle.json');
+    writeFileSync(path, JSON.stringify({ ...JSON.parse(readFileSync(path, 'utf8')), script: [{ id: 'step1', title: 'Open the settings' }, { id: 'step2', title: 'Turn on dark mode' }, { id: 'step3', title: 'Export the video' }] }));
+    const page = await openEditor(dir);
+    await page.keyboard.press('Control+E');
+    await page.waitForSelector('[data-testid=export-chapters]');
+    expect(await page.locator('[data-testid=export-chapters] span').textContent()).toBe('3 from the script, in the video file');
+    await page.waitForSelector('[data-testid=export-start]:not([disabled])');
+    await click(page, '[data-testid=export-start]');
+    await exported(page);
+    expect(await page.locator('[data-testid=export-file] small').textContent()).toContain('· 3 chapters');
+    const list = '0:00 Open the settings\n0:02 Turn on dark mode\n0:04 Export the video';
+    expect(await page.locator('[data-testid=export-chapter-list] pre').textContent()).toBe(list);
+    // a video this short: YouTube would not show them, and says why
+    expect(await page.locator('[data-testid=export-chapter-list] .note').textContent()).toMatch(/^YouTube needs each chapter to last 10 s or more/);
+    await click(page, '[data-testid=export-copy-chapters]');
+    await expect.poll(() => page.locator('[data-testid=export-copy-chapters]').textContent()).toBe('Copied');
+    expect(await app.evaluate(() => (globalThis as { __copied?: string }).__copied)).toBe(list);
+    await shotOf('48-export-chapters', '/editor.html', 'chapters · Cuttle');
+    // the video file has them, where the take reached each step
+    const probe = spawnSync('ffprobe', ['-v', 'error', '-show_chapters', '-of', 'json', join(dir, 'out', 'export.mp4')], { encoding: 'utf8' });
+    const chapters = (JSON.parse(probe.stdout) as { chapters: { start_time: string; tags: { title: string } }[] }).chapters;
+    expect(chapters.map((chapter) => [Number(chapter.start_time), chapter.tags.title])).toEqual([
+      [0, 'Open the settings'],
+      [2, 'Turn on dark mode'],
+      [4.125, 'Export the video'],
+    ]);
+    await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find((window) => window.getTitle() === 'chapters · Cuttle')?.close());
+  }, 180_000);
+
   it('had no unhandled rejection in the main process, and no error in the editor', async () => {
     expect(await app.evaluate(() => (globalThis as unknown as { __rejections: string[] }).__rejections)).toEqual([]);
     expect(pageErrors).toEqual([]);

@@ -6,6 +6,7 @@ export const WINDOW_CHANNELS = {
     requests: [
       'project:info',
       'project:reveal',
+      'export:copy',
       'media:state',
       'media:retry',
       'export:targets',

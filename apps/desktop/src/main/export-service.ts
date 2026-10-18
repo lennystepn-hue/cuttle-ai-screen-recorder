@@ -57,7 +57,7 @@ export class ExportRun {
             onProgress({ format, position, formats: formats.length, done, total, elapsed: (now - started) / 1000 });
           },
         });
-        files.push({ format, out: result.out, seconds: result.seconds, bytes: (await stat(result.out)).size, ...(result.subtitles && { subtitles: result.subtitles }) });
+        files.push({ format, out: result.out, seconds: result.seconds, bytes: (await stat(result.out)).size, ...(result.subtitles && { subtitles: result.subtitles }), ...(result.chapters && { chapters: result.chapters }) });
       } catch (error) {
         if (error instanceof ExportError && error.code === 'cancelled') return { state: 'cancelled', files };
         const code = error instanceof ExportError ? error.code : 'internal';

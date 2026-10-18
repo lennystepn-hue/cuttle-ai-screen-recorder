@@ -1137,6 +1137,35 @@ button.chip-status:hover {
   display: block;
   color: var(--muted);
 }
+/* the chapters an export wrote: the lines for a YouTube description, to copy */
+.chapter-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px 10px;
+  border-radius: 9px;
+  background: var(--raised);
+  font-size: var(--size-s);
+}
+.chapter-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.chapter-head b {
+  flex: 1;
+  min-width: 0;
+  font-weight: 500;
+}
+.chapter-list pre {
+  margin: 0;
+  max-height: 150px;
+  overflow: auto;
+  font: var(--size-s) / 1.6 var(--mono);
+  color: var(--text);
+  white-space: pre-wrap;
+  user-select: text;
+}
 .sheet .actions {
   display: flex;
   justify-content: flex-end;

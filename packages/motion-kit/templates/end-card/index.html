@@ -5,14 +5,16 @@
     <title>End card</title>
     <!-- The end card: a logo (or a monogram tile) springs in with a ring, the headline rises letter by
          letter, the URL types itself into a glass pill that a light sweeps across, a call to action
-         settles under it; particles drift up behind. -->
+         settles under it; particles drift up behind. Its sounds: a hit as the mark lands, keys while
+         the URL types, a ding once it is there (the "sounds" param). -->
     <script type="application/json" id="cuttle-params">
       [
         { "name": "headline", "label": "Headline", "type": "text", "default": "Try it yourself" },
         { "name": "url", "label": "URL", "type": "text", "default": "example.com" },
         { "name": "cta", "label": "Call to action", "type": "text", "default": "Link in the description" },
         { "name": "logo", "label": "Logo (an image in the project)", "type": "image", "default": null },
-        { "name": "monogram", "label": "Monogram without a logo", "type": "text", "default": "C" }
+        { "name": "monogram", "label": "Monogram without a logo", "type": "text", "default": "C" },
+        { "name": "sounds", "label": "Sounds", "type": "bool", "default": true }
       ]
     </script>
     <style>
@@ -192,6 +194,11 @@
       const cta = document.getElementById('cta');
       const typeFrom = 1.05;
       const typedAt = typedUntil(params.url || '', { start: typeFrom, cps: 22 });
+      if (params.sounds !== false) {
+        cuttle.sound('impact', { at: 0.05, volume: 0.6 });
+        for (let key = typeFrom; key < typedAt - 0.1; key += 0.6) cuttle.sound('type-burst', { at: key, volume: 0.7 });
+        if (params.url) cuttle.sound('ding', { at: typedAt + 0.15, volume: 0.45 });
+      }
       cuttle.onFrame((t) => {
         particles(t);
         // the mark springs in, a ring leaves it

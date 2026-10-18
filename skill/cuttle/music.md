@@ -126,6 +126,10 @@ without touching the music: `cuttle -C "<project>" --json sound add whoosh --at 
 second: it plays wherever the video shows that moment) or `--scene s5 --at 0.2` (seconds into a
 scene), `--volume 0.6`. A file of the project works too (`sounds/ding.wav`). `cuttle --json sound list`
 lists the built-in sounds. `look.audio.effects` and `effectsVolume` switch and scale every sound.
+A motion page asks for its own with `cuttle.sound('whoosh', { at: 0.3 })` ([motion.md](motion.md)),
+so its sounds move with it; the templates do (their `sounds` param). `music check` and the export
+play them with the music and the project's sounds, so a whoosh in the title and a hit in the music
+on the same cut add up: leave one of them out.
 
 ## Music that feels composed
 

@@ -4,14 +4,16 @@
     <meta charset="utf-8" />
     <title>Title</title>
     <!-- A kinetic title: an eyebrow line, the title's words rising out of a blur, an accent line
-         that draws under them, a subtitle; everything leaves upward at the end. -->
+         that draws under them, a subtitle; everything leaves upward at the end. A whoosh as the
+         words come in (the "sounds" param). -->
     <script type="application/json" id="cuttle-params">
       [
         { "name": "title", "label": "Title", "type": "text", "default": "Built with Claude Code" },
         { "name": "subtitle", "label": "Subtitle", "type": "text", "default": "" },
         { "name": "eyebrow", "label": "Small line above", "type": "text", "default": "" },
         { "name": "align", "label": "Align", "type": "select", "default": "center", "options": ["center", "left"] },
-        { "name": "background", "label": "Own background", "type": "bool", "default": true }
+        { "name": "background", "label": "Own background", "type": "bool", "default": true },
+        { "name": "sounds", "label": "Sounds", "type": "bool", "default": true }
       ]
     </script>
     <style>
@@ -169,6 +171,9 @@
         g.fillStyle = pattern;
         g.fillRect(0, 0, w, h);
       }
+
+      // its sound: a whoosh as the words rise in
+      if (params.sounds !== false) cuttle.sound('whoosh', { at: 0.45, volume: 1 });
 
       const line = document.getElementById('line');
       const bar = eyebrow.isConnected ? eyebrow.querySelector('i') : null;

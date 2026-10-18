@@ -10,7 +10,7 @@ import { ExportError } from '../errors';
 import { motionSeed } from '../motion/init';
 import { declaredParams } from '../motion/params';
 import { soundCues, videoData, type VideoInputs } from '../music/video';
-import type { VideoData } from '../music/runtime';
+import type { SoundCue, VideoData } from '../music/runtime';
 import { duckEnvelope } from '../music/duck';
 
 export { DUCK_ATTACK, DUCK_RELEASE, duckEnvelope } from '../music/duck';
@@ -43,14 +43,21 @@ export interface SoundtrackPlan {
 
 /**
  * What the project's soundtrack holds: none when the audio is off, or when it has no music that plays
- * and no sounds (the typing clicks alone are mixed without a page).
+ * and no sounds (the typing clicks alone are mixed without a page). `pageSounds` are the sounds its
+ * motion pages asked for, in output seconds (`motionSoundCues`); they play with the project's own.
  */
-export async function planSoundtrack(projectDir: string, project: CuttleProject, inputs: VideoInputs): Promise<SoundtrackPlan | undefined> {
+export async function planSoundtrack(
+  projectDir: string,
+  project: CuttleProject,
+  inputs: VideoInputs,
+  pageSounds: readonly SoundCue[] = [],
+): Promise<SoundtrackPlan | undefined> {
   const { audio } = project.look;
   if (!audio.enabled) return undefined;
   const music = project.music?.enabled ? project.music : undefined;
   const sounds = audio.effects ? project.sounds.filter((sound) => sound.enabled) : [];
-  if (!music && sounds.length === 0) return undefined;
+  const fromPages = audio.effects ? pageSounds : [];
+  if (!music && sounds.length === 0 && fromPages.length === 0) return undefined;
   const root = resolve(projectDir);
   let params: Record<string, unknown> = {};
   let page: string | undefined;
@@ -65,7 +72,8 @@ export async function planSoundtrack(projectDir: string, project: CuttleProject,
   }
   const skipped: string[] = [];
   const cues: SoundtrackPlan['sounds'] = [];
-  for (const cue of soundCues(project, sounds)) {
+  const asked = [...soundCues(project, sounds), ...fromPages].sort((a, b) => a.at - b.at);
+  for (const cue of asked) {
     if (!isSoundFile(cue.sound)) {
       cues.push(cue);
       continue;
@@ -73,7 +81,7 @@ export async function planSoundtrack(projectDir: string, project: CuttleProject,
     const path = resolve(root, cue.sound);
     const exists = inside(root, path) && (await stat(path).then((info) => info.isFile(), () => false));
     if (!exists) skipped.push(`${cue.sound}: not a file in the project`);
-    else cues.push({ ...cue, url: pageUrl(root, path) });
+    else cues.push({ at: cue.at, sound: cue.sound, volume: cue.volume, url: pageUrl(root, path) });
   }
   return {
     video: videoData(project, inputs),

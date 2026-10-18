@@ -1724,6 +1724,12 @@ describe.runIf(enabled)('the Cuttle app', () => {
     await expect.poll(async () => (await now()).t).toBe(1);
     // its block on the timeline shows frames of its page
     await page.waitForSelector('.scene.motion .thumbs i', { timeout: 30_000 });
+    // the whoosh its page asks for, on the Sound lane where it plays (0.45 s into it), and rendered
+    type PageSounds = { sound: { status: { state: string; pageSounds?: { sound: string; at: number; item: string }[] } } };
+    const sound = async () => ((await now()) as unknown as PageSounds).sound.status;
+    await expect.poll(async () => (await sound()).pageSounds, { timeout: 60_000 }).toEqual([{ sound: 'whoosh', at: 1.45, item: 'Title' }]);
+    await page.waitForSelector('[data-testid=page-sound]');
+    await expect.poll(async () => (await sound()).state, { timeout: 90_000 }).toBe('ready');
 
     // the editor draws the scenes and the overlay as the export does (`cuttle preview`), pixel for pixel
     await flushPage();

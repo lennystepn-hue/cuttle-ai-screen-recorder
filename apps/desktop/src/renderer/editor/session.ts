@@ -180,8 +180,12 @@ function stillThere(selection: Selection, project: CuttleProject): boolean {
   return (project[LISTS[selection.kind]] as { id?: string }[]).some((item) => item.id === selection.id);
 }
 
-/** Whether a project has music or sounds (to render, or to stop rendering once it has none). */
-const hasSound = (project: CuttleProject) => project.music !== undefined || project.sounds.length > 0;
+/**
+ * Whether a project may have music or sounds (to render, or to stop rendering once it has none): its
+ * own, or ones its motion pages ask for.
+ */
+const hasSound = (project: CuttleProject) =>
+  project.music !== undefined || project.sounds.length > 0 || project.overlays.length > 0 || project.scenes.some((scene) => scene.type === 'motion');
 
 /** The document's project goes to the main process at each edit: it renders its music and sounds a moment later. */
 function followSound(): void {

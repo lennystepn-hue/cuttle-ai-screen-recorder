@@ -786,6 +786,17 @@ button.chip-status:hover {
   color: var(--sound);
   padding: 0 4px;
 }
+/* a sound a motion page asks for: a diamond where it plays (the page moves it, not a drag) */
+.page-sound {
+  position: absolute;
+  top: 50%;
+  width: 7px;
+  height: 7px;
+  margin: -4px 0 0 -4px;
+  transform: rotate(45deg);
+  border: 1.5px solid var(--sound);
+  background: rgba(181, 224, 90, 0.25);
+}
 /* the music: one block over the video, its waveform and its parts */
 .item.music {
   height: auto;

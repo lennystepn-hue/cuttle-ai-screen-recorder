@@ -52,13 +52,17 @@ function subtitleFormats(formats: readonly string[]): SubtitleFormat[] {
   return formats as SubtitleFormat[];
 }
 
-/** The project with the checked page as its only scene, or the checked overlay as its only one (its look and output stay). */
+/**
+ * The project with the checked page as its only scene, or the checked overlay as its only one (its look
+ * and output stay); a transition page in the project as it is, between the two scenes it joins.
+ */
 function motionCheckProject(project: CuttleProject, check: MotionCheck): CuttleProject {
+  if (check.transition !== undefined) return project;
   if (check.overlay !== undefined) {
     const overlay = project.overlays[check.overlay];
     return { ...project, overlays: overlay ? [overlay] : [] };
   }
-  const { overlay: _overlay, ...page } = check;
+  const { overlay: _overlay, transition: _transition, ...page } = check;
   return { ...project, scenes: [{ type: 'motion', label: 'check', ...page }], overlays: [], cuts: [] };
 }
 

@@ -327,6 +327,34 @@ describe.runIf(enabled)('cuttle in Electron', () => {
     }
   }, 180_000);
 
+  it('goes into a scene through its transition page: the fold turns the card over onto the clip', () => {
+    const dir = join(mkdtempSync(join(tmpdir(), 'cuttle-fold-')), 'fold');
+    cpSync(project, dir, { recursive: true });
+    try {
+      const file = join(dir, 'cuttle.json');
+      const raw = JSON.parse(readFileSync(file, 'utf8')) as Record<string, unknown>;
+      writeFileSync(file, JSON.stringify({ ...raw, scenes: [{ type: 'card', id: 's1', title: 'Before', duration: 2 }, { type: 'clip', id: 's2', from: 0, to: 2.5 }], overlays: [] }));
+      expect(cuttle('-C', dir, 'motion', 'new', 'fold', '--into', 's1').code).toBe(1);
+      const added = cuttle('-C', dir, 'motion', 'new', 'fold', '--into', 's2');
+      expect(added.json).toMatchObject({ kind: 'transition', into: 1, item: { src: 'motion/fold/index.html', duration: 0.9 } });
+      // checked in the video, between the card and the clip: 1.55 to 2.45 s
+      const checked = cuttle('-C', dir, 'motion', 'check', 'motion/fold/index.html');
+      expect(checked.json).toMatchObject({ kind: 'transition', duration: 0.9, errors: [] });
+      const { json } = cuttle('-C', dir, 'render');
+      expect(json.motion).toEqual([{ item: 'scenes[1].transition', src: 'motion/fold/index.html', errors: [], console: [] }]);
+      // in the middle of the turn the picture is the page's, not a crossfade of the two scenes
+      const still = (name: string) => PNG.sync.read(readFileSync((cuttle('-C', dir, 'preview', '--at', '1.98', '-o', join(dir, name)).json.stills as { file: string }[])[0]!.file));
+      const folded = still('folded');
+      writeFileSync(file, JSON.stringify({ ...JSON.parse(readFileSync(file, 'utf8')), look: { transition: { enabled: true, duration: 0.9 } }, scenes: [{ type: 'card', id: 's1', title: 'Before', duration: 2 }, { type: 'clip', id: 's2', from: 0, to: 2.5 }] }));
+      const faded = still('faded');
+      let differ = 0;
+      for (let i = 0; i < folded.data.length; i += 4 * 97) if (Math.abs(folded.data[i]! - faded.data[i]!) + Math.abs(folded.data[i + 1]! - faded.data[i + 1]!) > 60) differ++;
+      expect(differ / (folded.data.length / (4 * 97))).toBeGreaterThan(0.2);
+    } finally {
+      rmSync(dirname(dir), { recursive: true, force: true });
+    }
+  }, 180_000);
+
   it('blurs fast motion: the moments while the shutter is open, averaged', () => {
     const dir = join(mkdtempSync(join(tmpdir(), 'cuttle-blur-')), 'blur');
     try {

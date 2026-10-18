@@ -207,12 +207,13 @@ export async function runCli(argv: readonly string[], streams?: Streams): Promis
   const motion = program.command('motion').description('motion pages: scenes and overlays drawn by code (HTML, CSS, canvas, WebGL)');
   motion
     .command('new <template>')
-    .description('copy a template into motion/<name>/ and add it: a scene at the end, or an overlay over the clips (motion templates lists them)')
+    .description('copy a template into motion/<name>/ and add it: a scene at the end, an overlay over the clips, or the transition into a scene (motion templates lists them)')
     .option('--name <name>', 'the folder in motion/ (default: the template\'s name)')
     .option('--at <seconds>', 'an overlay\'s start, in source seconds (default: the first clip\'s start)', seconds)
     .option('--duration <seconds>', 'how long it lasts (default: the template\'s; a callout or caption overlay: the whole take)', positive)
     .option('--first', 'a scene goes first instead of last (an intro)')
-    .action(action((output, project, template: string, options: { name?: string; at?: number; duration?: number; first?: boolean }) => motionNewCommand(project, template, options, output)));
+    .option('--into <scene>', 'a transition: the scene it leads into, by id or place from 0 (default: the second scene)')
+    .action(action((output, project, template: string, options: { name?: string; at?: number; duration?: number; first?: boolean; into?: string }) => motionNewCommand(project, template, options, output)));
   motion
     .command('templates')
     .description('the templates motion new copies: their kind and what they show')

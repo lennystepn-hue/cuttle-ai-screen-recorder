@@ -14,6 +14,8 @@ export interface MotionCheck {
   network: boolean;
   motionBlur?: { samples: number; shutter: number };
   overlay?: number;
+  /** The scene whose transition page it is: checked in the video, between its two scenes. */
+  transition?: number;
 }
 
 export type ElectronRequest = (

@@ -4,7 +4,7 @@ import { readProjectFile, writeProjectFile } from '@cuttle/core';
 import { MOTION_TEMPLATES, type MotionTemplate } from '@cuttle/motion-kit';
 import { copyTemplate, MissingTemplateError } from '@cuttle/motion-kit/files';
 import { newId, usedIds, type MotionScene } from '@cuttle/project';
-import { occurrences, sceneSpans } from '@cuttle/timeline';
+import { crossfadeHalf, occurrences, sceneSpans } from '@cuttle/timeline';
 import { CliError } from '../errors';
 import { runInElectron } from '../electron-runner';
 import type { MotionCheck } from '../electron/protocol';
@@ -24,8 +24,8 @@ export interface MotionCheckArgs {
 export interface MotionCheckResult extends Omit<PreviewResult, 'motion'> {
   /** The page, relative to the project folder. */
   src: string;
-  /** A scene of its own, or an overlay over the video (checked where the video first shows it). */
-  kind: 'scene' | 'overlay';
+  /** A scene of its own, an overlay over the video (checked where the video first shows it), or a transition (between its two scenes). */
+  kind: 'scene' | 'overlay' | 'transition';
   /** Seconds it lasts; an overlay's stills are at output seconds of the video. */
   duration: number;
   /** The page's uncaught errors and rejections, and its console. */
@@ -67,7 +67,9 @@ export async function motionCheckCommand(projectDir: string, src: string, args: 
   const scene = project.scenes.find((candidate): candidate is MotionScene => candidate.type === 'motion' && same(candidate.src));
   const overlayIndex = scene ? -1 : project.overlays.findIndex((overlay) => same(overlay.src));
   const overlay = project.overlays[overlayIndex];
-  const item = scene ?? overlay;
+  const transitionIndex = scene || overlay ? -1 : project.scenes.findIndex((candidate) => candidate.transition?.enabled && same(candidate.transition.src));
+  const transition = project.scenes[transitionIndex]?.transition;
+  const item = scene ?? overlay ?? transition;
   // an overlay: the output seconds where the video first shows its stretch of the take
   let from = 0;
   let duration = args.duration ?? item?.duration ?? DEFAULT_SECONDS;
@@ -76,6 +78,16 @@ export async function motionCheckCommand(projectDir: string, src: string, args: 
     if (!shown) throw new CliError('invalid-project', `the video does not show overlays[${overlayIndex}] (${page}): no clip covers source ${overlay.at}–${overlay.at + overlay.duration} s`);
     from = shown.start;
     duration = Math.round((shown.end - shown.start) * 1000) / 1000;
+  }
+  // a transition: the seconds around its cut, where it draws the video
+  if (transition) {
+    const spans = sceneSpans(project.scenes, project.cuts);
+    const into = spans.find((span) => span.sceneIndex === transitionIndex);
+    const before = into ? spans[into.index - 1] : undefined;
+    const half = into && before ? crossfadeHalf(before, into, project.look.transition) : 0;
+    if (!into || !before || half === 0) throw new CliError('invalid-project', `the video goes into scenes[${transitionIndex}] without its transition (${page}): it is the first scene, or right after a cut`);
+    from = Math.round((into.start - half) * 1000) / 1000;
+    duration = Math.round(2 * half * 1000) / 1000;
   }
   const last = Math.max(0, duration - 1 / project.output.fps);
   const offsets = args.at && args.at.length > 0 ? args.at : Array.from({ length: CHECK_FRAMES }, (_, i) => Math.round((i * last * 1000) / (CHECK_FRAMES - 1)) / 1000);
@@ -89,8 +101,9 @@ export async function motionCheckCommand(projectDir: string, src: string, args: 
     duration,
     params: item?.params ?? {},
     network: item?.network ?? false,
-    ...(item?.motionBlur && { motionBlur: item.motionBlur }),
+    ...(item && 'motionBlur' in item && item.motionBlur && { motionBlur: item.motionBlur }),
     ...(overlay && { overlay: overlayIndex }),
+    ...(transition && { transition: transitionIndex }),
   };
   output.info(`rendering ${times.length} frame(s) of ${page} into ${outDir} …`);
   const result = await runInElectron<PreviewResult>(
@@ -107,12 +120,14 @@ export async function motionCheckCommand(projectDir: string, src: string, args: 
     },
     signal,
   );
-  const said = result.motion?.[0];
+  // what this page said (a transition is checked in the whole video, among the other pages)
+  const said = result.motion?.find((report) => report.src === page) ?? (transition ? undefined : result.motion?.[0]);
   const { motion: _reports, ...rest } = result;
-  const checked: MotionCheckResult = { ...rest, src: page, kind: overlay ? 'overlay' : 'scene', duration, errors: said?.errors ?? [], console: said?.console ?? [] };
+  const kind = overlay ? 'overlay' : transition ? 'transition' : 'scene';
+  const checked: MotionCheckResult = { ...rest, src: page, kind, duration, errors: said?.errors ?? [], console: said?.console ?? [] };
   output.result(checked, () =>
     [
-      `${page}: ${overlay ? `an overlay over the video, ${from.toFixed(2)}–${(from + duration).toFixed(2)} s` : `${duration} s`}, ${checked.width}×${checked.height}`,
+      `${page}: ${overlay ? `an overlay over the video, ${from.toFixed(2)}–${(from + duration).toFixed(2)} s` : transition ? `the transition into scenes[${transitionIndex}], ${from.toFixed(2)}–${(from + duration).toFixed(2)} s` : `${duration} s`}, ${checked.width}×${checked.height}`,
       ...checked.stills.map((still) => `${still.t.toFixed(2)} s  ${still.file}`),
       ...(checked.sheet ? [`sheet  ${checked.sheet}`] : []),
       checked.errors.length > 0 ? `errors:\n${checked.errors.map((line) => `  ${line}`).join('\n')}` : 'no errors',
@@ -131,6 +146,8 @@ export interface MotionNewArgs {
   duration?: number;
   /** A scene goes first, not last. */
   first?: boolean;
+  /** A transition: the scene it leads into, by id or place (from 0; default: the second scene). */
+  into?: string;
 }
 
 export interface MotionNewResult {
@@ -138,8 +155,10 @@ export interface MotionNewResult {
   kind: MotionTemplate['kind'];
   /** The page, from the project folder. */
   src: string;
-  /** What was added to cuttle.json (`scenes` or `overlays`). */
+  /** What was added to cuttle.json (a scene, an overlay, or a scene's `transition`). */
   item: Record<string, unknown>;
+  /** A transition: the scene it leads into. */
+  into?: number;
 }
 
 const NAME = /^[a-z0-9][a-z0-9-]{0,47}$/;
@@ -166,6 +185,15 @@ export async function motionNewCommand(projectDir: string, template: string, arg
   const file = await readProjectFile(projectDir);
   const clips = file.project.scenes.filter((scene) => scene.type === 'clip');
   if (info.kind === 'overlay' && clips.length === 0) throw new CliError('invalid-project', `${file.path} has no clips: an overlay goes over a clip`);
+  // a transition leads into a scene that has one before it
+  let into = -1;
+  if (info.kind === 'transition') {
+    const scenes = file.project.scenes;
+    const wanted = args.into ?? '1';
+    into = scenes.findIndex((candidate) => candidate.id === wanted);
+    if (into < 0 && /^\d+$/.test(wanted)) into = Number(wanted);
+    if (!(into >= 1 && into < scenes.length)) throw new CliError('usage', `--into ${wanted}: a transition leads into a scene after the first (${scenes.length} scenes)`);
+  }
   // a folder of its own, beside any page there already
   let src: string;
   try {
@@ -177,7 +205,11 @@ export async function motionNewCommand(projectDir: string, template: string, arg
   const folder = src.split('/')[1]!;
   const taken = usedIds(file.project);
   let item: Record<string, unknown>;
-  if (info.kind === 'scene') {
+  if (info.kind === 'transition') {
+    item = { src, duration: args.duration ?? info.duration };
+    const scenes = file.raw.scenes as Record<string, unknown>[];
+    scenes[into] = { ...scenes[into], transition: item };
+  } else if (info.kind === 'scene') {
     item = { type: 'motion', id: newId('scenes', taken), label: labelOf(folder), src, duration: args.duration ?? info.duration };
     const scenes = (file.raw.scenes as unknown[] | undefined) ?? [];
     file.raw.scenes = args.first ? [item, ...scenes] : [...scenes, item];
@@ -190,11 +222,13 @@ export async function motionNewCommand(projectDir: string, template: string, arg
     file.raw.overlays = [...((file.raw.overlays as unknown[] | undefined) ?? []), item];
   }
   await writeProjectFile(file, 'motion new');
-  const result: MotionNewResult = { template, kind: info.kind, src, item };
+  const result: MotionNewResult = { template, kind: info.kind, src, item, ...(into >= 0 && { into }) };
   output.result(result, () =>
-    info.kind === 'scene'
-      ? `added ${src} as a ${String(item.duration)} s scene ${args.first ? 'at the start' : 'at the end'} (${String(item.id)})`
-      : `added ${src} as an overlay over source ${String(item.at)} s for ${String(item.duration)} s (${String(item.id)})`,
+    info.kind === 'transition'
+      ? `added ${src} as the ${String(item.duration)} s transition into scenes[${into}]`
+      : info.kind === 'scene'
+        ? `added ${src} as a ${String(item.duration)} s scene ${args.first ? 'at the start' : 'at the end'} (${String(item.id)})`
+        : `added ${src} as an overlay over source ${String(item.at)} s for ${String(item.duration)} s (${String(item.id)})`,
   );
   return result;
 }

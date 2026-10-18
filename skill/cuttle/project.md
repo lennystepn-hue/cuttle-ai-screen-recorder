@@ -78,7 +78,10 @@ never in the video. A take starts at the first step; the step key (Ctrl+Shift+Al
 Ctrl+Shift+Alt+B) or the prompter's buttons move on, and each move is a `step` marker. The video's
 chapters come from these markers: one where the video shows each step reached (a move undone
 within 2 s is none; a step in a stretch that is cut starts where the video goes on), the first at
-0, each named by its step's title. Fixing a title in `script` renames its chapter.
+0, each named by its step's title. Fixing a title in `script` renames its chapter. `motion`
+(optional: `lower-third` or `title`) draws the step's title with that template of the kit, as an
+overlay; without it the title is a text. `suggest` makes the titles and a zoom on where each step
+happens (below).
 
 `look` (every field is optional):
 
@@ -179,13 +182,16 @@ Every scene may also have a `transition`: the page it is gone into with, in plac
 `enabled` (`true`); `duration` (`0.8`, up to 4 s) is around the cut, half before and half after,
 also with the look's crossfades off. [motion.md](motion.md) has how such a page is written.
 
-**Automatic items.** Cuttle tags what it makes on its own with `auto` (on a zoom, mask, cut or a
-clip's `crop`): `answer` and `click` zooms from `suggest`, and later `crop`, `privacy`,
-`notification`, `retake`, `filler`, `pause`, `length`, `typing` and `dialog`. A rerun replaces
+**Automatic items.** Cuttle tags what it makes on its own with `auto` (on a zoom, mask, cut, text,
+overlay or a clip's `crop`): `answer` and `click` zooms from `suggest`, and later `crop`, `privacy`,
+`notification`, `retake`, `filler`, `pause`, `length`, `typing` and `dialog`; `title` (a
+step's title: a text, or an overlay of its `motion` template) and `step` (a zoom on where a step
+happens) from the script. A rerun replaces
 only tagged items. **When you change a tagged item's time, place or size, remove its `auto`**: then
 it is yours and the next `suggest` keeps it (switching it on or off keeps the tag). `autoEdits`
 (`clickZooms`, `answerZoom`, `crop`, `privacy`, `retakes`, `fillers`, `pauses`, `typingZooms`,
-`dialogZooms`: all `true`) holds which kinds are made at all; one set to `false` is not made again.
+`dialogZooms`, `stepTitles`, `stepZooms`: all `true`) holds which kinds are made at all; one set
+to `false` is not made again.
 
 ## Music and sounds
 

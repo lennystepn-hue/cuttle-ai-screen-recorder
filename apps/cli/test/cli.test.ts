@@ -457,6 +457,11 @@ describe('cuttle suggest and recover', () => {
           "pauses": 0,
           "retakes": 0,
         },
+        "steps": {
+          "reached": 0,
+          "titles": 0,
+          "zooms": 0,
+        },
         "written": true,
         "zooms": [
           {
@@ -502,6 +507,57 @@ describe('cuttle suggest and recover', () => {
     const without = await cli('--json', '-C', dir, 'suggest', '--dry-run', '--no-typing-zooms', '--no-click-zooms');
     expect((without.json as Zooms).zooms.map((zoom) => zoom.label)).not.toContain('Clicks');
   }, 30_000);
+
+  it("titles the script's steps and zooms on where they happen; a step's motion template is the kit's page; again, a title switched off stays off", async () => {
+    const dir = temp();
+    cpSync(fixture, dir, { recursive: true });
+    // three steps: clicks in the second, typed in the third (whose title is a lower third)
+    writeFileSync(join(dir, 'takes/1/markers.json'), JSON.stringify({ version: 1, markers: [{ t: 3, kind: 'step', label: 'step1' }, { t: 8, kind: 'step', label: 'step2' }, { t: 15, kind: 'step', label: 'step3' }] }));
+    const events = [
+      ...Array.from({ length: 11 }, (_, i) => ({ t: 3 + i * 0.4, type: 'keys', count: 1 })),
+      { t: 8.6, type: 'click', x: 400, y: 300, button: 'left' },
+      { t: 9.4, type: 'click', x: 480, y: 340, button: 'left' },
+      { t: 15.5, type: 'caret', rect: [900, 600, 2, 20] },
+      { t: 16.2, type: 'caret', rect: [960, 600, 2, 20] },
+    ].sort((a, b) => a.t - b.t);
+    writeFileSync(join(dir, 'takes/1/events.jsonl'), events.map((event) => `${JSON.stringify(event)}\n`).join(''));
+    const path = join(dir, 'cuttle.json');
+    const script = [{ id: 'step1', title: 'Open the settings' }, { id: 'step2', title: 'Turn on dark mode' }, { id: 'step3', title: 'Export the video', motion: 'lower-third' }];
+    writeFileSync(path, JSON.stringify({ ...JSON.parse(readFileSync(path, 'utf8')), script }));
+    type Result = { steps: { reached: number; titles: number; zooms: number }; zooms: { label?: string; auto?: string; at: number }[]; notes: string[] };
+    // the typing's zoom (3 to 8.7 s) would cover step 2's start: a step's zoom keeps clear of another
+    const first = await cli('--json', '-C', dir, 'suggest', '--no-click-zooms', '--no-typing-zooms');
+    expect(first.code, first.stdout).toBe(0);
+    const result = first.json as Result;
+    expect(result.steps).toEqual({ reached: 3, titles: 3, zooms: 2 });
+    expect(result.zooms.filter((zoom) => zoom.auto === 'step').map((zoom) => [zoom.label, zoom.at])).toEqual([
+      ['Step 2', 8],
+      ['Step 3', 15],
+    ]);
+    expect(result.notes).toContain("2 zooms on where the script's steps happen");
+    type Saved = { texts: { id: string; text: string; auto?: string; enabled?: boolean }[]; overlays: { src: string; params: Record<string, unknown>; auto?: string }[] };
+    const saved = () => JSON.parse(readFileSync(path, 'utf8')) as Saved;
+    expect(saved().texts.map((text) => [text.text, text.auto])).toEqual([
+      ['Open the settings', 'title'],
+      ['Turn on dark mode', 'title'],
+    ]);
+    expect(saved().overlays).toEqual([expect.objectContaining({ src: 'motion/lower-third/index.html', params: { name: 'Export the video', role: 'Step 3 of 3' }, auto: 'title' })]);
+    expect(existsSync(join(dir, 'motion', 'lower-third', 'index.html'))).toBe(true);
+    // the second step's title switched off by the person: a new run keeps it off, and the page it had
+    const switched = saved();
+    switched.texts[1]!.enabled = false;
+    writeFileSync(path, JSON.stringify(switched));
+    expect((await cli('--json', '-C', dir, 'suggest', '--no-click-zooms', '--no-typing-zooms')).code).toBe(0);
+    expect(saved().texts.map((text) => [text.text, text.enabled])).toEqual([
+      ['Open the settings', undefined],
+      ['Turn on dark mode', false],
+    ]);
+    expect(existsSync(join(dir, 'motion', 'lower-third-2'))).toBe(false);
+    // without titles and step zooms: those made before go
+    const none = await cli('--json', '-C', dir, 'suggest', '--no-step-titles', '--no-step-zooms');
+    expect((none.json as Result).steps).toEqual({ reached: 3, titles: 0, zooms: 0 });
+    expect([saved().texts, saved().overlays]).toEqual([[], []]);
+  }, 60_000);
 
   it('replaces only the zooms it made: hand-made ones stay, one switched off stays off, a kind switched off is not made', async () => {
     const dir = temp();

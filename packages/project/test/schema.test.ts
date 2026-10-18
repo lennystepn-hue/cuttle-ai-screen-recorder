@@ -124,6 +124,9 @@ describe('ProjectSchema', () => {
     expect(pathsOf({ ...minimal, script: [{ id: 'step1', title: '   ' }] })).toEqual(['script.0.title']);
     expect(pathsOf({ ...minimal, script: [{ id: 'step1', title: 'x'.repeat(81) }] })).toEqual(['script.0.title']);
     expect(pathsOf({ ...minimal, script: [{ id: 'step1', title: 'Go', note: 'x'.repeat(1001) }] })).toEqual(['script.0.note']);
+    // a step's title may be a motion template's, the kit's lower third or title
+    expect(ProjectSchema.parse({ ...minimal, script: [{ id: 'step1', title: 'Go', motion: 'lower-third' }] }).script[0]!.motion).toBe('lower-third');
+    expect(pathsOf({ ...minimal, script: [{ id: 'step1', title: 'Go', motion: 'end-card' }] })).toEqual(['script.0.motion']);
     expect(pathsOf({ ...minimal, script: Array.from({ length: 51 }, (_, i) => ({ id: `step${i + 1}`, title: 'Go' })) })).toEqual(['script']);
     const twice = ProjectSchema.safeParse({ ...minimal, scenes: [{ type: 'clip', id: 'step1', from: 0, to: 1 }], script: [{ id: 'step1', title: 'Go' }] });
     expect(twice.error?.issues.map((issue) => [issue.path.join('.'), issue.message])).toEqual([['script.0.id', 'the id "step1" is already used by scenes[0]']]);
@@ -275,7 +278,7 @@ describe('automatic edits in the project', () => {
     const p = ProjectSchema.parse(minimal);
     expect(p.cuts).toEqual([]);
     expect(p.autoEdits).toEqual({
-      crop: true, privacy: true, retakes: true, fillers: true, pauses: true, typingZooms: true, dialogZooms: true, clickZooms: true, answerZoom: true,
+      crop: true, privacy: true, retakes: true, fillers: true, pauses: true, typingZooms: true, dialogZooms: true, clickZooms: true, answerZoom: true, stepTitles: true, stepZooms: true,
     });
   });
 
@@ -286,11 +289,14 @@ describe('automatic edits in the project', () => {
       cuts: [{ id: 'c1', label: 'Filler: ähm', from: 12.4, to: 12.8, auto: 'filler' }],
       zooms: [{ id: 'z1', at: 30, duration: 3, rect: [0, 0, 960, 540], auto: 'click' }],
       masks: [{ id: 'm1', from: 1, to: 2, rect: [0, 0, 10, 10], auto: 'privacy' }],
+      texts: [{ id: 't1', at: 1, duration: 3, text: 'Open the settings', auto: 'title' }],
+      overlays: [{ id: 'o1', src: 'motion/lower-third/index.html', at: 8, duration: 4, auto: 'title' }],
       autoEdits: { fillers: false },
     });
     expect(p.scenes[0]).toMatchObject({ crop: { rect: [62, 141, 2478, 1237], enabled: true, auto: 'crop' } });
     expect(p.cuts[0]).toEqual({ id: 'c1', label: 'Filler: ähm', from: 12.4, to: 12.8, enabled: true, auto: 'filler' });
     expect(p.zooms[0]!.auto).toBe('click');
+    expect([p.texts[0]!.auto, p.overlays[0]!.auto]).toEqual(['title', 'title']);
     expect(p.autoEdits).toMatchObject({ fillers: false, pauses: true });
   });
 

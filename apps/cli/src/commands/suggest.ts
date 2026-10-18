@@ -1,4 +1,5 @@
 import { suggestProject, type SuggestOptions, type SuggestResult } from '@cuttle/core';
+import { templatePage } from '@cuttle/motion-kit/files';
 import type { Output } from '../output';
 import { percentSteps } from './transcribe';
 
@@ -7,9 +8,11 @@ import { percentSteps } from './transcribe';
  * sped up, speech kept), zooms on Claude's answer and the clicks, and cuts for filler words and
  * pauses, written to cuttle.json (see @cuttle/core's suggestProject).
  */
-export async function suggestCommand(projectDir: string, args: Omit<SuggestOptions, 'onStatus' | 'onProgress'>, output: Output): Promise<SuggestResult> {
+export async function suggestCommand(projectDir: string, args: Omit<SuggestOptions, 'onStatus' | 'onProgress' | 'motionPage'>, output: Output): Promise<SuggestResult> {
   const result = await suggestProject(projectDir, {
     ...args,
+    // a step title in a motion template (the script's `motion`): the kit's page next to the CLI
+    motionPage: (template) => templatePage(projectDir, template, import.meta.url),
     onStatus: (text) => output.info(text),
     onProgress: percentSteps((percent) => output.info(`transcribing … ${percent} %`)),
   });

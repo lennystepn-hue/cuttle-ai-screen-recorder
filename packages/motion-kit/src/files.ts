@@ -41,3 +41,17 @@ export async function copyTemplate(projectDir: string, template: string, name: s
   await copyFolder(from, join(projectDir, into, folder));
   return `${into}/${folder}/index.html`;
 }
+
+/**
+ * The project's page of a template, for items that share one (the script's step titles): its
+ * `motion/<template>/index.html` when the project has it already (as the person may have changed
+ * it), else a copy of the kit's (`copyTemplate`). Undefined when the kit does not have it.
+ */
+export async function templatePage(projectDir: string, template: string, bundleUrl: string): Promise<string | undefined> {
+  const page = `motion/${template}/index.html`;
+  if (await stat(join(projectDir, page)).then((info) => info.isFile(), () => false)) return page;
+  return copyTemplate(projectDir, template, template, bundleUrl).catch((error: unknown) => {
+    if (error instanceof MissingTemplateError) return undefined;
+    throw error;
+  });
+}

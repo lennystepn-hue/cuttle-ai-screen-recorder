@@ -26,10 +26,14 @@ export const WEBCAM_CORNERS = ['top-left', 'top-right', 'bottom-left', 'bottom-r
 export const CLICK_EFFECTS = ['ripple', 'none'] as const;
 export const MOUSE_BUTTONS = ['left', 'right', 'middle'] as const;
 /**
- * What made an automatic item (`auto` on cuts, zooms, masks and a clip's crop). Editing an item by
- * hand drops its tag; a rerun replaces only tagged items of the kinds it makes.
+ * What made an automatic item (`auto` on cuts, zooms, masks, texts, overlays and a clip's crop).
+ * Editing an item by hand drops its tag; a rerun replaces only tagged items of the kinds it makes.
+ * `title`: a step's title from the script (a text, or an overlay of the step's motion template);
+ * `step`: a zoom on where a step of the script happens.
  */
-export const AUTO_KINDS = ['crop', 'privacy', 'notification', 'retake', 'filler', 'pause', 'length', 'typing', 'dialog', 'click', 'answer'] as const;
+export const AUTO_KINDS = ['crop', 'privacy', 'notification', 'retake', 'filler', 'pause', 'length', 'typing', 'dialog', 'click', 'answer', 'title', 'step'] as const;
+/** The motion templates a step's title may be drawn with, as an overlay over the step's start. */
+export const STEP_MOTIONS = ['lower-third', 'title'] as const;
 
 // z.number() already rejects Infinity and NaN in zod 4.
 const seconds = z.number().nonnegative();
@@ -377,6 +381,8 @@ const AutoEditsSchema = z.strictObject({
   dialogZooms: z.boolean().default(true),
   clickZooms: z.boolean().default(true),
   answerZoom: z.boolean().default(true),
+  stepTitles: z.boolean().default(true),
+  stepZooms: z.boolean().default(true),
 });
 
 const TextSchema = z.strictObject({
@@ -387,6 +393,7 @@ const TextSchema = z.strictObject({
   style: z.enum(TEXT_STYLES).default('pill'),
   position: z.enum(TEXT_POSITIONS).default('top'),
   enabled: z.boolean().default(true),
+  auto: autoKind,
 });
 
 /**
@@ -399,6 +406,7 @@ const MotionOverlaySchema = z.strictObject({
   at: seconds,
   duration: positiveSeconds,
   enabled: z.boolean().default(true),
+  auto: autoKind,
 });
 
 /**
@@ -451,6 +459,8 @@ const StepSchema = z.strictObject({
   title: z.string().max(STEP_TITLE_MAX).regex(/\S/, 'a step needs a title'),
   /** What to say or do: for the prompter only, never in the video. */
   note: z.string().max(STEP_NOTE_MAX).optional(),
+  /** Its title as this motion template (an overlay), instead of a text. */
+  motion: z.enum(STEP_MOTIONS).optional(),
 });
 
 export const ProjectSchema = z
@@ -545,6 +555,7 @@ export type SceneTransition = NonNullable<Scene['transition']>;
 export type Music = NonNullable<CuttleProject['music']>;
 export type Sound = CuttleProject['sounds'][number];
 export type ScriptStep = CuttleProject['script'][number];
+export type StepMotion = (typeof STEP_MOTIONS)[number];
 export type Zoom = CuttleProject['zooms'][number];
 export type ZoomMove = NonNullable<Zoom['moves']>[number];
 export type WindowKind = (typeof WINDOW_KINDS)[number];

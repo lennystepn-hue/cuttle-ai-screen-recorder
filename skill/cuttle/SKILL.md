@@ -120,7 +120,10 @@ taskbar (from the window's content area the recorder saw, else from the screen's
 `--no-crop` leaves it out). It zooms on Claude's answer, on a dialog while it is open ("Dialog";
 `--no-dialog-zooms`), in where someone types, following the text along ("Typing": the camera
 moves on as the text leaves the middle of the view; `--no-typing-zooms`), and where clicks
-happen at normal speed ("Click", "Clicks"; `--no-click-zooms`; `--no-zoom` leaves out every zoom). Its `notes` say what it did, in
+happen at normal speed ("Click", "Clicks"; `--no-click-zooms`; `--no-zoom` leaves out every zoom).
+With a script, it titles each step where the video shows it (a text, or the step's `motion`
+template; `--no-step-titles`) and zooms on where each step happens ("Step 2"; `--no-step-zooms`),
+before the clicks' zooms. Its `notes` say what it did, in
 source seconds. It replaces every clip and the zooms it made before (tagged `auto`; masks, texts,
 cuts, stills, cards and zooms made by hand stay), so run it once, before your hand edits. Its clips and zooms have ids, and labels where Claude's markers say
 what they show ("Claude at work", "Answer"): keep them when you edit, and give items you add an

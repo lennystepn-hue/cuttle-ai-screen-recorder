@@ -481,6 +481,8 @@ const AUTO_GROUPS: AutoGroup[] = [
   { id: 'dialog', title: 'Zooms on dialogs', icon: <ZoomIcon />, kinds: ['dialog'], key: 'dialogZooms' },
   { id: 'click', title: 'Zooms on clicks', icon: <ZoomIcon />, kinds: ['click'], key: 'clickZooms' },
   { id: 'answer', title: 'Zoom on Claude’s answer', icon: <ZoomIcon />, kinds: ['answer'], key: 'answerZoom' },
+  { id: 'titles', title: 'Step titles', icon: <TextIcon />, kinds: ['title'], key: 'stepTitles' },
+  { id: 'steps', title: 'Zooms on steps', icon: <ZoomIcon />, kinds: ['step'], key: 'stepZooms' },
 ];
 
 /** The automatic items of a group, in the order the video shows them. */
@@ -490,6 +492,10 @@ function autoItems(project: CuttleProject, spans: readonly SceneSpan[], group: A
   for (const zoom of project.zooms) if (of(zoom.auto) && zoom.id) items.push({ kind: 'zoom', id: zoom.id, label: zoom.label ?? 'Zoom', enabled: zoom.enabled, at: outputTimesOf(spans, zoom.at)[0] });
   for (const mask of project.masks) if (of(mask.auto) && mask.id) items.push({ kind: 'mask', id: mask.id, label: mask.label ?? 'Mask', enabled: mask.enabled, at: outputTimesOf(spans, mask.from)[0] });
   for (const cut of project.cuts) if (of(cut.auto) && cut.id) items.push({ kind: 'cut', id: cut.id, label: cut.label ?? 'Cut', enabled: cut.enabled, at: cutShownAt(spans, cut) });
+  for (const text of project.texts) if (of(text.auto) && text.id) items.push({ kind: 'caption', id: text.id, label: text.text, enabled: text.enabled, at: outputTimesOf(spans, text.at)[0] });
+  for (const overlay of project.overlays) {
+    if (of(overlay.auto) && overlay.id) items.push({ kind: 'motion', id: overlay.id, label: overlay.label ?? motionName(overlay.src), enabled: overlay.enabled, at: outputTimesOf(spans, overlay.at)[0] });
+  }
   project.scenes.forEach((scene, index) => {
     if (scene.type === 'clip' && scene.id && of(scene.crop?.auto)) {
       items.push({ kind: 'crop', id: scene.id, label: `${scene.label ?? 'Clip'}: ${Math.round(scene.crop!.rect[2])} × ${Math.round(scene.crop!.rect[3])}`, enabled: scene.crop!.enabled, at: sceneStretch(spans, index)?.start });
@@ -670,6 +676,8 @@ const AUTO_REASONS: Record<AutoKind, string> = {
   dialog: 'a dialog',
   click: 'clicks',
   answer: "Claude's answer",
+  title: 'a step of the script',
+  step: 'a step of the script',
 };
 
 /** Says that Cuttle made the item, for what, and that a change makes it the person's. */
@@ -972,6 +980,7 @@ function Details({ project, selection }: { project: CuttleProject; selection: Se
   return (
     <>
       <Head icon={<TextIcon />} color="var(--caption)" name={text.label ?? 'Caption'} />
+      <AutoNote kind={text.auto} />
       <Row label="Text" wide>
         <TextInput value={text.text} multiline onCommit={(value) => value.trim() && set('texts', id, { text: value }, 'Edit caption')} testId="caption-text" />
       </Row>
@@ -1166,6 +1175,7 @@ function MotionDetails({ list, index, item, placement }: { list: 'scenes' | 'ove
   return (
     <>
       <Head icon={<MotionIcon />} color="var(--motion)" name={item.label ?? motionName(item.src)} />
+      {'auto' in item && <AutoNote kind={item.auto} />}
       <MotionState status={status} />
       <Row label="Label">
         <TextInput value={item.label ?? ''} placeholder={motionName(item.src)} onCommit={(value) => set(list, id, { label: value.trim() || undefined }, `Rename ${noun}`)} testId="motion-label" />

@@ -1,7 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import { relative, sep } from 'node:path';
 import { KIT_FONTS } from '@cuttle/motion-kit';
-import type { CuttleProject, MotionOverlay, MotionScene } from '@cuttle/project';
+import type { CuttleProject, MotionOverlay, MotionScene, SceneTransition } from '@cuttle/project';
 import { CHANNELS, type MotionFrameRequest, type MotionPages } from '../job';
 import { motionInit } from '../motion/init';
 import { declaredParams, paramDefaults } from '../motion/params';
@@ -10,7 +10,7 @@ import { MotionPage, type MotionFrame, type MotionPageOptions } from './motion';
 
 /** What one motion item's page said while it rendered: its errors and its console, every showing together. */
 export interface MotionItemReport {
-  /** `scenes[2]` or `overlays[0]`. */
+  /** `scenes[2]`, `overlays[0]` or `scenes[3].transition`. */
   item: string;
   /** The page, relative to the project folder (`/` between folders). */
   src: string;
@@ -47,7 +47,14 @@ export class MotionHost {
     private readonly options: Pick<MotionPageOptions, 'frameTimeout' | 'loadTimeout' | 'kitDir'> = {},
   ) {}
 
-  private item(request: MotionFrameRequest): { item: MotionScene | MotionOverlay; name: string; file: string } {
+  private item(request: MotionFrameRequest): { item: MotionScene | MotionOverlay | SceneTransition; name: string; file: string } {
+    if (request.kind === 'transition') {
+      const name = `scenes[${request.index}].transition`;
+      const item = this.project.scenes[request.index]?.transition;
+      const file = this.pages.transitions[request.index];
+      if (!item || file === undefined) throw new Error(`${name} is not a transition page`);
+      return { item, name, file };
+    }
     const name = `${request.kind === 'scene' ? 'scenes' : 'overlays'}[${request.index}]`;
     const item = request.kind === 'scene' ? this.project.scenes[request.index] : this.project.overlays[request.index];
     const file = (request.kind === 'scene' ? this.pages.scenes : this.pages.overlays)[request.index];
@@ -55,17 +62,19 @@ export class MotionHost {
     return { item: item as MotionScene | MotionOverlay, name, file };
   }
 
-  private async openPage(request: MotionFrameRequest, item: MotionScene | MotionOverlay, name: string, file: string, report: MotionItemReport): Promise<MotionPage> {
+  private async openPage(request: MotionFrameRequest, item: MotionScene | MotionOverlay | SceneTransition, name: string, file: string, report: MotionItemReport): Promise<MotionPage> {
     // the params the page declares: their defaults, under the item's own values
     const declared = declaredParams(await readFile(file, 'utf8'));
     for (const issue of declared.issues) if (!report.errors.includes(issue)) report.errors.push(issue);
-    const window = 'type' in item ? null : { from: item.at, to: item.at + item.duration };
+    const window = request.kind === 'overlay' && 'at' in item ? { from: item.at, to: item.at + item.duration } : null;
     const init = motionInit(this.project, item, name, { start: request.start, duration: request.duration }, {
       take: takeData(this.project, this.take, request.screen, window),
       fonts: [...KIT_FONTS],
       defaults: paramDefaults(declared.params),
+      transition: request.kind === 'transition',
     });
-    return MotionPage.open({ file, root: this.pages.root, init, network: item.network, ...(item.motionBlur && { motionBlur: item.motionBlur }), ...this.options });
+    const blur = 'motionBlur' in item ? item.motionBlur : undefined;
+    return MotionPage.open({ file, root: this.pages.root, init, network: item.network, ...(blur && { motionBlur: blur }), ...this.options });
   }
 
   private open(request: MotionFrameRequest): Showing {
@@ -98,7 +107,7 @@ export class MotionHost {
     showing ??= this.open(request);
     showing.asked = Math.max(showing.asked, request.frame);
     try {
-      const frame = await this.run(showing, (page) => page.frame(request.frame, request.view));
+      const frame = await this.run(showing, (page) => page.frame(request.frame, request.view, request.between));
       showing.last = { frame: request.frame, data: frame };
       return frame;
     } catch (error) {

@@ -4,8 +4,8 @@
 import { readdir, readFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { KIT_FONTS } from '@cuttle/motion-kit';
-import type { CuttleProject, MotionOverlay, MotionScene } from '@cuttle/project';
-import { occurrences, sceneSpans } from '@cuttle/timeline';
+import type { CuttleProject, MotionOverlay, MotionScene, SceneTransition } from '@cuttle/project';
+import { crossfadeHalf, occurrences, pageTransition, sceneSpans } from '@cuttle/timeline';
 import type { MotionPages } from '../job';
 import { motionInit } from '../motion/init';
 import { declaredParams, paramDefaults } from '../motion/params';
@@ -22,14 +22,27 @@ export interface Showing {
 
 const milli = (value: number) => Math.round(value * 1000) / 1000;
 
-/** Each showing of each motion item: a scene's one, an overlay's per stretch of clips that shows it. */
-export function motionShowings(project: CuttleProject): { kind: 'scene' | 'overlay'; index: number; item: MotionScene | MotionOverlay; showings: Showing[] }[] {
+/** A motion item: a scene, an overlay, or the transition into a scene (`index` is that scene's). */
+export type ShownItem = { kind: 'scene'; index: number; item: MotionScene } | { kind: 'overlay'; index: number; item: MotionOverlay } | { kind: 'transition'; index: number; item: SceneTransition };
+
+/**
+ * Each showing of each motion item: a scene's one, an overlay's per stretch of clips that shows it, a
+ * transition's around the cut into its scene.
+ */
+export function motionShowings(project: CuttleProject): (ShownItem & { showings: Showing[] })[] {
   const spans = sceneSpans(project.scenes, project.cuts);
   const out: ReturnType<typeof motionShowings> = [];
   project.scenes.forEach((scene, index) => {
     if (scene.type !== 'motion') return;
     const span = spans.find((candidate) => candidate.sceneIndex === index);
     if (span) out.push({ kind: 'scene', index, item: scene, showings: [{ start: span.start, duration: span.end - span.start }] });
+  });
+  project.scenes.forEach((scene, index) => {
+    const into = scene.transition ? spans.find((candidate) => candidate.sceneIndex === index) : undefined;
+    const before = into ? spans[into.index - 1] : undefined;
+    if (!scene.transition || !into || !before || !pageTransition(before, into, project.look.transition)) return;
+    const half = crossfadeHalf(before, into, project.look.transition);
+    out.push({ kind: 'transition', index, item: scene.transition, showings: [{ start: into.start - half, duration: 2 * half }] });
   });
   project.overlays.forEach((overlay, index) => {
     if (!overlay.enabled) return;
@@ -71,7 +84,7 @@ async function asksForSounds(file: string): Promise<boolean> {
 
 /** The sounds one motion item's page asked for, on the video: `name` is its label, else its id or `scenes[0]`. */
 export interface ItemSounds {
-  kind: 'scene' | 'overlay';
+  kind: ShownItem['kind'];
   index: number;
   name: string;
   cues: SoundCue[];
@@ -98,9 +111,9 @@ export async function motionSoundCues(
   const errors: string[] = [];
   const items: ItemSounds[] = [];
   for (const { kind, index, item, showings } of motionShowings(project)) {
-    const file = (kind === 'scene' ? pages.scenes : pages.overlays)[index];
+    const file = (kind === 'scene' ? pages.scenes : kind === 'overlay' ? pages.overlays : pages.transitions)[index];
     if (file === undefined || !(await asksForSounds(file))) continue;
-    const name = `${kind === 'scene' ? 'scenes' : 'overlays'}[${index}]`;
+    const name = kind === 'transition' ? `scenes[${index}].transition` : `${kind === 'scene' ? 'scenes' : 'overlays'}[${index}]`;
     const first = showings[0]!;
     const key = JSON.stringify({ file, item, first, changes: options.changes ?? 0 });
     let sounds = options.cache?.get(key);
@@ -108,11 +121,12 @@ export async function motionSoundCues(
       let page: MotionPage | undefined;
       try {
         const declared = declaredParams(await readFile(file, 'utf8'));
-        const window = 'type' in item ? null : { from: item.at, to: item.at + item.duration };
+        const window = kind === 'overlay' ? { from: item.at, to: item.at + item.duration } : null;
         const init = motionInit(project, item, name, first, {
           take: takeData(project, take, { width: project.output.width, height: project.output.height }, window),
           fonts: [...KIT_FONTS],
           defaults: paramDefaults(declared.params),
+          transition: kind === 'transition',
         });
         const { kitDir, loadTimeout, frameTimeout } = options;
         page = await MotionPage.open({ file, root: pages.root, init, network: item.network, ...(kitDir && { kitDir }), ...(loadTimeout && { loadTimeout }), ...(frameTimeout && { frameTimeout }) });
@@ -127,7 +141,9 @@ export async function motionSoundCues(
       }
     }
     const played = soundsOfShowings(showings, sounds);
-    if (played.length > 0) items.push({ kind, index, name: item.label ?? item.id ?? name, cues: played });
+    const into = project.scenes[index];
+    const label = kind === 'transition' ? `Transition into ${into?.label ?? into?.id ?? `scenes[${index}]`}` : (item.label ?? item.id ?? name);
+    if (played.length > 0) items.push({ kind, index, name: label, cues: played });
     cues.push(...played);
   }
   return { cues: cues.sort((a, b) => a.at - b.at), errors, items };

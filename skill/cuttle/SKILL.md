@@ -211,6 +211,8 @@ Then refine `cuttle.json` ([project.md](project.md)) and preview again:
 - **Sounds.** A sound at a moment, without the music: `cuttle -C "<project>" --json sound add whoosh --at 12.4`
   (source seconds) or `--scene s5 --at 0.2`; `sound list` has the built-in sounds. A motion page
   asks for its own with `cuttle.sound(…)` (motion.md); the templates come with theirs.
+- **Transitions.** A page in place of the crossfade into a scene: `cuttle -C "<project>" --json motion new fold --into <scene id>`
+  (motion.md). One or two a video, where something changes.
 - **End card.** A `card` scene at the end with the product name and URL, or a `motion` scene.
 
 ## 4. Render

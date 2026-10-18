@@ -362,6 +362,32 @@ function CutDetails({ project, id }: { project: CuttleProject; id: string }) {
 }
 
 /** A clip's crop: the part of the screen it shows, in source pixels, on or off. */
+/** The transition page a scene is gone into with (Claude adds one with `motion new fold`): its length, on and off, out. */
+function TransitionInto({ project, index }: { project: CuttleProject; index: number }) {
+  const scene = project.scenes[index];
+  const transition = scene?.transition;
+  if (!scene?.id || !transition || index === 0) return null;
+  const id = scene.id;
+  const change = (fields: Partial<typeof transition>, label: string) => set('scenes', id, { transition: { ...transition, ...fields } }, label);
+  return (
+    <div className="transition-in" data-testid="transition-in">
+      <Row label="Into this scene">{motionName(transition.src)}</Row>
+      <p className="hint">The export draws its page between the two scenes; the editor shows a crossfade there for now.</p>
+      <div className="grid2">
+        <Row label="Length (s)">
+          <NumberInput value={transition.duration} min={0.1} max={4} step={0.1} onCommit={(duration) => change({ duration }, 'Transition length')} testId="transition-duration" />
+        </Row>
+        <Row label="Transition" inline>
+          <Toggle checked={transition.enabled} label="The transition into this scene" onChange={(on) => change({ enabled: on }, on ? 'Transition on' : 'Transition off')} testId="transition-on" />
+        </Row>
+      </div>
+      <button type="button" className="ghost small" onClick={() => set('scenes', id, { transition: undefined }, 'Remove transition')} data-testid="transition-remove">
+        Remove the transition
+      </button>
+    </div>
+  );
+}
+
 function CropDetails({ project, id }: { project: CuttleProject; id: string }) {
   const clip = project.scenes.find((scene) => scene.id === id);
   if (clip?.type !== 'clip' || !clip.crop) return <p className="hint">This clip has no crop any more.</p>;
@@ -660,7 +686,12 @@ function Details({ project, selection }: { project: CuttleProject; selection: Se
     const sceneIndex = project.scenes.findIndex((item) => item.id === id);
     const scene = project.scenes[sceneIndex]!;
     const stretch = sceneStretch(sceneSpans(project.scenes, project.cuts), sceneIndex);
-    const inVideo = stretch && <Row label="In the video">{span(stretch.start, stretch.end)}</Row>;
+    const inVideo = (
+      <>
+        {stretch && <Row label="In the video">{span(stretch.start, stretch.end)}</Row>}
+        <TransitionInto project={project} index={sceneIndex} />
+      </>
+    );
     if (scene.type === 'clip') {
       const name = [scene.speed !== 1 ? formatSpeed(scene.speed) : '', scene.label ?? (scene.speed === 1 ? 'Clip' : '')].filter(Boolean).join(' ');
       return (

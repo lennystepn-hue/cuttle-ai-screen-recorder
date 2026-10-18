@@ -111,6 +111,7 @@ async function exportVideo(job: ExportJob): Promise<PageSuccess> {
         const t0 = performance.now();
         const state = timeline.frameAt(frame / fps);
         const frameSources = await sources.sourcesFor(frame, state);
+        await sources.transition(state, () => renderer.layerPixels(state, frameSources));
         const t1 = performance.now();
         renderer.render(state, frameSources);
         // render() throws on a lost context too; this catches a loss between render and capture.
@@ -186,7 +187,9 @@ async function renderStills(job: StillsJob): Promise<PageStillsSuccess> {
       const unique = [...new Set(byTime)].sort((a, b) => a - b);
       for (const [done, frame] of unique.entries()) {
         const state = timeline.frameAt(frame / fps);
-        renderer.render(state, await sources.sourcesFor(frame, state));
+        const frameSources = await sources.sourcesFor(frame, state);
+        await sources.transition(state, () => renderer.layerPixels(state, frameSources));
+        renderer.render(state, frameSources);
         if (gl.isContextLost()) throw new Error('the WebGL context was lost while rendering stills');
         const image = await png(canvas);
         for (const [n, frameOfTime] of byTime.entries()) {

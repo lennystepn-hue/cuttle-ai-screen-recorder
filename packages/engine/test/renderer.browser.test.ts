@@ -350,4 +350,40 @@ describe('motion', () => {
     expect(pixelAt(shown, 1, 30)).toEqual([0, 255, 0, 255]);
     expect(pixelAt(shown, 32, 5)).toEqual(pixelAt(plain, 32, 5));
   });
+
+  it('gives a transition page the two layers whole, top row first, and draws its frame in place of their crossfade', () => {
+    // two motion scenes: the first red over blue, the second green; the transition page's frame white over black
+    const scenes = parse({ look: solid, scenes: [{ type: 'motion', src: 'a.html', duration: 1 }, { type: 'motion', src: 'b.html', duration: 1, transition: { src: 't.html' } }] });
+    const sources = { ...NO_SOURCES, motion: new Map([[0, motionFrame([255, 0, 0, 255], [0, 0, 255, 255])], [1, motionFrame([0, 255, 0, 255], [0, 255, 0, 255])]]) };
+    const state: RenderState = {
+      t: 1,
+      layers: [layer(0, 0.5, 'motion'), layer(1, 0.5, 'motion')],
+      transition: { sceneIndex: 1, key: 'transition:1', start: 0.6, local: 0.4, duration: 0.8 },
+    };
+    const canvas = new OffscreenCanvas(1, 1);
+    const renderer = createRenderer(canvas, scenes, { assets, screenSize: SCREEN });
+    const gl = canvas.getContext('webgl2')!;
+    renderer.render(state, sources);
+    const crossfade = readPixels(gl);
+    const [from, to] = renderer.layerPixels(state, sources);
+    const at = (pixels: MotionPixels, x: number, y: number) => [...pixels.data.subarray((y * 64 + x) * 4, (y * 64 + x) * 4 + 4)];
+    expect([from.width, from.height, at(from, 5, 5), at(from, 5, 30)]).toEqual([64, 36, [255, 0, 0, 255], [0, 0, 255, 255]]);
+    expect([at(to, 5, 5), at(to, 5, 30)]).toEqual([
+      [0, 255, 0, 255],
+      [0, 255, 0, 255],
+    ]);
+    // reading the layers leaves the canvas as it was
+    expect(readPixels(gl).data).toEqual(crossfade.data);
+    // without the page's frame the layers crossfade; with it, its frame is the picture
+    near(pixelAt(crossfade, 5, 5), [128, 128, 0, 255]);
+    renderer.render(state, { ...sources, transitions: new Map([['transition:1', motionFrame([255, 255, 255, 255], [0, 0, 0, 255])]]) });
+    const paged = readPixels(gl);
+    expect([pixelAt(paged, 5, 5), pixelAt(paged, 5, 30)]).toEqual([
+      [255, 255, 255, 255],
+      [0, 0, 0, 255],
+    ]);
+    expect(() => renderer.layerPixels({ t: 0, layers: [layer(0, 1, 'motion')] }, sources)).toThrow('layerPixels: the frame shows one scene, not two');
+    renderer.dispose();
+    gl.getExtension('WEBGL_lose_context')?.loseContext();
+  });
 });

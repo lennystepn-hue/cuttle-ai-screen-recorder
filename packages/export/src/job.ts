@@ -18,6 +18,8 @@ export interface MotionPages {
   scenes: Record<number, string>;
   /** Overlay index → its page. */
   overlays: Record<number, string>;
+  /** Scene index → the page of the transition into it. */
+  transitions: Record<number, string>;
 }
 
 /** A motion page's frame: premultiplied RGBA, top row first (what the engine draws as `MotionPixels`). */
@@ -29,10 +31,10 @@ export interface MotionPixels {
 
 /** A frame of one showing of a motion item, which the page asks the main process for. */
 export interface MotionFrameRequest {
-  /** The showing: `scene:<index>`, or `overlay:` and the overlay's `ActiveOverlay.key`. */
+  /** The showing: `scene:<index>`, `overlay:` and the overlay's `ActiveOverlay.key`, or a transition's `ActiveTransition.key`. */
   key: string;
-  kind: 'scene' | 'overlay';
-  /** Its place in the project's `scenes` or `overlays`. */
+  kind: 'scene' | 'overlay' | 'transition';
+  /** Its place in the project's `scenes` or `overlays` (a transition's: the scene it goes into). */
   index: number;
   /** Frame n is n / fps seconds into the showing. */
   frame: number;
@@ -43,6 +45,8 @@ export interface MotionFrameRequest {
   screen: { width: number; height: number };
   /** An overlay's frame: where the clip under it shows the take. */
   view?: MotionView;
+  /** A transition's frame: the outgoing and the incoming frame it draws from (the output's size, opaque). */
+  between?: { from: MotionPixels; to: MotionPixels };
 }
 
 /** Everything the page needs for one export. Paths are absolute; the page may read only these files. */

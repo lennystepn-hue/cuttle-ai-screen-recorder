@@ -92,7 +92,9 @@ export class SceneSources {
   private readonly pendingOverlays: OverlayPlan[];
   /** The last frame of the video (or of the stills). */
   private readonly lastFrame: number;
-  private readonly sources: FrameSources = { screens: new Map(), webcams: new Map(), stills: new Map(), motion: new Map(), overlays: new Map() };
+  private readonly sources: FrameSources = { screens: new Map(), webcams: new Map(), stills: new Map(), motion: new Map(), overlays: new Map(), transitions: new Map() };
+  /** The transition pages' showings now open, by `ActiveTransition.key`. */
+  private readonly transitions = new Set<string>();
 
   constructor(
     plan: FramePlan,
@@ -179,12 +181,13 @@ export class SceneSources {
     }
     // a motion item's page opens and draws its first frame while the frames before it are made
     for (const first of opened) if (first > frame) this.askAhead(first);
-    const { screens, webcams, stills, motion, overlays } = this.sources;
+    const { screens, webcams, stills, motion, overlays, transitions } = this.sources;
     screens.clear();
     webcams.clear();
     stills.clear();
     motion.clear();
     overlays.clear();
+    transitions!.clear();
     for (const layer of state.layers) {
       // decoders are opened per scene (`plan.index`), frames are handed over per layer
       const scene = this.open.get(layer.sceneIndex);
@@ -217,6 +220,39 @@ export class SceneSources {
     return this.sources;
   }
 
+  /**
+   * The frame of the transition page that draws `state` (none without one), drawn in the main
+   * process from the two layers, which `layers` reads from the renderer; a transition page that no
+   * longer shows closes.
+   */
+  async transition(state: RenderState, layers: () => [MotionPixels, MotionPixels]): Promise<void> {
+    const active = state.transition;
+    for (const key of this.transitions) {
+      if (key === active?.key) continue;
+      this.transitions.delete(key);
+      host().motionDone(key);
+    }
+    if (!active) return;
+    const [from, to] = layers();
+    this.transitions.add(active.key);
+    const request: MotionFrameRequest = {
+      key: active.key,
+      kind: 'transition',
+      index: active.sceneIndex,
+      frame: Math.round(active.local * this.motion.project.output.fps),
+      start: active.start,
+      duration: active.duration,
+      screen: this.screenSize,
+      between: { from, to },
+    };
+    const pixels = await host()
+      .motionFrame(request)
+      .catch((error: unknown) => {
+        throw new PageError('render', remoteMessage(error));
+      });
+    this.sources.transitions!.set(active.key, pixels);
+  }
+
   /** Closes the scenes whose last frame was `frame`. */
   async release(frame: number): Promise<void> {
     for (const [index, scene] of this.open) {
@@ -236,6 +272,8 @@ export class SceneSources {
     this.open.clear();
     for (const overlay of this.overlays.values()) overlay.source.done();
     this.overlays.clear();
+    for (const key of this.transitions) host().motionDone(key);
+    this.transitions.clear();
     await Promise.allSettled(scenes.map(closeScene));
   }
 }

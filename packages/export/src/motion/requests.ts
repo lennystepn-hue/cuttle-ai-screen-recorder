@@ -10,7 +10,8 @@ import type { MotionView } from './runtime';
 export interface MotionNeed {
   /** A scene's frame goes to `FrameSources.motion` by its layer, an overlay's to `overlays` by its showing. */
   target: { kind: 'scene'; layer: number } | { kind: 'overlay'; key: string };
-  request: MotionFrameRequest;
+  /** A scene's or an overlay's frame (a transition's is asked for with the frames it goes between). */
+  request: Omit<MotionFrameRequest, 'kind' | 'between'> & { kind: 'scene' | 'overlay' };
 }
 
 /** Where a clip layer shows the take, for the overlays over it. `screen` is the screen recording's size. */

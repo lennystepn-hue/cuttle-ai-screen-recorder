@@ -325,6 +325,22 @@ describe('motion', () => {
     expect(p.overlays[0]).toEqual({ id: 'o1', src: 'motion/callouts/index.html', at: 4.2, duration: 6, params: {}, network: false, enabled: true });
   });
 
+  it('reads the transition page into any scene, with its defaults, and refuses one too long or without a page', () => {
+    const p = ProjectSchema.parse({
+      ...minimal,
+      scenes: [
+        { type: 'card', title: 'A', duration: 2 },
+        { type: 'clip', from: 0, to: 4, transition: { src: 'motion/fold/index.html' } },
+        { type: 'card', title: 'B', duration: 2, transition: { src: 'motion/fold/index.html', duration: 1.5, params: { direction: 'right' }, enabled: false } },
+      ],
+    });
+    expect(p.scenes[1]!.transition).toEqual({ src: 'motion/fold/index.html', params: {}, network: false, duration: 0.8, enabled: true });
+    expect(p.scenes[2]!.transition).toEqual({ src: 'motion/fold/index.html', params: { direction: 'right' }, network: false, duration: 1.5, enabled: false });
+    expect(p.scenes[0]!.transition).toBeUndefined();
+    expect(pathsOf({ ...minimal, scenes: [{ type: 'card', title: 'A', duration: 2, transition: { src: 'a.html', duration: 5 } }] })).toEqual(['scenes.0.transition.duration']);
+    expect(pathsOf({ ...minimal, scenes: [{ type: 'card', title: 'A', duration: 2, transition: { duration: 1 } }] })).toEqual(['scenes.0.transition.src']);
+  });
+
   it('reads motion blur with its defaults, and refuses too few samples and a shutter of zero', () => {
     const p = ProjectSchema.parse({
       ...minimal,

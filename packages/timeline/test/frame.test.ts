@@ -137,6 +137,23 @@ describe('crossfades', () => {
     expect(timeline.frameAt(5).layers).toHaveLength(1);
   });
 
+  it('hands a scene\'s transition page the two layers around its cut, with its own clock', () => {
+    const scenes = [JUMP[0], { ...JUMP[1], transition: { src: 'motion/fold/index.html', duration: 0.8 } }, JUMP[2]];
+    const paged = createTimeline(project({ transition: { enabled: false } }, { scenes }), { screenSize });
+    expect(paged.frameAt(9.5).transition).toBeUndefined();
+    const into = paged.frameAt(9.7);
+    expect(into.layers.map((layer) => [layer.index, layer.sourceTime])).toEqual([
+      [0, 19.7],
+      [1, 21],
+    ]);
+    expect(into.transition).toEqual({ sceneIndex: 1, key: 'transition:1', start: 9.6, local: 0.1, duration: 0.8 });
+    expect(paged.frameAt(10.3).transition?.local).toBeCloseTo(0.7, 6);
+    // the next boundary has no page: a cut, as the look says
+    expect(paged.frameAt(19.95).layers).toHaveLength(1);
+    // the look's crossfade elsewhere carries no page
+    expect(timeline.frameAt(9.9).transition).toBeUndefined();
+  });
+
   it('blends the outgoing and incoming scenes around a boundary', () => {
     const before = timeline.frameAt(9.9).layers;
     expect(before.map((l) => l.index)).toEqual([0, 1]);

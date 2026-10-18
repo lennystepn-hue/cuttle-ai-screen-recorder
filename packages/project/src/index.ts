@@ -32,6 +32,7 @@ export {
   type Music,
   type Sound,
   type MotionScene,
+  type SceneTransition,
   type ClipScene,
   type CursorShape,
   type CursorStyle,

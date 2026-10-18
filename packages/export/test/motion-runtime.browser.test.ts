@@ -18,7 +18,7 @@ const INIT: MotionInit = {
 type Page = Window &
   typeof globalThis & {
     cuttle: CuttleApi;
-    __cuttleDraw(ms: number, view?: import('../src/motion/runtime').MotionView): Promise<number>;
+    __cuttleDraw(ms: number, view?: import('../src/motion/runtime').MotionView | null, between?: { from: string; to: string }): Promise<number>;
     __cuttleReady(): Promise<void>;
     __cuttleErrors: string[];
     __cuttleSounds: import('../src/motion/runtime').PageSound[];
@@ -199,6 +199,33 @@ describe('the motion runtime', () => {
     await expect(win.cuttle.take.frame(-1)).rejects.toThrow('no frame at -1');
     // without a recording there is nothing to read
     await expect(page('', '').cuttle.take.frame(1)).rejects.toThrow('no screen recording');
+  });
+
+  it('gives a transition page the frames it goes between before it draws, and how far it is', async () => {
+    // two raw frames at the page's size: red and blue
+    const raw = (rgb: number[]) => {
+      const data = new Uint8Array(INIT.width * INIT.height * 4);
+      for (let i = 0; i < data.length; i += 4) data.set([...rgb, 255], i);
+      return URL.createObjectURL(new Blob([data]));
+    };
+    const win = page(
+      '',
+      `cuttle.onFrame((t) => {
+         const g = new OffscreenCanvas(1, 1).getContext('2d');
+         const colour = (bitmap) => (g.drawImage(bitmap, 0, 0), [...g.getImageData(0, 0, 1, 1).data].slice(0, 3));
+         seen.push({ t, progress: cuttle.progress, from: cuttle.from && [cuttle.from.width, cuttle.from.height, ...colour(cuttle.from)], to: cuttle.to && colour(cuttle.to) });
+       });`,
+      { ...INIT, transition: true },
+    );
+    expect([win.cuttle.from, win.cuttle.to, win.cuttle.progress]).toEqual([null, null, 0]);
+    await win.__cuttleDraw(500, null, { from: raw([255, 0, 0]), to: raw([0, 0, 255]) });
+    await win.__cuttleDraw(1500, null, { from: raw([0, 255, 0]), to: raw([0, 0, 255]) });
+    expect(win.seen).toEqual([
+      { t: 0.5, progress: 0.25, from: [320, 180, 255, 0, 0], to: [0, 0, 255] },
+      { t: 1.5, progress: 0.75, from: [320, 180, 0, 255, 0], to: [0, 0, 255] },
+    ]);
+    // a frame that cannot be read fails the draw
+    await expect(win.__cuttleDraw(1600, null, { from: 'blob:nothing', to: raw([0, 0, 0]) })).rejects.toThrow();
   });
 
   it('seeds Math.random: the same seed gives the same numbers', () => {

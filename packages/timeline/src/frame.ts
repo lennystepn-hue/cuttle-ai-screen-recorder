@@ -4,7 +4,7 @@ import { cursorAt, type CursorFrame, type CursorTrack } from './cursor';
 import { clamp } from './easing';
 import { occurrences, rampAmount, type Occurrence } from './occurrences';
 import { TEXT_FADE_SECONDS, activeMasks, activeTexts, badgeFor, type ActiveText } from './overlays';
-import { crossfadeHalf, isContinuousCut, sceneSpans, sourceTimeAt, spanAt, totalDuration, type SceneSpan } from './time';
+import { crossfadeHalf, isContinuousCut, pageTransition, sceneSpans, sourceTimeAt, spanAt, totalDuration, type SceneSpan } from './time';
 import { ZOOM_RAMP_SECONDS, zoomRectAt } from './zoom';
 
 /** A motion overlay on a clip's frame: which one, and where its own clock is. */
@@ -42,9 +42,24 @@ export interface SceneFrame {
   cursor?: CursorFrame;
 }
 
+/** A scene's transition page while it plays: the scene it goes into, and where its clock is. */
+export interface ActiveTransition {
+  /** The scene it goes into, its place in the project's `scenes`. */
+  sceneIndex: number;
+  /** `transition:<sceneIndex>`: a scene is gone into once. */
+  key: string;
+  /** Where it starts (output seconds), how far into it the frame is, and how long it lasts. */
+  start: number;
+  local: number;
+  duration: number;
+}
+
 export interface RenderState {
   t: number;
+  /** One layer, or two during a crossfade or a transition (the outgoing one first). */
   layers: SceneFrame[];
+  /** The transition page that draws this frame from the two layers, instead of their crossfade. */
+  transition?: ActiveTransition;
   /** The caption shown over the frame, when captions are on and someone speaks. */
   caption?: ActiveCaption;
 }
@@ -173,22 +188,27 @@ export function createTimeline(project: CuttleProject, opts: TimelineOptions): T
       span = following;
     }
 
+    /** The two layers between `a` and `b`, and the transition page that draws them when `b` has one. */
+    const between = (a: SceneSpan, b: SceneSpan, half: number): RenderState => {
+      const start = round(a.end - half);
+      const mix = (time - (a.end - half)) / (2 * half);
+      const state: RenderState = { t: time, layers: [sceneFrame(a, time, 1 - mix), sceneFrame(b, time, mix)] };
+      if (pageTransition(a, b, project.look.transition)) {
+        state.transition = { sceneIndex: b.sceneIndex, key: `transition:${b.sceneIndex}`, start, local: round(time - start), duration: round(2 * half) };
+      }
+      return state;
+    };
+
     const next = spans[span.index + 1];
     if (next) {
       const half = halfBetween(span, next);
-      if (half > 0 && time > span.end - half) {
-        const mix = (time - (span.end - half)) / (2 * half);
-        return { t: time, layers: [sceneFrame(span, time, 1 - mix), sceneFrame(next, time, mix)] };
-      }
+      if (half > 0 && time > span.end - half) return between(span, next, half);
     }
 
     const prev = spans[span.index - 1];
     if (prev) {
       const half = halfBetween(prev, span);
-      if (half > 0 && time < span.start + half) {
-        const mix = (time - (span.start - half)) / (2 * half);
-        return { t: time, layers: [sceneFrame(prev, time, 1 - mix), sceneFrame(span, time, mix)] };
-      }
+      if (half > 0 && time < span.start + half) return between(prev, span, half);
     }
 
     return { t: time, layers: [sceneFrame(span, time, 1)] };

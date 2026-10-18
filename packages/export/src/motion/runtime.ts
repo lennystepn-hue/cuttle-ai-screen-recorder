@@ -74,6 +74,8 @@ export interface MotionInit {
   take: TakeData | null;
   /** The script that reads the take's frames (`TAKE_WORKER`; a test gives its own). */
   takeWorker?: string;
+  /** A transition page: each frame comes with the outgoing and the incoming frame (`cuttle.from`, `cuttle.to`). */
+  transition?: boolean;
 }
 
 /** A point of the screen recording in the frame: output px, and whether the frame shows it. */
@@ -139,6 +141,14 @@ export interface CuttleApi {
   ready(promise: Promise<unknown>): void;
   /** The take (empty lists when the item has no take). */
   readonly take: CuttleTake;
+  /**
+   * A transition page's outgoing and incoming frame for the frame being drawn (the output's size,
+   * opaque; null in other pages and before the first frame), and how far it is from one to the other
+   * (0 to 1, as `time / duration`). Do not close them: they are replaced each frame.
+   */
+  readonly from: ImageBitmap | null;
+  readonly to: ImageBitmap | null;
+  readonly progress: number;
   /**
    * Asks for a sound (a built-in, as `cuttle sound list` names them, or a file of the project) at `at`
    * seconds into this item, or at `videoTime` (an output second); without either, now. Ask when the
@@ -320,7 +330,25 @@ export function motionRuntime(init: MotionInit): void {
   const sounds: PageSound[] = [];
   page.__cuttleSounds = sounds;
 
+  // a transition's two frames: raw RGBA at the page's size, fetched before each frame is drawn
+  let from: ImageBitmap | null = null;
+  let to: ImageBitmap | null = null;
+  const bitmapOf = async (url: string): Promise<ImageBitmap> => {
+    const response = await fetch(url);
+    if (!response.ok) throw new Error(`a transition's frame could not be read (${response.status})`);
+    return createImageBitmap(new ImageData(new Uint8ClampedArray(await response.arrayBuffer()), init.width, init.height));
+  };
+
   const api: CuttleApi = {
+    get from() {
+      return from;
+    },
+    get to() {
+      return to;
+    },
+    get progress() {
+      return init.duration > 0 ? Math.min(1, Math.max(0, now / 1000 / init.duration)) : 1;
+    },
     get time() {
       return now / 1000;
     },
@@ -380,9 +408,21 @@ export function motionRuntime(init: MotionInit): void {
   /**
    * Moves the clock to `ms` (never back) and draws: due timers in order, one animation frame (and
    * the draws it returns promises for), every animation to its time. `next` is the frame's view of
-   * the take (an overlay's). Answers with the draw's number, which the marker shows.
+   * the take (an overlay's); `between`, a transition's two frames (their URLs), which become
+   * `cuttle.from` and `cuttle.to` first. Answers with the draw's number, which the marker shows.
    */
-  page.__cuttleDraw = (ms: number, next?: MotionView): Promise<number> => {
+  page.__cuttleDraw = (ms: number, next?: MotionView | null, between?: { from: string; to: string }): Promise<number> => {
+    if (!between) return draw(ms, next);
+    return Promise.all([bitmapOf(between.from), bitmapOf(between.to)]).then(([outgoing, incoming]) => {
+      from?.close();
+      to?.close();
+      from = outgoing;
+      to = incoming;
+      return draw(ms, next);
+    });
+  };
+
+  const draw = (ms: number, next?: MotionView | null): Promise<number> => {
     if (next) view = next;
     sight();
     const target = Math.max(now, ms);

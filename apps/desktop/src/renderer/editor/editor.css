@@ -328,6 +328,20 @@ button.chip-status:hover {
   grid-template-columns: 1fr 1fr;
   gap: 8px 12px;
 }
+/* the transition a scene is gone into with: a part of its panel */
+.transition-in {
+  display: grid;
+  gap: 10px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+  justify-items: start;
+}
+.transition-in > * {
+  justify-self: stretch;
+}
+.transition-in > button {
+  justify-self: start;
+}
 .hint {
   color: var(--muted);
   font-size: var(--size-s);

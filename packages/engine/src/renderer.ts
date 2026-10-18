@@ -42,6 +42,11 @@ export interface FrameSources {
   motion: Map<number, MotionPixels>;
   /** `ActiveOverlay.key` → the frame of a motion overlay; one without a frame is left out. */
   overlays: Map<string, MotionPixels>;
+  /**
+   * `ActiveTransition.key` → the frame a transition page drew from the two layers (`layerPixels`); it
+   * takes the place of their crossfade. Without one, the layers crossfade (its page is not drawn yet).
+   */
+  transitions?: Map<string, MotionPixels>;
 }
 
 export interface Renderer {
@@ -50,6 +55,12 @@ export interface Renderer {
    * when the WebGL context was lost (create a new renderer after `webglcontextrestored`).
    */
   render(state: RenderState, sources: FrameSources): void;
+  /**
+   * The two layers of a frame between two scenes, each drawn whole: what a transition page is given
+   * (premultiplied RGBA at the output's size, top row first, opaque). Throws like `render`, and when
+   * the frame has one layer. Leaves the canvas as it was.
+   */
+  layerPixels(state: RenderState, sources: FrameSources): [MotionPixels, MotionPixels];
   /** The text overlays the last `render` drew, where they are in the output (for picking one with the pointer). */
   drawnTexts(): readonly DrawnText[];
   /**
@@ -276,19 +287,48 @@ export function createRenderer(canvas: HTMLCanvasElement | OffscreenCanvas, proj
     }
   }
 
+  function begin(what: string): void {
+    if (disposed) throw new Error(`${what}: the renderer was disposed`);
+    // A lost context draws nothing and reports no error: fail loudly instead of exporting black frames.
+    if (gl.isContextLost()) throw new Error(`${what}: the WebGL context was lost`);
+    drawn = [];
+    gl.bindVertexArray(vao);
+    gl.viewport(0, 0, output.width, output.height);
+    gl.enable(gl.BLEND);
+    gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+    gl.clearColor(0, 0, 0, 1);
+  }
+
+  /** One layer drawn whole into the offscreen target and read back, top row first. */
+  function readLayer(layer: SceneFrame, sources: FrameSources, t: number): MotionPixels {
+    layerTarget ??= createRenderTarget(gl, output);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, layerTarget.framebuffer);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+    drawLayer(layer, sources, t);
+    const { width, height } = output;
+    const bottomUp = new Uint8Array(width * height * 4);
+    gl.readPixels(0, 0, width, height, gl.RGBA, gl.UNSIGNED_BYTE, bottomUp);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    const data = new Uint8Array(bottomUp.length);
+    const row = width * 4;
+    for (let y = 0; y < height; y++) data.set(bottomUp.subarray((height - 1 - y) * row, (height - y) * row), y * row);
+    return { width, height, data };
+  }
+
   return {
     render(state, sources) {
-      if (disposed) throw new Error('render: the renderer was disposed');
-      // A lost context draws nothing and reports no error: fail loudly instead of exporting black frames.
-      if (gl.isContextLost()) throw new Error('render: the WebGL context was lost');
-      drawn = [];
-      gl.bindVertexArray(vao);
-      gl.viewport(0, 0, output.width, output.height);
-      gl.enable(gl.BLEND);
-      gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+      begin('render');
       gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-      gl.clearColor(0, 0, 0, 1);
       gl.clear(gl.COLOR_BUFFER_BIT);
+      // a transition page's frame takes the place of the two layers' crossfade
+      const between = state.transition ? sources.transitions?.get(state.transition.key) : undefined;
+      if (between) {
+        background.draw(state.t);
+        drawMotion(between, `transition into scene ${state.transition!.sceneIndex}`);
+        if (state.caption) drawCaptionOver(state.caption);
+        sprites.endFrame();
+        return;
+      }
       const [first, ...rest] = state.layers;
       if (first) drawLayer(first, sources, state.t);
       for (const layer of rest) {
@@ -302,6 +342,14 @@ export function createRenderer(canvas: HTMLCanvasElement | OffscreenCanvas, proj
       }
       if (state.caption) drawCaptionOver(state.caption);
       sprites.endFrame();
+    },
+    layerPixels(state, sources) {
+      begin('layerPixels');
+      const [outgoing, incoming] = state.layers;
+      if (!outgoing || !incoming) throw new Error('layerPixels: the frame shows one scene, not two');
+      const pixels: [MotionPixels, MotionPixels] = [readLayer(outgoing, sources, state.t), readLayer(incoming, sources, state.t)];
+      sprites.endFrame();
+      return pixels;
     },
     drawnTexts: () => drawn,
     setScenes(next) {

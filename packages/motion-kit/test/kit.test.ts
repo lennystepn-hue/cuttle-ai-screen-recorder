@@ -29,8 +29,9 @@ describe('the motion kit', () => {
     expect(withImportMap('<h1>Hi</h1>')).toBe(`${map}<h1>Hi</h1>`);
   });
 
-  it('has a page for every template, and each says when it is one (a scene or an overlay)', () => {
-    expect(MOTION_TEMPLATES.map((template) => template.name)).toEqual(['title', 'end-card', 'code-typing', 'device-3d', 'lower-third', 'click-callouts', 'kinetic-captions']);
+  it('has a page for every template, and each says when it is one (a scene, an overlay or a transition)', () => {
+    expect(MOTION_TEMPLATES.map((template) => template.name)).toEqual(['title', 'end-card', 'code-typing', 'device-3d', 'fold', 'lower-third', 'click-callouts', 'kinetic-captions']);
+    expect(MOTION_TEMPLATES.find((template) => template.name === 'fold')?.kind).toBe('transition');
     for (const template of MOTION_TEMPLATES) {
       const file = `${TEMPLATES}${template.name}/index.html`;
       expect(existsSync(file), template.name).toBe(true);
@@ -53,7 +54,7 @@ describe('the motion kit', () => {
       expect(html, template.name).toContain('params.sounds !== false');
       for (const name of asked) expect(names.has(name), `${template.name}: ${name}`).toBe(true);
     }
-    expect(making).toEqual(['title', 'end-card', 'code-typing', 'device-3d', 'lower-third', 'click-callouts']);
+    expect(making).toEqual(['title', 'end-card', 'code-typing', 'device-3d', 'fold', 'lower-third', 'click-callouts']);
   });
 
   it('has a page for every music template that composes with cuttle.music and declares its params', () => {

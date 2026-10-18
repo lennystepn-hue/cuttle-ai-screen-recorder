@@ -32,6 +32,25 @@ describe('the showings of motion items', () => {
       { kind: 'overlay', index: 0, showings: [{ start: 8, duration: 2 }, { start: 13, duration: 2 }] },
     ]);
   });
+
+  it('gives a transition the seconds around the cut into its scene, and none where there is no cut to go through', () => {
+    const fold = { src: 'motion/fold/index.html', duration: 1 };
+    const folded = project({
+      scenes: [
+        { type: 'motion', id: 's1', src: 'motion/intro/index.html', duration: 2 },
+        { type: 'clip', id: 's2', from: 10, to: 20, transition: fold },
+        { type: 'clip', id: 's3', from: 15, to: 25, transition: fold },
+        { type: 'card', id: 's4', title: 'Cuttle', duration: 3, transition: fold },
+      ],
+    });
+    // into s2 at 2 s, into s3 at 12 s (source 20 to 15: a jump, not a continuous cut) and into the card at 22 s
+    const showings = motionShowings(folded).filter((shown) => shown.kind === 'transition');
+    expect(showings.map(({ index, showings }) => ({ index, showings }))).toEqual([
+      { index: 1, showings: [{ start: 1.5, duration: 1 }] },
+      { index: 2, showings: [{ start: 11.5, duration: 1 }] },
+      { index: 3, showings: [{ start: 21.5, duration: 1 }] },
+    ]);
+  });
 });
 
 describe('the sounds a page asked for, on the video', () => {
@@ -67,7 +86,7 @@ describe('the sounds a page asked for, on the video', () => {
   });
 
   it('asks no page while the sound or the effects are off, or without pages', async () => {
-    const pages = { root: '.', scenes: { 0: 'motion/intro/index.html' }, overlays: {} };
+    const pages = { root: '.', scenes: { 0: 'motion/intro/index.html' }, overlays: {}, transitions: {} };
     const take = { events: [], words: [], markers: [] };
     expect(await motionSoundCues(video, undefined, take)).toEqual({ cues: [], errors: [], items: [] });
     const off = { ...video, look: { ...video.look, audio: { ...video.look.audio, effects: false } } };

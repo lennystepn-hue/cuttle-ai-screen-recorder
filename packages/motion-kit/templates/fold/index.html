@@ -1,0 +1,146 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Fold</title>
+    <!-- A transition: the outgoing frame is turned over its middle like a page. One half lifts and
+         folds over onto the other, in 3D, showing the incoming frame beneath it; its back is the
+         rest of the incoming frame, so when it lands the new scene is whole. A shadow runs ahead of
+         the fold, and a whoosh goes with it (the "sounds" param). -->
+    <script type="application/json" id="cuttle-params">
+      [
+        { "name": "direction", "label": "Turns towards", "type": "select", "default": "left", "options": ["left", "right"] },
+        { "name": "depth", "label": "Depth of the turn", "type": "number", "default": 0.5, "min": 0.2, "max": 1.5 },
+        { "name": "sounds", "label": "Sounds", "type": "bool", "default": true }
+      ]
+    </script>
+    <style>
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        overflow: hidden;
+        background: #000;
+      }
+      canvas {
+        display: block;
+      }
+    </style>
+  </head>
+  <body>
+    <script type="module">
+      import * as THREE from 'three';
+      import { ease } from 'cuttle';
+
+      const { params, size, duration } = cuttle;
+      const w = size.width;
+      const h = size.height;
+      // turning left: the right half turns over the middle onto the left one; right: the other way
+      const toLeft = params.direction !== 'right';
+      const depth = Math.min(1.5, Math.max(0.2, Number(params.depth) || 0.5));
+
+      const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+      renderer.setPixelRatio(1);
+      renderer.setSize(w, h);
+      renderer.outputColorSpace = THREE.SRGBColorSpace;
+      document.body.appendChild(renderer.domElement);
+      const scene = new THREE.Scene();
+      // a camera that shows the plane z = 0 pixel for pixel, with perspective for what leaves it
+      const fov = 30;
+      const camera = new THREE.PerspectiveCamera(fov, w / h, 1, 20 * w);
+      camera.position.set(0, 0, h / 2 / Math.tan(THREE.MathUtils.degToRad(fov / 2)) / depth);
+      camera.lookAt(0, 0, 0);
+      camera.fov = 2 * THREE.MathUtils.radToDeg(Math.atan(h / 2 / camera.position.z));
+      camera.updateProjectionMatrix();
+
+      const texture = () => {
+        const map = new THREE.Texture();
+        map.colorSpace = THREE.SRGBColorSpace;
+        map.flipY = false;
+        map.generateMipmaps = false;
+        map.minFilter = THREE.LinearFilter;
+        return map;
+      };
+      const fromMap = texture();
+      const toMap = texture();
+
+      /** A plane `width` px wide showing the part `u0`–`u1` of a frame (top row at v = 0), its left edge at x = 0. */
+      function half(map, u0, u1) {
+        const geometry = new THREE.PlaneGeometry(w / 2, h);
+        geometry.translate(w / 4, 0, 0);
+        const uv = geometry.attributes.uv;
+        for (let i = 0; i < uv.count; i++) uv.setXY(i, u0 + uv.getX(i) * (u1 - u0), 1 - uv.getY(i));
+        return new THREE.Mesh(geometry, new THREE.MeshBasicMaterial({ map, toneMapped: false }));
+      }
+
+      // what stays: the half the page lands on (the outgoing frame) and the half it uncovers (the incoming one)
+      const stays = half(fromMap, toLeft ? 0 : 0.5, toLeft ? 0.5 : 1);
+      stays.position.x = toLeft ? -w / 2 : 0;
+      const uncovered = half(toMap, toLeft ? 0.5 : 0, toLeft ? 1 : 0.5);
+      uncovered.position.x = toLeft ? 0 : -w / 2;
+      // the page: the outgoing half on its front, the incoming frame's other half on its back, turning about the middle
+      const page = new THREE.Group();
+      const front = half(fromMap, toLeft ? 0.5 : 0, toLeft ? 1 : 0.5);
+      const back = half(toMap, toLeft ? 0 : 0.5, toLeft ? 0.5 : 1);
+      // the back lies where the front does, facing the other way
+      back.rotation.y = Math.PI;
+      if (toLeft) back.position.x = w / 2;
+      else front.position.x = -w / 2;
+      page.add(front, back);
+      page.position.z = 0.5;
+
+      // a shadow on what the page is about to cover, and one it casts on what it leaves
+      const shade = (stops) => {
+        const canvas = document.createElement('canvas');
+        canvas.width = 256;
+        canvas.height = 2;
+        const g = canvas.getContext('2d');
+        const gradient = g.createLinearGradient(0, 0, 256, 0);
+        for (const [at, alpha] of stops) gradient.addColorStop(at, `rgba(0,0,0,${alpha})`);
+        g.fillStyle = gradient;
+        g.fillRect(0, 0, 256, 2);
+        const map = new THREE.CanvasTexture(canvas);
+        const mesh = new THREE.Mesh(new THREE.PlaneGeometry(w / 2, h), new THREE.MeshBasicMaterial({ map, transparent: true, depthWrite: false, toneMapped: false }));
+        mesh.position.z = 0.25;
+        return mesh;
+      };
+      // darkest at the fold, fading away from it
+      const ahead = shade(toLeft ? [[0, 0], [1, 0.75]] : [[0, 0.75], [1, 0]]);
+      ahead.position.x = toLeft ? -w / 4 : w / 4;
+      const behind = shade(toLeft ? [[0, 0.6], [1, 0]] : [[0, 0], [1, 0.6]]);
+      behind.position.x = toLeft ? w / 4 : -w / 4;
+      scene.add(stays, uncovered, ahead, behind, page);
+
+      if (params.sounds !== false) cuttle.sound('whoosh', { at: duration * 0.5, volume: 0.6 });
+
+      const shown = { from: null, to: null };
+      cuttle.onFrame(() => {
+        const { from, to } = cuttle;
+        // checked alone (no frames to go between), the page draws nothing
+        if (!from || !to) return renderer.clear();
+        if (shown.from !== from) {
+          fromMap.image = from;
+          fromMap.needsUpdate = true;
+          shown.from = from;
+        }
+        if (shown.to !== to) {
+          toMap.image = to;
+          toMap.needsUpdate = true;
+          shown.to = to;
+        }
+        const p = ease.inOut(cuttle.progress);
+        const angle = p * Math.PI;
+        page.rotation.y = toLeft ? -angle : angle;
+        // the page darkens as it stands on edge, and lifts a little off the table
+        const edge = Math.sin(angle);
+        front.material.color.setScalar(1 - 0.45 * edge * (toLeft ? 1 : 0.8));
+        back.material.color.setScalar(1 - 0.45 * edge);
+        page.position.z = 0.5 + edge * 40 * depth;
+        // the shadows: strongest while the page stands, gone when it lies flat
+        ahead.material.opacity = edge * (p < 0.5 ? 1 : 1 - (p - 0.5) * 1.6);
+        behind.material.opacity = edge * (p < 0.5 ? 1 - p : 0.5);
+        renderer.render(scene, camera);
+      });
+    </script>
+  </body>
+</html>

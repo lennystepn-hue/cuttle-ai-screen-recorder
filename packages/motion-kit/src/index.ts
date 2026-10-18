@@ -67,8 +67,8 @@ export const KIT_FONTS: readonly KitFont[] = [
 /** A template `cuttle motion new` copies: a scene of its own, or an overlay over the clips. */
 export interface MotionTemplate {
   name: string;
-  kind: 'scene' | 'overlay';
-  /** Seconds it lasts when added: a scene's output seconds, an overlay's source seconds. */
+  kind: 'scene' | 'overlay' | 'transition';
+  /** Seconds it lasts when added: a scene's or a transition's output seconds, an overlay's source seconds. */
   duration: number;
   /** An overlay that belongs over the whole take (it follows the take itself). */
   whole?: boolean;
@@ -80,6 +80,7 @@ export const MOTION_TEMPLATES: readonly MotionTemplate[] = [
   { name: 'end-card', kind: 'scene', duration: 4, description: 'the end card: a logo or monogram that lands with a hit, a line, the URL in a pill that types itself (keys, a ding), a call to action' },
   { name: 'code-typing', kind: 'scene', duration: 6, description: 'a code editor that types a file with syntax colours, line by line, keys clattering' },
   { name: 'device-3d', kind: 'scene', duration: 5, description: 'a laptop or tablet in 3D whose screen plays the take: it turns in as the lid opens, then flies into the screen' },
+  { name: 'fold', kind: 'transition', duration: 0.9, description: 'the way into a scene: the outgoing frame turns over its middle like a page, onto the incoming one' },
   { name: 'lower-third', kind: 'overlay', duration: 4, description: 'a name and a role in a bar that wipes in (a swoosh) and out' },
   { name: 'click-callouts', kind: 'overlay', duration: 0, whole: true, description: 'a ring, a number and a pop at every click the video shows, on the click' },
   { name: 'kinetic-captions', kind: 'overlay', duration: 0, whole: true, description: 'the spoken words, word by word, the current one in the accent colour' },

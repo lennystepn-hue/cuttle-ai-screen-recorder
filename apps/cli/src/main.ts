@@ -157,7 +157,7 @@ export async function runCli(argv: readonly string[], streams?: Streams): Promis
 
   program
     .command('suggest')
-    .description('propose scenes (quiet start and end trimmed, idle cut, waiting sped up, cropped to the content), a zoom on the answer, zooms on dialogs, zooms that follow typing and zooms on clicks')
+    .description("propose scenes (quiet start and end trimmed, idle cut, waiting sped up, cropped to the content), a zoom on the answer, zooms on dialogs, zooms that follow typing and zooms on clicks, and the script's steps' titles and zooms")
     .option('--claude [cwd]', "read Claude Code's transcript for a take without Claude markers (default: here)")
     .option('--no-zoom', 'no zooms (neither on the answer, nor on dialogs, nor on typing, nor on clicks)')
     .option('--no-crop', 'no crop to the content (a browser\'s page without its tabs and bars)')
@@ -166,12 +166,14 @@ export async function runCli(argv: readonly string[], streams?: Streams): Promis
     .option('--no-dialog-zooms', 'no zooms on dialogs')
     .option('--no-typing-zooms', 'no zooms that follow typing')
     .option('--no-click-zooms', 'no zooms on clicks (the answer zoom stays)')
+    .option('--no-step-zooms', "no zooms on where the script's steps happen")
+    .option('--no-step-titles', "no titles for the script's steps")
     .option('--no-speech', 'leave the speech out: no filler, pause or spoken retake cuts, and speech does not keep a stretch')
     .option('--no-transcribe', 'do not transcribe the mic first (when it has no transcript and a speech model is there)')
     .option('--length <seconds>', 'fit the video to this length: what rests is cut, never speech, clicks or typing', positive)
     .option('--dry-run', 'print the suggestion, leave cuttle.json as it is')
     .action(
-      action((output, project, { mask, ...options }: { claude?: string | true; zoom: boolean; crop: boolean; privacy: boolean; mask: string[]; dialogZooms: boolean; typingZooms: boolean; clickZooms: boolean; speech: boolean; transcribe: boolean; length?: number; dryRun?: boolean }) =>
+      action((output, project, { mask, ...options }: { claude?: string | true; zoom: boolean; crop: boolean; privacy: boolean; mask: string[]; dialogZooms: boolean; typingZooms: boolean; clickZooms: boolean; stepZooms: boolean; stepTitles: boolean; speech: boolean; transcribe: boolean; length?: number; dryRun?: boolean }) =>
         suggestCommand(project, { ...options, ...(mask.length > 0 && { maskWords: mask }) }, output),
       ),
     );

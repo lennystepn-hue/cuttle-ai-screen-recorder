@@ -4,6 +4,7 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import { rename, rm, writeFile } from 'node:fs/promises';
 import { applyLengthFit, applyPrivacy, applySpeechEdits, ffmpegPath, probeScreen, readScreenTake, streamSeconds, suggestProject, transcribeTake } from '@cuttle/core';
+import { templatePage } from '@cuttle/motion-kit/files';
 import {
   PEAKS_SAMPLE_RATE,
   PeakFolder,
@@ -105,7 +106,9 @@ async function run(id: number, job: MediaJob): Promise<JobResult | undefined> {
     case 'suggest': {
       // the app transcribes after the cut, as a step of its own (`transcribe`, `speech-edits`); the
       // screen's text is read in a step of its own too (P4-M5b): the cut leaves the privacy masks be
-      await suggestProject(job.input, { transcribe: false, privacy: false, onStatus: () => reply({ id, progress: 0 }) });
+      // a step title in a motion template (the script's `motion`) takes the kit's page next to this bundle
+      const motionPage = (template: string) => templatePage(job.input, template, import.meta.url);
+      await suggestProject(job.input, { transcribe: false, privacy: false, motionPage, onStatus: () => reply({ id, progress: 0 }) });
       return undefined;
     }
     case 'transcribe': {

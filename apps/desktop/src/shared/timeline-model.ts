@@ -3,7 +3,7 @@ import { isFact, type AutoKind, type CuttleProject, type InputEvent, type Marker
 import { occurrences, type SceneSpan } from '@cuttle/timeline';
 import { formatDuration } from './format';
 
-export type OverlayKind = 'zoom' | 'mask' | 'caption';
+export type OverlayKind = 'zoom' | 'mask' | 'caption' | 'motion';
 
 export interface SceneBlock {
   /** The scene's index in the project's `scenes`. */
@@ -47,7 +47,7 @@ export interface CutNotch {
 
 export interface OverlayBlock {
   kind: OverlayKind;
-  /** Index in the project's `zooms`, `masks` or `texts`. */
+  /** Index in the project's `zooms`, `masks`, `texts` or `overlays`. */
   item: number;
   /** The item's id (`#<index>` for one without). */
   id: string;
@@ -241,6 +241,7 @@ export function timelineModel(project: CuttleProject, spans: readonly SceneSpan[
       zoom: lane('zoom', project.zooms, spans, (zoom) => [zoom.at, zoom.at + zoom.duration], () => 'Zoom', (zoom) => (zoom.moves ?? []).map((move) => move.at)),
       mask: lane('mask', project.masks, spans, (mask) => [mask.from, mask.to], () => 'Mask', (mask) => (mask.moves ?? []).map((move) => move.at)),
       caption: lane('caption', project.texts, spans, (text) => [text.at, text.at + text.duration], (text) => text.text),
+      motion: lane('motion', project.overlays, spans, (overlay) => [overlay.at, overlay.at + overlay.duration], (overlay) => motionName(overlay.src)),
     },
     markers: markers
       .flatMap((marker) => outputTimesOf(spans, marker.t).map((t) => ({ t, source: marker.t, kind: marker.kind, ...(marker.label !== undefined && { label: marker.label }) })))
@@ -349,6 +350,8 @@ export function waveformColumns(peaks: Peaks, spans: readonly SceneSpan[], from:
 }
 
 const count = (n: number, one: string) => `${n} ${one}${n === 1 ? '' : 's'}`;
+/** What people call an overlay of each lane. */
+const OVERLAY_NOUNS: Record<OverlayKind, string> = { zoom: 'zoom', mask: 'mask', caption: 'caption', motion: 'motion overlay' };
 const list = (items: readonly string[]) => (items.length < 2 ? items.join('') : `${items.slice(0, -1).join(', ')} and ${items.at(-1)}`);
 
 /**
@@ -361,10 +364,10 @@ export function exportChecks(project: CuttleProject, spans: readonly SceneSpan[]
   const checks: string[] = [];
   const off = project.masks.filter((mask) => !mask.enabled).length;
   if (off > 0) checks.push(`${count(off, 'mask')} ${off === 1 ? 'is off: what it covers shows' : 'are off: what they cover shows'} in the video.`);
-  const cut = (['zoom', 'mask', 'caption'] as const).filter((kind) => model.lanes[kind].cutOut > 0);
+  const cut = (['zoom', 'mask', 'caption', 'motion'] as const).filter((kind) => model.lanes[kind].cutOut > 0);
   const cutTotal = cut.reduce((sum, kind) => sum + model.lanes[kind].cutOut, 0);
   if (cutTotal > 0) {
-    checks.push(`${list(cut.map((kind) => count(model.lanes[kind].cutOut, kind)))} ${cutTotal === 1 ? 'is cut out: no clip shows it' : 'are cut out: no clip shows them'}.`);
+    checks.push(`${list(cut.map((kind) => count(model.lanes[kind].cutOut, OVERLAY_NOUNS[kind])))} ${cutTotal === 1 ? 'is cut out: no clip shows it' : 'are cut out: no clip shows them'}.`);
   }
   const shortest = new Map<number, number>();
   for (const block of model.lanes.caption.blocks) shortest.set(block.item, Math.min(shortest.get(block.item) ?? Infinity, block.end - block.start));

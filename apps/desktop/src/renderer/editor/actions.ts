@@ -1,5 +1,6 @@
 // The editor's actions on the document (the timeline bar, the keys, the command menu and the tools
 // call these): each is one step to undo. Where the playhead stands decides where things go.
+import { MOTION_TEMPLATES } from '@cuttle/motion-kit';
 import type { ClipScene, CuttleProject, Scene } from '@cuttle/project';
 import { clickZooms, sceneSpans, shownClicks, TEXT_FADE_SECONDS, type SceneSpan } from '@cuttle/timeline';
 import type { Command, ListName } from '../../shared/document';
@@ -12,7 +13,7 @@ import { currentPlayer, documentProject, select, setTool, store, type Selection,
 export const NEW_OVERLAY_SECONDS = 3;
 export const SPEEDS = [1, 2, 4, 8, 12, 20] as const;
 
-export const LIST_OF: Record<Selection['kind'], ListName> = { scene: 'scenes', zoom: 'zooms', mask: 'masks', caption: 'texts', cut: 'cuts', crop: 'scenes' };
+export const LIST_OF: Record<Selection['kind'], ListName> = { scene: 'scenes', zoom: 'zooms', mask: 'masks', caption: 'texts', motion: 'overlays', cut: 'cuts', crop: 'scenes' };
 /** What people call a scene of each type. */
 const SCENE_NOUNS: Record<Scene['type'], string> = { clip: 'clip', still: 'page', card: 'card', motion: 'motion scene' };
 const NAMES: Record<ListName, string> = { scenes: 'scene', zooms: 'zoom', masks: 'mask', texts: 'caption', overlays: 'motion overlay', cuts: 'cut' };
@@ -129,7 +130,8 @@ function addAndSelect(command: Extract<Command, { type: 'add' }>, kind: Selectio
   if (added) select({ kind, id: added });
 }
 
-const itemIds = (project: CuttleProject | undefined) => (project ? [...project.scenes, ...project.zooms, ...project.masks, ...project.texts].map((item) => item.id!).filter(Boolean) : []);
+const itemIds = (project: CuttleProject | undefined) =>
+  project ? [...project.scenes, ...project.zooms, ...project.masks, ...project.texts, ...project.overlays].map((item) => item.id!).filter(Boolean) : [];
 
 /** A zoom at the playhead: 3 output seconds (so it rests at full zoom for a while), on the middle half of the screen; then the source view to place it. */
 export function addZoom(rect?: number[]): void {
@@ -239,6 +241,46 @@ export async function addPage(): Promise<void> {
   addAndSelect({ type: 'add', list: 'scenes', index: insertIndex(), item: { type: 'still', image: chosen.path, duration: 4, motion: 'scroll', frame: 'browser-light' } }, 'scene', 'Add page');
 }
 
+/** "lower-third" (or "lower-third-2", a second copy) as a label: "Lower third". */
+export const templateLabel = (name: string) => `${name.charAt(0).toUpperCase()}${name.slice(1).replace(/-\d+$/, '').replace(/-/g, ' ')}`;
+
+/**
+ * A motion template of the kit: its page is copied into the project's `motion/` folder, and it goes
+ * in as a scene after the scene under the playhead, or as an overlay on the clip there (one that
+ * follows the take, over all the clips). The playhead moves to it.
+ */
+export async function addMotion(name: string): Promise<void> {
+  const template = MOTION_TEMPLATES.find((candidate) => candidate.name === name);
+  const project = documentProject();
+  if (!template || !project) return;
+  if (store.get().doc?.issues) return toast('cuttle.json has a mistake; fix it first (Claude or a text editor), then edit here again.', { tone: 'warning' });
+  const clips = project.scenes.filter((scene): scene is ClipScene => scene.type === 'clip');
+  const place = playheadPlace();
+  if (template.kind === 'overlay' && clips.length === 0) return toast('A motion overlay goes over a clip, and this video has none: add a motion scene instead.', { tone: 'warning' });
+  if (template.kind === 'overlay' && !template.whole && !place?.clip) return toast('A motion overlay goes on a clip: move the playhead onto one.', { tone: 'warning' });
+  let src: string;
+  try {
+    ({ src } = await bridge.invoke('motion:add-template', name));
+  } catch (error) {
+    return toast(`The template could not be copied: ${error instanceof Error ? error.message : String(error)}`, { tone: 'warning' });
+  }
+  const label = templateLabel(src.split('/')[1] ?? name);
+  let command: Extract<Command, { type: 'add' }>;
+  if (template.kind === 'scene') command = { type: 'add', list: 'scenes', index: insertIndex(), item: { type: 'motion', label, src, duration: template.duration } };
+  else if (template.whole) {
+    const at = Math.min(...clips.map((clip) => clip.from));
+    command = { type: 'add', list: 'overlays', item: { label, src, at, duration: Math.max(...clips.map((clip) => clip.to)) - at } };
+  } else {
+    const clip = place!.clip!;
+    const at = place!.source!;
+    command = { type: 'add', list: 'overlays', item: { label, src, at, duration: Math.max(0.1, Math.min(template.duration * clip.speed, clip.to - at)) } };
+  }
+  const before = new Set(itemIds(documentProject()));
+  if (!edit([command], `Add ${label}`)) return;
+  const added = itemIds(documentProject()).find((id) => !before.has(id));
+  if (added) reveal(command.list, added);
+}
+
 /** Replaces a still's image or the background's with one the person picks. */
 export async function chooseImage(purpose: 'still' | 'background', id?: string): Promise<void> {
   const chosen = await bridge.invoke('project:import-image', { purpose });
@@ -247,16 +289,15 @@ export async function chooseImage(purpose: 'still' | 'background', id?: string):
   else edit([{ type: 'look', path: ['background'], value: { preset: 'image', image: chosen.path } }], 'Background image');
 }
 
-/** What selecting an item of each list selects (motion overlays get a lane in P5-M1c). */
-const KIND_OF: Record<ListName, Selection['kind'] | undefined> = { scenes: 'scene', zooms: 'zoom', masks: 'mask', texts: 'caption', overlays: undefined, cuts: 'cut' };
+/** What selecting an item of each list selects. */
+const KIND_OF: Record<ListName, Selection['kind']> = { scenes: 'scene', zooms: 'zoom', masks: 'mask', texts: 'caption', overlays: 'motion', cuts: 'cut' };
 
 /** Selects an item and moves the playhead to where the video first shows it (the toast's "Show"). */
 export function reveal(list: ListName, id: string): void {
   const project = documentProject();
   const item = project?.[list].find((candidate) => candidate.id === id);
   if (!project || !item) return;
-  const kind = KIND_OF[list];
-  if (kind) select({ kind, id });
+  select({ kind: KIND_OF[list], id });
   const spans = sceneSpans(project.scenes, project.cuts);
   const sceneIndex = list === 'scenes' ? project.scenes.indexOf(item as Scene) : -1;
   const at =

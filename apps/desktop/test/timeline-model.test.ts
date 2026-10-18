@@ -86,6 +86,33 @@ describe('timelineModel', () => {
     ]);
   });
 
+  it('draws motion overlays on a lane of their own, named by their page, and counts those no clip shows', () => {
+    const motion = project({
+      scenes: [
+        { type: 'clip', from: 0, to: 4 },
+        { type: 'motion', src: 'motion/title/index.html', duration: 2 },
+      ],
+      overlays: [
+        { src: 'motion/lower-third/index.html', at: 1, duration: 2, label: 'Name' },
+        { src: 'motion/click-callouts/index.html', at: 0, duration: 4 },
+        { src: 'motion/late.html', at: 9, duration: 1 },
+      ],
+    });
+    const motionSpans = sceneSpans(motion.scenes);
+    const lanes = timelineModel(motion, motionSpans, []);
+    expect(lanes.scenes.map((scene) => [scene.kind, scene.title])).toEqual([
+      ['clip', 'Clip'],
+      ['motion', 'title'],
+    ]);
+    // overlapping ones on rows of their own
+    expect(lanes.lanes.motion.blocks.map((block) => [block.title, block.start, block.end, block.row])).toEqual([
+      ['click-callouts', 0, 4, 0],
+      ['Name', 1, 3, 1],
+    ]);
+    expect(lanes.lanes.motion.cutOutItems.map((item) => item.title)).toEqual(['late']);
+    expect(exportChecks(motion, motionSpans)).toEqual(['1 motion overlay is cut out: no clip shows it.']);
+  });
+
   it('pins markers where a clip shows them; a cut-out marker has no pin', () => {
     expect(model.markers.map((pin) => [pin.t, pin.kind])).toEqual([
       [2.5, 'prompt'],

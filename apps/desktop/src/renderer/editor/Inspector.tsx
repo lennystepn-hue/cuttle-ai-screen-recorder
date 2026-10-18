@@ -20,10 +20,14 @@ import {
   type AutoEdits,
   type AutoKind,
   type CuttleProject,
+  type MotionOverlay,
+  type MotionScene,
   type Rect,
 } from '@cuttle/project';
+import type { ParamDeclaration } from '@cuttle/export/motion-params';
 import { sceneSpans, type SceneSpan } from '@cuttle/timeline';
 import type { Command, ListName } from '../../shared/document';
+import type { MotionParams, MotionStatusView } from '../../shared/ipc';
 import { formatDuration, formatSource, formatSpeed, formatTime } from '../../shared/format';
 import {
   BACKGROUND_NAMES,
@@ -40,7 +44,28 @@ import {
   WEBCAM_SHAPE_NAMES,
 } from '../../shared/names';
 import { motionName, outputTimesOf } from '../../shared/timeline-model';
-import { BackgroundIcon, CameraIcon, CardIcon, CheckIcon, ChevronIcon, CopyIcon, CropIcon, FilmIcon, MaskIcon, PageIcon, SelectIcon, SoundIcon, SplitIcon, SubtitlesIcon, TextIcon, TrashIcon, WindowIcon, ZoomIcon } from '../icons';
+import {
+  BackgroundIcon,
+  CameraIcon,
+  CardIcon,
+  CheckIcon,
+  ChevronIcon,
+  CopyIcon,
+  CropIcon,
+  FilmIcon,
+  MaskIcon,
+  MotionIcon,
+  PageIcon,
+  SelectIcon,
+  SoundIcon,
+  SplitIcon,
+  SubtitlesIcon,
+  TextIcon,
+  TrashIcon,
+  WindowIcon,
+  ZoomIcon,
+} from '../icons';
+import { bridge } from '../bridge';
 import { Select as StyledSelect } from '../Select';
 import { chooseImage, cutShownAt, deleteSelection, duplicateSelection, LIST_OF, playheadPlace, reveal, SPEEDS } from './actions';
 import { edit, preview } from './doc';
@@ -722,21 +747,19 @@ function Details({ project, selection }: { project: CuttleProject; selection: Se
     }
     if (scene.type === 'motion') {
       return (
-        <>
-          <Head icon={<CardIcon />} color="var(--motion)" name={scene.label ?? motionName(scene.src)} />
-          <Row label="Label">
-            <TextInput value={scene.label ?? ''} placeholder={motionName(scene.src)} onCommit={(value) => set('scenes', id, { label: value.trim() || undefined }, 'Rename motion scene')} />
-          </Row>
-          <Row label="Page" plain>
-            <span className="path" title={scene.src}>
-              {scene.src}
-            </span>
-          </Row>
-          {inVideo}
-          <Row label="Length (s)">
-            <NumberInput value={scene.duration} min={0.1} onCommit={(duration) => edit([{ type: 'trim', id, duration }], 'Change the length of the motion scene')} />
-          </Row>
-        </>
+        <MotionDetails
+          list="scenes"
+          index={sceneIndex}
+          item={scene}
+          placement={
+            <>
+              {inVideo}
+              <Row label="Length (s)">
+                <NumberInput value={scene.duration} min={0.1} onCommit={(duration) => edit([{ type: 'trim', id, duration }], 'Change the length of the motion scene')} testId="motion-length" />
+              </Row>
+            </>
+          }
+        />
       );
     }
     return (
@@ -757,9 +780,10 @@ function Details({ project, selection }: { project: CuttleProject; selection: Se
   }
 
   /** An overlay's place: in the video (read), its start in source seconds, its length in the video. */
-  const timing = (list: 'zooms' | 'texts' | 'masks', from: number, to: number) => {
+  const timing = (list: 'zooms' | 'texts' | 'masks' | 'overlays', from: number, to: number) => {
     const stretch = stretchOf(project, selection, from, to);
-    const label = list === 'masks' ? 'mask' : list === 'zooms' ? 'zoom' : 'caption';
+    const label = list === 'masks' ? 'mask' : list === 'zooms' ? 'zoom' : list === 'overlays' ? 'motion overlay' : 'caption';
+    const testId = list === 'overlays' ? 'motion' : label;
     return (
       <>
         <Row label="Shows at" note={formatSource(from)}>
@@ -777,14 +801,14 @@ function Details({ project, selection }: { project: CuttleProject; selection: Se
         ) : (
           <div className="grid2">
             <Row label="Start (take s)">
-              <NumberInput value={from} min={0} onCommit={(at) => set(list, id, { at }, `Move ${label}`)} testId={`${label}-at`} />
+              <NumberInput value={from} min={0} onCommit={(at) => set(list, id, { at }, `Move ${label}`)} testId={`${testId}-at`} />
             </Row>
             <Row label="Length (s)" note={stretch && stretch.speed !== 1 ? `${formatDuration(to - from)} src` : undefined}>
               <NumberInput
                 value={stretch ? (to - from) / stretch.speed : to - from}
                 min={0.05}
                 onCommit={(length) => set(list, id, { duration: length * (stretch?.speed ?? 1) }, `Change the length of the ${label}`)}
-                testId={`${label}-length`}
+                testId={`${testId}-length`}
               />
             </Row>
           </div>
@@ -812,7 +836,7 @@ function Details({ project, selection }: { project: CuttleProject; selection: Se
     </div>
   );
 
-  const enabled = (list: 'zooms' | 'masks' | 'texts', on: boolean, label: string) => (
+  const enabled = (list: 'zooms' | 'masks' | 'texts' | 'overlays', on: boolean, label: string) => (
     <Row label="Show" inline>
       <em>{on ? 'On' : 'Off: kept, not in the video'}</em>
       <Toggle checked={on} label={`Show the ${label}`} onChange={(value) => set(list, id, { enabled: value ? undefined : false }, value ? `Turn ${label} on` : `Turn ${label} off`)} />
@@ -869,6 +893,23 @@ function Details({ project, selection }: { project: CuttleProject; selection: Se
       </>
     );
   }
+  if (selection.kind === 'motion') {
+    const index = project.overlays.findIndex((item) => item.id === id);
+    const overlay = project.overlays[index]!;
+    return (
+      <MotionDetails
+        list="overlays"
+        index={index}
+        item={overlay}
+        placement={
+          <>
+            {timing('overlays', overlay.at, overlay.at + overlay.duration)}
+            {enabled('overlays', overlay.enabled, 'motion overlay')}
+          </>
+        }
+      />
+    );
+  }
   const text = project.texts.find((item) => item.id === id)!;
   return (
     <>
@@ -890,6 +931,279 @@ function Details({ project, selection }: { project: CuttleProject; selection: Se
       </Row>
       {enabled('texts', text.enabled, 'caption')}
     </>
+  );
+}
+
+// ---- motion --------------------------------------------------------------------------------------
+
+/** The params a page declares, read again when the project's files change (Claude edited the page). */
+function useMotionParams(src: string): MotionParams | undefined {
+  const files = useStore(store, (state) => state.motionFiles);
+  const [read, setRead] = useState<{ src: string; params: MotionParams }>();
+  useEffect(() => {
+    let live = true;
+    bridge.invoke('motion:params', src).then(
+      (params) => live && setRead({ src, params }),
+      (error: Error) => live && setRead({ src, params: { params: [], issues: [error.message] } }),
+    );
+    return () => {
+      live = false;
+    };
+  }, [src, files]);
+  return read?.src === src ? read.params : undefined;
+}
+
+const BLUR_SAMPLES = ['4', '8', '16', '32'] as const;
+
+/**
+ * A motion scene or overlay: its page and how it is doing in the preview (what it threw, its
+ * console), its place (`placement`), the params its page declares, the internet and motion blur.
+ */
+function MotionDetails({ list, index, item, placement }: { list: 'scenes' | 'overlays'; index: number; item: MotionScene | MotionOverlay; placement: ReactNode }) {
+  const id = item.id!;
+  const name = `${list}[${index}]`;
+  const status = useStore(store, (state) => state.motionStatus.find((entry) => entry.item === name && entry.src === item.src));
+  const declared = useMotionParams(item.src);
+  const noun = list === 'scenes' ? 'motion scene' : 'motion overlay';
+  const blur = item.motionBlur;
+  return (
+    <>
+      <Head icon={<MotionIcon />} color="var(--motion)" name={item.label ?? motionName(item.src)} />
+      <MotionState status={status} />
+      <Row label="Label">
+        <TextInput value={item.label ?? ''} placeholder={motionName(item.src)} onCommit={(value) => set(list, id, { label: value.trim() || undefined }, `Rename ${noun}`)} testId="motion-label" />
+      </Row>
+      <div className="field">
+        <span className="field-label">
+          Page
+          <span className="links">
+            <button type="button" className="link" onClick={() => void bridge.invoke('project:reveal', item.src)} title="Show the page's file in its folder">
+              Show file
+            </button>
+            <button type="button" className="link" onClick={() => void bridge.invoke('motion:reload', name)} title="Load the page again" data-testid="motion-reload">
+              Reload
+            </button>
+          </span>
+        </span>
+        <span className="field-input">
+          <span className="path" title={item.src}>
+            {item.src}
+          </span>
+        </span>
+      </div>
+      {placement}
+      {declared && <MotionParamFields list={list} id={id} item={item} declared={declared} />}
+      <Row label="Internet" inline>
+        <em title={item.network ? 'The page may load fonts, images and data from https: addresses' : 'The page reaches only the project folder and the motion kit'}>{item.network ? 'On' : 'Off'}</em>
+        <Toggle checked={item.network} label="Let the page load from the internet" onChange={(on) => set(list, id, { network: on || undefined }, on ? 'Let the page load from the internet' : 'Keep the page offline')} testId="motion-network" />
+      </Row>
+      <Row label="Motion blur" inline>
+        <em title="Each frame is the average of moments while a shutter would be open: smooth fast motion, drawn that many times (slower)">{blur ? 'On' : 'Off'}</em>
+        <Toggle checked={!!blur} label="Motion blur" onChange={(on) => set(list, id, { motionBlur: on ? { samples: 8, shutter: 0.5 } : undefined }, on ? 'Motion blur on' : 'Motion blur off')} testId="motion-blur" />
+      </Row>
+      {blur && (
+        <div className="grid2">
+          <Row label="Samples">
+            <StyledSelect
+              value={String(blur.samples)}
+              options={[...new Set([...BLUR_SAMPLES, String(blur.samples)])].map((samples) => ({ value: samples, label: samples }))}
+              onChange={(samples) => set(list, id, { motionBlur: { ...blur, samples: Number(samples) } }, 'Change motion blur')}
+              label="Samples"
+            />
+          </Row>
+          <Row label="Shutter" note="of a frame">
+            <NumberInput value={blur.shutter} min={0.05} max={1} step={0.05} onCommit={(shutter) => set(list, id, { motionBlur: { ...blur, shutter } }, 'Change motion blur')} />
+          </Row>
+        </div>
+      )}
+      <MotionLog status={status} />
+      <p className="hint motion-hint">Claude can change this page or write a new one: ask it in Claude Code. Each saved change shows here at once.</p>
+    </>
+  );
+}
+
+/** How the page is doing in the preview. */
+function MotionState({ status }: { status: MotionStatusView | undefined }) {
+  if (!status) return null;
+  const errors = status.errors.length;
+  const text =
+    status.state === 'failed'
+      ? `The page cannot draw: ${status.failure ?? 'it failed'}`
+      : status.state === 'loading'
+        ? 'Loading the page…'
+        : errors > 0
+          ? `Draws, but threw ${errors === 1 ? 'an error' : `${errors} errors`}`
+          : 'Ready';
+  return (
+    <p className={`motion-state ${status.state === 'ready' && errors > 0 ? 'warn' : status.state}`} data-testid="motion-state" title={text}>
+      <i />
+      {text}
+    </p>
+  );
+}
+
+/** What the page threw, and its console. */
+function MotionLog({ status }: { status: MotionStatusView | undefined }) {
+  if (!status || (status.errors.length === 0 && status.console.length === 0)) return null;
+  return (
+    <div className="motion-log">
+      {status.errors.length > 0 && (
+        <details open>
+          <summary>Errors ({status.errors.length})</summary>
+          <pre data-testid="motion-errors">{status.errors.join('\n')}</pre>
+        </details>
+      )}
+      {status.console.length > 0 && (
+        <details>
+          <summary>Console ({status.console.length})</summary>
+          <pre>{status.console.join('\n')}</pre>
+        </details>
+      )}
+    </div>
+  );
+}
+
+/** The params the page declares, each in a field of its kind; ones the item has that the page does not declare, as text. */
+function MotionParamFields({ list, id, item, declared }: { list: 'scenes' | 'overlays'; id: string; item: MotionScene | MotionOverlay; declared: MotionParams }) {
+  const values = item.params;
+  const command = (name: string, value: unknown): Command => {
+    const next: Record<string, unknown> = { ...values };
+    if (value === undefined) delete next[name];
+    else next[name] = value;
+    return { type: 'set', list, id, fields: { params: Object.keys(next).length > 0 ? next : undefined } };
+  };
+  const others = Object.keys(values).filter((name) => !declared.params.some((param) => param.name === name));
+  if (declared.params.length === 0 && others.length === 0 && declared.issues.length === 0) return null;
+  return (
+    <div className="motion-params" data-testid="motion-params">
+      <span className="section-title">Params</span>
+      {declared.issues.map((issue) => (
+        <p key={issue} className="note warning">
+          {issue}
+        </p>
+      ))}
+      {declared.params.map((param) => (
+        <ParamField key={param.name} param={param} value={param.name in values ? values[param.name] : param.default} set={param.name in values} toCommand={(value) => command(param.name, value)} />
+      ))}
+      {others.map((name) => (
+        <Row key={name} label={name} note="not declared by the page">
+          <TextInput
+            value={typeof values[name] === 'string' ? (values[name] as string) : JSON.stringify(values[name])}
+            onCommit={(text) => {
+              let value: unknown = text;
+              try {
+                value = JSON.parse(text);
+              } catch {
+                // plain text
+              }
+              edit([command(name, value)], `Change ${name}`);
+            }}
+          />
+        </Row>
+      ))}
+    </div>
+  );
+}
+
+/** One param: a field of its kind, live on the video while a slider or a colour moves; Reset back to the page's default. */
+function ParamField({ param, value, set: isSet, toCommand }: { param: ParamDeclaration; value: unknown; set: boolean; toCommand: (value: unknown) => Command }) {
+  const label = `Change ${param.label}`;
+  const commit = (next: unknown) => edit([toCommand(next)], label);
+  let input: ReactNode;
+  switch (param.type) {
+    case 'bool':
+      input = <Toggle checked={value === true} label={param.label} onChange={(on) => commit(on)} testId={`param-${param.name}`} />;
+      break;
+    case 'select':
+      input = (
+        <StyledSelect
+          value={String(value ?? '')}
+          options={(param.options ?? []).map((option) => ({ value: option, label: option }))}
+          onChange={(option) => commit(option)}
+          label={param.label}
+          testId={`param-${param.name}`}
+        />
+      );
+      break;
+    case 'number': {
+      const number = typeof value === 'number' ? value : 0;
+      const { min, max } = param;
+      input = (
+        <>
+          {min !== undefined && max !== undefined && max > min && (
+            <input
+              key={number}
+              type="range"
+              className="range"
+              min={min}
+              max={max}
+              step={(max - min) / 200}
+              defaultValue={number}
+              aria-label={param.label}
+              onInput={(event) => preview([toCommand(Number((event.target as HTMLInputElement).value))])}
+              onChange={(event) => {
+                preview(undefined);
+                commit(Number(event.target.value));
+              }}
+            />
+          )}
+          <span className="narrow">
+            <NumberInput value={number} min={min} max={max} step={min !== undefined && max !== undefined ? (max - min) / 20 : 1} onCommit={commit} testId={`param-${param.name}`} />
+          </span>
+        </>
+      );
+      break;
+    }
+    case 'color':
+      input = (
+        <>
+          <ColorInput value={/^#[0-9a-f]{6}$/i.test(String(value)) ? String(value) : '#ffffff'} label={label} toCommand={(colour) => toCommand(colour)} />
+          <TextInput value={String(value ?? '')} placeholder="#ffffff" onCommit={(text) => commit(text.trim() || undefined)} testId={`param-${param.name}`} />
+        </>
+      );
+      break;
+    case 'image':
+      input = (
+        <>
+          <span className="path" title={String(value ?? '')}>
+            {value ? String(value) : 'none'}
+          </span>
+          <button
+            type="button"
+            className="ghost small"
+            onClick={() =>
+              void bridge.invoke('project:import-image', { purpose: 'still' }).then((chosen) => {
+                if (chosen) commit(chosen.path);
+              })
+            }
+          >
+            Choose…
+          </button>
+          {value ? (
+            <button type="button" className="ghost small" onClick={() => commit(null)}>
+              None
+            </button>
+          ) : null}
+        </>
+      );
+      break;
+    default: {
+      const text = String(value ?? '');
+      input = <TextInput value={text} multiline={text.includes('\n') || String(param.default ?? '').includes('\n')} onCommit={(next) => commit(next)} testId={`param-${param.name}`} />;
+    }
+  }
+  return (
+    <div className={`field${param.type === 'bool' ? ' inline' : ''}`}>
+      <span className="field-label">
+        {param.label}
+        {isSet && (
+          <button type="button" className="link" onClick={() => edit([toCommand(undefined)], `Reset ${param.label}`)} title={`Back to the page's default (${JSON.stringify(param.default)})`}>
+            Reset
+          </button>
+        )}
+      </span>
+      <span className="field-input">{input}</span>
+    </div>
   );
 }
 

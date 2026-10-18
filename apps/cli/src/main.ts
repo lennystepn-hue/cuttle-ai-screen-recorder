@@ -1,4 +1,5 @@
 import { Command, CommanderError, InvalidArgumentError, Option } from 'commander';
+import { backgroundCommand, type BackgroundArgs } from './commands/background';
 import { brandApplyCommand, brandListCommand, brandRemoveCommand, brandSaveCommand } from './commands/brand';
 import { capturePageCommand } from './commands/capture-page';
 import { devices } from './commands/devices';
@@ -44,6 +45,11 @@ const collect = (value: string, previous: number[] = []): number[] => [...previo
 const fraction = (value: string): number => {
   const parsed = Number(value);
   if (!Number.isFinite(parsed) || parsed < 0 || parsed > 1) throw new InvalidArgumentError('expected a number from 0 to 1');
+  return parsed;
+};
+const degrees = (value: string): number => {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed < 0 || parsed > 360) throw new InvalidArgumentError('expected degrees from 0 to 360');
   return parsed;
 };
 const decibels = (value: string): number => {
@@ -258,6 +264,22 @@ export async function runCli(argv: readonly string[], streams?: Streams): Promis
     .option('--src <page>', 'check this page instead of the project\'s music')
     .option('-o, --out <dir>', 'folder for music.wav and music.png (default: preview/ in the project)')
     .action(action((output, project, options: { src?: string; out?: string }) => withSignal(output, (signal) => musicCheckCommand(project, options, output, signal))));
+
+  program
+    .command('background')
+    .argument('[preset]', 'sunset-sky, aurora, mesh, solid, image, gradient, flow, bokeh or dots (default: the one it has, or what the options ask for)')
+    .description('the background behind the window: a preset, a gradient of your colours or the product\'s, an image or the desktop\'s wallpaper, softened and darkened')
+    .option('--colors <list>', 'colours, comma-separated: a gradient\'s stops (2 to 4), or the tints of mesh, flow, bokeh and dots')
+    .option('--from <source>', 'the colours read off "take" (the screen recording), "logo" (the brand\'s) or an image file')
+    .option('--angle <degrees>', 'a gradient\'s direction: 0 to the top, 90 to the right (default 135)', degrees)
+    .option('--radial', 'a gradient from the centre out')
+    .option('--linear', 'a gradient along its angle (the default)')
+    .option('--color <hex>', 'the solid background\'s colour')
+    .option('--image <file>', 'an image (copied into images/ when it is outside the project)')
+    .option('--wallpaper', 'the desktop\'s wallpaper as the image, softened (copied into images/)')
+    .option('--blur <0-1>', 'how soft the image is: 0 sharp, 1 a wash of its colours', fraction)
+    .option('--dim <0-0.8>', 'how much darker the image is', fraction)
+    .action(action((output, project, preset: string | undefined, options: BackgroundArgs) => backgroundCommand(project, preset, options, output)));
 
   const brand = program.command('brand').description('brand kits: a project\'s theme (name, URL, logo, colours, heading font), background, frame and cursor, saved once and applied with one command');
   brand

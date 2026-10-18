@@ -4,6 +4,7 @@ import { homedir } from 'node:os';
 import { extname, join, resolve } from 'node:path';
 import { BRAND_VERSION, parseBrandKitJson, type BrandKit, type CuttleProject } from '@cuttle/project';
 import { CoreError } from './errors';
+import { keepInProject } from './keep-file';
 import type { ProjectFile } from './project-file';
 
 /** A kit's file in its folder. */
@@ -162,18 +163,7 @@ async function copyIntoProject(projectDir: string, source: string, stem: string)
   } catch (error) {
     throw new CoreError('missing-file', `cannot read the brand kit's ${source}: ${(error as Error).message}`, { cause: error });
   }
-  const folder = join(projectDir, PROJECT_BRAND_DIR);
-  await mkdir(folder, { recursive: true });
-  const ext = extname(source).toLowerCase();
-  for (let n = 1; ; n++) {
-    const name = `${stem}${n === 1 ? '' : `-${n}`}${ext}`;
-    const target = join(folder, name);
-    const existing = await readFile(target).catch(() => undefined);
-    if (existing?.equals(bytes)) return `${PROJECT_BRAND_DIR}/${name}`;
-    if (existing) continue;
-    await writeFile(target, bytes, { flag: 'wx' });
-    return `${PROJECT_BRAND_DIR}/${name}`;
-  }
+  return keepInProject(projectDir, bytes, PROJECT_BRAND_DIR, stem, extname(source).toLowerCase());
 }
 
 /** What applying a kit sets in a project, its files copied into the project first. */

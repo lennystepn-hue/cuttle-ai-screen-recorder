@@ -1,6 +1,6 @@
 // The editor's actions on the document (the timeline bar, the keys, the command menu and the tools
 // call these): each is one step to undo. Where the playhead stands decides where things go.
-import { MOTION_TEMPLATES } from '@cuttle/motion-kit';
+import { MOTION_TEMPLATES, MUSIC_TEMPLATES } from '@cuttle/motion-kit';
 import type { ClipScene, CuttleProject, Scene } from '@cuttle/project';
 import { clickZooms, sceneSpans, shownClicks, TEXT_FADE_SECONDS, type SceneSpan } from '@cuttle/timeline';
 import type { Command, ListName } from '../../shared/document';
@@ -13,10 +13,10 @@ import { currentPlayer, documentProject, select, setTool, store, type Selection,
 export const NEW_OVERLAY_SECONDS = 3;
 export const SPEEDS = [1, 2, 4, 8, 12, 20] as const;
 
-export const LIST_OF: Record<Selection['kind'], ListName> = { scene: 'scenes', zoom: 'zooms', mask: 'masks', caption: 'texts', motion: 'overlays', cut: 'cuts', crop: 'scenes' };
+export const LIST_OF: Record<Exclude<Selection['kind'], 'music'>, ListName> = { scene: 'scenes', zoom: 'zooms', mask: 'masks', caption: 'texts', motion: 'overlays', cut: 'cuts', crop: 'scenes', sound: 'sounds' };
 /** What people call a scene of each type. */
 const SCENE_NOUNS: Record<Scene['type'], string> = { clip: 'clip', still: 'page', card: 'card', motion: 'motion scene' };
-const NAMES: Record<ListName, string> = { scenes: 'scene', zooms: 'zoom', masks: 'mask', texts: 'caption', overlays: 'motion overlay', cuts: 'cut' };
+const NAMES: Record<ListName, string> = { scenes: 'scene', zooms: 'zoom', masks: 'mask', texts: 'caption', overlays: 'motion overlay', cuts: 'cut', sounds: 'sound' };
 
 /** Where the playhead is: its scene and, in a clip, the source second it shows. */
 export interface PlayheadPlace {
@@ -77,6 +77,10 @@ export function split(): void {
 export function deleteSelection(): void {
   const selection = store.get().selection;
   if (!selection) return;
+  if (selection.kind === 'music') {
+    if (edit([{ type: 'music', fields: null }], 'Remove the music')) select(undefined);
+    return;
+  }
   // a crop belongs to its clip: deleting it shows the whole screen again
   if (selection.kind === 'crop') {
     if (edit([{ type: 'set', list: 'scenes', id: selection.id, fields: { crop: undefined } }], 'Remove crop')) select({ kind: 'scene', id: selection.id });
@@ -92,6 +96,7 @@ export function duplicateSelection(): void {
   if (!selection) return;
   if (selection.kind === 'cut') return toast('A cut cannot be copied: the same stretch is cut once.', { tone: 'warning' });
   if (selection.kind === 'crop') return toast('A crop belongs to its clip: duplicate the clip instead.', { tone: 'warning' });
+  if (selection.kind === 'music') return toast('A video has one music: change its page or its params instead.', { tone: 'warning' });
   const list = LIST_OF[selection.kind];
   edit([{ type: 'duplicate', list, id: selection.id, ...(list !== 'scenes' && { shift: 1 }) }], `Duplicate ${NAMES[list]}`);
 }
@@ -281,6 +286,45 @@ export async function addMotion(name: string): Promise<void> {
   if (added) reveal(command.list, added);
 }
 
+/**
+ * Copies a music template into `music/<name>/` and makes it the video's music (its level and duck stay
+ * when the video had music before); the music lane is selected.
+ */
+export async function addMusic(name: string): Promise<void> {
+  if (!MUSIC_TEMPLATES.some((candidate) => candidate.name === name) || !documentProject()) return;
+  if (store.get().doc?.issues) return toast('cuttle.json has a mistake; fix it first (Claude or a text editor), then edit here again.', { tone: 'warning' });
+  let src: string;
+  try {
+    ({ src } = await bridge.invoke('sound:add-template', name));
+  } catch (error) {
+    return toast(`The music template could not be copied: ${error instanceof Error ? error.message : String(error)}`, { tone: 'warning' });
+  }
+  if (edit([{ type: 'music', fields: { src, params: undefined, enabled: undefined } }], `Music: ${templateLabel(name)}`)) select({ kind: 'music', id: 'music' });
+}
+
+/**
+ * A sound at the playhead: on a clip at the source second it shows (it plays wherever the video shows
+ * that moment), elsewhere that many seconds into the scene; the sound is selected.
+ */
+export function addSound(sound = 'pop'): void {
+  const project = documentProject();
+  const place = playheadPlace();
+  if (!project || !place) return toast('There is nothing in the video yet to put a sound on.', { tone: 'warning' });
+  if (store.get().doc?.issues) return toast('cuttle.json has a mistake; fix it first (Claude or a text editor), then edit here again.', { tone: 'warning' });
+  const round = (value: number) => Math.round(value * 1000) / 1000;
+  let item: Record<string, unknown>;
+  if (place.clip && place.source !== undefined) item = { sound, at: round(place.source) };
+  else {
+    const scene = project.scenes[place.index]!;
+    if (!scene.id) return;
+    item = { sound, at: round(Math.max(0, place.t - place.span.start)), scene: scene.id };
+  }
+  const before = new Set(project.sounds.map((entry) => entry.id));
+  if (!edit([{ type: 'add', list: 'sounds', item }], `Add sound: ${sound}`)) return;
+  const added = documentProject()?.sounds.find((entry) => entry.id !== undefined && !before.has(entry.id));
+  if (added?.id) select({ kind: 'sound', id: added.id });
+}
+
 /** Replaces a still's image or the background's with one the person picks. */
 export async function chooseImage(purpose: 'still' | 'background', id?: string): Promise<void> {
   const chosen = await bridge.invoke('project:import-image', { purpose });
@@ -290,7 +334,7 @@ export async function chooseImage(purpose: 'still' | 'background', id?: string):
 }
 
 /** What selecting an item of each list selects. */
-const KIND_OF: Record<ListName, Selection['kind']> = { scenes: 'scene', zooms: 'zoom', masks: 'mask', texts: 'caption', overlays: 'motion', cuts: 'cut' };
+const KIND_OF: Record<ListName, Selection['kind']> = { scenes: 'scene', zooms: 'zoom', masks: 'mask', texts: 'caption', overlays: 'motion', cuts: 'cut', sounds: 'sound' };
 
 /** Selects an item and moves the playhead to where the video first shows it (the toast's "Show"). */
 export function reveal(list: ListName, id: string): void {

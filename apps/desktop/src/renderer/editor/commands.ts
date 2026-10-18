@@ -1,11 +1,13 @@
 // Everything the editor can do by name, with its keys: the command menu (Ctrl+K) lists these, and
 // the keyboard runs them. Keys are written as the menu shows them.
-import { MOTION_TEMPLATES } from '@cuttle/motion-kit';
+import { BUILT_IN_SOUNDS, MOTION_TEMPLATES, MUSIC_TEMPLATES } from '@cuttle/motion-kit';
 import { bridge } from '../bridge';
 import {
   addCard,
   addMask,
   addMotion,
+  addMusic,
+  addSound,
   addPage,
   addZoom,
   autoZoomClicks,
@@ -66,6 +68,24 @@ export function editorCommands(): EditorCommand[] {
         keywords: `motion template animation ${template.kind} ${template.description}`,
         group: 'Add',
         run: () => void addMotion(template.name),
+      }),
+    ),
+    ...MUSIC_TEMPLATES.map(
+      (template): EditorCommand => ({
+        id: `add-music-${template.name}`,
+        name: `Add music: ${templateLabel(template.name)}`,
+        keywords: `music soundtrack score song ${template.description}`,
+        group: 'Add',
+        run: () => void addMusic(template.name),
+      }),
+    ),
+    ...BUILT_IN_SOUNDS.map(
+      ([name, description]): EditorCommand => ({
+        id: `add-sound-${name}`,
+        name: `Add a sound at the playhead: ${templateLabel(name)}`,
+        keywords: `sound effect sfx ${description}`,
+        group: 'Add',
+        run: () => addSound(name),
       }),
     ),
     { id: 'tool-select', name: 'Select tool', keys: 'V', group: 'Tools', run: () => setTool('select') },

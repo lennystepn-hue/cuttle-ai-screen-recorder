@@ -9,7 +9,8 @@
     "./track-reader": "./src/page/track-reader.ts",
     "./formats": "./src/formats.ts",
     "./motion-requests": "./src/motion/requests.ts",
-    "./motion-params": "./src/motion/params.ts"
+    "./motion-params": "./src/motion/params.ts",
+    "./music-duck": "./src/music/duck.ts"
   },
   "dependencies": {
     "@cuttle/engine": "workspace:*",

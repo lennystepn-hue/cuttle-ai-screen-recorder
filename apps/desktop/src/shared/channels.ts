@@ -31,6 +31,12 @@ export const WINDOW_CHANNELS = {
       'motion:statuses',
       'motion:reload',
       'motion:add-template',
+      'sound:project',
+      'sound:soundtrack',
+      'sound:status',
+      'sound:params',
+      'sound:reload',
+      'sound:add-template',
     ],
     events: [
       'media:state',
@@ -44,6 +50,7 @@ export const WINDOW_CHANNELS = {
       'app:motion',
       'motion:status',
       'motion:changed',
+      'sound:status',
     ],
   },
   pill: {

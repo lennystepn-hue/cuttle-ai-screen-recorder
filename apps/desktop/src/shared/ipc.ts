@@ -3,7 +3,7 @@
 // their window's channels.
 import { z } from 'zod';
 import type { ParamDeclaration } from '@cuttle/export/motion-params';
-import { MOTION_TEMPLATES } from '@cuttle/motion-kit';
+import { MOTION_TEMPLATES, MUSIC_TEMPLATES } from '@cuttle/motion-kit';
 import type { LengthReport } from './media-jobs';
 import type { PickedTarget, PickerDisplay, PickerWindow, RecordChoices } from './recording';
 
@@ -209,6 +209,46 @@ export type MotionStripAnswer = { id: number; frames?: { width: number; height: 
 /** The motion templates the editor offers (as @cuttle/motion-kit has them). */
 export const MOTION_TEMPLATE_NAMES = MOTION_TEMPLATES.map((template) => template.name) as [string, ...string[]];
 
+/** The music templates the editor offers (as @cuttle/motion-kit has them). */
+export const MUSIC_TEMPLATE_NAMES = MUSIC_TEMPLATES.map((template) => template.name) as [string, ...string[]];
+
+/** What the music page told about its music (as @cuttle/export's MusicInfo). */
+export interface MusicInfoView {
+  bpm?: number;
+  key?: string;
+  sections?: { start: number; end: number; name: string; energy?: number }[];
+}
+
+/**
+ * The editor's soundtrack (its music and sounds): `none` without music or sounds, `rendering` while it
+ * renders (`key` is then the last one rendered, which plays meanwhile), `ready`, or `failed`.
+ */
+export interface SoundStatusView {
+  state: 'none' | 'rendering' | 'ready' | 'failed';
+  /** The project version it is for. */
+  version?: number;
+  /** The rendered soundtrack to ask for (`sound:soundtrack`). */
+  key?: string;
+  info?: MusicInfoView | null;
+  renderMs?: number;
+  failure?: string;
+  errors: string[];
+  console: string[];
+  /** Sounds that could not play. */
+  skipped: string[];
+}
+
+/** A rendered soundtrack: each stem interleaved stereo float at `rate`, the music's peaks for its lane, the speech it goes down for. */
+export type SoundtrackAnswer = {
+  key: string;
+  rate: number;
+  music: Float32Array;
+  effects: Float32Array;
+  /** The music's peaks, 50 a second, 0–255. */
+  peaks: Uint8Array;
+  speech: { start: number; end: number }[];
+} | null;
+
 const rect = z.strictObject({ x: z.number().finite(), y: z.number().finite(), width: z.number().finite().positive(), height: z.number().finite().positive() });
 const box = z.tuple([z.number().finite(), z.number().finite(), z.number().finite(), z.number().finite()]);
 /** A motion frame the player asks for (as @cuttle/export's MotionFrameRequest). */
@@ -379,6 +419,19 @@ export const REQUESTS = {
   'motion:reload': z.string().regex(/^(scenes|overlays)\[\d{1,6}\]$/),
   /** Copies a template of the motion kit into the project's `motion/` folder. */
   'motion:add-template': z.enum(MOTION_TEMPLATE_NAMES),
+  /** The project as the editor shows it now, numbered: its soundtrack renders a moment later. */
+  'sound:project': z
+    .strictObject({ version: z.number().int().nonnegative(), raw: z.record(z.string(), z.unknown()) })
+    .refine((value) => JSON.stringify(value.raw).length <= MAX_PROJECT_BYTES, 'the project is too large'),
+  /** The soundtrack rendered last, by its key (none when a newer one replaced it). */
+  'sound:soundtrack': z.string().regex(/^[0-9a-f]{8,64}$/),
+  'sound:status': z.undefined(),
+  /** The params the music page declares. */
+  'sound:params': z.string().min(1).max(4096),
+  /** Renders the music again. */
+  'sound:reload': z.undefined(),
+  /** Copies a music template into the project's `music/` folder. */
+  'sound:add-template': z.enum(MUSIC_TEMPLATE_NAMES),
 } as const;
 
 export type Request = keyof typeof REQUESTS;
@@ -462,6 +515,13 @@ export interface Responses {
   'motion:reload': void;
   /** The page's path in the project (`motion/title/index.html`). */
   'motion:add-template': { src: string };
+  'sound:project': void;
+  'sound:soundtrack': SoundtrackAnswer;
+  'sound:status': SoundStatusView;
+  'sound:params': MotionParams;
+  'sound:reload': void;
+  /** The page's path in the project (`music/pulse/index.html`). */
+  'sound:add-template': { src: string };
 }
 
 /** A version of cuttle.json: as written, and the SHA-256 of its bytes. */
@@ -515,6 +575,8 @@ export interface Events {
   'motion:status': MotionStatusView[];
   /** The project's files changed (a page edited): motion frames are drawn anew. Counts the changes. */
   'motion:changed': { files: number };
+  /** The soundtrack's state: rendering, ready (with its key), failed. */
+  'sound:status': SoundStatusView;
 }
 
 export type Event = keyof Events;

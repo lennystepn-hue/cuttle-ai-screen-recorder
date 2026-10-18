@@ -11,12 +11,12 @@ import { motionSeed } from '../motion/init';
 import { declaredParams } from '../motion/params';
 import { soundCues, videoData, type VideoInputs } from '../music/video';
 import type { VideoData } from '../music/runtime';
+import { duckEnvelope } from '../music/duck';
+
+export { DUCK_ATTACK, DUCK_RELEASE, duckEnvelope } from '../music/duck';
 import { renderMusic, type MusicStems } from './music';
 import { pageUrl } from './motion';
 
-/** The music goes down this long before speech starts, and comes back over this long after it ends (seconds). */
-export const DUCK_ATTACK = 0.25;
-export const DUCK_RELEASE = 0.45;
 /** Samples mixed at a time: 10 s. */
 const BLOCK = AUDIO_SAMPLE_RATE * 10;
 
@@ -97,31 +97,6 @@ export async function renderSoundtrack(projectDir: string, plan: SoundtrackPlan,
   });
   stems.result.skipped.push(...plan.skipped);
   return stems;
-}
-
-/**
- * The music's gain at each moment: 1, down to `duck` dB under speech (it starts going down before the
- * words, and stays down over a gap too short to come back up in).
- */
-export function duckEnvelope(speech: readonly { start: number; end: number }[], duckDb: number): (t: number) => number {
-  const low = 10 ** (-duckDb / 20);
-  if (duckDb <= 0 || speech.length === 0) return () => 1;
-  const spans: { start: number; end: number }[] = [];
-  for (const span of [...speech].sort((a, b) => a.start - b.start)) {
-    const last = spans.at(-1);
-    if (last && span.start - last.end < DUCK_ATTACK + DUCK_RELEASE) last.end = Math.max(last.end, span.end);
-    else spans.push({ ...span });
-  }
-  return (t) => {
-    let depth = 0;
-    for (const span of spans) {
-      if (t < span.start - DUCK_ATTACK) break;
-      if (t > span.end + DUCK_RELEASE) continue;
-      const k = t < span.start ? (t - (span.start - DUCK_ATTACK)) / DUCK_ATTACK : t > span.end ? 1 - (t - span.end) / DUCK_RELEASE : 1;
-      depth = Math.max(depth, Math.min(1, Math.max(0, k)));
-    }
-    return 1 - (1 - low) * depth;
-  };
 }
 
 /** A WAV header for `frames` frames of 32-bit float stereo at the export's rate. */

@@ -1,0 +1,37 @@
+// The music under speech: how far down it goes and when, the same for the export's mix and the
+// editor's preview. Pure, so the editor imports it without the main process's code.
+
+/** The music goes down this long before speech starts, and comes back over this long after it ends (seconds). */
+export const DUCK_ATTACK = 0.25;
+export const DUCK_RELEASE = 0.45;
+
+/** The stretches the music is down for: speech, joined over a gap too short to come back up in. */
+export function duckSpans(speech: readonly { start: number; end: number }[]): { start: number; end: number }[] {
+  const spans: { start: number; end: number }[] = [];
+  for (const span of [...speech].sort((a, b) => a.start - b.start)) {
+    const last = spans.at(-1);
+    if (last && span.start - last.end < DUCK_ATTACK + DUCK_RELEASE) last.end = Math.max(last.end, span.end);
+    else spans.push({ ...span });
+  }
+  return spans;
+}
+
+/**
+ * The music's gain at each moment: 1, down to `duck` dB under speech (it starts going down before the
+ * words, and stays down over a gap too short to come back up in).
+ */
+export function duckEnvelope(speech: readonly { start: number; end: number }[], duckDb: number): (t: number) => number {
+  const low = 10 ** (-duckDb / 20);
+  if (duckDb <= 0 || speech.length === 0) return () => 1;
+  const spans = duckSpans(speech);
+  return (t) => {
+    let depth = 0;
+    for (const span of spans) {
+      if (t < span.start - DUCK_ATTACK) break;
+      if (t > span.end + DUCK_RELEASE) continue;
+      const k = t < span.start ? (t - (span.start - DUCK_ATTACK)) / DUCK_ATTACK : t > span.end ? 1 - (t - span.end) / DUCK_RELEASE : 1;
+      depth = Math.max(depth, Math.min(1, Math.max(0, k)));
+    }
+    return 1 - (1 - low) * depth;
+  };
+}

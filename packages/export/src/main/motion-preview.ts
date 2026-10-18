@@ -4,10 +4,11 @@
 // item being scrubbed gets a spare page loaded beside it, so going back (a page only goes forward)
 // does not wait for a load. Frames are kept, the least recently used dropped first. A change to the
 // project's files reloads the pages: Claude edits a page, the editor shows it.
+import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { isAbsolute, relative, resolve, sep } from 'node:path';
 import { KIT_FONTS } from '@cuttle/motion-kit';
-import { parseProject, type CuttleProject, type MotionOverlay, type MotionScene } from '@cuttle/project';
+import { parseProject, type CuttleProject, type MotionOverlay, type MotionScene, type SceneTransition } from '@cuttle/project';
 import { sceneSpans } from '@cuttle/timeline';
 import type { MotionFrameRequest, MotionPixels } from '../job';
 import { motionInit } from '../motion/init';
@@ -267,26 +268,29 @@ export class MotionPreview {
   /** The page options of a request's showing, and its identity: the same identity draws the same frames. */
   private async describeShowing(version: Version, request: MotionFrameRequest, size: { width: number; height: number }) {
     const project = version.project!;
-    const name = `${request.kind === 'scene' ? 'scenes' : 'overlays'}[${request.index}]`;
-    const item = request.kind === 'scene' ? project.scenes[request.index] : project.overlays[request.index];
+    const transition = request.kind === 'transition';
+    const name = transition ? `scenes[${request.index}].transition` : `${request.kind === 'scene' ? 'scenes' : 'overlays'}[${request.index}]`;
+    const item = transition ? project.scenes[request.index]?.transition : request.kind === 'scene' ? project.scenes[request.index] : project.overlays[request.index];
     if (!item || ('type' in item && item.type !== 'motion')) throw new Error(`${name} is not a motion item`);
-    const motion = item as MotionScene | MotionOverlay;
+    const motion = item as MotionScene | MotionOverlay | SceneTransition;
+    const blur = 'motionBlur' in motion ? motion.motionBlur : undefined;
     const file = this.pageFile(motion.src, `${name}.src`);
     const [declared, take] = await Promise.all([this.declaration(file), this.take(project, request.screen)]);
-    const window = 'type' in motion ? null : { from: motion.at, to: motion.at + motion.duration };
+    const window = request.kind === 'overlay' && 'at' in motion ? { from: motion.at, to: motion.at + motion.duration } : null;
     const init = motionInit(project, motion, name, { start: request.start, duration: request.duration }, {
       take: take.data && { ...take.data, window },
       fonts: [...KIT_FONTS],
       defaults: paramDefaults(declared.params),
+      transition,
     });
     const { take: _take, ...rest } = init;
-    const identity = JSON.stringify([file, this.files, take.id, window, motion.network, motion.motionBlur ?? null, size, rest]);
+    const identity = JSON.stringify([file, this.files, take.id, window, motion.network, blur ?? null, size, rest]);
     const options: MotionPageOptions = {
       file,
       root: resolve(this.projectDir),
       init,
       network: motion.network,
-      ...(motion.motionBlur && { motionBlur: motion.motionBlur }),
+      ...(blur && { motionBlur: blur }),
       ...((size.width !== init.width || size.height !== init.height) && { frameSize: size }),
       ...(this.options.kitDir && { kitDir: this.options.kitDir }),
       ...(this.options.frameTimeout && { frameTimeout: this.options.frameTimeout }),
@@ -339,7 +343,9 @@ export class MotionPreview {
       if (showing) showing.used = Date.now();
       return { id };
     }
-    const cacheKey = `${id}|${request.frame}|${request.view ? JSON.stringify(request.view) : ''}`;
+    // a transition's frame is drawn from the two it is given: they are part of what it is
+    const between = request.between ? createHash('sha1').update(request.between.from.data).update(request.between.to.data).digest('hex') : '';
+    const cacheKey = `${id}|${request.frame}|${request.view ? JSON.stringify(request.view) : ''}|${between}`;
     const cached = this.cache.get(cacheKey);
     if (cached) {
       if (showing) showing.used = Date.now();
@@ -432,7 +438,7 @@ export class MotionPreview {
         }
         const drawing = (async () => {
           const page = await this.pageFor(showing, request.frame);
-          return page.frame(request.frame, request.view);
+          return page.frame(request.frame, request.view, request.between);
         })();
         showing.drawing = drawing.catch(() => {});
         try {

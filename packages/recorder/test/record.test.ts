@@ -100,7 +100,11 @@ describe.concurrent('record (test backend)', () => {
       { t: expect.closeTo(markedSecond, 1), kind: 'manual', label: 'one second' },
       { t: expect.closeTo(slipSecond, 1), kind: 'retake' },
     ]);
-    expect(events.map((event) => event.type)).toEqual(['processes', 'recording', 'marker', 'marker', 'stopping']);
+    expect(events.filter((event) => event.type !== 'level').map((event) => event.type)).toEqual(['processes', 'recording', 'marker', 'marker', 'stopping']);
+    // the mic's level while it records: the test mic's sine at 1/8 of full scale is about -21 dBFS
+    const levels = events.flatMap((event) => (event.type === 'level' ? [event.rms] : []));
+    expect(levels.length).toBeGreaterThan(15);
+    expect(levels.every((rms) => rms > -22.5 && rms < -19.5)).toBe(true);
     // screen, webcam and mic: the app kills these when its recorder host dies
     const processes = events[0]!;
     expect(processes.type === 'processes' && processes.pids.length === 3 && processes.pids.every(Number.isInteger)).toBe(true);
@@ -179,12 +183,25 @@ describe.concurrent('record (test backend)', () => {
   it('stops when asked and warns about a silent microphone', async () => {
     const projectDir = project();
     const warnings: string[] = [];
-    const recording = record({ ...test, projectDir, mic: 'Silent Test Microphone', stop: {}, onEvent: (event) => event.type === 'warning' && warnings.push(event.message) });
+    const levels: number[] = [];
+    const recording = record({
+      ...test,
+      projectDir,
+      mic: 'Silent Test Microphone',
+      stop: {},
+      onEvent: (event) => {
+        if (event.type === 'warning') warnings.push(event.message);
+        if (event.type === 'level') levels.push(event.rms, event.peak);
+      },
+    });
     await sleep(2000);
     const take = await recording.stop();
     expect(take.stopReason).toBe('stop');
     expect(take.warnings).toEqual(['the microphone "Silent Test Microphone" records silence: it may be muted, or blocked for desktop apps (Windows: Settings > Privacy & security > Microphone)']);
     expect(warnings).toEqual(take.warnings);
+    // its level says so too: digital silence
+    expect(levels.length).toBeGreaterThan(0);
+    expect(new Set(levels)).toEqual(new Set([-90]));
   }, SLOW);
 
   it('turns a throwing onEvent into a warning instead of a failed take', async () => {

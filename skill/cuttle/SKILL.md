@@ -38,7 +38,9 @@ permission, 3 render, 130 cancelled.
 - The format: 16:9 for X, YouTube and LinkedIn; 9:16 for Shorts, Reels and TikTok; 1:1 for feeds.
   X takes H.264 up to 1920×1200; keep demos under 60 s. A 16:9 screen fills only about a third
   of a 9:16 video: for 9:16 record a narrow window or region, or plan tight zooms.
-- Webcam and mic only when asked (`--webcam`, `--mic`). A muted mic is reported as a warning.
+- Webcam and mic only when asked (`--webcam`, `--mic`). A muted mic is reported as a warning;
+  after the mic's first second the output says whether it hears sound (`mic: it hears sound`, or
+  `it hears almost nothing`: then ask the user to check the mic before going on).
   When the user will speak, Cuttle transcribes the mic on this computer and cuts filler words and
   pauses. That needs a speech model: `cuttle --json models` lists them. If none is downloaded, ask
   the user before `cuttle models download small` (488 MB, once). Tell them that a slip needs no

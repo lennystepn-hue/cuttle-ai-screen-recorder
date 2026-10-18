@@ -113,6 +113,8 @@ export interface HudState {
   detail?: string;
   /** `warn`: a warning (amber); `info`: a state ("Stopping…"). */
   tone?: 'warn' | 'info';
+  /** The take records a mic: the HUD shows its level (`hud:level`). */
+  mic?: boolean;
 }
 
 /** What the main process is doing to a project, shown in its editor's title bar. */
@@ -636,6 +638,8 @@ export interface Events {
   /** `restart`: counting down again after a restart (the take before is kept). */
   'countdown:tick': { seconds: number; restart?: boolean };
   'hud:state': HudState;
+  /** The mic's level now (dBFS), ten times a second while the take records. */
+  'hud:level': { rms: number; peak: number };
   /** What the main process is doing to the project (cutting the take), or nothing. */
   'project:status': ProjectStatus;
   'project:file': ProjectFileEvent;

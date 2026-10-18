@@ -166,8 +166,10 @@ describe('cuttle devices and record (test backend)', () => {
     const script = [{ id: 'step1', title: 'Open the settings', note: 'The gear, top right.' }, { id: 'step2', title: 'Turn on dark mode' }];
     writeFileSync(path, JSON.stringify({ ...JSON.parse(readFileSync(path, 'utf8')), script }));
     let stderr = '';
-    const code = await runCli(['-C', dir, 'record', '--backend', 'test', '--max', '1', '--countdown', '0'], { stdout: () => {}, stderr: (chunk) => void (stderr += chunk) });
+    const code = await runCli(['-C', dir, 'record', '--backend', 'test', '--mic', '--max', '2', '--countdown', '0'], { stdout: () => {}, stderr: (chunk) => void (stderr += chunk) });
     expect(code, stderr).toBe(0);
+    // and whether the mic hears anything, after its first second: the test mic's tone
+    expect(stderr).toContain('mic: it hears sound (-21 dBFS at the loudest)');
     expect(stderr).toContain('script: 2 steps; next step: Ctrl+Shift+Alt+N, back: Ctrl+Shift+Alt+B');
     expect(stderr).toContain('step 1/2: Open the settings at 0.00 s');
     expect(JSON.parse(readFileSync(join(dir, 'takes/1/markers.json'), 'utf8')).markers).toEqual([{ t: 0, kind: 'step', label: 'step1' }]);

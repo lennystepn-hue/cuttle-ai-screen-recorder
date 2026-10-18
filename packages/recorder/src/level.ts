@@ -1,0 +1,51 @@
+// The mic's level while it records, from its sound as 16 kHz mono 16-bit samples (the mic's capture
+// writes them to its stdout beside the track): how loud it is (RMS) and its loudest sample, in dB
+// below full scale, every tenth of a second. Pure.
+
+/** The rate of the samples the mic's capture gives (16 kHz mono, as speech recognition takes them too). */
+export const PCM_RATE = 16_000;
+/** A level is measured over this many seconds. */
+export const LEVEL_SECONDS = 0.1;
+/** The quietest level told (dBFS): digital silence. */
+export const LEVEL_FLOOR = -90;
+
+export interface MicLevel {
+  /** How loud, on average (RMS), in dBFS. */
+  rms: number;
+  /** The loudest sample, in dBFS (0: the mic clips). */
+  peak: number;
+}
+
+const decibels = (value: number) => (value <= 0 ? LEVEL_FLOOR : Math.max(LEVEL_FLOOR, Math.round(20 * Math.log10(value) * 10) / 10));
+
+/**
+ * Takes the samples as they come (a chunk may end inside a sample) and calls `onLevel` once for each
+ * tenth of a second of them.
+ */
+export function levelMeter(onLevel: (level: MicLevel) => void): (chunk: Uint8Array) => void {
+  const size = Math.round(PCM_RATE * LEVEL_SECONDS);
+  let sum = 0;
+  let peak = 0;
+  let count = 0;
+  let half: number | undefined;
+  return (chunk) => {
+    let i = 0;
+    const take = (sample: number) => {
+      const value = sample / 32768;
+      sum += value * value;
+      peak = Math.max(peak, Math.abs(value));
+      if (++count < size) return;
+      onLevel({ rms: decibels(Math.sqrt(sum / count)), peak: decibels(peak) });
+      sum = 0;
+      peak = 0;
+      count = 0;
+    };
+    if (half !== undefined && chunk.length > 0) {
+      take(((chunk[0]! << 8) | half) << 16 >> 16);
+      half = undefined;
+      i = 1;
+    }
+    for (; i + 1 < chunk.length; i += 2) take(((chunk[i + 1]! << 8) | chunk[i]!) << 16 >> 16);
+    if (i < chunk.length) half = chunk[i]!;
+  };
+}

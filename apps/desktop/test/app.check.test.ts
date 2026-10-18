@@ -1310,6 +1310,27 @@ describe.runIf(enabled)('the Cuttle app', () => {
     await opened.waitForSelector('.app[data-phase="ready"]', { timeout: 30_000 });
   }, 120_000);
 
+  it("shows the mic's level in the HUD: its bars rise with the test mic's tone and go dark while paused", async () => {
+    const before = new Set(existsSync(join(root, 'projects')) ? readdirSync(join(root, 'projects')) : []);
+    await recordThroughPicker(pillRecord, { stop: 'none', camera: undefined, mic: 'Test Microphone' }, false);
+    const hud = await runningHud();
+    const lit = () => hud.locator('[data-testid=hud-level]').getAttribute('data-level');
+    // the test mic's tone is about -21 dBFS: four of the five bars
+    await expect.poll(lit, { timeout: 10_000 }).toBe('4');
+    // the bars fit the HUD beside the time, the note and the buttons
+    expect(await hud.evaluate(() => document.querySelector('.hud')!.scrollWidth <= document.querySelector('.hud')!.clientWidth)).toBe(true);
+    await shotOf('31b-hud-level', '/hud.html');
+    await click(hud, '[data-testid=hud-pause]');
+    await hud.waitForSelector('.hud.paused');
+    await expect.poll(lit).toBe('0');
+    await click(hud, '[data-testid=hud-pause]');
+    await hud.waitForSelector('.hud.recording');
+    await expect.poll(lit, { timeout: 10_000 }).toBe('4');
+    await click(hud, '[data-testid=hud-stop]');
+    const dir = await newProject(before);
+    await projectWhen(dir, (written) => written.scenes[0]?.id !== undefined);
+  }, 120_000);
+
   it('marks a slip from the HUD (the mistake key): it says what to do next, and the cut goes back from there', async () => {
     const before = new Set(existsSync(join(root, 'projects')) ? readdirSync(join(root, 'projects')) : []);
     await recordThroughPicker(pillRecord, { stop: 'none', camera: undefined }, false);

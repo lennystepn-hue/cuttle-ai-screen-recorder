@@ -2,10 +2,16 @@
 // and the pure geometry of picking what to record.
 import type { Bounds, CaptureSource, Devices, RecordOptions, RecorderEvent, StopOptions, Take } from '@cuttle/recorder';
 
+/** Live captions for a take: the speech model's file and the language spoken (`auto` or a code). */
+export interface LiveRequest {
+  model: string;
+  language: string;
+}
+
 /** What the main process asks of the host. */
 export type HostRequest =
   | { type: 'devices'; id: number; media: boolean }
-  | { type: 'start'; options: Omit<RecordOptions, 'onEvent'> }
+  | { type: 'start'; options: Omit<RecordOptions, 'onEvent' | 'onAudio'>; live?: LiveRequest }
   | { type: 'stop' }
   | { type: 'marker'; label?: string }
   | { type: 'retake' }
@@ -19,6 +25,10 @@ export type HostRequest =
 export type HostReply =
   | { type: 'devices'; id: number; devices?: Devices; error?: string }
   | { type: 'event'; event: RecorderEvent }
+  /** Words the live captions heard, newest last. */
+  | { type: 'live'; words: string[] }
+  /** The live captions stopped (the take goes on). */
+  | { type: 'live-failed'; message: string }
   | { type: 'done'; take: Take }
   | { type: 'failed'; code: string; message: string };
 

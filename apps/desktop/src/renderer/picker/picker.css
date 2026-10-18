@@ -390,8 +390,11 @@ body.transparent #root {
 /* HUD: never in the video, never takes the focus */
 .hud-wrap {
   height: 100%;
-  display: grid;
-  place-items: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
 }
 .hud {
   width: 492px;
@@ -558,6 +561,59 @@ body.transparent #root {
   background: rgba(79, 209, 161, 0.14);
 }
 
+/* the live captions under the bar: the newest words at the right, the older ones fading out at the left */
+.captions {
+  width: 492px;
+  height: 30px;
+  display: flex;
+  padding: 0 14px;
+  border-radius: 12px;
+  background: var(--overlay);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45), 0 0 0 1px rgba(255, 255, 255, 0.07);
+  color: var(--text);
+  font-size: var(--size-s);
+  -webkit-app-region: drag;
+}
+.captions .line {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  overflow: hidden;
+  -webkit-mask: linear-gradient(to right, transparent 0, #000 48px);
+  mask: linear-gradient(to right, transparent 0, #000 48px);
+}
+.captions .said {
+  flex: none;
+  white-space: nowrap;
+}
+.captions .said > span {
+  animation: heard 240ms ease-out;
+}
+.captions .waiting,
+.captions.resting {
+  color: var(--muted);
+}
+.captions.failed {
+  color: var(--card);
+}
+.captions.failed .line {
+  justify-content: flex-start;
+  -webkit-mask: none;
+  mask: none;
+}
+.captions.failed .said {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+@keyframes heard {
+  from {
+    opacity: 0;
+  }
+}
+
 @keyframes pop {
   from {
     transform: scale(0.85);
@@ -571,12 +627,14 @@ body.transparent #root {
 }
 @media (prefers-reduced-motion: reduce) {
   :root:not([data-motion='full']) .countdown b,
-  :root:not([data-motion='full']) .hud .dot {
+  :root:not([data-motion='full']) .hud .dot,
+  :root:not([data-motion='full']) .captions .said > span {
     animation: none;
   }
 }
 :root[data-motion='reduce'] .countdown b,
-:root[data-motion='reduce'] .hud .dot {
+:root[data-motion='reduce'] .hud .dot,
+:root[data-motion='reduce'] .captions .said > span {
   animation: none;
 }
 

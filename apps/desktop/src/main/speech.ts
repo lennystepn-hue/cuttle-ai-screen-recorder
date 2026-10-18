@@ -1,9 +1,10 @@
-// Speech in the app: the models (download with progress and cancel, remove), and transcribing a
-// take after its cut, in the media worker, then its retakes, filler words and pauses cut as one
-// change.
+// Speech in the app: the models (download with progress and cancel, remove), transcribing a take
+// after its cut, in the media worker, then its retakes, filler words and pauses cut as one change,
+// and which model the live captions use while a take records.
 import { dirname, join, relative, resolve, sep } from 'node:path';
-import { CLEAN_MIC_FILE, CoreError, SPEECH_MODELS, TRANSCRIPT_FILE, downloadModel, hasWhisper, installedModels, modelInstalled, modelsDir, readProjectFile, removeModel } from '@cuttle/core';
+import { CLEAN_MIC_FILE, CoreError, SPEECH_MODELS, TRANSCRIPT_FILE, downloadModel, hasWhisper, installedModels, liveModel, modelInstalled, modelPath, modelsDir, readProjectFile, removeModel } from '@cuttle/core';
 import type { SpeechModelName, SpeechStatus } from '../shared/ipc';
+import type { LiveRequest } from '../shared/recording';
 import { mediaWorker } from './media-service';
 import { loadSettings } from './settings';
 import { expectSpeech, setEditorStatus } from './windows';
@@ -30,6 +31,18 @@ export async function speechStatus(fresh = true): Promise<SpeechStatus> {
     ...(download && { download: { name: download.name, received: download.received, total: download.total } }),
     ...(failure && { failure }),
   };
+}
+
+/**
+ * Live captions for a take with a mic, when they are on: the fastest model downloaded (they must
+ * keep up with speech) and the language spoken. None without a model or whisper.
+ */
+export async function liveRequest(): Promise<LiveRequest | undefined> {
+  const { speech } = await loadSettings();
+  if (!speech.live) return undefined;
+  const model = await liveModel();
+  if (!model || !(await hasWhisper().catch(() => false))) return undefined;
+  return { model: modelPath(model), language: speech.language };
 }
 
 /** Calls `listener` whenever the models change or a download moves on (every whole percent). */

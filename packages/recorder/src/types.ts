@@ -96,6 +96,11 @@ export interface RecordOptions {
    * as a recording HUD, so no take shows the pointer going to them or a click on Stop.
    */
   deadZones?: Bounds[];
+  /**
+   * The script's step ids, in order (`script` in cuttle.json): the take starts at the first, and
+   * `next()`, `previous()` and the step keys move through them, each move a `step` marker.
+   */
+  steps?: string[];
   onEvent?: (event: RecorderEvent) => void;
 }
 
@@ -140,6 +145,12 @@ export interface Recording {
   /** Marks a slip (the mistake key): Cuttle cuts back to the pause before it. */
   retake(): void;
   /**
+   * Moves to the script's next step (the step key), or back to the one before: a `step` marker.
+   * Nothing at either end, without a script, or before the screen track started.
+   */
+  next(): void;
+  previous(): void;
+  /**
    * Pauses the take: every track stops (each file is complete) and nothing is captured or logged
    * until `resume()`. The take's time stands still meanwhile; the stop joins the pieces. Events:
    * `paused`, then `resuming` and `resumed`. The newest of `pause` and `resume` wins.
@@ -166,4 +177,4 @@ export type RawInput =
   /** A dialog or menu opened or closed. */
   | { type: 'window'; time: number; id: number; kind: WindowKind; rect: Bounds; open: boolean };
 
-export type HotkeyAction = 'stop' | 'marker' | 'pause' | 'retake';
+export type HotkeyAction = 'stop' | 'marker' | 'pause' | 'retake' | 'next' | 'previous';

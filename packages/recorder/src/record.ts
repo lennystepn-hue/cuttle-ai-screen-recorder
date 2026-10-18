@@ -44,6 +44,8 @@ export function record(options: RecordOptions): Recording {
     },
     marker: (label) => control.marker(label),
     retake: () => control.retake(),
+    next: () => control.step(1),
+    previous: () => control.step(-1),
     pause: () => control.setPaused(true),
     resume: () => control.setPaused(false),
     setDeadZones: (zones) => (control.deadZones = [...zones]),
@@ -51,10 +53,12 @@ export function record(options: RecordOptions): Recording {
   };
 }
 
-/** Stop requests, pauses and manual markers from the caller, the hotkeys and the triggers. */
+/** Stop requests, pauses, manual markers and the script's steps from the caller, the hotkeys and the triggers. */
 class Control {
   reason: StopReason | undefined;
   onMarker: ((label?: string, kind?: 'manual' | 'retake') => void) | undefined;
+  /** Moves through the script's steps once the take runs. */
+  onStep: ((delta: 1 | -1) => void) | undefined;
   /** Pointer input inside these is not logged. */
   deadZones: Bounds[] = [];
   private waiters: ((reason: StopReason) => void)[] = [];
@@ -111,6 +115,10 @@ class Control {
 
   retake(): void {
     this.onMarker?.(undefined, 'retake');
+  }
+
+  step(delta: 1 | -1): void {
+    this.onStep?.(delta);
   }
 }
 
@@ -410,7 +418,14 @@ async function recordTake({ options, control, platform, area, cameraMode, projec
         if (raw.type !== 'area' && raw.type !== 'window') lastInput = raw.time;
         writer.push(raw);
       },
-      (action) => (action === 'stop' ? control.request('hotkey') : action === 'pause' ? control.toggle() : action === 'retake' ? control.retake() : control.marker()),
+      (action) => {
+        if (action === 'stop') control.request('hotkey');
+        else if (action === 'pause') control.toggle();
+        else if (action === 'retake') control.retake();
+        else if (action === 'next') control.step(1);
+        else if (action === 'previous') control.step(-1);
+        else control.marker();
+      },
     );
     if (input.warning) reporter.warn(input.warning);
 
@@ -432,6 +447,18 @@ async function recordTake({ options, control, platform, area, cameraMode, projec
     } satisfies TakeFile);
     capturing = true;
     reporter.emit({ type: 'recording', dir: rel(dir) });
+    // The script: its first step from the take's first frame, then a marker for each move.
+    const steps = options.steps ?? [];
+    if (steps.length > 0) {
+      let step = 0;
+      addMarker({ kind: 'step', label: steps[0]! }, screenAt);
+      control.onStep = (delta) => {
+        const to = step + delta;
+        if (to < 0 || to >= steps.length) return;
+        step = to;
+        addMarker({ kind: 'step', label: steps[to]! }, now());
+      };
+    }
     // Claude's answer stops the take a little after it; while paused, a little after the resume.
     let claudeStop = false;
     // one timer at a time; a pause clears it (the tail is recorded time), the resume starts it again
@@ -550,6 +577,7 @@ async function recordTake({ options, control, platform, area, cameraMode, projec
     throw new RecorderError(code, `${message(error)}\n(what was recorded is in ${rel(dir)})`, { cause: error });
   } finally {
     control.onMarker = undefined;
+    control.onStep = undefined;
     closeEvents();
   }
 
@@ -645,6 +673,8 @@ function checkOptions(options: RecordOptions, projectDir: string): void {
   if (countdown !== undefined && !(Number.isFinite(countdown) && countdown >= 0)) throw invalid('countdownSeconds must be 0 or more');
   const flag = options.stop.untilFile === undefined ? undefined : resolve(options.stop.untilFile);
   if (flag !== undefined && existsSync(flag)) throw invalid(`untilFile ${flag} already exists; delete it first, or the recording would stop at once`);
+  const steps = options.steps ?? [];
+  if (steps.some((id) => typeof id !== 'string' || id === '') || new Set(steps).size !== steps.length) throw invalid('steps must be different, non-empty step ids');
 }
 
 /** Creates the next free `takes/<n>` folder; `mkdir` fails on an existing one, so two recorders never share one. */

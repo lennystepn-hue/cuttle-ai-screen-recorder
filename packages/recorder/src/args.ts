@@ -1,4 +1,5 @@
 // ffmpeg command lines for the three capture processes. Pure: the inputs come from sources.ts.
+import { PCM_RATE } from './level';
 
 export const FRAME_RATE = 30;
 
@@ -59,10 +60,32 @@ export function webcamArgs(input: readonly string[], file: string, wallclock = t
   return [...(wallclock ? WALLCLOCK : []), ...input, '-filter_complex', `[0:v]${VIDEO_CHAIN}[out]`, '-map', '[out]', ...VIDEO_CODEC, ...FRAGMENTED_MP4, '-y', file];
 }
 
-/** The mic track, with `silencedetect` on a copy so a muted microphone can be reported. */
+/**
+ * The mic track, with `silencedetect` on a copy so a muted microphone can be reported, and its sound
+ * as 16 kHz mono 16-bit samples on stdout, for its level while it records.
+ */
 export function micArgs(input: readonly string[], file: string, wallclock = true): string[] {
-  const graph = `[0:a]asplit[rec][chk];[chk]silencedetect=n=${SILENCE_NOISE}:d=${SILENCE_SECONDS},anullsink;[rec]anull[out]`;
-  return [...(wallclock ? WALLCLOCK : []), ...input, '-filter_complex', graph, '-map', '[out]', ...AUDIO_CODEC, ...AUDIO_FRAGMENTS, ...FRAGMENTED_MP4, '-y', file];
+  const graph = `[0:a]asplit=3[rec][chk][pcm];[chk]silencedetect=n=${SILENCE_NOISE}:d=${SILENCE_SECONDS},anullsink;[rec]anull[out];[pcm]aresample=${PCM_RATE},aformat=sample_fmts=s16:channel_layouts=mono[raw]`;
+  return [
+    ...(wallclock ? WALLCLOCK : []),
+    ...input,
+    '-filter_complex',
+    graph,
+    '-map',
+    '[out]',
+    ...AUDIO_CODEC,
+    ...AUDIO_FRAGMENTS,
+    ...FRAGMENTED_MP4,
+    '-y',
+    file,
+    '-map',
+    '[raw]',
+    '-f',
+    's16le',
+    '-flush_packets',
+    '1',
+    'pipe:1',
+  ];
 }
 
 /** `[Parsed_freezedetect_3 @ …] lavfi.freezedetect.freeze_start: 0.973633` → 0.973633 */

@@ -46,6 +46,12 @@ describe('ffmpeg arguments', () => {
     expect(args).toContain('-c:a aac -b:a 160k -frag_duration 1000000');
   });
 
+  it('writes the mic as 16 kHz mono samples to stdout too, for its level, after the track', () => {
+    const args = micArgs(input, 'mic.m4a');
+    expect(args.join(' ')).toContain('[pcm]aresample=16000,aformat=sample_fmts=s16:channel_layouts=mono[raw]');
+    expect(args.slice(args.indexOf('mic.m4a'))).toEqual(['mic.m4a', '-map', '[raw]', '-f', 's16le', '-flush_packets', '1', 'pipe:1']);
+  });
+
   it('reads freezedetect and silencedetect log lines', () => {
     expect(freezeStart('[Parsed_freezedetect_3 @ 00000132707ccd00] lavfi.freezedetect.freeze_start: 0.973633')).toBe(0.973633);
     expect(freezeStart('[Parsed_freezedetect_3 @ 0000] lavfi.freezedetect.freeze_start: 0')).toBe(0);

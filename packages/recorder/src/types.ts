@@ -113,6 +113,8 @@ export type RecorderEvent =
   /** Every track is capturing; `dir` is the take folder relative to the project. */
   | { type: 'recording'; dir: string }
   | { type: 'marker'; marker: Marker }
+  /** How loud the mic is now (dBFS), every tenth of a second while it records. */
+  | { type: 'level'; rms: number; peak: number }
   | { type: 'warning'; message: string }
   /** Every track has stopped: nothing is captured or logged until a resume. */
   | { type: 'paused' }

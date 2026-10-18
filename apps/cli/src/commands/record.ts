@@ -1,11 +1,16 @@
 import { rm } from 'node:fs/promises';
 import { hostname } from 'node:os';
 import { resolve } from 'node:path';
-import { HOTKEYS, listDevices, record, type Backend, type CaptureSource, type Take } from '@cuttle/recorder';
+import { HOTKEYS, LEVEL_FLOOR, listDevices, record, type Backend, type CaptureSource, type Take } from '@cuttle/recorder';
 import type { Rect } from '@cuttle/project';
 import { CliError } from '../errors';
 import type { Output } from '../output';
 import { editorLockOf, newProjectFile, projectExists, readProjectFile, useTake, writeProjectFile } from '@cuttle/core';
+
+/** The mic's first second (its levels, a tenth of a second each) tells whether it hears anything. */
+const MIC_CHECK_LEVELS = 10;
+/** A mic whose loudest level in its first second stays below this (dBFS) hears almost nothing. */
+const MIC_QUIET = -60;
 
 export interface RecordArgs {
   monitor?: number;
@@ -55,6 +60,17 @@ export async function recordCommand(projectDir: string, args: RecordArgs, output
   const before = projectExists(projectDir) ? await readProjectFile(projectDir) : (await writeProjectFile(newProjectFile(projectDir), 'record')).file;
   if (signal.aborted) throw new CliError('cancelled', 'stopped before the recording started');
   const script = before.project.script;
+  // the mic's level in its first second: whether it hears anything (a silent one is warned about apart)
+  let heard: number[] | undefined = [];
+  const hearing = (rms: number) => {
+    if (!heard) return;
+    heard.push(rms);
+    if (heard.length < MIC_CHECK_LEVELS) return;
+    const loudest = Math.max(...heard);
+    heard = undefined;
+    if (loudest <= LEVEL_FLOOR) return;
+    output.info(loudest < MIC_QUIET ? `mic: it hears almost nothing (${Math.round(loudest)} dBFS at the loudest): muted, or the wrong mic? ("cuttle devices" lists them)` : `mic: it hears sound (${Math.round(loudest)} dBFS at the loudest)`);
+  };
   const stepLine = (id: string | undefined) => {
     const index = script.findIndex((step) => step.id === id);
     return index < 0 ? undefined : `step ${index + 1}/${script.length}: ${script[index]!.title}`;
@@ -77,6 +93,7 @@ export async function recordCommand(projectDir: string, args: RecordArgs, output
     ...(script.length > 0 && { steps: script.map((step) => step.id) }),
     onEvent(event) {
       if (event.type === 'countdown') output.info(`recording in ${event.seconds} …`);
+      if (event.type === 'level') hearing(event.rms);
       if (event.type === 'recording') output.info(`recording ${event.dir}; stop: Ctrl+C or ${HOTKEYS.stop}, marker: ${HOTKEYS.marker}, pause: ${HOTKEYS.pause}, a slip: ${HOTKEYS.retake}`);
       if (event.type === 'recording' && script.length > 0) output.info(`script: ${script.length} steps; next step: ${HOTKEYS.next}, back: ${HOTKEYS.previous}`);
       if (event.type === 'paused') output.info(`paused: nothing is recorded until ${HOTKEYS.pause} again`);

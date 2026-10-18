@@ -15,16 +15,18 @@ import { CHECK, COUNTDOWN, HIDDEN, TEST_BACKEND } from './check';
 import { bindRequests, send } from './ipc';
 import { cutTake } from './media-service';
 import { APP_ORIGIN, serveApp, bundlePath } from './protocols';
-import { recorderHost, RecordingError } from './recorder-host';
+import { recorderHost, RecordingError, type LiveNews } from './recorder-host';
 import { findFfmpeg } from './tools';
 import { loadSettings, updateSettings } from './settings';
 import { maskPrivacy } from './privacy';
 import { openPrompter, type Prompter } from './prompter';
-import { transcribeProject } from './speech';
+import { liveRequest, transcribeProject } from './speech';
 import { editorWindowOf, expectSuggest, guard, hidePill, reopenEditor, sendToEditor, setEditorStatus, showPill, webPreferences } from './windows';
 
 /** The HUD's window (the HUD and a margin for its shadow): never in the video, and a dead zone for the input log. */
 const HUD_SIZE = { width: 512, height: 64 };
+/** With live captions: the strip of words under the bar. */
+const HUD_CAPTIONED_SIZE = { width: 512, height: 102 };
 /** The recorder host answers a listing in this time, or the picker says it cannot record. */
 const LISTING_TIMEOUT_MS = 10_000;
 
@@ -547,6 +549,9 @@ async function record(target: PickedTarget, display: PickerDisplay, displays: Pi
     const script = scriptForTake(steps, usedIds({ ...file?.raw, script: [] }));
 
     const area = targetRect(target, display, picked);
+    // what the mic hears, in the HUD while the take records
+    const live = choices.mic ? await liveRequest().catch(() => undefined) : undefined;
+    const hudSize = live ? HUD_CAPTIONED_SIZE : HUD_SIZE;
     /** Takes a restart put aside, newest last (folders relative to the project). */
     const discarded: string[] = [];
     for (;;) {
@@ -558,8 +563,8 @@ async function record(target: PickedTarget, display: PickerDisplay, displays: Pi
         () => !HIDDEN && !countdown.isDestroyed() && countdown.showInactive(),
         () => {},
       );
-      const hud = overlay({ ...hudPosition(displays, display.id, area, HUD_SIZE), ...HUD_SIZE }, 'hud.cjs', { focusable: false, movable: true });
-      const hudState: HudState = { phase: 'countdown', markers: 0, ...(choices.mic && { mic: true }) };
+      const hud = overlay({ ...hudPosition(displays, display.id, area, hudSize), ...hudSize }, 'hud.cjs', { focusable: false, movable: true });
+      const hudState: HudState = { phase: 'countdown', markers: 0, ...(choices.mic && { mic: true }), ...(live && { captions: {} }) };
       // a check of the drive or the window still under way may note something after the HUD closed
       const showHud = () => !hud.isDestroyed() && send(hud.webContents, 'hud:state', { ...hudState });
       /** The last warning: a pause shows its own note, the resume brings the warning back. */
@@ -635,6 +640,13 @@ async function record(target: PickedTarget, display: PickerDisplay, displays: Pi
             note('The window moved', 'The window moved or changed size: the area where it was picked is still recorded.', 'warn');
           }
         }
+      };
+
+      const onLive = (news: LiveNews) => {
+        if ('failed' in news) {
+          hudState.captions = { failed: news.failed };
+          showHud();
+        } else if (!hud.isDestroyed()) send(hud.webContents, 'hud:caption', { words: news.words });
       };
 
       const onEvent = (event: RecorderEvent) => {
@@ -722,6 +734,7 @@ async function record(target: PickedTarget, display: PickerDisplay, displays: Pi
             hideWindowsOf: [process.pid],
           },
           onEvent,
+          live && { request: live, onLive },
         );
       } catch (error) {
         clearInterval(watch);

@@ -96,6 +96,7 @@ describe('cuttle devices and record (test backend)', () => {
         "mics": [
           "Test Microphone",
           "Silent Test Microphone",
+          "Spoken Test Microphone",
         ],
         "monitors": [
           {

@@ -370,6 +370,8 @@ describe.runIf(enabled)('the Cuttle app', () => {
         CUTTLE_CHECK_IMAGE: join(root, 'nimbus.svg'),
         // the desktop's wallpaper, the check's own (never this computer's)
         CUTTLE_WALLPAPER: join(root, 'wallpaper.png'),
+        // what the spoken test mic says
+        CUTTLE_TEST_SPEECH: SPOKEN,
       },
     });
     // Unhandled rejections in the main process are bugs: collect them for the last test.
@@ -1561,7 +1563,7 @@ describe.runIf(enabled)('the Cuttle app', () => {
     const settings = await waitForPage(app, async (page) => page.url().includes('/settings.html') && (await page.locator('[data-testid=settings-page-speech]').count()) === 1);
     await click(settings, '[data-testid=settings-page-speech]');
     await settings.waitForSelector('[data-testid=speech-line]');
-    const saved = () => JSON.parse(readFileSync(join(root, 'user-data', 'settings.json'), 'utf8')) as { speech?: { model: string; language: string } };
+    const saved = () => JSON.parse(readFileSync(join(root, 'user-data', 'settings.json'), 'utf8')) as { speech?: { model: string; language: string; live?: boolean } };
     const line = () => settings.locator('[data-testid=speech-line] .row-hint').textContent();
     const choose = (label: string) => chooseIn(settings, '[data-testid=speech-model]', label, true);
     // Good (small), the default: not downloaded here; its download breaks off, and says so
@@ -1592,6 +1594,13 @@ describe.runIf(enabled)('the Cuttle app', () => {
     // the language spoken
     await click(settings, '[data-testid=speech-language] button:nth-child(3)');
     await expect.poll(() => saved().speech?.language).toBe('en');
+    // live captions while recording: on until switched off; without a model the row says what they need
+    expect(await settings.locator('[data-testid=speech-live]').getAttribute('aria-checked')).toBe('true');
+    expect(await settings.locator('.row:has([data-testid=speech-live]) .row-hint').textContent()).toBe('The HUD shows what the mic hears as you speak. It needs a speech model: download one above.');
+    await click(settings, '[data-testid=speech-live]');
+    await expect.poll(() => saved().speech?.live).toBe(false);
+    await click(settings, '[data-testid=speech-live]');
+    await expect.poll(() => saved().speech?.live).toBe(true);
     if (!BASE_MODEL || !hasWhisper) {
       await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find((window) => window.webContents.getURL().includes('/settings.html'))?.close());
       return;
@@ -1643,6 +1652,33 @@ describe.runIf(enabled)('the Cuttle app', () => {
     await click(page, '[data-testid=auto-group-fillers] .auto-toggle');
     await shotOf('27-speech-edits', '/editor.html', 'spoken · Cuttle');
     await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find((window) => window.getTitle() === 'spoken · Cuttle')?.close());
+  }, 120_000);
+
+  it.runIf(!!BASE_MODEL && hasWhisper)("shows live captions in the HUD while a take with a mic records: the spoken test mic's words, newest at the right", async () => {
+    // the fastest model downloaded (the test before downloads it; alone, this one copies it)
+    if (!existsSync(join(root, 'models', 'ggml-base.bin'))) {
+      mkdirSync(join(root, 'models'), { recursive: true });
+      cpSync(BASE_MODEL!, join(root, 'models', 'ggml-base.bin'));
+    }
+    const before = new Set(existsSync(join(root, 'projects')) ? readdirSync(join(root, 'projects')) : []);
+    await recordThroughPicker(pillRecord, { stop: 'none', camera: undefined, mic: 'Spoken Test Microphone' }, false);
+    const hud = await runningHud();
+    const captions = hud.locator('[data-testid=hud-captions]');
+    // "Uh, this is Cuttle. It records your screen…": about two seconds after it is said
+    await expect.poll(() => captions.textContent(), { timeout: 45_000 }).toMatch(/\bscreen\b/i);
+    // the strip fits under the bar in the HUD's window, the newest word at its right end
+    const fits = await hud.evaluate(() => {
+      const strip = document.querySelector('.captions')!.getBoundingClientRect();
+      const said = document.querySelector('.captions .said')!.getBoundingClientRect();
+      const bar = document.querySelector('.hud')!;
+      return { inside: strip.bottom <= window.innerHeight && strip.top >= bar.getBoundingClientRect().bottom, newest: said.right <= strip.right, bar: bar.scrollWidth <= bar.clientWidth };
+    });
+    expect(fits).toEqual({ inside: true, newest: true, bar: true });
+    await shotOf('31c-hud-captions', '/hud.html');
+    await click(hud, '[data-testid=hud-stop]');
+    const dir = await newProject(before);
+    const written = await projectWhen(dir, (file) => file.scenes[0]?.id !== undefined);
+    expect(written.sources.mic).toBe('takes/1/mic.m4a');
   }, 120_000);
 
   it('shows the transcript (a click goes to a word, a fix reads in the subtitles, Delete cuts words and Restore brings them back), styles the subtitles, and exports them as .srt', async () => {

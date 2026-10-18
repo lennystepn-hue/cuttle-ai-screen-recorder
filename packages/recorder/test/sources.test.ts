@@ -126,6 +126,19 @@ describe('ffmpeg inputs', () => {
     expect(micInput('test', 'Silent Test Microphone')[3]).toBe('anullsrc=r=48000:cl=mono,arealtime');
   });
 
+  it('plays the sound file CUTTLE_TEST_SPEECH names as the spoken test mic, looped in real time', () => {
+    const saved = process.env.CUTTLE_TEST_SPEECH;
+    try {
+      process.env.CUTTLE_TEST_SPEECH = 'C:/speech/en.m4a';
+      expect(micInput('test', 'Spoken Test Microphone')).toEqual(['-re', '-stream_loop', '-1', '-i', 'C:/speech/en.m4a']);
+      delete process.env.CUTTLE_TEST_SPEECH;
+      expect(() => micInput('test', 'Spoken Test Microphone')).toThrow(expect.objectContaining({ code: 'device-not-found' }));
+    } finally {
+      if (saved === undefined) delete process.env.CUTTLE_TEST_SPEECH;
+      else process.env.CUTTLE_TEST_SPEECH = saved;
+    }
+  });
+
   it('opens DirectShow devices with a small mic buffer and corrects the mic start by it', () => {
     expect(webcamInput('windows', 'Cam')).toEqual(['-f', 'dshow', '-rtbufsize', '256M', '-i', 'video=Cam']);
     expect(micInput('windows', 'Mic (USB)')).toEqual(['-f', 'dshow', '-audio_buffer_size', '50', '-i', 'audio=Mic (USB)']);

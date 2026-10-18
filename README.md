@@ -116,7 +116,9 @@ that is open in the app ("Record again" records it there).
 (Ctrl+Shift+Option+R on a Mac) shows a picker over every display: the window under the pointer lights up (the display where there is none), a drag draws a
 region, and the bar sets the camera, the mic and when to stop (your stop, Claude's answer, an idle
 screen). After the countdown only a small HUD remains, which never appears in the video; with a
-mic, its bars show the mic's level, so a mic that hears nothing shows at once;
+mic, its bars show the mic's level, so a mic that hears nothing shows at once, and once a speech
+model is downloaded, a line under it shows what the mic hears as you speak (live captions, about
+two seconds behind, with the fastest model there; nothing of it is saved);
 Ctrl+Shift+Alt+S stops and Ctrl+Shift+Alt+M sets a marker. The bar's Script holds the steps of
 the demo (a title each, and what to say; a pasted list becomes steps). While recording, a prompter
 by the HUD shows the step now, its note and the step after it, never in the video:
@@ -138,7 +140,8 @@ and `~/.local/bin` (an app started from the Dock does not see a terminal's PATH)
 request, the `cuttle` command (the app's own copy of the CLI, run by the app itself, in
 `%LOCALAPPDATA%\Cuttle\bin`, which goes on your PATH; `~/.local/bin` on macOS) and the Claude skill. The settings (the tray,
 the pill's menu, Ctrl+, in the editor) hold the projects folder, the countdown, the default camera
-and mic, starting at sign-in, motion, and the recent projects (open, rename, show, remove).
+and mic, speech (the model, the language, the live captions), starting at sign-in, motion, and the
+recent projects (open, rename, show, remove).
 
 ## The CLI
 

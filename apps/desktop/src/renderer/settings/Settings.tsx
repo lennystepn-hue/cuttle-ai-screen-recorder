@@ -378,6 +378,26 @@ function SpeechSettings({ view, change }: { view: SettingsView | undefined; chan
           testid="speech-language"
         />
       </Row>
+      <Row
+        label="Live captions while recording"
+        hint={
+          status && !status.models.some((entry) => entry.installed)
+            ? 'The HUD shows what the mic hears as you speak. It needs a speech model: download one above.'
+            : 'The HUD shows what the mic hears as you speak, with the fastest model downloaded. Nothing of it is saved.'
+        }
+      >
+        <button
+          className="toggle"
+          role="switch"
+          aria-checked={view?.speech.live ?? true}
+          aria-label="Live captions while recording"
+          disabled={!view}
+          onClick={() => view && change({ speechLive: !view.speech.live })}
+          data-testid="speech-live"
+        >
+          <i />
+        </button>
+      </Row>
     </>
   );
 }

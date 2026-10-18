@@ -120,7 +120,9 @@ Ctrl+Shift+Alt+S stops and Ctrl+Shift+Alt+M sets a marker. The bar's Script hold
 the demo (a title each, and what to say; a pasted list becomes steps). While recording, a prompter
 by the HUD shows the step now, its note and the step after it, never in the video:
 Ctrl+Shift+Alt+N (or Next) goes on, Ctrl+Shift+Alt+B back, each step is a marker of the take, and
-the script is kept in the project for the next take. Pause (the HUD, or Ctrl+Shift+Alt+P)
+the script is kept in the project for the next take. The export puts the steps into the video as
+its chapters (players list them), and its sheet lists them to copy into a YouTube description.
+Pause (the HUD, or Ctrl+Shift+Alt+P)
 records nothing until you resume; the pieces are joined at the stop. Restart is a held press: the
 take is put aside, the countdown starts again, and the editor offers "Undo restart". The editor
 opens on the take at once while `suggest` cuts it in the background. "Record again" adds a take to
@@ -150,7 +152,8 @@ cuttle suggest                       # scenes: quiet start and end trimmed, idle
 cuttle preview                       # 12 stills and a contact sheet in preview/
 cuttle frame 42.5 --grid             # a source frame with a numbered pixel grid, for masks and zooms
 cuttle capture-page https://example.com --scroll --add
-cuttle render --format 9:16          # out/9x16.mp4
+cuttle render --format 9:16          # out/9x16.mp4, with the script's steps as its chapters
+cuttle chapters                      # those chapters as lines for a YouTube description
 cuttle recover takes/2               # after a crash
 ```
 

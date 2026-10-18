@@ -75,7 +75,10 @@ screen showed where; never edit it.
 unique in the project (the app gives `step1`, `step2` …); `title` says in up to 80 characters what
 the step shows; `note` (optional, up to 1000) is what to say, shown only in the app's prompter and
 never in the video. A take starts at the first step; the step key (Ctrl+Shift+Alt+N, back
-Ctrl+Shift+Alt+B) or the prompter's buttons move on, and each move is a `step` marker.
+Ctrl+Shift+Alt+B) or the prompter's buttons move on, and each move is a `step` marker. The video's
+chapters come from these markers: one where the video shows each step reached (a move undone
+within 2 s is none; a step in a stretch that is cut starts where the video goes on), the first at
+0, each named by its step's title. Fixing a title in `script` renames its chapter.
 
 `look` (every field is optional):
 

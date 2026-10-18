@@ -18,8 +18,9 @@ SVG, WebGL, Three.js or all of them at once. Make it look like the work of a gre
 
 1. Write the page in the project: `motion/<name>/index.html`, with its scripts, images and data next
    to it (or shared, `motion/shared.js`, imported as `../shared.js`). Or start from a template:
-   `cuttle -C "<project>" --json motion new <template>` (title, end-card, code-typing, lower-third,
-   click-callouts, kinetic-captions; `cuttle --json motion templates` says what each shows); it
+   `cuttle -C "<project>" --json motion new <template>` (title, end-card, code-typing, device-3d,
+   lower-third, click-callouts, kinetic-captions; `cuttle --json motion templates` says what each
+   shows); it
    copies the page and adds it to cuttle.json. Then change the copy as much as you like. Most
    templates make their sounds (a whoosh with the title, a pop on each callout, keys while code
    types); their `sounds` param switches them off.
@@ -46,7 +47,8 @@ page in `motion/` you did not write.
   drawn, from 0 at the item's start. `Math.random` is seeded per item: every render is the same.
 - **Draw from time.** `cuttle.onFrame((t) => …)` runs before each frame (also after a jump). A page
   that sets everything from `t` there is right on every frame; free-running CSS animations work too,
-  but keyframes you compute are easier to time. `import { at, ease, keys, stagger, split, typed,
+  but keyframes you compute are easier to time. A draw may be `async` (it awaits a frame of the take):
+  the frame waits for it. `import { at, ease, keys, stagger, split, typed,
   highlight, spring, random } from 'cuttle'` gives you easing, keyframes, staggering, text splitting,
   typing with a rhythm, syntax colours and springs, all as functions of time.
 - **`window.cuttle`:** `time` and `duration` (the item's seconds), `videoTime` (the video's),
@@ -103,7 +105,7 @@ for (const click of cuttle.take.clicks) {
 - The theme as CSS variables: `--cuttle-accent`, `--cuttle-bg`, `--cuttle-fg`, `--cuttle-font`,
   `--cuttle-mono`. Use them to match the project's look, or set your own palette.
 
-## The take (overlays over a recording)
+## The take (what was recorded)
 
 `cuttle.take` holds the recording in source seconds and source pixels: `events` (`click` with `x`,
 `y`, `button`; `keys` counts; `scroll`; `move`), `clicks`, `words` (the transcript), `markers`
@@ -114,6 +116,23 @@ stretch). To place things on the video:
 - `take.toScreen(x, y)` is where a point of the recording is in this frame, with the window frame,
   the crop and the zoom (`{ x, y, inside }`, null in a scene); `take.cursor` is the pointer there.
 - `take.cursorAt(source)` is the pointer's path at any moment.
+- `await take.frame(source, { width })` is the screen recording's frame at a source second, as an
+  `ImageBitmap`, with the project's privacy masks painted over it: for a screen in 3D, a freeze, a
+  lens, a wall of moments. Make the draw `async` and await it in `onFrame` (the frame waits for it);
+  draw it (`drawImage`, a Three.js texture with `flipY = false`), then `close()` it. Frames read
+  forward fastest; `width` (at most the recording's) keeps them light. The device-3d template plays
+  the take on a laptop's screen this way, then flies into it.
+
+```js
+// a moment of the take, frozen and tilted in a scene of its own
+cuttle.onFrame(async (t) => {
+  const frame = await cuttle.take.frame(cuttle.take.clips[0].from + 2, { width: 1280 });
+  g.clearRect(0, 0, w, h);
+  g.setTransform(0.6, -0.08, 0.08, 0.6, w * 0.2, h * 0.25);
+  g.drawImage(frame, 0, 0);
+  frame.close();
+});
+```
 
 ```js
 // a ring at each click, on the click, as the video plays it

@@ -7,7 +7,7 @@
 // scenes after move. The wheel scrolls along, Shift+wheel up and down, Ctrl+wheel zooms.
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import { createPortal } from 'react-dom';
-import { MOTION_TEMPLATES } from '@cuttle/motion-kit';
+import { BUILT_IN_SOUNDS, MOTION_TEMPLATES, MUSIC_TEMPLATES } from '@cuttle/motion-kit';
 import type { CuttleProject, MarkerKind } from '@cuttle/project';
 import { applyCaptionFixes, captionCues, captionWords, sceneSpans } from '@cuttle/timeline';
 import type { Command, OverlayList } from '../../shared/document';
@@ -29,7 +29,7 @@ import {
 } from '../../shared/timeline-model';
 import { FitIcon } from '../icons';
 import { Select } from '../Select';
-import { addCard, addMask, addMotion, addPage, addZoom, overlayBlocked, selectedOrCurrentClip, setSpeed, split, SPEEDS, templateLabel } from './actions';
+import { addCard, addMask, addMotion, addMusic, addPage, addSound, addZoom, overlayBlocked, selectedOrCurrentClip, setSpeed, split, SPEEDS, templateLabel } from './actions';
 import { audible } from './audio';
 import { edit, fitLength, preview } from './doc';
 import { beginGesture } from './gesture';
@@ -41,20 +41,22 @@ import { useStore } from './store';
 const END_SPACE = 40;
 /** A row of an overlay lane (lanes grow a row for overlays that overlap in time). */
 const ROW = 22;
-const BASE_ROWS = { markers: 26, ruler: 20, video: 52, mic: 30, input: 26 } as const;
+const BASE_ROWS = { markers: 26, ruler: 20, video: 52, music: 34, mic: 30, input: 26 } as const;
 const LANES: { kind: OverlayKind; name: string; list: OverlayList }[] = [
   { kind: 'zoom', name: 'Zoom', list: 'zooms' },
   { kind: 'mask', name: 'Mask', list: 'masks' },
   { kind: 'caption', name: 'Caption', list: 'texts' },
   { kind: 'motion', name: 'Motion', list: 'overlays' },
+  { kind: 'sound', name: 'Sound', list: 'sounds' },
 ];
-const NOUN: Record<OverlayKind, string> = { zoom: 'zoom', mask: 'mask', caption: 'caption', motion: 'motion overlay' };
+const NOUN: Record<OverlayKind, string> = { zoom: 'zoom', mask: 'mask', caption: 'caption', motion: 'motion overlay', sound: 'sound' };
 /** What an empty lane says: its key, and how to fill it. */
 const LANE_HINTS: Record<OverlayKind, [string, string]> = {
   zoom: ['Z', 'and draw on the video: the part to zoom in on'],
   mask: ['M', 'and draw over what no one should see (a token, an address)'],
   caption: ['T', 'and type on the video'],
   motion: ['+ Motion', 'a lower third, rings on the clicks, word-by-word captions, or a page Claude writes'],
+  sound: ['+ Sound', 'a whoosh, a pop or a ding at the playhead'],
 };
 const TICKS = [0.1, 0.2, 0.5, 1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 1800];
 const MAX_PPS = 400;
@@ -74,20 +76,30 @@ let pointerSeekUntil = 0;
 const MARKER_DOT: Record<MarkerKind, string> = { prompt: '#ececf1', tool: '#7a7a85', answer: '#4fd1a1', manual: '#9a9aa5', retake: '#f2b34a' };
 
 interface Layout {
-  heights: Record<'markers' | 'ruler' | 'video' | OverlayKind | 'mic' | 'input', number>;
-  tops: Record<'markers' | 'ruler' | 'video' | OverlayKind | 'mic' | 'input', number>;
+  heights: Record<'markers' | 'ruler' | 'video' | OverlayKind | 'music' | 'mic' | 'input', number>;
+  tops: Record<'markers' | 'ruler' | 'video' | OverlayKind | 'music' | 'mic' | 'input', number>;
   total: number;
 }
+
+/** An overlay lane's height: a row per overlap; an empty lane is slimmer, room for its hint. */
+const laneHeight = (model: TimelineModel | undefined, kind: OverlayKind): number => {
+  const lane = model?.lanes[kind];
+  if (!lane) return 8 + ROW;
+  return lane.blocks.length === 0 && lane.cutOut === 0 ? EMPTY_LANE : 8 + ROW * lane.rows;
+};
+/** An empty lane's height. */
+const EMPTY_LANE = 24;
 
 function layoutOf(model: TimelineModel | undefined): Layout {
   const heights = {
     ...BASE_ROWS,
-    zoom: 8 + ROW * (model?.lanes.zoom.rows ?? 1),
-    mask: 8 + ROW * (model?.lanes.mask.rows ?? 1),
-    caption: 8 + ROW * (model?.lanes.caption.rows ?? 1),
-    motion: 8 + ROW * (model?.lanes.motion.rows ?? 1),
+    zoom: laneHeight(model, 'zoom'),
+    mask: laneHeight(model, 'mask'),
+    caption: laneHeight(model, 'caption'),
+    motion: laneHeight(model, 'motion'),
+    sound: laneHeight(model, 'sound'),
   };
-  const order = ['markers', 'ruler', 'video', 'zoom', 'mask', 'caption', 'motion', 'mic', 'input'] as const;
+  const order = ['markers', 'ruler', 'video', 'zoom', 'mask', 'caption', 'motion', 'sound', 'music', 'mic', 'input'] as const;
   const tops = {} as Layout['tops'];
   let y = 0;
   for (const row of order) {
@@ -357,6 +369,25 @@ export function Timeline() {
     if (edge === 'move') seekTo(timeAt(event.clientX));
     const item = project[list].find((candidate) => candidate.id === block.id);
     const scene = spans[block.span]?.scene;
+    // a sound in a scene moves inside it, in output seconds
+    if (item && 'sound' in item && item.scene !== undefined) {
+      const at = item.at;
+      const length = (spans.filter((span) => span.sceneIndex === spans[block.span]?.sceneIndex).at(-1)?.end ?? block.end) - (block.start - at);
+      let moves: Command[] | undefined;
+      follow(
+        event,
+        (dx) => {
+          const next = Math.min(Math.max(0, at + dx / pps), Math.max(0, length - 1 / fps));
+          moves = copy ? [{ type: 'duplicate', list, id: block.id, shift: next - at }] : [{ type: 'set', list, id: block.id, fields: { at: Math.round(next * 1000) / 1000 } }];
+          preview(moves);
+        },
+        (moved) => {
+          if (!moved || !moves) return preview(undefined);
+          edit(moves, copy ? 'Duplicate sound' : 'Move sound');
+        },
+      );
+      return;
+    }
     if (!item || scene?.type !== 'clip') return;
     const range = overlayRange(item as { from?: number; to?: number; at?: number; duration?: number });
     const others = targets({ overlay: block.id });
@@ -441,6 +472,7 @@ export function Timeline() {
               )}
             </div>
           ))}
+          <div style={{ height: heights.music }}>Music</div>
           <div style={{ height: heights.mic }}>Mic</div>
           <div style={{ height: heights.input }}>Input</div>
         </div>
@@ -508,21 +540,22 @@ export function Timeline() {
                           onPointerEnter={() => setHovered(block.id)}
                           onPointerLeave={() => setHovered((id) => (id === block.id ? undefined : id))}
                           style={{ left: blockLeft, width: blockWidth, top: 4 + block.row * ROW }}
-                          title={`${block.title}${block.enabled ? '' : ' (off: not in the video)'} · drag to move, edges to change the length, Alt to copy, Del to delete`}
+                          title={`${block.title}${block.enabled ? '' : ' (off: not in the video)'} · drag to move${lane.kind === 'sound' ? '' : ', edges to change the length'}, Alt to copy, Del to delete`}
                           data-id={block.id}
                           onPointerDown={(event) => pressOverlay(event, block, lane.list)}
                           onKeyDown={(event) => event.key === 'Enter' && select({ kind: lane.kind, id: block.id, start: block.start, end: block.end })}
                         >
-                          {blockWidth >= 14 && <i className="edge start" data-edge="start" />}
+                          {blockWidth >= 14 && lane.kind !== 'sound' && <i className="edge start" data-edge="start" />}
                           {blockWidth >= LABEL_MIN_PX && <span style={{ marginLeft: inset }}>{block.title}</span>}
                           {/* a zoom that follows: where it moves on */}
                           {block.marks?.map((mark) => <i key={mark} className="move-mark" style={{ left: (mark - block.start) * pps }} />)}
-                          {blockWidth >= 14 && <i className="edge end" data-edge="end" />}
+                          {blockWidth >= 14 && lane.kind !== 'sound' && <i className="edge end" data-edge="end" />}
                         </button>
                       );
                     })}
                   </div>
                 ))}
+                <MusicLane model={model} top={tops.music} height={heights.music} pps={pps} view={view} duration={duration} selected={isSelected(selection, 'music', 'music')} />
                 <ColumnsCanvas
                   top={tops.mic}
                   height={heights.mic}
@@ -585,6 +618,83 @@ export function Timeline() {
 
 const isSelected = (selection: Selection | undefined, kind: Selection['kind'], id: string) => selection?.kind === kind && selection.id === id;
 
+/** The rendered music's peaks: this many a second (as the main process makes them). */
+const MUSIC_PEAKS_RATE = 50;
+
+/**
+ * The music's lane: one block over the video with the rendered music's waveform and the parts its page
+ * named, and what it is doing (rendering, failed). Without music: how to add some.
+ */
+function MusicLane({ model, top, height, pps, view, duration, selected }: { model: TimelineModel; top: number; height: number; pps: number; view: { left: number; width: number }; duration: number; selected: boolean }) {
+  const status = useStore(store, (state) => state.soundStatus);
+  const track = useStore(store, (state) => state.soundtrack);
+  const music = model.music;
+  if (!music) {
+    return (
+      <span className="lane-hint" style={{ top: top + height / 2, left: view.left + 10 }}>
+        <kbd>+ Music</kbd> a score written for this video: pulse, drift, lofi, bright or cinematic
+      </span>
+    );
+  }
+  const sections = status.info?.sections ?? [];
+  const problems = status.errors.length;
+  const state = status.state === 'rendering' ? 'rendering …' : status.state === 'failed' ? 'could not render' : problems > 0 ? `${problems} error${problems === 1 ? '' : 's'}` : '';
+  const info = [status.info?.bpm ? `${Math.round(status.info.bpm * 10) / 10} BPM` : '', status.info?.key ?? ''].filter(Boolean).join(' · ');
+  return (
+    <>
+      <button
+        type="button"
+        className={`item music${music.enabled ? '' : ' off'}${selected ? ' selected' : ''}${status.state === 'failed' || problems > 0 ? ' failed' : ''}`}
+        style={{ left: 0, width: Math.max(6, duration * pps), top: top + 3, height: height - 6 }}
+        title={`Music: ${music.title}${music.enabled ? '' : ' (off)'}${info ? ` · ${info}` : ''} · click for its page and params`}
+        data-testid="music-lane"
+        onPointerDown={(event) => {
+          if (event.button !== 0) return;
+          event.stopPropagation();
+          select({ kind: 'music', id: 'music' });
+        }}
+        onKeyDown={(event) => event.key === 'Enter' && select({ kind: 'music', id: 'music' })}
+      >
+        {sections.map((part, index) => (
+          <span key={index} className="music-part" style={{ left: part.start * pps }}>
+            {(part.end - part.start) * pps >= 56 ? `${part.name}${part.energy !== undefined ? ` · ${part.energy}` : ''}` : ''}
+          </span>
+        ))}
+        {sections.length === 0 && <span style={{ marginLeft: Math.max(0, view.left) }}>{music.title}</span>}
+        {state && (
+          <span className="music-state" style={{ right: Math.max(8, duration * pps - view.left - view.width + 8) }}>
+            {state}
+          </span>
+        )}
+      </button>
+      {track && (
+        <ColumnsCanvas
+          className="music-wave"
+          top={top + 12}
+          height={height - 16}
+          view={view}
+          color="rgba(232, 197, 71, 0.55)"
+          columns={(from, to, count) => {
+            const out = new Array<number>(count).fill(0);
+            const per = (to - from) / count;
+            for (let i = 0; i < count; i++) {
+              const a = Math.max(0, Math.floor((from + i * per) * MUSIC_PEAKS_RATE));
+              const b = Math.min(track.peaks.length, Math.ceil((from + (i + 1) * per) * MUSIC_PEAKS_RATE));
+              let peak = 0;
+              for (let k = a; k < b; k++) peak = Math.max(peak, track.peaks[k]!);
+              out[i] = (peak / 255) * (music.enabled ? 1 : 0.4);
+            }
+            return out;
+          }}
+          pps={pps}
+          mirrored
+          deps={[track, music.enabled]}
+        />
+      )}
+    </>
+  );
+}
+
 /** The timeline's bar: split, speed, new items, snapping, fit and scale. */
 function TimelineBar({ status, duration, fit, zoomValue, onScale }: { status: string; duration?: number; fit: () => void; zoomValue: number; onScale: (value: number) => void }) {
   useStore(store, (state) => state.doc?.project);
@@ -644,6 +754,32 @@ function TimelineBar({ status, duration, fit, zoomValue, onScale }: { status: st
         title="Motion from the kit's templates: a scene after the scene under the playhead, or an overlay on the video. Claude can change its page, or write one of its own."
       >
         + Motion
+      </Select>
+      <Select
+        value={undefined}
+        options={MUSIC_TEMPLATES.map((template) => ({ value: template.name, label: templateLabel(template.name), note: template.description.split(':')[0]! }))}
+        onChange={(name) => void addMusic(name)}
+        label="Add music from a template"
+        variant="bare"
+        disabled={broken}
+        className="act music-add"
+        testId="add-music"
+        title="Music written for this video from a template (it follows the scenes and cuts and goes down under speech). Claude can change it or write the video's own."
+      >
+        + Music
+      </Select>
+      <Select
+        value={undefined}
+        options={BUILT_IN_SOUNDS.map(([name, description]) => ({ value: name, label: templateLabel(name), note: description }))}
+        onChange={(name) => addSound(name)}
+        label="Add a sound at the playhead"
+        variant="bare"
+        disabled={broken}
+        className="act sound-add"
+        testId="add-sound"
+        title="A sound at the playhead: a whoosh, a pop, a ding (it moves with what the video shows there)"
+      >
+        + Sound
       </Select>
       <span className="tl-status">{status}</span>
       {duration !== undefined && <LengthControl duration={duration} />}
@@ -937,6 +1073,7 @@ function Scene(props: { scene: SceneBlock; project: CuttleProject; pps: number; 
 
 /** A canvas over the visible part of a lane, one bar per two pixels (0–1 each). */
 function ColumnsCanvas(props: {
+  className?: string;
   top: number;
   height: number;
   view: { left: number; width: number };
@@ -967,5 +1104,5 @@ function ColumnsCanvas(props: {
       context.fillRect(i * columnWidth, mirrored ? middle - bar / 2 : element.height - bar, Math.max(1, columnWidth - ratio), bar);
     });
   }, [view.left, view.width, pps, height, color, ...props.deps]);
-  return <canvas ref={canvas} className="tl-canvas" style={{ top: y, left: view.left, width: view.width, height }} />;
+  return <canvas ref={canvas} className={`tl-canvas${props.className ? ` ${props.className}` : ''}`} style={{ top: y, left: view.left, width: view.width, height }} />;
 }

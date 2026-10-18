@@ -1,7 +1,7 @@
 .app {
   display: grid;
   /* the video stays the largest part: the timeline takes about a third of a small window, its lanes all shown at 900 px */
-  grid-template-rows: 44px minmax(0, 1fr) var(--timeline-height, clamp(220px, 36vh, 340px));
+  grid-template-rows: 44px minmax(0, 1fr) var(--timeline-height, clamp(220px, 40vh, 380px));
   /* the tools beside the video, the inspector on the right */
   grid-template-columns: 48px minmax(0, 1fr) 300px;
   height: 100%;
@@ -779,6 +779,49 @@ button.chip-status:hover {
   background: rgba(236, 111, 207, 0.14);
   box-shadow: inset 0 0 0 1px rgba(236, 111, 207, 0.5);
   color: var(--motion);
+}
+.item.sound {
+  background: rgba(181, 224, 90, 0.16);
+  box-shadow: inset 0 0 0 1px rgba(181, 224, 90, 0.55);
+  color: var(--sound);
+  padding: 0 4px;
+}
+/* the music: one block over the video, its waveform and its parts */
+.item.music {
+  height: auto;
+  background: rgba(232, 197, 71, 0.08);
+  box-shadow: inset 0 0 0 1px rgba(232, 197, 71, 0.4);
+  color: var(--music);
+  align-items: flex-start;
+  padding: 2px 8px;
+}
+.item.music.selected {
+  box-shadow: inset 0 0 0 1.5px var(--music), 0 0 0 1px rgba(232, 197, 71, 0.25);
+}
+.music-part {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  border-left: 1px dashed rgba(232, 197, 71, 0.45);
+  font-size: 10px;
+  font-weight: 600;
+  padding: 1px 4px;
+  color: rgba(232, 197, 71, 0.85);
+  pointer-events: none;
+  white-space: nowrap;
+}
+.music-state {
+  position: absolute;
+  right: 8px;
+  top: 2px;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--muted);
+  pointer-events: none;
+}
+.tl-canvas.music-wave {
+  pointer-events: none;
+  opacity: 0.85;
 }
 /* a motion item whose page cannot draw */
 .scene.failed,
@@ -2336,14 +2379,17 @@ button.chip-status:hover {
 .tl-bar .act.speed .select-trigger {
   min-width: 52px;
 }
-.tl-bar .select-trigger.motion-add {
+.tl-bar .select-trigger.motion-add,
+.tl-bar .select-trigger.music-add,
+.tl-bar .select-trigger.sound-add {
+  flex-shrink: 0;
   height: 26px;
   padding: 0 6px 0 8px;
   border-radius: 7px;
   gap: 4px;
 }
-.tl-bar .select-trigger.motion-add:hover:not(:disabled),
-.tl-bar .select-trigger.motion-add[aria-expanded='true'] {
+.tl-bar .select-trigger:is(.motion-add, .music-add, .sound-add):hover:not(:disabled),
+.tl-bar .select-trigger:is(.motion-add, .music-add, .sound-add)[aria-expanded='true'] {
   background: var(--raised);
   color: var(--text);
 }
@@ -2356,7 +2402,7 @@ button.chip-status:hover {
 .item:active {
   cursor: grabbing;
 }
-@media (max-width: 1250px) {
+@media (max-width: 1500px) {
   .tl-status {
     display: none;
   }

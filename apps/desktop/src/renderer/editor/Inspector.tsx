@@ -22,12 +22,13 @@ import {
   type CuttleProject,
   type MotionOverlay,
   type MotionScene,
+  type Music,
   type Rect,
 } from '@cuttle/project';
 import type { ParamDeclaration } from '@cuttle/export/motion-params';
 import { sceneSpans, type SceneSpan } from '@cuttle/timeline';
 import type { Command, ListName } from '../../shared/document';
-import type { MotionParams, MotionStatusView } from '../../shared/ipc';
+import type { MotionParams, MotionStatusView, SoundStatusView } from '../../shared/ipc';
 import { formatDuration, formatSource, formatSpeed, formatTime } from '../../shared/format';
 import {
   BACKGROUND_NAMES,
@@ -43,7 +44,8 @@ import {
   TEXT_STYLE_NAMES,
   WEBCAM_SHAPE_NAMES,
 } from '../../shared/names';
-import { motionName, outputTimesOf } from '../../shared/timeline-model';
+import { motionName, outputTimesOf, soundName } from '../../shared/timeline-model';
+import { BUILT_IN_SOUNDS } from '@cuttle/motion-kit';
 import {
   BackgroundIcon,
   CameraIcon,
@@ -402,7 +404,7 @@ function CropDetails({ project, id }: { project: CuttleProject; id: string }) {
 // ---- what Cuttle did on its own ------------------------------------------------------------------
 
 interface AutoItem {
-  kind: Selection['kind'];
+  kind: Exclude<Selection['kind'], 'music'>;
   id: string;
   label: string;
   enabled: boolean;
@@ -643,6 +645,7 @@ function SelectionPanel() {
   // a drag in progress shows here as it goes
   const project = useStore(store, (state) => state.doc?.preview ?? state.doc?.project);
   if (!project || !selection) return HINTS[tool];
+  if (selection.kind === 'music') return project.music ? <MusicDetails music={project.music} /> : <p className="hint">The music is not in the project any more.</p>;
   const list = LIST_OF[selection.kind];
   const item = (project[list] as { id?: string }[]).find((candidate) => candidate.id === selection.id);
   if (!item) return <p className="hint">The selection is not in the project any more.</p>;
@@ -910,6 +913,7 @@ function Details({ project, selection }: { project: CuttleProject; selection: Se
       />
     );
   }
+  if (selection.kind === 'sound') return <SoundDetails project={project} id={id} />;
   const text = project.texts.find((item) => item.id === id)!;
   return (
     <>
@@ -930,6 +934,145 @@ function Details({ project, selection }: { project: CuttleProject; selection: Se
         <TextInput value={text.label ?? ''} placeholder="Caption" onCommit={(value) => set('texts', id, { label: value.trim() || undefined }, 'Rename caption')} />
       </Row>
       {enabled('texts', text.enabled, 'caption')}
+    </>
+  );
+}
+
+// ---- music and sounds ----------------------------------------------------------------------------
+
+/** The params the music page declares, read again with each new render (Claude edited the page). */
+function useMusicParams(src: string): MotionParams | undefined {
+  const rendered = useStore(store, (state) => state.soundStatus.key);
+  const [read, setRead] = useState<{ src: string; params: MotionParams }>();
+  useEffect(() => {
+    let live = true;
+    bridge.invoke('sound:params', src).then(
+      (params) => live && setRead({ src, params }),
+      (error: Error) => live && setRead({ src, params: { params: [], issues: [error.message] } }),
+    );
+    return () => {
+      live = false;
+    };
+  }, [src, rendered]);
+  return read?.src === src ? read.params : undefined;
+}
+
+const musicEdit = (fields: Record<string, unknown>): Command => ({ type: 'music', fields });
+
+/**
+ * The video's music: how its render is doing, its page, on or off, its level and how far it goes down
+ * under speech, the params its page declares, what the page said.
+ */
+function MusicDetails({ music }: { music: Music }) {
+  const status = useStore(store, (state) => state.soundStatus);
+  const declared = useMusicParams(music.src);
+  const info = status.info;
+  const summary = [info?.bpm ? `${Math.round(info.bpm * 10) / 10} BPM` : '', info?.key ?? '', info?.sections?.length ? `${info.sections.length} parts` : ''].filter(Boolean).join(' · ');
+  const values = music.params;
+  const param = (name: string, value: unknown): Command => {
+    const next: Record<string, unknown> = { ...values };
+    if (value === undefined) delete next[name];
+    else next[name] = value;
+    return musicEdit({ params: next });
+  };
+  return (
+    <>
+      <Head icon={<SoundIcon />} color="var(--music)" name={`Music · ${motionName(music.src)}`} copies={false} />
+      <MusicState status={status} />
+      <div className="field">
+        <span className="field-label">
+          Page
+          <span className="links">
+            <button type="button" className="link" onClick={() => void bridge.invoke('project:reveal', music.src)} title="Show the page's file in its folder">
+              Show file
+            </button>
+            <button type="button" className="link" onClick={() => void bridge.invoke('sound:reload')} title="Render the music again" data-testid="music-reload">
+              Reload
+            </button>
+          </span>
+        </span>
+        <span className="field-input">
+          <span className="path" title={music.src}>
+            {music.src}
+          </span>
+        </span>
+      </div>
+      {summary && <Row label="Made">{summary}</Row>}
+      <Row label="Music" inline>
+        <em>{music.enabled ? 'On' : 'Off'}</em>
+        <Toggle checked={music.enabled} label="Play the music" onChange={(on) => edit([musicEdit({ enabled: on ? undefined : false })], on ? 'Music on' : 'Music off')} testId="music-enabled" />
+      </Row>
+      <Row label={`Volume · ${Math.round(music.volume * 100)} %`}>
+        <RangeInput value={Math.round(music.volume * 100)} min={0} max={100} label="Music volume" toCommand={(value) => musicEdit({ volume: value / 100 })} commitLabel="Music volume" testId="music-volume" />
+      </Row>
+      <Row label={`Under speech · ${music.duck > 0 ? `${music.duck} dB down` : 'stays as it is'}`}>
+        <RangeInput value={music.duck} min={0} max={30} label="How far the music goes down under speech (dB)" toCommand={(value) => musicEdit({ duck: value })} commitLabel="Music under speech" testId="music-duck" />
+      </Row>
+      {declared && (declared.params.length > 0 || declared.issues.length > 0) && (
+        <div className="motion-params" data-testid="music-params">
+          <span className="section-title">Params</span>
+          {declared.issues.map((issue) => (
+            <p key={issue} className="note warning">
+              {issue}
+            </p>
+          ))}
+          {declared.params.map((declaration) => (
+            <ParamField key={declaration.name} param={declaration} value={declaration.name in values ? values[declaration.name] : declaration.default} set={declaration.name in values} toCommand={(value) => param(declaration.name, value)} />
+          ))}
+        </div>
+      )}
+      <MotionLog status={{ item: 'music', src: music.src, state: status.state === 'failed' ? 'failed' : 'ready', errors: [...status.errors, ...status.skipped], console: status.console }} />
+      <p className="hint motion-hint">Claude writes this music for the video: ask it in Claude Code for another mood, tempo or sound. A saved change plays here a moment later.</p>
+    </>
+  );
+}
+
+/** How the music's render is doing. */
+function MusicState({ status }: { status: SoundStatusView }) {
+  const errors = status.errors.length;
+  const text =
+    status.state === 'failed'
+      ? `The music cannot render: ${status.failure ?? 'it failed'}`
+      : status.state === 'rendering'
+        ? 'Rendering the music…'
+        : status.state === 'none'
+          ? 'Waiting for the music'
+          : errors > 0
+            ? `Plays, but the page threw ${errors === 1 ? 'an error' : `${errors} errors`}`
+            : `Ready${status.renderMs !== undefined ? ` · rendered in ${(status.renderMs / 1000).toFixed(1)} s` : ''}`;
+  const state = status.state === 'ready' ? (errors > 0 ? 'warn' : 'ready') : status.state === 'failed' ? 'failed' : 'loading';
+  return (
+    <p className={`motion-state ${state}`} data-testid="music-state" title={text}>
+      <i />
+      {text}
+    </p>
+  );
+}
+
+/** A sound: which one, where it plays, how loud, on or off. */
+function SoundDetails({ project, id }: { project: CuttleProject; id: string }) {
+  const sound = project.sounds.find((item) => item.id === id)!;
+  const scene = sound.scene !== undefined ? project.scenes.find((item) => item.id === sound.scene) : undefined;
+  const options = [...BUILT_IN_SOUNDS.map(([name]) => name), ...(BUILT_IN_SOUNDS.some(([name]) => name === sound.sound) ? [] : [sound.sound])];
+  return (
+    <>
+      <Head icon={<SoundIcon />} color="var(--sound)" name={sound.label ?? soundName(sound.sound)} />
+      <Row label="Sound" note={BUILT_IN_SOUNDS.find(([name]) => name === sound.sound)?.[1] ?? 'a file of the project'}>
+        <StyledSelect value={sound.sound} options={options.map((name) => ({ value: name, label: soundName(name) }))} onChange={(name) => set('sounds', id, { sound: name }, 'Change sound')} label="Sound" />
+      </Row>
+      <Row label={scene ? `Into ${scene.label ?? 'its scene'} (s)` : 'At (take s)'} note={scene ? undefined : formatSource(sound.at)}>
+        <NumberInput value={sound.at} min={0} step={0.05} onCommit={(at) => set('sounds', id, { at }, 'Move sound')} testId="sound-at" />
+      </Row>
+      <Row label={`Volume · ${Math.round(sound.volume * 100)} %`}>
+        <RangeInput value={Math.round(sound.volume * 100)} min={0} max={100} label="Sound volume" toCommand={(value) => ({ type: 'set', list: 'sounds', id, fields: { volume: value / 100 } })} commitLabel="Sound volume" testId="sound-volume" />
+      </Row>
+      <Row label="Label">
+        <TextInput value={sound.label ?? ''} placeholder={soundName(sound.sound)} onCommit={(value) => set('sounds', id, { label: value.trim() || undefined }, 'Rename sound')} />
+      </Row>
+      <Row label="In the video" inline>
+        <em>{sound.enabled ? 'On' : 'Off'}</em>
+        <Toggle checked={sound.enabled} label="Play the sound" onChange={(on) => set('sounds', id, { enabled: on ? undefined : false }, on ? 'Sound on' : 'Sound off')} testId="sound-enabled" />
+      </Row>
     </>
   );
 }
@@ -1301,7 +1444,9 @@ function LookPanel() {
         ? `${WEBCAM_SHAPE_NAMES[webcam.shape]} · ${webcam.position ? 'moved' : CORNER_NAMES[webcam.corner].toLowerCase()} · ${Math.round(webcam.size * 100)} %`
         : 'Off',
     subtitles: captions.enabled ? CAPTION_STYLE_NAMES[captions.style] : sources.transcript ? 'Off' : 'Not transcribed yet',
-    sound: current.audio.enabled ? [sources.cleanMic && current.audio.cleanup ? 'Mic · clean voice' : 'Mic', current.audio.typing && 'key clicks'].filter(Boolean).join(' · ') : 'Muted',
+    sound: current.audio.enabled
+      ? [sources.cleanMic && current.audio.cleanup ? 'Mic · clean voice' : 'Mic', current.audio.typing && 'key clicks', project.music?.enabled && 'music', current.audio.effects && project.sounds.length > 0 && 'sounds'].filter(Boolean).join(' · ')
+      : 'Muted',
     video: `${size?.name ?? `${output.width} × ${output.height}`} · ${output.fps} fps${current.transition.enabled ? ' · crossfades' : ''}`,
   };
   return (
@@ -1441,8 +1586,8 @@ function LookPanel() {
       </LookPart>
 
       <LookPart id="sound" summary={summaries.sound}>
-        <Row label="Mic" inline>
-          <Toggle checked={current.audio.enabled} label="Mic sound" onChange={(on) => look(['audio', 'enabled'], on, on ? 'Sound on' : 'Sound off')} />
+        <Row label="Sound" inline note="the mic, the music and the sounds">
+          <Toggle checked={current.audio.enabled} label="Sound" onChange={(on) => look(['audio', 'enabled'], on, on ? 'Sound on' : 'Sound off')} />
         </Row>
         {current.audio.enabled && sources.cleanMic && (
           <Row label="Clean voice" inline note="less noise">
@@ -1464,6 +1609,24 @@ function LookPanel() {
               toCommand={(value) => ({ type: 'look', path: ['audio', 'typingVolume'], value: value / 100 }) as Command}
               commitLabel="Typing volume"
               testId="audio-typing-volume"
+            />
+          </Row>
+        )}
+        {current.audio.enabled && (
+          <Row label="Sounds" inline note="the sounds and the music's effects">
+            <Toggle checked={current.audio.effects} label="Sounds" onChange={(on) => look(['audio', 'effects'], on, on ? 'Sounds on' : 'Sounds off')} testId="audio-effects" />
+          </Row>
+        )}
+        {current.audio.enabled && current.audio.effects && (
+          <Row label={`Sounds volume · ${Math.round(current.audio.effectsVolume * 100)} %`}>
+            <RangeInput
+              value={Math.round(current.audio.effectsVolume * 100)}
+              min={0}
+              max={100}
+              label="Sounds volume"
+              toCommand={(value) => ({ type: 'look', path: ['audio', 'effectsVolume'], value: value / 100 }) as Command}
+              commitLabel="Sounds volume"
+              testId="audio-effects-volume"
             />
           </Row>
         )}

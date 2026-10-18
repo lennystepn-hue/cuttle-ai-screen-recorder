@@ -1,6 +1,9 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
+import { copyTemplate, MissingTemplateError } from '../src/files';
 import { KIT_FONTS, KIT_IMPORTS, KIT_ORIGIN, MOTION_TEMPLATES, importMapTag, withImportMap } from '../src/index';
 
 const TEMPLATES = fileURLToPath(new URL('../templates/', import.meta.url));
@@ -32,6 +35,19 @@ describe('the motion kit', () => {
       expect(existsSync(file), template.name).toBe(true);
       expect(readFileSync(file, 'utf8'), template.name).toMatch(/^<!doctype html>/);
       expect(template.whole === true || template.duration > 0, template.name).toBe(true);
+    }
+  });
+
+  it('copies a template into the project, beside a folder of its name already there', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'cuttle-kit-'));
+    try {
+      // no kit next to this file: the package's own templates
+      expect(await copyTemplate(dir, 'title', 'title', import.meta.url)).toBe('motion/title/index.html');
+      expect(await copyTemplate(dir, 'title', 'title', import.meta.url)).toBe('motion/title-2/index.html');
+      expect(readFileSync(join(dir, 'motion', 'title-2', 'index.html'), 'utf8')).toBe(readFileSync(`${TEMPLATES}title/index.html`, 'utf8'));
+      await expect(copyTemplate(dir, 'nope', 'nope', import.meta.url)).rejects.toThrow(MissingTemplateError);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
     }
   });
 });

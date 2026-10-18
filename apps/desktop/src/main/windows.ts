@@ -14,6 +14,7 @@ import { ExportRun, exportPath } from './export-service';
 import { bindRequests, send } from './ipc';
 import { ProjectMedia } from './media-service';
 import { EditorMotion } from './motion-service';
+import { EditorSound } from './sound-service';
 import { LockedError, lockProject, openProjectFile, projectInfo } from './project';
 import { importImage, ProjectFileWatch } from './project-watch';
 import { APP_ORIGIN, assetPath, bundlePath, serveApp, serveMedia } from './protocols';
@@ -89,6 +90,7 @@ interface Editor {
   media: ProjectMedia;
   /** The preview of its motion scenes and overlays. */
   motion: EditorMotion;
+  sound: EditorSound;
   /** cuttle.json on disk: the editor's saves and the changes others make. */
   watch: ProjectFileWatch;
   release: () => Promise<void>;
@@ -143,6 +145,7 @@ async function createEditor(dir: string, key: string, force: boolean): Promise<B
       editors.delete(key);
       editor.media.dispose();
       editor.motion.dispose();
+      editor.sound.dispose();
       if (!editor.window.isDestroyed()) editor.window.destroy();
     }
     await release();
@@ -173,7 +176,8 @@ async function editorWindow(dir: string, key: string, file: ProjectFile, release
     status: (statuses) => send(contents, 'motion:status', statuses),
     changed: (files) => send(contents, 'motion:changed', { files }),
   });
-  const editor: Editor = { window, contents, media: newMedia(file.project), motion, release, watch: new ProjectFileWatch(dir, (event) => onFileChange(event)) };
+  const sound = new EditorSound(dir, { status: (status) => send(contents, 'sound:status', status) });
+  const editor: Editor = { window, contents, media: newMedia(file.project), motion, sound, release, watch: new ProjectFileWatch(dir, (event) => onFileChange(event)) };
   editors.set(key, editor);
   function newMedia(project: ProjectFile['project']): ProjectMedia {
     return new ProjectMedia(dir, project, (state) => send(contents, 'media:state', state));
@@ -242,6 +246,12 @@ async function editorWindow(dir: string, key: string, file: ProjectFile, release
     'motion:statuses': () => motion.statuses(),
     'motion:reload': (item) => motion.reload(item),
     'motion:add-template': async (template) => ({ src: await motion.addTemplate(template) }),
+    'sound:project': ({ version, raw }) => sound.project(version, raw),
+    'sound:soundtrack': (key) => sound.soundtrack(key),
+    'sound:status': () => sound.currentStatus(),
+    'sound:params': (src) => sound.params(src),
+    'sound:reload': () => sound.reload(),
+    'sound:add-template': async (template) => ({ src: await sound.addTemplate(template) }),
     'project:import-image': async ({ purpose }) => {
       const chosen =
         CHECK_IMAGE ??
@@ -282,6 +292,7 @@ async function editorWindow(dir: string, key: string, file: ProjectFile, release
     editor.watch.close();
     editor.media.dispose();
     editor.motion.dispose();
+    editor.sound.dispose();
     editor.run?.cancel();
     void release();
     // Closing the last editor returns to the pill (not while an editor is reopened on a new take).

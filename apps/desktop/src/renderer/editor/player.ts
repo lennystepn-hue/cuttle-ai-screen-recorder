@@ -9,6 +9,7 @@ import { AudioSchedule } from './audio';
 import { TypingSchedule } from './typing-audio';
 import { FrameGrabber, KeyFrames, PlaybackFrames, type HeldFrame, type PlaybackVideo } from './frames';
 import type { EditorMedia, VideoSource } from './media';
+import { MotionFrames } from './motion';
 
 export interface PlayerState {
   /** Output seconds of the frame on screen. */
@@ -26,6 +27,8 @@ export interface PlayerState {
 const LOOKAHEAD_FRAMES = 20;
 /** Playback this far behind the clock restarts its decoders at the clock (frames are dropped). */
 const BEHIND_SECONDS = 0.5;
+/** The sizes motion frames are drawn at, as parts of the output: the smallest that fills the player on screen. */
+const MOTION_SCALES = [1 / 4, 1 / 3, 3 / 8, 1 / 2, 2 / 3, 3 / 4, 1];
 
 /** What playback did, for the check: frames drawn, decoder restarts at the clock (frames dropped), typing clicks scheduled, the clock. */
 export interface PlaybackStats {
@@ -34,6 +37,8 @@ export interface PlaybackStats {
   clicks: number;
   /** The clock's output time (where the sound is), while playing. */
   clock: number;
+  /** Motion frames that came while playing, and how long one took (ms, a running mean). */
+  motion?: { frames: number; took: number };
 }
 
 export interface PlayerOptions {
@@ -43,6 +48,8 @@ export interface PlayerOptions {
   /** The project as shown (the editor may preview another output format than the file's). */
   project: CuttleProject;
   onChange: (state: PlayerState) => void;
+  /** Motion frames at the output's size, whatever the player's on screen (the check compares them with the export's). */
+  fullSizeMotion?: boolean;
 }
 
 export class Player {
@@ -59,6 +66,11 @@ export class Player {
   private screenGrabber: FrameGrabber;
   private webcamGrabber: FrameGrabber | undefined;
   private seekToken = 0;
+  /**
+   * Where the seek under way goes (output seconds, as asked): a new version of the project that comes
+   * meanwhile shows that time, not the one still on screen (an item added, then the playhead moved to it).
+   */
+  private seeking: number | undefined;
   private playToken = 0;
   private context: AudioContext | undefined;
   private audio: AudioSchedule | undefined;
@@ -67,6 +79,10 @@ export class Player {
   private disposed = false;
   private readonly playback: PlaybackStats = { drawn: 0, restarts: 0, clicks: 0, clock: 0 };
   private clockNow: (() => number) | undefined;
+  private readonly motion: MotionFrames;
+  private readonly fullSizeMotion: boolean;
+  /** The frames of the seek on screen, kept while its motion frames come (it is drawn again with them). */
+  private parked: HeldFrame[] = [];
 
   constructor(options: PlayerOptions) {
     this.media = options.media;
@@ -79,6 +95,27 @@ export class Player {
     this.webcamGrabber = this.media.webcam ? new FrameGrabber(this.media.webcam) : undefined;
     this.timeline = this.makeTimeline();
     this.renderer = this.makeRenderer();
+    this.fullSizeMotion = options.fullSizeMotion ?? false;
+    this.motion = new MotionFrames(this.project, this.media.screen.size, () => this.motionSize());
+  }
+
+  /** The size motion frames are drawn at: the output's part that fills the player on screen. */
+  private motionSize(): { width: number; height: number } {
+    const { width, height } = this.project.output;
+    const shown = this.canvas.clientWidth * (window.devicePixelRatio || 1);
+    const scale = this.fullSizeMotion ? 1 : (MOTION_SCALES.find((part) => width * part >= shown * 0.95) ?? 1);
+    return { width: Math.max(8, Math.round(width * scale)), height: Math.max(8, Math.round(height * scale)) };
+  }
+
+  /** Frames across motion scene `sceneIndex` for its block on the timeline, `height` px high (undefined: not now). */
+  motionStrip(sceneIndex: number, height: number) {
+    return this.motion.strip(this.timeline.spans, sceneIndex, height);
+  }
+
+  /** The project's files changed (a motion page edited): its frames are drawn anew. */
+  motionFilesChanged(): void {
+    this.motion.filesChanged();
+    if (!this.state.playing) void this.seek(this.seeking ?? this.state.t);
   }
 
   get duration(): number {
@@ -114,7 +151,7 @@ export class Player {
 
   /** Playback counters since the last play, and the clock's time while playing. */
   stats(): PlaybackStats {
-    return { ...this.playback, clicks: this.typing?.scheduled ?? this.playback.clicks, clock: this.clockNow?.() ?? this.state.t };
+    return { ...this.playback, clicks: this.typing?.scheduled ?? this.playback.clicks, clock: this.clockNow?.() ?? this.state.t, motion: this.motion.stats() };
   }
 
   private makeTimeline(): Timeline {
@@ -152,6 +189,7 @@ export class Player {
     const background = this.media.backgroundImage;
     const renew = look(project) !== look(this.project) || background !== this.drawnBackground;
     this.project = project;
+    this.motion.setProject(project);
     this.timeline = this.makeTimeline();
     // the title bar and the transport show the length: they learn it changed with the state
     this.set({ duration: this.timeline.duration });
@@ -160,7 +198,7 @@ export class Player {
       this.renderer = this.makeRenderer();
     } else this.renderer.setScenes(project.scenes);
     if (this.media.webcam && !this.webcamGrabber) this.webcamGrabber = new FrameGrabber(this.media.webcam);
-    void this.seek(Math.min(this.state.t, this.timeline.duration));
+    void this.seek(Math.min(this.seeking ?? this.state.t, this.timeline.duration));
     if (playing) this.play();
   }
 
@@ -189,7 +227,7 @@ export class Player {
     this.keyFrames = new KeyFrames(proxy);
     this.screenGrabber = new FrameGrabber(proxy);
     if (playing) this.play();
-    else void this.seek(this.state.t);
+    else void this.seek(this.seeking ?? this.state.t);
   }
 
   /** The output frame number of a time. */
@@ -212,15 +250,27 @@ export class Player {
     }
   }
 
-  /** Shows the frame at output time `t` (paused); a newer seek wins over one still decoding. */
+  /** Closes the frames a seek kept for drawing again. */
+  private unpark(): void {
+    for (const frame of this.parked) frame.close();
+    this.parked = [];
+  }
+
+  /**
+   * Shows the frame at output time `t` (paused); a newer seek wins over one still decoding. Motion
+   * shows at once with the nearest frame the player has, and the frame is drawn again once the exact
+   * ones came.
+   */
   async seek(t: number): Promise<void> {
     if (this.disposed) return;
     if (this.state.playing) this.pause();
     const token = ++this.seekToken;
+    this.unpark();
+    this.seeking = t;
     const time = Math.max(0, Math.min(t, this.duration));
     const frame = this.frameOf(time);
     const state = this.timeline.frameAt(frame / this.fps);
-    const held: HeldFrame[] = [];
+    let held: HeldFrame[] = [];
     const sources: FrameSources = { screens: new Map(), webcams: new Map(), stills: new Map(), motion: new Map(), overlays: new Map() };
     const stills = this.stillsByIndex();
     try {
@@ -255,9 +305,23 @@ export class Player {
         }
       }
       if (token !== this.seekToken || this.disposed) return;
+      const needs = this.motion.needs(this.timeline.spans, state);
+      const exact = this.motion.fill(needs, sources);
+      this.seeking = undefined;
       if (this.draw(state, sources)) this.set({ t: time, source: this.sourceOf(state), error: undefined });
+      if (exact) return;
+      // the exact motion frames, then this frame again with them (its video frames are kept until then)
+      this.parked = held;
+      held = [];
+      const changed = await this.motion.exact(needs, sources);
+      if (token !== this.seekToken || this.disposed || this.state.playing) return;
+      if (changed) this.draw(state, sources);
+      this.unpark();
     } catch (error) {
-      if (token === this.seekToken && !this.disposed) this.set({ t: time, error: frameError(error) });
+      if (token === this.seekToken && !this.disposed) {
+        this.seeking = undefined;
+        this.set({ t: time, error: frameError(error) });
+      }
     } finally {
       for (const frame of held) frame.close();
     }
@@ -268,6 +332,8 @@ export class Player {
     if (this.disposed || this.state.playing || !(this.duration > 0)) return;
     const from = this.state.t >= this.duration - 1 / this.fps ? 0 : this.state.t;
     this.seekToken++;
+    this.seeking = undefined;
+    this.unpark();
     const token = ++this.playToken;
     this.context ??= new AudioContext({ latencyHint: 'playback' });
     void this.context.resume();
@@ -320,6 +386,8 @@ export class Player {
     };
     let frames: PlaybackFrames | undefined;
     let shown = startFrame - 1;
+    const needsAt = (frame: number) => this.motion.needs(this.timeline.spans, this.timeline.frameAt(frame / fps));
+    this.motion.startPlaying();
     try {
       if (this.media.mic) this.audio = new AudioSchedule(context, this.media.mic, this.project, this.timeline.spans, from, contextStart);
       this.typing = new TypingSchedule(context, this.project, this.timeline.spans, this.media.events, from, contextStart);
@@ -341,6 +409,12 @@ export class Player {
           const state = this.timeline.frameAt(frame / fps);
           const sources = await frames.sourcesFor(frame, state, speedOf);
           if (token !== this.playToken || this.disposed) break;
+          if (sources) {
+            // the motion frames that have come, and the next ones asked for
+            sources.motion.clear();
+            sources.overlays.clear();
+            this.motion.stream(this.motion.needs(this.timeline.spans, state), frame, fps, last, sources, needsAt);
+          }
           if (sources && this.draw(state, sources)) {
             this.playback.drawn++;
             this.set({ t: frame / fps, source: this.sourceOf(state) });
@@ -369,6 +443,7 @@ export class Player {
   dispose(): void {
     this.disposed = true;
     this.pause();
+    this.unpark();
     this.renderer.dispose();
     void this.context?.close();
   }

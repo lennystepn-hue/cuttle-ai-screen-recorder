@@ -4,7 +4,7 @@ import { loadEngineAssets, type EngineAssets } from '@cuttle/engine';
 import { withFormat, type ExportFormat } from '@cuttle/export/formats';
 import type { CuttleProject } from '@cuttle/project';
 import type { Command, EditLimits } from '../../shared/document';
-import type { ExportEnd, ExportProgress, ExportTarget, MediaState, ProjectInfo, ProjectStatus } from '../../shared/ipc';
+import type { ExportEnd, ExportProgress, ExportTarget, MediaState, MotionStatusView, ProjectInfo, ProjectStatus } from '../../shared/ipc';
 import type { OverlayKind } from '../../shared/timeline-model';
 import { bridge } from '../bridge';
 import { beforeClose, dismissToast, edit, flush, offerUndoRestart, openDocument, outsideChange, redo, toast, undo, type DocState } from './doc';
@@ -56,6 +56,10 @@ export interface EditorState {
   status?: ProjectStatus;
   /** The command menu (Ctrl+K) is open. */
   menuOpen: boolean;
+  /** The motion items' pages in the preview: loading, ready or failed, and what they said. */
+  motionStatus: MotionStatusView[];
+  /** Counts the changes to the project's files (a motion page edited): what was read from them is read again. */
+  motionFiles: number;
 }
 
 export const store = createStore<EditorState>({
@@ -71,6 +75,8 @@ export const store = createStore<EditorState>({
   exportUnseen: false,
   pxPerSecond: 0,
   menuOpen: false,
+  motionStatus: [],
+  motionFiles: 0,
 });
 
 let player: Player | undefined;
@@ -127,6 +133,8 @@ export async function openSession(canvas: HTMLCanvasElement): Promise<void> {
       assets,
       project: shownProject()!,
       onChange: (state) => store.set({ player: state }),
+      // the check compares the editor's motion frames with the export's
+      fullSizeMotion: query.get('check') === '1',
     });
     store.set({ phase: 'ready', media });
     await player.seek(0);
@@ -140,6 +148,12 @@ export async function openSession(canvas: HTMLCanvasElement): Promise<void> {
     bridge.on('project:file', (event) => void outsideChange(event));
     // A restarted take: the one before it is kept aside, and can be the take again.
     bridge.on('project:restarted', ({ discarded }) => offerUndoRestart(discarded));
+    // a motion page changed (Claude edited it): its frames, params and errors anew
+    bridge.on('motion:status', (statuses) => store.set({ motionStatus: statuses }));
+    bridge.on('motion:changed', ({ files }) => {
+      store.set({ motionFiles: files });
+      player?.motionFilesChanged();
+    });
     // what happened to the take (an undone restart), once it is in
     bridge.on('project:note', ({ text }) => toast(text));
   } catch (error) {
@@ -147,7 +161,7 @@ export async function openSession(canvas: HTMLCanvasElement): Promise<void> {
   }
 }
 
-const LISTS = { scene: 'scenes', zoom: 'zooms', mask: 'masks', caption: 'texts', cut: 'cuts', crop: 'scenes' } as const;
+const LISTS = { scene: 'scenes', zoom: 'zooms', mask: 'masks', caption: 'texts', motion: 'overlays', cut: 'cuts', crop: 'scenes' } as const;
 
 /** The player follows the document (edits, previews, outside changes) and the previewed format. */
 function followDocument(): void {
@@ -178,7 +192,15 @@ function exposeCheckHook(canvas: HTMLCanvasElement): void {
     __cuttleCheck: {
       seek: (t: number) => player?.seek(t),
       playback: () => player?.stats(),
-      state: () => ({ ...store.get().player, duration: player?.duration ?? 0, mediaState: store.get().mediaState, proxyInUse, selection: store.get().selection, tool: store.get().tool }),
+      state: () => ({
+        ...store.get().player,
+        duration: player?.duration ?? 0,
+        mediaState: store.get().mediaState,
+        proxyInUse,
+        selection: store.get().selection,
+        tool: store.get().tool,
+        motion: { status: store.get().motionStatus, files: store.get().motionFiles },
+      }),
       pixels: () => canvas.toDataURL('image/png'),
       /** Switches to the proxy (the check runs with `?proxy=off` to compare frames of the take first). */
       useProxy: async () => {

@@ -48,7 +48,8 @@ permission, 3 render, 130 cancelled.
   When the user will speak, Cuttle transcribes the mic on this computer and cuts filler words and
   pauses. That needs a speech model: `cuttle --json models` lists them. If none is downloaded, ask
   the user before `cuttle models download small` (488 MB, once). Tell them that a slip needs no
-  new take: press Ctrl+Shift+Alt+X (or say "nochmal", "again") and do the bit again.
+  new take: press Ctrl+Shift+Alt+X (or say "nochmal", "again", or just pause and begin the
+  sentence again) and do the bit again.
 - Ask the user to make text large (terminal font 16 px or more, or zoom the browser), to close
   private windows, to switch on Do not disturb (Cuttle masks the notifications it sees, but none is
   better), and to use a clean folder or browser profile.
@@ -161,11 +162,14 @@ Transcribing also writes a cleaned-up mic (less noise, even loudness) that the v
 
 **Slips.** The mistake key (Ctrl+Shift+Alt+X, or the scissors in the recording bar) marks a slip
 in `markers.json` (kind `retake`). A spoken cue counts too when the bit is then said again ("…die
-Art. Nochmal. Die App erkennt die Art …"; also "noch mal", "again", "one more time"). `suggest`
-cuts each slip from the pause before it to where the bit starts again (cuts tagged `retake`,
-"Retake" or "Retake: “Nochmal”"); the key needs no speech model. Check each with `preview --at`
-just before and after the cut; if it took too much or too little, move its `from` or `to` and
-remove its `auto`.
+Art. Nochmal. Die App erkennt die Art …"; also "noch mal", "again", "one more time"), and so
+does a sentence begun again after a pause ("Dann klickt ihr auf … Dann klickt ihr auf
+Exportieren"). `suggest` cuts each slip from the pause before it to where the bit starts again
+(cuts tagged `retake`, "Retake", "Retake: “Nochmal”" or "Restart: “Dann klickt ihr auf”"); the
+key needs no speech model. Every speech cut begins and ends where the mic is quiet: its notes say
+how many edges it moved there, and which cuts it left out because the words ran together. Check
+each with `preview --at` just before and after the cut; if it took too much or too little, move
+its `from` or `to` and remove its `auto`.
 
 **Subtitles.** A transcribed take gets subtitles in the video (`captions`, project.md): as
 subtitles at the bottom, `karaoke` (the spoken word in colour) or `bold` (a few big words, for

@@ -168,8 +168,9 @@ cuts have no subtitle.
 `cuts` take a stretch out of whatever clip covers it, without splitting the clip: `from` and `to`
 (source seconds) and `enabled` (`true`). The video jumps there (no crossfade); zooms, masks and
 texts run on across it. Use them for a slip, a filler or a pause inside a clip; `suggest` makes
-them for slips ("Retake": the mistake key, or a spoken "nochmal" with the bit said again), filler
-words ("Filler: äh") and pauses ("Pause: 2.4 s") from the transcript.
+them for slips ("Retake": the mistake key, or a spoken "nochmal" with the bit said again;
+"Restart": a sentence begun again), filler words ("Filler: äh") and pauses ("Pause: 2.4 s") from
+the transcript, each beginning and ending where the mic is quiet.
 
 Every scene, zoom, mask, text, overlay and cut may have an `id` (1 to 64 letters, digits, `-` or `_`,
 unique in the whole project) and a `label` (a name for people, shown in the Cuttle app). `suggest`

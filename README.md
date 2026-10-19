@@ -252,7 +252,7 @@ recent projects (open, rename, show, remove).
 ```bash
 cuttle init demo && cd demo
 cuttle devices                       # monitors, windows, cameras, microphones
-cuttle record --mic --until-claude   # stops when Claude Code in this folder ends its turn (or Ctrl+C)
+cuttle record --mic --until-claude   # stops when Claude Code in this folder has answered, background work included (or Ctrl+C)
 cuttle suggest                       # scenes: quiet start and end trimmed, idle cut, waiting sped up, zooms on the answer and on clicks
 cuttle preview                       # 12 stills and a contact sheet in preview/
 cuttle frame 42.5 --grid             # a source frame with a numbered pixel grid, for masks and zooms

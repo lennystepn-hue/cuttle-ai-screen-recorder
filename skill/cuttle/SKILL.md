@@ -82,8 +82,11 @@ cuttle -C "<project>" record --monitor 0 --until-file "<project>/stop" --until-c
   `cuttle.json` still points at the previous take. After a stop by file, `record` removes the file
   again.
 - `--until-claude "<folder>"`: also ends the take 2 s after the first Claude Code session in that
-  folder that prompts after the start finishes its turn; its prompt, tool calls and answer become
-  markers. If that folder is the one you run in, tell the user not to write to you until the
+  folder that prompts after the start finishes its turn; its prompt, tool calls and answers become
+  markers. A turn that leaves commands, agents or monitors running in the background does not end
+  it: the take ends after Claude's answer once they are done (their results are in it), or 60 s
+  after the last step in that session when one never ends (a server it started; the output then
+  says so). If that folder is the one you run in, tell the user not to write to you until the
   recording has stopped: your own next turn would end it.
 - `--until-idle 5`: also ends once the screen and the input have rested 5 s.
 - `--max <seconds>` is the safety net (it counts recorded time, not pauses). The user can also stop

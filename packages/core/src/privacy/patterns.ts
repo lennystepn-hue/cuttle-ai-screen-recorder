@@ -26,10 +26,55 @@ export interface Secret {
   key: string;
 }
 
-/** Key prefixes; one wrong letter is allowed in those of 4 letters or more. */
-const KEY_PREFIXES = ['sk-ant-', 'sk-proj-', 'sk-', 'ghp_', 'gho_', 'ghs_', 'ghu_', 'github_pat_', 'glpat-', 'xoxb-', 'xoxa-', 'xoxp-', 'xoxs-', 'akia', 'aiza', 'eyj'];
-/** After a prefix, a key goes on with at least this many key characters. */
+/** After a prefix, a key goes on with at least this many key characters (`rest` says otherwise). */
 const KEY_REST = 10;
+/**
+ * Key prefixes (lower case); one wrong letter is allowed in those of 4 letters or more. `rest`: the
+ * key characters that must follow; `plain`: they are letters and digits only (an environment name
+ * such as npm_config_cache is not an npm token).
+ */
+const KEY_PREFIXES: readonly { prefix: string; rest?: number; plain?: true }[] = [
+  { prefix: 'sk-ant-' },
+  { prefix: 'sk-proj-' },
+  { prefix: 'sk-' },
+  // Stripe
+  { prefix: 'sk_live_', rest: 16 },
+  { prefix: 'sk_test_', rest: 16 },
+  { prefix: 'rk_live_', rest: 16 },
+  { prefix: 'rk_test_', rest: 16 },
+  { prefix: 'whsec_', rest: 24 },
+  // GitHub, GitLab, Slack
+  { prefix: 'ghp_' },
+  { prefix: 'gho_' },
+  { prefix: 'ghs_' },
+  { prefix: 'ghu_' },
+  { prefix: 'github_pat_' },
+  { prefix: 'glpat-' },
+  { prefix: 'xoxb-' },
+  { prefix: 'xoxa-' },
+  { prefix: 'xoxp-' },
+  { prefix: 'xoxs-' },
+  // AWS (access keys and temporary ones), Google
+  { prefix: 'akia', rest: 16 },
+  { prefix: 'asia', rest: 16 },
+  { prefix: 'aiza' },
+  { prefix: 'ya29.', rest: 30 },
+  // Hugging Face, xAI, Groq, Replicate, npm, PyPI
+  { prefix: 'hf_', rest: 30, plain: true },
+  { prefix: 'xai-', rest: 30, plain: true },
+  { prefix: 'gsk_', rest: 30, plain: true },
+  { prefix: 'r8_', rest: 30, plain: true },
+  { prefix: 'npm_', rest: 30, plain: true },
+  { prefix: 'pypi-', rest: 30 },
+  // Shopify, DigitalOcean, Linear, SendGrid (SG.<22>.<43>)
+  { prefix: 'shpat_', rest: 24, plain: true },
+  { prefix: 'shpss_', rest: 24, plain: true },
+  { prefix: 'dop_v1_', rest: 40, plain: true },
+  { prefix: 'lin_api_', rest: 30, plain: true },
+  { prefix: 'sg.', rest: 50 },
+  // a JWT
+  { prefix: 'eyj' },
+];
 /** Names whose value is private, in a `NAME=value` or `name: value` line. */
 const SECRET_NAMES = /(api[_ -]?key|_key|key\b|token|secret|passw(or)?d|\bpwd\b|session|authorization|\bauth\b|credential|cookie)/i;
 
@@ -110,12 +155,14 @@ export function findSecrets(text: string, words: readonly string[] = []): Match[
   // keys by their prefix: the key and what follows on the line
   for (const match of text.matchAll(/[^\s=:"'`(/@]+/g)) {
     const token = match[0];
-    const prefix = KEY_PREFIXES.find((candidate) => startsLike(token, candidate));
-    if (!prefix) continue;
+    const rule = KEY_PREFIXES.find((candidate) => startsLike(token, candidate.prefix));
+    if (!rule) continue;
+    const { prefix } = rule;
     // a JWT the OCR split with spaces goes on to the line's end: parts with dots between
-    const rest = (prefix === 'eyj' ? text.slice(match.index + prefix.length).replace(/\s+/g, '') : token.slice(prefix.length)).replace(/[^A-Za-z0-9_\-.øØ]/g, '');
+    const after = prefix === 'eyj' ? text.slice(match.index + prefix.length).replace(/\s+/g, '') : token.slice(prefix.length);
+    const rest = rule.plain ? (/^[A-Za-z0-9øØ]*/.exec(after)?.[0] ?? '') : after.replace(/[^A-Za-z0-9_\-.øØ]/g, '');
     if (prefix === 'eyj' && !(rest.length >= 20 && rest.includes('.'))) continue;
-    if (rest.length < (prefix === 'akia' ? 16 : KEY_REST)) continue;
+    if (rest.length < (rule.rest ?? KEY_REST)) continue;
     add('key', match.index, text.length);
   }
   // a private key's header line

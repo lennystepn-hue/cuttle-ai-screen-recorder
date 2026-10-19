@@ -1,6 +1,6 @@
 // What the editor's timeline draws, in output seconds: pure, so it is tested without a window.
 import { isFact, type AutoKind, type CuttleProject, type InputEvent, type Marker, type MarkerKind } from '@cuttle/project';
-import { occurrences, type SceneSpan } from '@cuttle/timeline';
+import { occurrences, outputTimesOf, type SceneSpan } from '@cuttle/timeline';
 import { formatDuration } from './format';
 
 export type OverlayKind = 'zoom' | 'mask' | 'caption' | 'motion' | 'sound';
@@ -265,16 +265,8 @@ function cutNotches(project: CuttleProject, spans: readonly SceneSpan[]): CutNot
   return notches.sort((a, b) => a.t - b.t);
 }
 
-/** The output seconds at which the clips show source second `t` (none when it is cut out). */
-export function outputTimesOf(spans: readonly SceneSpan[], t: number): number[] {
-  const times: number[] = [];
-  for (const span of spans) {
-    const scene = span.scene;
-    if (scene.type !== 'clip' || t < scene.from || t >= scene.to) continue;
-    times.push(span.start + (t - scene.from) / scene.speed);
-  }
-  return times;
-}
+// @cuttle/timeline's; the editor imports it from here
+export { outputTimesOf };
 
 export function timelineModel(project: CuttleProject, spans: readonly SceneSpan[], markers: readonly Marker[] = []): TimelineModel {
   // a clip with cuts in it is several spans in a row with one sceneIndex: one block

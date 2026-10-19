@@ -205,11 +205,12 @@ export async function runCli(argv: readonly string[], streams?: Streams): Promis
     .command('preview')
     .description('PNG stills of the output, and a contact sheet')
     .option('--at <seconds...>', 'output times (default: 12 evenly spaced, with a sheet)', collect)
+    .option('--masks', "stills just before, inside and after each mask's start and end, with a sheet (a row per mask)")
     .option('--sheet', 'also a contact sheet of the stills')
     .option('--format <format>', '16:9, 1:1 or 9:16 (default: the project output)')
     .option('-o, --out <dir>', 'folder for the PNGs (default: preview/ in the project)')
     .action(
-      action((output, project, options: { at?: number[]; sheet?: boolean; format?: string; out?: string }) =>
+      action((output, project, options: { at?: number[]; masks?: boolean; sheet?: boolean; format?: string; out?: string }) =>
         withSignal(output, (signal) => previewCommand(project, options, output, signal)),
       ),
     );

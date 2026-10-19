@@ -54,6 +54,35 @@ describe.runIf(enabled)('cuttle in Electron', () => {
     expect(pngSize(sheet.json.sheet as string)[0]).toBeGreaterThan(1000);
   }, 120_000);
 
+  it("renders stills at each mask's edges, a row of the sheet per mask, and says which is which", () => {
+    const file = join(project, 'cuttle.json');
+    const before = readFileSync(file, 'utf8');
+    const raw = JSON.parse(before) as Record<string, unknown>;
+    try {
+      writeFileSync(file, JSON.stringify({ ...raw, masks: [{ id: 'mask1', label: 'Key', from: 1, to: 2, rect: [0, 0, 200, 40] }, { from: 2.4, to: 2.6, rect: [0, 0, 50, 50], enabled: false }] }));
+      const { code, json } = cuttle('-C', project, 'preview', '--masks');
+      expect(code).toBe(0);
+      // one clip over the whole take: output and source seconds are the same
+      expect(json.masks).toEqual([
+        { mask: 0, id: 'mask1', label: 'Key', edge: 'before', t: 0.9, source: 0.9 },
+        { mask: 0, id: 'mask1', label: 'Key', edge: 'start', t: 1.1, source: 1.1 },
+        { mask: 0, id: 'mask1', label: 'Key', edge: 'end', t: 1.9, source: 1.9 },
+        { mask: 0, id: 'mask1', label: 'Key', edge: 'after', t: 2.1, source: 2.1 },
+      ]);
+      expect((json.stills as { t: number }[]).map((still) => still.t)).toEqual([0.9, 1.1, 1.9, 2.1]);
+      // four stills a row: one row
+      const [width, height] = pngSize(json.sheet as string);
+      expect(width / height).toBeGreaterThan(3);
+      // without a mask to look at, it says so
+      writeFileSync(file, JSON.stringify({ ...raw, masks: [{ from: 2.4, to: 2.6, rect: [0, 0, 50, 50], enabled: false }] }));
+      const none = cuttle('-C', project, 'preview', '--masks');
+      expect(none.code).toBe(1);
+      expect(none.json).toMatchObject({ error: { code: 'usage' } });
+    } finally {
+      writeFileSync(file, before);
+    }
+  }, 120_000);
+
   it('captures a whole page and appends it as a scrolling still scene', () => {
     const page = join(project, 'page.html');
     // A landing page: smooth scrolling, a fixed header (black, 60 px), a full-height hero (100vh,

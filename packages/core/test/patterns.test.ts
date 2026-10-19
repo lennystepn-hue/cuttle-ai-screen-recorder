@@ -27,6 +27,34 @@ describe('findSecrets, on lines as Windows OCR read the fixture page (its slips 
     expect(found('-----BEGIN OPENSSH PRIVATE KEY-----')).toEqual([['key', '-----BEGIN OPENSSH PRIVATE KEY-----']]);
   });
 
+  it("finds more services' keys by their prefix, and not names that only start the same", () => {
+    // put together here, so no key-like text stands in the source
+    const key = (prefix: string, length: number) => prefix + 'Ab1Cd2Ef3Gh4Jk5Lm6Np7Qr8St9Uv0Wx1Yz2'.repeat(3).slice(0, length);
+    for (const [prefix, length] of [
+      ['sk_' + 'live_', 24],
+      ['sk_' + 'test_', 24],
+      ['rk_' + 'live_', 24],
+      ['whsec_', 32],
+      ['hf_', 34],
+      ['xai-', 40],
+      ['gsk_', 52],
+      ['r8_', 37],
+      ['npm_', 36],
+      ['pypi-', 60],
+      ['ASIA', 16],
+      ['ya29.', 40],
+      ['shpat_', 32],
+      ['dop_v1_', 64],
+      ['lin_api_', 40],
+    ] as const) {
+      const token = key(prefix, length);
+      expect(found(`export TOKEN_VALUE ${token}`), prefix).toContainEqual(['key', token]);
+    }
+    const sendgrid = `SG.${key('', 22)}.${key('', 43)}`;
+    expect(found(sendgrid)).toEqual([['key', sendgrid]]);
+    for (const clean of ['npm_config_cache C:\\npm-cache', 'TZ Asia/Tokyo', 'vite sg.config.ts', 'hf_hub_download(repo_id)', 'r8_model ready', 'see ya29.example']) expect(found(clean), clean).toEqual([]);
+  });
+
   it('finds tokens in links, and the value of a private name', () => {
     expect(found('$ curl "https://api.examp1e.com/v1/items?access_token=abc123def456ghi789"')).toContainEqual(['token', 'abc123def456ghi789']);
     expect(found('Password: hunter2 (do not share)')).toEqual([['value', 'hunter2 (do not share)']]);

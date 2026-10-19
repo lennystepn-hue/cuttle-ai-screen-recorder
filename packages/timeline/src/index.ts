@@ -1,9 +1,12 @@
 export { clamp, clamp01, ease, easeInOutCubic, lerp, lerpRect, type EaseKind } from './easing';
 export {
   CONTINUOUS_CUT_SECONDS,
+  MASK_EDGE_SECONDS,
   MIN_PIECE_SECONDS,
   clipPieces,
   crossfadeHalf,
+  maskEdges,
+  outputTimesOf,
   pageTransition,
   isContinuousCut,
   sceneDuration,
@@ -12,6 +15,7 @@ export {
   spanAt,
   totalDuration,
   type CutRange,
+  type MaskEdge,
   type SceneSpan,
 } from './time';
 export { occurrences, rampAmount, type Occurrence } from './occurrences';

@@ -53,6 +53,35 @@ while ($null -ne ($line = [Console]::In.ReadLine())) {
 /** Pictures are read at up to twice their size on Windows (its OCR reads small text much better so; Vision needs no help). */
 export const OCR_SCALE = 2;
 
+/**
+ * Seconds the helper may take to start (Windows PowerShell, cold, can take several) and to read one
+ * picture (well under one here) before it counts as hung: then it is ended, and the screen is not read.
+ */
+export const OCR_TIMEOUT = { start: 60, read: 60 };
+
+/**
+ * The helper's next answer, or `ocr-missing` when none came within `seconds` (`hung` is called
+ * then: it ends the helper).
+ */
+export function answerWithin(answers: AsyncIterator<string>, seconds: number, what: string, hung: () => void): Promise<IteratorResult<string>> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      hung();
+      reject(new CoreError('ocr-missing', `the OCR helper did not answer within ${seconds} s (${what})`));
+    }, seconds * 1000);
+    answers.next().then(
+      (answer) => {
+        clearTimeout(timer);
+        resolve(answer);
+      },
+      (error: unknown) => {
+        clearTimeout(timer);
+        reject(error);
+      },
+    );
+  });
+}
+
 /** What the helper answers to a picture: its lines, each a list of words with their rects. */
 type Answer = { lines?: { t: string; r: [number, number, number, number] }[][]; error?: string };
 
@@ -106,7 +135,7 @@ export class ScreenReader {
     let stderr = '';
     child.stderr.on('data', (chunk: Buffer) => (stderr += chunk.toString('utf8')));
     const started = new Promise<never>((_, reject) => child.on('error', (error) => reject(new CoreError('ocr-missing', `the OCR helper did not start (${error.message})`))));
-    const first = await Promise.race([answers.next(), started]);
+    const first = await Promise.race([answerWithin(answers, OCR_TIMEOUT.start, 'starting', () => child.kill()), started]);
     const hello = first.done ? undefined : (JSON.parse(first.value) as { ready: boolean; language?: string; max?: number });
     if (!hello?.ready) {
       child.kill();
@@ -119,7 +148,7 @@ export class ScreenReader {
   async read(path: string, width: number, height: number): Promise<ScreenTextLine[]> {
     const scale = this.upscales ? Math.max(1, Math.min(OCR_SCALE, this.maxSide / Math.max(width, height))) : 1;
     this.child.stdin.write(`${JSON.stringify({ path, scale })}\n`);
-    const next = await this.answers.next();
+    const next = await answerWithin(this.answers, OCR_TIMEOUT.read, `reading ${path}`, () => this.child.kill());
     if (next.done) throw new CoreError('ocr-missing', 'the OCR helper stopped');
     const answer = JSON.parse(next.value) as Answer;
     if (answer.error) throw new CoreError('invalid-media', `the OCR could not read ${path}: ${answer.error}`);

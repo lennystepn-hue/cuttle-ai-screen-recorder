@@ -80,6 +80,10 @@ jobs:
           security unlock-keychain -p "$password" "$keychain"
           security import "$RUNNER_TEMP/cuttle.p12" -k "$keychain" -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
           rm "$RUNNER_TEMP/cuttle.p12"
+          # Apple's Developer ID G2 intermediate: without it the identity is "not trusted" and
+          # find-identity -v leaves it out. A .p12 exported with it holds it already.
+          curl -fsSL -o "$RUNNER_TEMP/DeveloperIDG2CA.cer" https://www.apple.com/certificateauthority/DeveloperIDG2CA.cer
+          security import "$RUNNER_TEMP/DeveloperIDG2CA.cer" -k "$keychain" || echo "the G2 intermediate is in the keychain already"
           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$password" "$keychain"
           security list-keychains -d user -s "$keychain" $(security list-keychains -d user | tr -d '"')
           identity="$(security find-identity -v -p codesigning "$keychain" | grep -o '"Developer ID Application[^"]*"' | head -1 | tr -d '"')"

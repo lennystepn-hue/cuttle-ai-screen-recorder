@@ -361,6 +361,10 @@ run's artifact, not part of the release):
 | `APPLE_CERTIFICATE_PASSWORD` | the .p12's password |
 | `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD`, `APPLE_TEAM_ID` | for notarizing: the Apple ID, an app-specific password made for it (account.apple.com), the team's id |
 
+The workflow adds Apple's *Developer ID - G2* intermediate certificate itself. Where Keychain
+Access says the certificate "is not trusted", that intermediate is missing on the Mac too: install
+it from apple.com/certificateauthority.
+
 On one computer, `pnpm app:build && pnpm app:installer` makes the installer of that platform in
 `apps/desktop/build/installers` (on macOS signed with `CUTTLE_SIGN_IDENTITY`, see
 `apps/desktop/scripts/package.mjs`).

@@ -1,7 +1,8 @@
 // Reading the screen's text for the privacy masks: the frames where the picture changed inside the
-// clips (at most 2 a second, at least one every 5 s), each read with the system's OCR (ocr.ts), written as the
-// take's screen-text.jsonl. Only the frames that are read are written to a temporary folder, one at
-// a time, and removed once read.
+// clips (compared 10 times a second; read at most 2 a second while it keeps changing, at least one
+// every 5 s, and once more where a change showed only a moment), each read with the system's OCR
+// (ocr.ts), written as the take's screen-text.jsonl. Only the frames that are read are written to a
+// temporary folder, one at a time, and removed once read.
 import { mkdtempSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -12,7 +13,9 @@ import type { Span } from '../suggest/spans';
 import { ScreenReader } from './ocr';
 
 export const READ_RULES = {
-  /** At most this many frames a second are read… */
+  /** The picture is compared this many times a second, so a change that shows only a moment is seen… */
+  detect: 10,
+  /** …at most this many frames a second are read while it keeps changing (typing, scrolling)… */
   rate: 2,
   /** …and at least one every this many seconds while the clips run. */
   every: 5,
@@ -28,8 +31,10 @@ export const READ_RULES = {
 export const SCREEN_TEXT_FILE = 'screen-text.jsonl';
 
 /**
- * The source seconds to read inside `spans`: each span's first frame, then every frame (at `rate`
- * a second) that changed since the last one kept, and one at least every `every` seconds.
+ * The source seconds to read inside `spans`: each span's first frame; a frame that changed since the
+ * last one read, `rate` a second at most; one at least every `every` seconds. A change that came
+ * too soon after a read and went before the next read was due (a token that flashed) is read as
+ * well. The frames are compared `detect` times a second.
  */
 export async function framesToRead(screen: string, spans: readonly Span[], size: { width: number; height: number }, rules = READ_RULES): Promise<number[]> {
   const width = rules.width;
@@ -38,26 +43,40 @@ export async function framesToRead(screen: string, spans: readonly Span[], size:
   const times: number[] = [];
   for (const span of spans) {
     if (!(span.to > span.from)) continue;
+    /** The last frame read, and the first change since then that came too soon to be read. */
     let kept: { t: number; data: Buffer } | undefined;
+    let waiting: number | undefined;
+    const read = (t: number, data: Buffer) => {
+      kept = { t, data };
+      times.push(t);
+    };
     let pending: Buffer = Buffer.alloc(0);
     let index = 0;
-    await runFfmpeg(['-ss', span.from.toFixed(3), '-t', (span.to - span.from).toFixed(3), '-i', screen, '-map', '0:v:0', '-vf', `fps=${rules.rate},scale=${width}:${height},format=gray`, '-f', 'rawvideo', '-'], (chunk) => {
+    await runFfmpeg(['-ss', span.from.toFixed(3), '-t', (span.to - span.from).toFixed(3), '-i', screen, '-map', '0:v:0', '-vf', `fps=${rules.detect},scale=${width}:${height},format=gray`, '-f', 'rawvideo', '-'], (chunk) => {
       pending = pending.length === 0 ? chunk : Buffer.concat([pending, chunk]);
       while (pending.length >= area) {
         const data = pending.subarray(0, area);
         pending = pending.subarray(area);
-        const t = Math.round((span.from + index++ / rules.rate) * 1000) / 1000;
+        const t = Math.round((span.from + index++ / rules.detect) * 1000) / 1000;
         if (t >= span.to) continue;
-        let changed = rules.minPixels;
-        if (kept && t - kept.t < rules.every) {
-          changed = 0;
-          for (let i = 0; i < area && changed < rules.minPixels; i++) if (Math.abs(data[i]! - kept.data[i]!) > rules.threshold) changed++;
+        if (!kept || t - kept.t >= rules.every) {
+          read(t, data);
+          continue;
         }
-        if (changed < rules.minPixels) continue;
-        kept = { t, data };
-        times.push(t);
+        let changed = 0;
+        for (let i = 0; i < area && changed < rules.minPixels; i++) if (Math.abs(data[i]! - kept.data[i]!) > rules.threshold) changed++;
+        if (changed >= rules.minPixels && t - kept.t >= 1 / rules.rate) {
+          waiting = undefined;
+          read(t, data);
+        } else if (changed >= rules.minPixels) waiting ??= t;
+        else if (waiting !== undefined) {
+          // back to what was read before the next read was due: the change showed only a moment
+          times.push(waiting);
+          waiting = undefined;
+        }
       }
     });
+    if (waiting !== undefined) times.push(waiting);
   }
   return times;
 }

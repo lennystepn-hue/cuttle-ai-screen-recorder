@@ -4,7 +4,7 @@ import { rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
-import { ffmpegPath, spawnCapture, type Feeder } from '../src/ffmpeg';
+import { ffmpegPath, spawnCapture, type CaptureProcess, type Feeder } from '../src/ffmpeg';
 import { relayInput } from '../src/window-capture';
 
 afterEach(() => vi.unstubAllEnvs());
@@ -74,20 +74,52 @@ describe('spawnCapture', () => {
     const frames = (file: string) =>
       Number(spawnSync('ffprobe', ['-v', 'error', '-count_frames', '-show_entries', 'stream=nb_read_frames', '-of', 'csv=p=0', file], { encoding: 'utf8' }).stdout);
     const relayed = (file: string) => ['-use_wallclock_as_timestamps', '1', ...relayInput(size), ...out(file)];
+    const running = (pid: number | undefined) => {
+      if (pid === undefined) return false;
+      try {
+        process.kill(pid, 0);
+        return true;
+      } catch {
+        return false;
+      }
+    };
+    /**
+     * Waits for one step of a relayed capture, at most `seconds`. Once it hung on GitHub's Windows
+     * runner (the test's 15 s ran out, twice in a row) and never here: a step that stalls fails at
+     * once, saying which one, whether ffmpeg and its feeder still run, and ffmpeg's last lines.
+     */
+    const step = async <T,>(what: string, promise: Promise<T>, capture: CaptureProcess, lines: readonly string[], seconds: number): Promise<T> => {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const stalled = new Promise<never>((_, reject) => {
+        timer = setTimeout(() => {
+          const state = `ffmpeg ${running(capture.pid) ? 'still runs' : 'has exited'}, its feeder ${running(capture.feederPid) ? 'still runs' : 'has exited'}`;
+          for (const pid of [capture.pid, capture.feederPid]) if (running(pid)) process.kill(pid!);
+          reject(new Error(`${what} took over ${seconds} s; ${state}. ffmpeg's last lines:\n${lines.slice(-20).join('\n')}`));
+        }, seconds * 1000);
+      });
+      try {
+        return await Promise.race([promise, stalled]);
+      } finally {
+        clearTimeout(timer);
+      }
+    };
 
     it('writes 30 frames a second from 2 a second, and stops at once though no frame is coming', async () => {
       const file = join(temp('cuttle-relay-'), 'out.mp4');
       const capture = spawnCapture('screen', relayed(file), feeder(2));
-      await capture.started;
+      const lines: string[] = [];
+      capture.onLine((line) => lines.push(line));
+      await step('the start', capture.started, capture, lines, 8);
       await new Promise((resolve) => setTimeout(resolve, 1500));
       const asked = Date.now();
-      await capture.stop();
+      await step('the stop', capture.stop(), capture, lines, 4);
       expect(Date.now() - asked).toBeLessThan(2000);
       const seconds = duration(file);
       expect(seconds).toBeGreaterThan(1.3);
-      // ten times what the feeder sends; beside a hundred other test files the clock's ticks come
-      // late, and a late tick writes one frame (a full run measured 24.6 a second)
-      expect(frames(file) / seconds).toBeGreaterThan(20);
+      // Far more than the feeder's 2 a second: the relay writes them. Beside a hundred other test
+      // files the clock's ticks come late, and a late tick writes one frame (full runs measured 24.6
+      // and 18.8 a second), so only that is asked: at least five times what the feeder sends.
+      expect(frames(file) / seconds).toBeGreaterThan(10);
       expect(frames(file) / seconds).toBeLessThan(33);
     }, 15_000);
 

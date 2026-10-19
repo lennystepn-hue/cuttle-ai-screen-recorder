@@ -1,5 +1,5 @@
-// A window take on macOS, where the capture helper takes the window by itself: only what is done in
-// that window is the take's input. While another window is in front, the pointer, the clicks, the
+// A window take recorded by itself (macOS's capture helper, Windows' gfxcapture): only what is done
+// in that window is the take's input. While another window is in front, the pointer, the clicks, the
 // keys and the content area are not logged (the take shows none of it), nor ever what opens over
 // the screen (a dialog or notification of another window is not in the take), nor a click or a
 // scroll beside the window. When the window has moved, the events' origin moves with it. Pure: the
@@ -10,7 +10,7 @@ import type { Bounds, RawInput } from './types';
 export const WINDOW_GATE_MS = 250;
 
 export interface WindowGate {
-  /** The front window now (its id and frame in desktop pixels, as darwin.ts's `foreground()` gives it). */
+  /** The front window now (its id and frame in desktop pixels, as `foreground()` in darwin.ts and win32.ts gives it). */
   look(front: { id: number; bounds: Bounds } | undefined): void;
   /** Whether `input` is the take's. */
   allows(input: RawInput): boolean;

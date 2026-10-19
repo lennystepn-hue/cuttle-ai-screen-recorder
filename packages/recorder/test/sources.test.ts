@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { TEST_DEVICES, areaGeometry, checkDevice, micInput, micLatency, pickCameraMode, platformFor, resolveArea, screenFilter, screenInput, webcamInput } from '../src/sources';
+import { TEST_DEVICES, areaGeometry, checkDevice, micInput, micLatency, pickCameraMode, platformFor, resolveArea, screenFilter, screenInput, webcamInput, wholeWindow } from '../src/sources';
 import type { Devices } from '../src/types';
 
 const devices: Devices = {
@@ -68,9 +68,18 @@ describe('resolveArea', () => {
 
   it('captures a window as the region of its bounds', () => {
     const area = resolveArea({ kind: 'window', title: 'Claude Code - demo' }, devices);
-    // the window's id too: macOS's helper takes the window by itself
-    expect(area).toEqual({ monitor: devices.monitors[1], crop: { x: 40, y: 91, width: 800, height: 500 }, window: 11 });
+    // the window's id and frame too: macOS's helper and Windows' gfxcapture take the window by itself
+    expect(area).toEqual({ monitor: devices.monitors[1], crop: { x: 40, y: 91, width: 800, height: 500 }, window: 11, frame: devices.windows[0]!.bounds });
     expect(areaGeometry(area).origin).toEqual({ x: 2600, y: 600 });
+  });
+
+  it('takes all of a window by itself, also where it reaches past its monitor, in even sizes', () => {
+    const editor = wholeWindow(resolveArea({ kind: 'window', title: 'Editor' }, devices));
+    expect(areaGeometry(editor)).toEqual({ size: { width: 700, height: 400 }, origin: { x: -1200, y: 100 } });
+    expect(areaGeometry(wholeWindow(resolveArea({ kind: 'window', id: 11 }, devices)))).toEqual({ size: { width: 800, height: 500 }, origin: { x: 2600, y: 600 } });
+    // anything but a window stays as it is
+    const region = resolveArea({ kind: 'region', rect: [100, 50, 400, 300], monitor: 2 }, devices);
+    expect(wholeWindow(region)).toBe(region);
   });
 
   it('clips a window to the monitor that holds most of it', () => {

@@ -51,7 +51,11 @@ export type CaptureSource =
   | { kind: 'monitor'; index: number }
   /** `rect` is `[x, y, width, height]` in pixels of that monitor (origin at its top-left corner). */
   | { kind: 'region'; rect: Rect; monitor: number }
-  /** Captured as the region of the window's bounds when the recording starts; by title or by id (`WindowInfo.id`). */
+  /**
+   * The window by itself, wherever it is and whatever lies over it (macOS with the capture helper;
+   * Windows with ffmpeg 8 or newer, which has gfxcapture), at its size when the recording starts;
+   * otherwise the region of its bounds then. By title or by id (`WindowInfo.id`).
+   */
   | { kind: 'window'; title: string }
   | { kind: 'window'; id: number };
 
@@ -114,7 +118,8 @@ export interface RecordOptions {
   onAudio?: (samples: Uint8Array) => void;
 }
 
-export type StopReason = 'stop' | 'hotkey' | 'max-seconds' | 'file' | 'idle' | 'claude';
+/** `window`: the window of a window take recorded by itself was closed. */
+export type StopReason = 'stop' | 'hotkey' | 'max-seconds' | 'file' | 'idle' | 'claude' | 'window';
 
 export type RecorderEvent =
   | { type: 'countdown'; seconds: number }

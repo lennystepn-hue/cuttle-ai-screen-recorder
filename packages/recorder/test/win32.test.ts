@@ -39,6 +39,14 @@ describe.runIf(process.platform === 'win32')('win32', () => {
     expect(CURSOR_SHAPES).toContain(win.cursorShape());
   });
 
+  it('sets timers to the millisecond until told to end, once', async () => {
+    const end = (await loadWin32()).fineTimers();
+    expect(() => {
+      end();
+      end();
+    }).not.toThrow();
+  });
+
   it('puts the pointer on a monitor, in the same pixels as the monitor bounds', async () => {
     const win = await loadWin32();
     const monitors = win.monitors();

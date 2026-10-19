@@ -4,7 +4,8 @@ import { rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
-import { ffmpegPath, spawnCapture } from '../src/ffmpeg';
+import { ffmpegPath, spawnCapture, type Feeder } from '../src/ffmpeg';
+import { relayInput } from '../src/window-capture';
 
 afterEach(() => vi.unstubAllEnvs());
 const dirs: string[] = [];
@@ -60,6 +61,49 @@ describe('spawnCapture', () => {
   it('fails when ffmpeg ends before stop() was called, with the end of its log', async () => {
     const capture = spawnCapture('webcam', [...testsrc(':d=0.5'), '-f', 'null', '-']);
     await expect(capture.exited).rejects.toMatchObject({ code: 'capture', message: expect.stringMatching(/^the webcam capture stopped unexpectedly \(ffmpeg exit code 0\):\n/) });
+  });
+
+  describe('relaying a feeder that sends a frame only when the picture changes', () => {
+    const size = { width: 64, height: 36 };
+    /** Raw frames of a test pattern at `rate` a second, for `seconds` (or until killed). */
+    const feeder = (rate: number, seconds = ''): Feeder => ({
+      command: ffmpegPath(),
+      args: ['-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', `testsrc2=s=64x36:r=${rate}${seconds},realtime,format=bgra`, '-fps_mode', 'passthrough', '-f', 'rawvideo', 'pipe:1'],
+      frameBytes: size.width * size.height * 4,
+    });
+    const frames = (file: string) =>
+      Number(spawnSync('ffprobe', ['-v', 'error', '-count_frames', '-show_entries', 'stream=nb_read_frames', '-of', 'csv=p=0', file], { encoding: 'utf8' }).stdout);
+    const relayed = (file: string) => ['-use_wallclock_as_timestamps', '1', ...relayInput(size), ...out(file)];
+
+    it('writes 30 frames a second from 2 a second, and stops at once though no frame is coming', async () => {
+      const file = join(temp('cuttle-relay-'), 'out.mp4');
+      const capture = spawnCapture('screen', relayed(file), feeder(2));
+      await capture.started;
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+      const asked = Date.now();
+      await capture.stop();
+      expect(Date.now() - asked).toBeLessThan(2000);
+      const seconds = duration(file);
+      expect(seconds).toBeGreaterThan(1.3);
+      expect(frames(file) / seconds).toBeGreaterThan(27);
+      expect(frames(file) / seconds).toBeLessThan(33);
+    }, 15_000);
+
+    it('says when the feeder ended after its first frame (the window was closed), and writes its last frame on until stop()', async () => {
+      const file = join(temp('cuttle-relay-'), 'out.mp4');
+      const capture = spawnCapture('screen', relayed(file), feeder(10, ':d=0.5'));
+      const start = await capture.started;
+      await capture.ended;
+      expect(Date.now() / 1000 - start).toBeGreaterThan(0.3);
+      await new Promise((resolve) => setTimeout(resolve, 700));
+      await capture.stop();
+      expect(duration(file)).toBeGreaterThan(1);
+    }, 15_000);
+
+    it("fails with the feeder's log when it ends before its first frame", async () => {
+      const capture = spawnCapture('screen', relayed(join(temp('cuttle-relay-'), 'out.mp4')), { command: ffmpegPath(), args: ['-hide_banner', '-f', 'lavfi', '-i', 'no_such_window', '-f', 'rawvideo', 'pipe:1'], frameBytes: 64 * 36 * 4 });
+      await expect(capture.exited).rejects.toMatchObject({ code: 'capture', message: expect.stringContaining('no_such_window') });
+    }, 15_000);
   });
 
   it('fails when ffmpeg cannot open its input, before any start time', async () => {

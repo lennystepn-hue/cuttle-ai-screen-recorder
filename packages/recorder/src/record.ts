@@ -11,7 +11,8 @@ import { captureHelper, helperArgs, helperInput } from './mac-capture';
 import { startInput, type InputSource } from './input';
 import { levelMeter, wholeSamples } from './level';
 import { FPS as JOIN_FPS, joinSegments, mediaInfo, renameWhenFree } from './join';
-import { areaGeometry, checkDevice, deviceClock, micInput, micLatency, platformFor, resolveArea, screenFilter, screenInput, screenLatency, webcamInput, type CameraMode, type Platform, type ScreenArea } from './sources';
+import { areaGeometry, checkDevice, deviceClock, micInput, micLatency, platformFor, resolveArea, screenFilter, screenInput, screenLatency, webcamInput, wholeWindow, type CameraMode, type Platform, type ScreenArea } from './sources';
+import { hasWindowCapture, relayInput, testWindowFeeder, windowFeeder } from './window-capture';
 import { WINDOW_GATE_MS, windowGate } from './window-gate';
 import type { Bounds, RawInput, RecordOptions, Recording, RecorderEvent, StopOptions, StopReason, Take } from './types';
 
@@ -197,6 +198,9 @@ async function prepareAndRecord(options: RecordOptions, control: Control, since:
   const cameraMode = options.webcam === undefined ? undefined : await cameraModeFor(platform, options.webcam);
   const reporter = new Reporter(options.onEvent);
   const claude = options.stop.untilClaude === undefined ? undefined : claudeTrigger(options.stop.untilClaude, since);
+  // a window by itself: on Windows where ffmpeg has gfxcapture (asked while the countdown runs), and the test backend's
+  const window = options.source.kind === 'window';
+  const byItself = window && platform === 'windows' ? hasWindowCapture() : Promise.resolve(window && platform === 'test');
   try {
     for (let left = options.countdownSeconds ?? DEFAULT_COUNTDOWN_SECONDS; left > 0 && control.reason === undefined; left--) {
       reporter.emit({ type: 'countdown', seconds: left });
@@ -205,7 +209,12 @@ async function prepareAndRecord(options: RecordOptions, control: Control, since:
     if (control.reason !== undefined) throw cancelled('it started');
     // A window is captured where it is when the recording starts, not where it was before the countdown.
     if (options.source.kind === 'window') area = resolveArea(options.source, { ...devices, windows: await windowsFor(platform) });
-    return await recordTake({ options, control, platform, area, cameraMode, projectDir, dir: allocateTake(projectDir), reporter, claude });
+    const whole = await byItself;
+    if (whole) area = wholeWindow(area);
+    else if (window && platform === 'windows') {
+      reporter.warn('this ffmpeg cannot record a window by itself (ffmpeg 8 or newer can: winget upgrade Gyan.FFmpeg): the screen where the window is is recorded, so keep the window in front');
+    }
+    return await recordTake({ options, control, platform, area, byItself: whole, cameraMode, projectDir, dir: allocateTake(projectDir), reporter, claude });
   } finally {
     claude?.stop();
   }
@@ -216,6 +225,8 @@ interface TakeContext {
   control: Control;
   platform: Platform;
   area: ScreenArea;
+  /** A window take of the window by itself through gfxcapture (Windows) or a test pattern (the test backend). */
+  byItself: boolean;
   /** The webcam's picture size, where the platform needs to ask for one (macOS). */
   cameraMode: CameraMode | undefined;
   projectDir: string;
@@ -241,7 +252,7 @@ const all = (tracks: Tracks) => [tracks.screen, tracks.webcam, tracks.mic].filte
 /** A track's file in segment `k` of a paused take: `screen.2.mp4`. */
 const numbered = (file: string, k: number) => file.replace(/\.(mp4|m4a)$/, `.${k}.$1`);
 
-async function recordTake({ options, control, platform, area, cameraMode, projectDir, dir, reporter, claude }: TakeContext): Promise<Take> {
+async function recordTake({ options, control, platform, area, byItself, cameraMode, projectDir, dir, reporter, claude }: TakeContext): Promise<Take> {
   const path = (file: string) => join(dir, file);
   const rel = (file: string) => relative(projectDir, file).split(sep).join('/');
   /** The take's stretches between pauses; written to segments.json from the first pause on. */
@@ -337,13 +348,13 @@ async function recordTake({ options, control, platform, area, cameraMode, projec
   // macOS: the camera's and the mic's starts are their capture times on the host clock, mapped to the wall clock
   const ownStamps = deviceClock(platform);
   const toWall = ownStamps ? (await import('./darwin').then(({ loadDarwin }) => loadDarwin())).hostToWall : (seconds: number) => seconds;
-  // macOS, a window take through the helper: the window by itself, and only the input done in it
-  const gate = helper && area.window !== undefined ? windowGate(area.window, { ...origin, ...size }, (corner) => writer.moveOrigin(corner)) : undefined;
+  // a window take by itself (macOS's helper, Windows' gfxcapture): only the input done in the window
+  const gate = area.window !== undefined && (helper !== undefined || (byItself && platform === 'windows')) ? windowGate(area.window, { ...origin, ...size }, (corner) => writer.moveOrigin(corner)) : undefined;
   if (gate) {
-    const mac = await (await import('./darwin')).loadDarwin();
+    const os = platform === 'macos' ? await (await import('./darwin')).loadDarwin() : await (await import('./win32')).loadWin32();
     const look = () => {
       try {
-        gate.look(mac.foreground());
+        gate.look(os.foreground());
       } catch {
         // the next look tries again
       }
@@ -351,6 +362,9 @@ async function recordTake({ options, control, platform, area, cameraMode, projec
     look();
     timer(look, WINDOW_GATE_MS, true);
   }
+  // Windows and the test backend, a window by itself: a feeder reads it, its newest frame is written 30 times a second
+  const feeder = byItself ? (platform === 'windows' ? windowFeeder(area.window!, size, options.drawMouse ?? false) : testWindowFeeder(size)) : undefined;
+  if (byItself && platform === 'windows') cleanups.push((await (await import('./win32')).loadWin32()).fineTimers());
   if (platform === 'macos' && !helper && (options.hideWindowsOf?.length ?? 0) > 0) {
     reporter.warn("Cuttle's own windows show in this take: the capture helper is missing (it is built by pnpm install with Xcode's command line tools)");
   }
@@ -360,7 +374,15 @@ async function recordTake({ options, control, platform, area, cameraMode, projec
     const drawMouse = options.drawMouse ?? false;
     const screen = helper
       ? spawnCapture('screen', screenArgs(helperInput(area), file(FILES.screen), options.stop.untilIdleSeconds), { command: helper, args: helperArgs(area, drawMouse, options.hideWindowsOf ?? []) })
-      : spawnCapture('screen', screenArgs(screenInput(platform, area, drawMouse), file(FILES.screen), options.stop.untilIdleSeconds, screenFilter(platform, area)));
+      : feeder
+        ? spawnCapture('screen', screenArgs(relayInput(size), file(FILES.screen), options.stop.untilIdleSeconds), feeder)
+        : spawnCapture('screen', screenArgs(screenInput(platform, area, drawMouse), file(FILES.screen), options.stop.untilIdleSeconds, screenFilter(platform, area)));
+    // the window was closed: the take ends there
+    void screen.ended?.then(() => {
+      if (control.reason !== undefined) return;
+      reporter.warn('the window was closed: the take ends there');
+      control.request('window');
+    });
     const webcam = options.webcam === undefined ? undefined : spawnCapture('webcam', webcamArgs(webcamInput(platform, options.webcam, cameraMode), file(FILES.webcam), !ownStamps));
     // the mic's level and its samples, while the take records (whole samples per capture: one that
     // stops at a pause may end inside a sample)

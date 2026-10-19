@@ -29,6 +29,11 @@ export interface Win32 {
   processName(pid: number): string;
   /** The dialogs, menus and notifications on the desktop now (not this process's own). */
   popups(): { id: number; kind: WindowKind; bounds: Bounds }[];
+  /**
+   * Timers of this process to the millisecond (`timeBeginPeriod(1)`; Windows' default is 15.6 ms),
+   * for frames written 30 times a second; the function it returns ends that.
+   */
+  fineTimers(): () => void;
 }
 
 /** Chromium and Electron draw a page in a child window of this class: its rect is the page's. */
@@ -99,6 +104,7 @@ async function create(): Promise<Win32> {
   const dxgi = koffi.load('dxgi.dll');
   const shcore = koffi.load('shcore.dll');
   const dwmapi = koffi.load('dwmapi.dll');
+  const winmm = koffi.load('winmm.dll');
 
   // Type names are process-wide and can be defined once, but this module may load more than once in
   // a process (test files, two copies in a bundle), so every load gets its own prefix. Anonymous
@@ -163,6 +169,8 @@ async function create(): Promise<Win32> {
   const PROCESS_QUERY_LIMITED_INFORMATION = 0x1000;
   const DwmGetWindowAttribute = dwmapi.func('__stdcall', 'DwmGetWindowAttribute', 'long', ['void *', 'uint32', 'void *', 'uint32']);
   const GetDpiForMonitor = shcore.func('__stdcall', 'GetDpiForMonitor', 'long', ['void *', 'int', koffi.out(koffi.pointer('uint32')), koffi.out(koffi.pointer('uint32'))]);
+  const timeBeginPeriod = winmm.func('__stdcall', 'timeBeginPeriod', 'uint32', ['uint32']);
+  const timeEndPeriod = winmm.func('__stdcall', 'timeEndPeriod', 'uint32', ['uint32']);
   const CreateDXGIFactory1 = dxgi.func('__stdcall', 'CreateDXGIFactory1', 'long', [koffi.pointer(GUID), koffi.out(koffi.pointer('void *'))]);
 
   // COM methods by vtable slot: IUnknown::Release 2, IDXGIFactory1::EnumAdapters1 12,
@@ -366,6 +374,14 @@ async function create(): Promise<Win32> {
         koffi.unregister(visit);
       }
       return found;
+    },
+    fineTimers() {
+      const begun = timeBeginPeriod(1) === 0;
+      let ended = false;
+      return () => {
+        if (begun && !ended) timeEndPeriod(1);
+        ended = true;
+      };
     },
     caret(thread = 0) {
       const gui = { cbSize: koffi.sizeof(GUITHREADINFO), flags: 0, hwndActive: null, hwndFocus: null, hwndCapture: null, hwndMenuOwner: null, hwndMoveSize: null, hwndCaret: null as unknown, rcCaret: rect() };

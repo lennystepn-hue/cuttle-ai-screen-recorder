@@ -73,13 +73,19 @@ const FEEDER_DENIED = 3;
  * `onStdout` takes what ffmpeg writes to its stdout (the mic's samples), as it comes.
  */
 export function spawnCapture(name: string, args: readonly string[], feeder?: Feeder, onStdout?: (chunk: Buffer) => void): CaptureProcess {
+  const t0 = performance.now();
+  const dbg = (what: string) => process.env.CUTTLE_RELAY_DEBUG && console.error('[relay ' + (performance.now() - t0).toFixed(0) + ' ms] ' + what);
   const feed = feeder && spawn(feeder.command, [...feeder.args], { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
   const frameBytes = feeder?.frameBytes;
   const feedTail: string[] = [];
   feed?.stderr?.setEncoding('utf8');
   feed?.stderr?.on('data', (chunk: string) => feedTail.push(...chunk.split(/\r?\n/).filter((line) => line.trim() !== '')));
   feed?.on('error', () => {}); // a feeder that cannot start ends its pipe: ffmpeg reports that
-  const feedExit = feed && new Promise<number | null>((resolve) => feed.once('close', (code) => resolve(code)));
+  const feedExit = feed && new Promise<number | null>((resolve) => feed.once('close', (code) => { dbg('feeder close ' + code); resolve(code); }));
+  feed?.once('exit', (code) => dbg('feeder exit ' + code));
+  feed?.stdout?.once('data', () => dbg('feeder first data'));
+  feed?.stdout?.once('close', () => dbg('feeder stdout close'));
+  feed?.stderr?.once('close', () => dbg('feeder stderr close'));
   // stdin for "q" (a relay's frames), stdout for what the caller reads (else nothing), stderr for the log; a feeder's pipe as file descriptor 3
   const direct = feed && frameBytes === undefined ? [feed.stdout] : [];
   const child = spawn(ffmpegPath(), ['-hide_banner', ...args], { stdio: ['pipe', onStdout ? 'pipe' : 'ignore', 'pipe', ...direct], windowsHide: true }) as ChildProcessByStdio<Writable, Readable | null, Readable>;
@@ -115,7 +121,7 @@ export function spawnCapture(name: string, args: readonly string[], feeder?: Fee
   const line = (text: string) => {
     if (text.trim() === '') return;
     const start = INPUT_START.exec(text);
-    if (start) resolveStarted(Number(start[1]));
+    if (start) { dbg('started'); resolveStarted(Number(start[1])); }
     const time = PROGRESS_TIME.exec(text);
     if (time) seconds = Number(time[1]) * 3600 + Number(time[2]) * 60 + Number(time[3]);
     else {
@@ -142,7 +148,9 @@ export function spawnCapture(name: string, args: readonly string[], feeder?: Fee
       rejectStarted(failure);
       reject(failure);
     });
+    child.on('exit', (code) => dbg('ffmpeg exit ' + code));
     child.on('close', (code) => {
+      dbg('ffmpeg close ' + code);
       relay?.stop();
       line(partial);
       partial = '';
@@ -178,6 +186,7 @@ export function spawnCapture(name: string, args: readonly string[], feeder?: Fee
     seconds: () => seconds,
     ...(ended && { ended }),
     stop() {
+      dbg('stop asked');
       if (child.exitCode === null && !stopping) {
         stopping = true;
         if (relay) {
@@ -187,6 +196,7 @@ export function spawnCapture(name: string, args: readonly string[], feeder?: Fee
           if (feed && feed.exitCode === null && feed.signalCode === null) feed.kill();
         } else child.stdin.end('q');
         const timer = setTimeout(() => {
+          dbg('stop timeout: kill');
           killed = true;
           child.kill();
         }, STOP_TIMEOUT_MS);

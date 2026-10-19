@@ -13,6 +13,7 @@ import { loadSettings, onSettingsChange } from './settings';
 import { openSettings } from './settings-window';
 import { findFfmpeg } from './tools';
 import { createTray, updateTray, type TrayActions } from './tray';
+import { startUpdates } from './updates';
 import { chooseAndOpen, createPill, lockDown, openEditorOrSay, showPill } from './windows';
 
 app.setName('Cuttle');
@@ -116,6 +117,8 @@ if (!app.requestSingleInstanceLock()) {
     else await showPill();
     // ffmpeg where the OS has it now (installed since the last login, say): the helpers start with it
     void findFfmpeg().catch(() => undefined);
+    // a newer version from GitHub's releases, a little after the start and once a day (the packaged app)
+    void startUpdates();
     onSettingsChange((latest) => updateTray(latest.recent, actions));
   });
 }

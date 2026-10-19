@@ -14,6 +14,7 @@ import { keyOf, listCamerasAndMics, recordingRuns } from './recording';
 import { loadSettings, sameDir, settingsView, updateSettings } from './settings';
 import { cancelSpeechDownload, downloadSpeechModel, onSpeechStatus, removeSpeechModel, speechStatus } from './speech';
 import { installTools, skillFolder, toolsStatus } from './tools';
+import { installUpdate, openReleases, updates } from './updates';
 import { bringToFront, guard, lockDown, openEditorOrSay, showPill, titleBar, webPreferences } from './windows';
 
 const BACKGROUND = '#0c0c0f';
@@ -97,6 +98,7 @@ export async function openSettings(options: { welcome?: boolean; page?: Settings
         if (change.privacyRead !== undefined) settings.privacy.read = change.privacyRead;
         // each word once, as it was first written
         if (change.privacyWords !== undefined) settings.privacy.words = change.privacyWords.filter((word, k, all) => all.findIndex((other) => other.toLowerCase() === word.toLowerCase()) === k);
+        if (change.updates !== undefined) settings.updates = change.updates;
       });
       if (change.launchAtLogin !== undefined) applyLoginItem(change.launchAtLogin);
       if (change.motion !== undefined) broadcastMotion(change.motion);
@@ -151,7 +153,17 @@ export async function openSettings(options: { welcome?: boolean; page?: Settings
     'speech:download': (name) => downloadSpeechModel(name),
     'speech:cancel': () => cancelSpeechDownload(),
     'speech:remove': (name) => removeSpeechModel(name),
+    'updates:status': () => updates().status(),
+    'updates:check': () => updates().check(),
+    'updates:download': () => updates().download(),
+    'updates:install': () => installUpdate(),
+    'updates:releases': () => openReleases(),
   });
+  // a check or a download goes on while the window is closed; an open one follows it
+  const offUpdates = updates().onStatus((status) => {
+    if (!contents.isDestroyed()) send(contents, 'updates:status', status);
+  });
+  window.on('closed', offUpdates);
   // a download goes on while the window is closed; an open one follows it
   const offSpeech = onSpeechStatus((status) => {
     if (!contents.isDestroyed()) send(contents, 'speech:status', status);

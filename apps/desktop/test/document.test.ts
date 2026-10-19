@@ -334,7 +334,8 @@ describe('random edit sequences', () => {
     }
     // the sequences do edit (not only refusals)
     expect(applied).toBeGreaterThan(1500);
-  });
+    // 150 sequences take seconds; beside the other test files more than the default 5
+  }, 30_000);
 });
 
 describe('automatic items in the document', () => {

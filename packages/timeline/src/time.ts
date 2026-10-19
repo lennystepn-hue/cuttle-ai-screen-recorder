@@ -88,6 +88,44 @@ export function sourceTimeAt(scene: ClipScene, local: number): number {
   return clamp(scene.from + local * scene.speed, scene.from, scene.to);
 }
 
+/** The output seconds at which the clips show source second `t` (none when it is cut out). */
+export function outputTimesOf(spans: readonly SceneSpan[], t: number): number[] {
+  const times: number[] = [];
+  for (const span of spans) {
+    const scene = span.scene;
+    if (scene.type !== 'clip' || t < scene.from || t >= scene.to) continue;
+    times.push(span.start + (t - scene.from) / scene.speed);
+  }
+  return times;
+}
+
+/** How far before and after a mask's start and end its edges are looked at (source seconds). */
+export const MASK_EDGE_SECONDS = 0.1;
+
+/** Where a mask is looked at: just before it starts, inside its start, inside its end, just after it ends. */
+export type MaskEdge = 'before' | 'start' | 'end' | 'after';
+
+/**
+ * The moments that show whether a mask covers what it hides: `MASK_EDGE_SECONDS` before its start
+ * and after its end (what it hides must not show yet, or no more) and as far inside each end (it
+ * must be covered), in output seconds wherever a clip shows that moment, in order. A mask shorter
+ * than twice that is looked at in its middle once.
+ */
+export function maskEdges(mask: { from: number; to: number }, spans: readonly SceneSpan[]): { edge: MaskEdge; t: number; source: number }[] {
+  const inside = mask.to - mask.from > 2 * MASK_EDGE_SECONDS;
+  const middle = (mask.from + mask.to) / 2;
+  const moments: [MaskEdge, number][] = [
+    ['before', mask.from - MASK_EDGE_SECONDS],
+    ['start', inside ? mask.from + MASK_EDGE_SECONDS : middle],
+    ...(inside ? [['end', mask.to - MASK_EDGE_SECONDS] as [MaskEdge, number]] : []),
+    ['after', mask.to + MASK_EDGE_SECONDS],
+  ];
+  const round = (value: number) => Math.round(value * 1000) / 1000;
+  return moments
+    .flatMap(([edge, source]) => outputTimesOf(spans, source).map((t) => ({ edge, t: round(t), source: round(source) })))
+    .sort((a, b) => a.t - b.t);
+}
+
 /** Two clips closer than this (source seconds) at a boundary count as one continuous piece of footage. */
 export const CONTINUOUS_CUT_SECONDS = 1e-3;
 

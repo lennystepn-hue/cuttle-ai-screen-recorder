@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { ClipScene, Scene } from '@cuttle/project';
-import { crossfadeHalf, isContinuousCut, pageTransition, sceneDuration, sceneSpans, sourceTimeAt, spanAt, totalDuration } from '../src/time';
+import { crossfadeHalf, isContinuousCut, maskEdges, outputTimesOf, pageTransition, sceneDuration, sceneSpans, sourceTimeAt, spanAt, totalDuration } from '../src/time';
 
 const clip = (from: number, to: number, speed = 1): ClipScene => ({ type: 'clip', from, to, speed });
 const scenes: Scene[] = [clip(10, 20), clip(20, 140, 12), { type: 'card', title: 'End', duration: 2 }];
@@ -63,6 +63,42 @@ describe('sourceTimeAt', () => {
     // 0 + (0.7 / 0.3) * 0.3 rounds up to 0.7000000000000001 without the clamp.
     const slow = clip(0, 0.7, 0.3);
     expect(sourceTimeAt(slow, sceneDuration(slow))).toBe(0.7);
+  });
+});
+
+describe('outputTimesOf and maskEdges', () => {
+  // 10 s at normal speed, then 12 s at 12× (1 s of video), then a card
+  const spans = sceneSpans([clip(0, 10), clip(10, 22, 12), { type: 'card', title: 'End', duration: 2 }]);
+
+  it('finds where the clips show a source second, at their speed (none where no clip shows it)', () => {
+    expect(outputTimesOf(spans, 5)).toEqual([5]);
+    expect(outputTimesOf(spans, 16)).toEqual([10.5]);
+    expect(outputTimesOf(spans, 25)).toEqual([]);
+  });
+
+  it("looks just before, inside and after a mask's start and end, in output seconds", () => {
+    expect(maskEdges({ from: 3, to: 6 }, spans)).toEqual([
+      { edge: 'before', t: 2.9, source: 2.9 },
+      { edge: 'start', t: 3.1, source: 3.1 },
+      { edge: 'end', t: 5.9, source: 5.9 },
+      { edge: 'after', t: 6.1, source: 6.1 },
+    ]);
+    // its end in the sped-up clip: 5.9 s into it is 0.49 s of video
+    expect(maskEdges({ from: 9, to: 16 }, spans).map(({ edge, t }) => [edge, t])).toEqual([
+      ['before', 8.9],
+      ['start', 9.1],
+      ['end', 10.492],
+      ['after', 10.508],
+    ]);
+  });
+
+  it('looks at a short mask once inside, and leaves out moments no clip shows', () => {
+    expect(maskEdges({ from: 4, to: 4.15 }, spans).map(({ edge, t }) => [edge, t])).toEqual([
+      ['before', 3.9],
+      ['start', 4.075],
+      ['after', 4.25],
+    ]);
+    expect(maskEdges({ from: 0, to: 2 }, spans).map(({ edge }) => edge)).toEqual(['start', 'end', 'after']);
   });
 });
 

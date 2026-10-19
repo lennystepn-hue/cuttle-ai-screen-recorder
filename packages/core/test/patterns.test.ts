@@ -83,6 +83,12 @@ describe('findSecrets, on lines as Windows OCR read the fixture page (its slips 
       'TEST_DATABASE_CONNECTION_POOL_SIZE_2024_V2',
       'abcdefghijklmnopqrstuvwxyz0123456789',
     ]) expect(found(clean), clean).toEqual([]);
+    // a mark of two kinds: each over the marks in a row that have it; a rule over marks alone finds nothing
+    expect(found('export ⟦key-abcdefgh+value-ijklmnop⟧ ⟦value-ijklmnop⟧')).toEqual([
+      ['key', '⟦key-abcdefgh+value-ijklmnop⟧'],
+      ['value', '⟦key-abcdefgh+value-ijklmnop⟧ ⟦value-ijklmnop⟧'],
+    ]);
+    expect(found('Password: ⟦value-abcdefgh⟧')).toEqual([['value', '⟦value-abcdefgh⟧']]);
     expect(found('API_KEY=⟦key-abcdefgh⟧ sent to ⟦email-qwertyui⟧ ⟦email-qwertyui⟧')).toEqual([
       ['key', '⟦key-abcdefgh⟧'],
       ['email', '⟦email-qwertyui⟧ ⟦email-qwertyui⟧'],

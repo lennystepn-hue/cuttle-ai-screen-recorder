@@ -2,7 +2,7 @@
 // to just after it was last seen, following it where it moved (text that scrolls). Pure.
 import type { Rect, ScreenTextFrame, ZoomMove } from '@cuttle/project';
 import { maskRectAt } from '@cuttle/timeline';
-import { SECRET_LABELS, SPECIFIC, lineSecrets, type SecretKind } from './patterns';
+import { SECRET_LABELS, SPECIFIC, isMarkKey, secretWords, type Secret, type SecretKind } from './patterns';
 
 export const MASK_RULES = {
   /** A mask starts this long before the first sight and ends this long after the last (source s). */
@@ -77,40 +77,82 @@ const overlap = (a: Rect, b: Rect) => {
   return inter / (a[2] * a[3] + b[2] * b[3] - inter);
 };
 
+/** A private thing followed from frame to frame: its kind, its first key, where it was seen. */
+export interface Track {
+  kind: SecretKind;
+  key: string;
+  sightings: Sighting[];
+  missed: number;
+}
+
+/** A secret of a frame (by its index in the frames given) and line, and the track it is part of. */
+export interface Found {
+  frame: number;
+  line: number;
+  secret: Secret & { words: number[] };
+  track: Track;
+}
+
 /**
- * The masks for what the frames read show of private things (`lineSecrets`), and of the person's
- * `words`. A secret is the same in the next frame when its text reads the same, or it is of the same
- * kind where it was; it moved when its rect did. `end`: the take's length (source seconds), where a
- * mask ends that no later frame showed gone.
+ * The private things the frames read show (`secretWords`, and the person's `words`), followed from
+ * frame to frame. A secret is the one of the frame before whose text reads the same; else one of its
+ * kind where it was; else one of its kind in the same column whose text reads nearly the same (text
+ * that scrolls, read with a slip). Those that read the same are matched first, so the order a frame's
+ * secrets come in does not change what follows what. redact.ts marks each track with one id, so the
+ * text it keeps makes the same tracks again (by the first rule alone).
  */
-export function privacyMasks(frames: readonly ScreenTextFrame[], words: readonly string[], screen: { width: number; height: number }, end = Infinity, rules = MASK_RULES): PrivacyMask[] {
-  type Group = { kind: SecretKind; key: string; sightings: Sighting[]; missed: number };
-  const open: Group[] = [];
-  const closed: Group[] = [];
-  for (const frame of [...frames].sort((a, b) => a.t - b.t)) {
-    const seen = new Set<Group>();
-    const secrets = frame.lines.flatMap((line) => lineSecrets(line, words));
-    for (const secret of secrets) {
-      const group =
-        open.find((candidate) => !seen.has(candidate) && candidate.key === secret.key) ??
+export function trackSecrets(frames: readonly ScreenTextFrame[], words: readonly string[], rules = MASK_RULES): { tracks: Track[]; found: Found[] } {
+  const open: Track[] = [];
+  const closed: Track[] = [];
+  const found: Found[] = [];
+  const order = frames.map((frame, index) => ({ frame, index })).sort((a, b) => a.frame.t - b.frame.t);
+  for (const { frame, index } of order) {
+    const seen = new Set<Track>();
+    const join = (entry: { line: number; secret: Found['secret'] }, track: Track) => {
+      if (track.sightings.at(-1)!.t !== frame.t) track.sightings.push({ t: frame.t, rect: entry.secret.rect });
+      track.missed = 0;
+      seen.add(track);
+      found.push({ frame: index, ...entry, track });
+    };
+    const rest: { line: number; secret: Found['secret'] }[] = [];
+    for (const entry of frame.lines.flatMap((line, at) => secretWords(line, words).map((secret) => ({ line: at, secret })))) {
+      const same = open.find((candidate) => !seen.has(candidate) && candidate.key === entry.secret.key);
+      if (same) join(entry, same);
+      else rest.push(entry);
+    }
+    for (const entry of rest) {
+      const { secret } = entry;
+      // marks' keys are ids: alike only by chance
+      const track =
         open.find((candidate) => !seen.has(candidate) && candidate.kind === secret.kind && overlap(candidate.sightings.at(-1)!.rect, secret.rect) >= 0.5) ??
-        open.find((candidate) => !seen.has(candidate) && candidate.kind === secret.kind && sameColumn(candidate.sightings.at(-1)!.rect, secret.rect) && alike(candidate.key, secret.key, rules.alike));
-      if (group) {
-        if (group.sightings.at(-1)!.t !== frame.t) group.sightings.push({ t: frame.t, rect: secret.rect });
-        group.missed = 0;
-        seen.add(group);
+        open.find(
+          (candidate) =>
+            !seen.has(candidate) && candidate.kind === secret.kind && sameColumn(candidate.sightings.at(-1)!.rect, secret.rect) && !isMarkKey(candidate.key) && !isMarkKey(secret.key) && alike(candidate.key, secret.key, rules.alike),
+        );
+      if (track) {
+        join(entry, track);
         continue;
       }
-      const fresh: Group = { kind: secret.kind, key: secret.key, sightings: [{ t: frame.t, rect: secret.rect }], missed: 0 };
+      const fresh: Track = { kind: secret.kind, key: secret.key, sightings: [{ t: frame.t, rect: secret.rect }], missed: 0 };
       open.push(fresh);
-      seen.add(fresh);
+      join(entry, fresh);
     }
-    for (const group of [...open]) {
-      if (seen.has(group) || ++group.missed < rules.missing || frame.t - group.sightings.at(-1)!.t < rules.gone) continue;
-      open.splice(open.indexOf(group), 1);
-      closed.push(group);
+    for (const track of [...open]) {
+      if (seen.has(track) || ++track.missed < rules.missing || frame.t - track.sightings.at(-1)!.t < rules.gone) continue;
+      open.splice(open.indexOf(track), 1);
+      closed.push(track);
     }
   }
+  return { tracks: [...closed, ...open], found };
+}
+
+/**
+ * The masks for what the frames read show of private things, and of the person's `words`, one for
+ * each track (`trackSecrets`); a mask moved when its rect did. `end`: the take's length (source
+ * seconds), where a mask ends that no later frame showed gone.
+ */
+export function privacyMasks(frames: readonly ScreenTextFrame[], words: readonly string[], screen: { width: number; height: number }, end = Infinity, rules = MASK_RULES): PrivacyMask[] {
+  const { tracks } = trackSecrets(frames, words, rules);
   // Frames are read where the picture changes: a secret stays on screen until a frame read shows it
   // gone, so a mask lasts until then (to the take's end when none does).
   const times = frames.map((frame) => frame.t).sort((a, b) => a - b);
@@ -124,7 +166,7 @@ export function privacyMasks(frames: readonly ScreenTextFrame[], words: readonly
     return [Math.round(left), Math.round(top), Math.round(Math.min(screen.width, rect[0] + rect[2] + rules.pad) - left), Math.round(Math.min(screen.height, rect[1] + rect[3] + rules.pad) - top)];
   };
   const moved = (a: Rect, b: Rect) => a.some((value, k) => Math.abs(value - b[k]!) > rules.moved);
-  const masks = [...closed, ...open]
+  const masks = tracks
     .map((group): PrivacyMask => {
       const [first, ...rest] = group.sightings as [Sighting, ...Sighting[]];
       const from = round(Math.max(0, first.t - rules.margin));

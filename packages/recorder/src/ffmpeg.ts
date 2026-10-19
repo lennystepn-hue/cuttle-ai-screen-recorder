@@ -1,5 +1,6 @@
 import { spawn, type ChildProcessByStdio } from 'node:child_process';
 import type { Readable, Writable } from 'node:stream';
+import { FRAME_RATE } from './args';
 import { RecorderError } from './errors';
 
 /** The ffmpeg executable: `CUTTLE_FFMPEG` when set, otherwise `ffmpeg` from PATH. */
@@ -44,12 +45,23 @@ export interface CaptureProcess {
   seconds(): number | undefined;
   /** Asks ffmpeg to finish the file ("q" on stdin); kills it if it has not exited after 10 s (the fragmented MP4 stays readable). */
   stop(): Promise<void>;
+  /**
+   * A relayed capture (`Feeder.frameBytes`): resolves when the feeder ended on its own after its first
+   * frame (the window was closed). Its last frame is written on until stop().
+   */
+  readonly ended?: Promise<void>;
 }
 
 /** A process that feeds ffmpeg: its stdout becomes ffmpeg's file descriptor 3 (`-i /dev/fd/3`). */
 export interface Feeder {
   command: string;
   args: readonly string[];
+  /**
+   * The feeder sends raw frames of this many bytes, only when the picture changed (Windows'
+   * gfxcapture): this process writes the newest into ffmpeg's stdin FRAME_RATE times a second
+   * (`relayFrames`), and stop() ends stdin instead of sending "q".
+   */
+  frameBytes?: number;
 }
 
 /** A feeder's exit code that means the OS does not allow the capture (cuttle-capture: screen recording). */
@@ -61,18 +73,30 @@ const FEEDER_DENIED = 3;
  * `onStdout` takes what ffmpeg writes to its stdout (the mic's samples), as it comes.
  */
 export function spawnCapture(name: string, args: readonly string[], feeder?: Feeder, onStdout?: (chunk: Buffer) => void): CaptureProcess {
-  const feed = feeder && spawn(feeder.command, [...feeder.args], { stdio: ['ignore', 'pipe', 'pipe'] });
+  const feed = feeder && spawn(feeder.command, [...feeder.args], { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
+  const frameBytes = feeder?.frameBytes;
   const feedTail: string[] = [];
   feed?.stderr?.setEncoding('utf8');
   feed?.stderr?.on('data', (chunk: string) => feedTail.push(...chunk.split(/\r?\n/).filter((line) => line.trim() !== '')));
   feed?.on('error', () => {}); // a feeder that cannot start ends its pipe: ffmpeg reports that
   const feedExit = feed && new Promise<number | null>((resolve) => feed.once('close', (code) => resolve(code)));
-  // stdin for "q", stdout for what the caller reads (else nothing), stderr for the log; a feeder's pipe as file descriptor 3
-  const child = spawn(ffmpegPath(), ['-hide_banner', ...args], { stdio: ['pipe', onStdout ? 'pipe' : 'ignore', 'pipe', ...(feed ? [feed.stdout] : [])], windowsHide: true }) as ChildProcessByStdio<Writable, Readable | null, Readable>;
+  // stdin for "q" (a relay's frames), stdout for what the caller reads (else nothing), stderr for the log; a feeder's pipe as file descriptor 3
+  const direct = feed && frameBytes === undefined ? [feed.stdout] : [];
+  const child = spawn(ffmpegPath(), ['-hide_banner', ...args], { stdio: ['pipe', onStdout ? 'pipe' : 'ignore', 'pipe', ...direct], windowsHide: true }) as ChildProcessByStdio<Writable, Readable | null, Readable>;
   // read as it comes: a full pipe would stall ffmpeg
   if (onStdout) child.stdout?.on('data', onStdout);
   // ffmpeg holds the pipe now: this process lets go of it, so the feeder sees ffmpeg's end
-  feed?.stdout?.destroy();
+  if (direct.length > 0) feed?.stdout?.destroy();
+  let resolveEnded!: () => void;
+  const ended = frameBytes === undefined ? undefined : new Promise<void>((resolve) => (resolveEnded = resolve));
+  const relay =
+    feed?.stdout && frameBytes !== undefined
+      ? relayFrames(feed.stdout, child.stdin, frameBytes, (framed) => {
+          // a feeder that ended before its first frame failed (its log says why): ffmpeg ends too
+          if (framed) resolveEnded();
+          else child.stdin.end();
+        })
+      : undefined;
   const listeners: ((line: string) => void)[] = [];
   const tail: string[] = [];
   let partial = '';
@@ -119,6 +143,7 @@ export function spawnCapture(name: string, args: readonly string[], feeder?: Fee
       reject(failure);
     });
     child.on('close', (code) => {
+      relay?.stop();
       line(partial);
       partial = '';
       // a feeder still running is done now; one that ended first says why the capture failed
@@ -151,10 +176,16 @@ export function spawnCapture(name: string, args: readonly string[], feeder?: Fee
     exited,
     onLine: (listener) => void listeners.push(listener),
     seconds: () => seconds,
+    ...(ended && { ended }),
     stop() {
       if (child.exitCode === null && !stopping) {
         stopping = true;
-        child.stdin.end('q');
+        if (relay) {
+          // the frames written so far, then the end of the input: ffmpeg finishes the file
+          relay.stop();
+          child.stdin.end();
+          if (feed && feed.exitCode === null && feed.signalCode === null) feed.kill();
+        } else child.stdin.end('q');
         const timer = setTimeout(() => {
           killed = true;
           child.kill();
@@ -162,6 +193,58 @@ export function spawnCapture(name: string, args: readonly string[], feeder?: Fee
         exited.finally(() => clearTimeout(timer)).catch(() => {});
       }
       return exited;
+    },
+  };
+}
+
+/**
+ * Writes the newest whole frame `source` sent (`frameBytes` each) into `sink` FRAME_RATE times a
+ * second, from the first frame on: one for each 1/30 s by the clock (a timer that fires late writes
+ * one; ffmpeg stamps each frame with the wall clock as it reads it). While the pipe still holds a
+ * frame and the next, none is written, as a capture that falls behind drops frames. `ended` is
+ * called when the source ends, with whether it sent a frame.
+ */
+function relayFrames(source: Readable, sink: Writable, frameBytes: number, ended: (framed: boolean) => void): { stop(): void } {
+  const period = 1000 / FRAME_RATE;
+  let newest: Buffer | undefined;
+  let pending: Buffer[] = [];
+  let pendingBytes = 0;
+  let begun: number | undefined;
+  let written = 0;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let stopped = false;
+  const tick = () => {
+    if (stopped || begun === undefined || !newest) return;
+    const slot = Math.floor((performance.now() - begun) / period);
+    if (slot >= written) {
+      if (sink.writableLength <= frameBytes) sink.write(newest);
+      written = slot + 1;
+    }
+    timer = setTimeout(tick, Math.max(0, begun + written * period - performance.now()));
+  };
+  source.on('data', (chunk: Buffer) => {
+    pending.push(chunk);
+    pendingBytes += chunk.length;
+    if (pendingBytes < frameBytes) return;
+    // the last whole frame in what came; the rest begins the next
+    const all = Buffer.concat(pending, pendingBytes);
+    const whole = Math.floor(all.length / frameBytes) * frameBytes;
+    newest = all.subarray(whole - frameBytes, whole);
+    pending = whole < all.length ? [all.subarray(whole)] : [];
+    pendingBytes = all.length - whole;
+    if (begun === undefined && !stopped) {
+      begun = performance.now();
+      tick();
+    }
+  });
+  source.on('error', () => {}); // its end says enough
+  source.on('close', () => {
+    if (!stopped) ended(newest !== undefined);
+  });
+  return {
+    stop() {
+      stopped = true;
+      clearTimeout(timer);
     },
   };
 }

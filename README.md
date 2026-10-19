@@ -105,7 +105,24 @@ its own, and the video you see is exactly what the export renders.
 
 ## Get started
 
-Cuttle runs from this repository for now (no signed download yet).
+### Download
+
+The [latest release](https://github.com/lennystepn-hue/cuttle-ai-screen-recorder/releases/latest)
+has an installer for Windows (`Cuttle-<version>-win-x64.exe`) and a DMG for Macs with Apple
+silicon (`Cuttle-<version>-mac-arm64.dmg`). Cuttle needs ffmpeg as well (`winget install
+Gyan.FFmpeg` on Windows, `brew install ffmpeg` on a Mac); its first start says what is missing.
+
+- **Windows:** the installer puts Cuttle in `%LOCALAPPDATA%\Programs\cuttle` for you alone (no
+  admin rights), with Start menu and desktop shortcuts; Settings > Apps uninstalls it. It is not
+  code-signed yet, so SmartScreen may not know it: *More info*, then *Run anyway*.
+- **macOS:** open the DMG and drag Cuttle into Applications. The permissions it asks for are below.
+- **Updates:** once a day Cuttle asks GitHub for a new version, downloads it in the background and
+  installs it when it quits, or at once with *Restart and update* (Settings > General). Nothing
+  about you or your recordings is sent; the daily check can be turned off there.
+
+### From this repository
+
+To run Cuttle from its source, or to work on it:
 
 | | Windows | macOS (Apple silicon or Intel) |
 |---|---|---|
@@ -322,6 +339,30 @@ Engine golden images live in `packages/engine/test/__golden__/`, one PNG per pla
 scenario writes its PNG on the first run and fails once so you can look at it.
 `pnpm exec vitest run -u` rewrites goldens after an intended change of look; that run fails once
 for every rewritten PNG, so look at each one and run the tests again.
+
+### Releases
+
+The app's version is `apps/desktop/package.json`'s (the `cuttle` command says the same; a test
+keeps them alike). A release:
+
+1. Raise both, and write what is new in `docs/releases/<version>.md`.
+2. Run the *Release* workflow (Actions > Release > Run workflow). It makes a draft release from
+   that file and adds the installers and the files the updates read (`latest.yml`,
+   `latest-mac.yml`): Windows from `windows-latest`, macOS from `macos-latest` (Apple silicon).
+3. Look at the draft, then publish it. Installed apps find it within a day.
+
+macOS is signed and notarized only with these repository secrets (without them its build is the
+run's artifact, not part of the release):
+
+| Secret | What |
+|---|---|
+| `APPLE_CERTIFICATE_P12` | the *Developer ID Application* certificate with its private key, exported as .p12, in base64 (`base64 -i cert.p12`) |
+| `APPLE_CERTIFICATE_PASSWORD` | the .p12's password |
+| `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD`, `APPLE_TEAM_ID` | for notarizing: the Apple ID, an app-specific password made for it (account.apple.com), the team's id |
+
+On one computer, `pnpm app:build && pnpm app:installer` makes the installer of that platform in
+`apps/desktop/build/installers` (on macOS signed with `CUTTLE_SIGN_IDENTITY`, see
+`apps/desktop/scripts/package.mjs`).
 
 ## Contributing
 

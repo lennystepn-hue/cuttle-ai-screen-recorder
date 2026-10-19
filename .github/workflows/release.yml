@@ -1,0 +1,122 @@
+# Builds Cuttle's installers on Windows and macOS (Apple silicon) and puts them, with the files the
+# app's updates read (latest.yml, latest-mac.yml), on the draft GitHub release of the app's version
+# (apps/desktop/package.json), which it makes from docs/releases/<version>.md when there is none.
+# Nothing is published: someone looks at the draft and publishes it. Started by hand (Actions,
+# Release, Run workflow). macOS is signed and notarized with the repository's Apple secrets (the
+# README's "Releases" names them); without them its build is only this run's artifact.
+name: Release
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  draft:
+    name: draft release
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: version
+        run: echo "version=$(node -p "require('./apps/desktop/package.json').version")" >> "$GITHUB_OUTPUT"
+
+      - name: the draft release (made once)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          if gh release view "v$VERSION" >/dev/null 2>&1; then
+            echo "v$VERSION is there: the installers are added to it"
+          else
+            gh release create "v$VERSION" --draft --target "$GITHUB_SHA" --title "Cuttle $VERSION" --notes-file "docs/releases/$VERSION.md"
+          fi
+
+  installers:
+    needs: draft
+    name: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      # also downloads Electron and, on macOS, builds the screen capture helper with Xcode's Swift
+      - run: pnpm install --frozen-lockfile
+
+      # macOS: the Developer ID certificate in a keychain of this run, when the repository has it
+      - name: signing identity (macOS)
+        if: runner.os == 'macOS'
+        env:
+          APPLE_CERTIFICATE_P12: ${{ secrets.APPLE_CERTIFICATE_P12 }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+        run: |
+          if [ -z "$APPLE_CERTIFICATE_P12" ]; then
+            echo "::warning::no APPLE_CERTIFICATE_P12 secret: the macOS build is not signed and not released (it is this run's artifact)"
+            exit 0
+          fi
+          keychain="$RUNNER_TEMP/cuttle.keychain-db"
+          password="$(openssl rand -base64 24)"
+          echo "$APPLE_CERTIFICATE_P12" | base64 --decode > "$RUNNER_TEMP/cuttle.p12"
+          security create-keychain -p "$password" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$password" "$keychain"
+          security import "$RUNNER_TEMP/cuttle.p12" -k "$keychain" -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          rm "$RUNNER_TEMP/cuttle.p12"
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$password" "$keychain"
+          security list-keychains -d user -s "$keychain" $(security list-keychains -d user | tr -d '"')
+          identity="$(security find-identity -v -p codesigning "$keychain" | grep -o '"Developer ID Application[^"]*"' | head -1 | tr -d '"')"
+          if [ -z "$identity" ]; then
+            echo "::error::APPLE_CERTIFICATE_P12 has no Developer ID Application identity"
+            exit 1
+          fi
+          echo "CUTTLE_SIGN_IDENTITY=$identity" >> "$GITHUB_ENV"
+
+      # package.mjs signs with CUTTLE_SIGN_IDENTITY and notarizes with the Apple ID's app-specific password
+      - name: the app
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          pnpm app:build:js
+          pnpm cli:build
+          node apps/desktop/scripts/package.mjs
+
+      - name: the installers, on the draft release
+        if: runner.os == 'Windows' || env.CUTTLE_SIGN_IDENTITY != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node apps/desktop/scripts/installer.mjs --publish
+
+      - name: the installers, unsigned (macOS without the Apple secrets)
+        if: runner.os == 'macOS' && env.CUTTLE_SIGN_IDENTITY == ''
+        run: node apps/desktop/scripts/installer.mjs
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: cuttle-${{ needs.draft.outputs.version }}-${{ runner.os }}
+          path: |
+            apps/desktop/build/installers/*.exe
+            apps/desktop/build/installers/*.dmg
+            apps/desktop/build/installers/*.zip
+            apps/desktop/build/installers/*.yml
+          if-no-files-found: ignore

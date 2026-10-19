@@ -5,6 +5,7 @@ import { capturePageCommand } from './commands/capture-page';
 import { devices } from './commands/devices';
 import { fitCommand } from './commands/fit';
 import { frameCommand } from './commands/frame';
+import { importCommand, type ImportArgs } from './commands/import';
 import { init } from './commands/init';
 import { motionCheckCommand, motionNewCommand, motionTemplatesCommand } from './commands/motion';
 import { musicCheckCommand, musicNewCommand, musicSetCommand, musicTemplatesCommand, soundAddCommand, soundListCommand } from './commands/music';
@@ -154,6 +155,14 @@ export async function runCli(argv: readonly string[], streams?: Streams): Promis
         withSignal(output, (signal) => recordCommand(project, options, output, signal)),
       ),
     );
+
+  program
+    .command('import <file>')
+    .description('a video made elsewhere (a phone, OBS, a download) as the next take, converted as a recording is (30 fps, BT.709), its sound as the mic; the project uses it')
+    .option('--from <seconds>', 'start at this second of the file', seconds)
+    .option('--to <seconds>', 'end at this second of the file', positive)
+    .option('--force', 'import even when the project is open in the Cuttle app')
+    .action(action((output, project, file: string, options: ImportArgs) => importCommand(project, file, options, output)));
 
   program
     .command('suggest')

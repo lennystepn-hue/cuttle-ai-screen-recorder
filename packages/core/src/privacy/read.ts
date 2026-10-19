@@ -2,10 +2,10 @@
 // clips (compared 10 times a second; read at most 2 a second while it keeps changing, at least one
 // every 5 s, and once more where a change showed only a moment), each read with the system's OCR
 // (ocr.ts), written as the take's screen-text.jsonl with each private thing in it marked instead
-// (redact.ts). Only the frames that are read are written to a temporary folder, one at a time, and
-// removed once read.
+// (redact.ts). Only the frames that are read are written to a temporary folder, one at a time for
+// each OCR helper, and removed once read.
 import { mkdtempSync, renameSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { cpus, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { ScreenTextFrame } from '@cuttle/project';
 import { CoreError } from '../errors';
@@ -84,16 +84,32 @@ export async function framesToRead(screen: string, spans: readonly Span[], size:
 }
 
 /**
- * Reads the screen's text of `screen` at `times` (source seconds) with the OCR helper, in order;
- * `onProgress` gets the share done. `ocr-missing` where the helper cannot run.
+ * OCR helpers that read at once: the OCR keeps about one logical processor busy, and the helpers
+ * scale (a 2560 × 1440 frame on 16 logical processors: 659 ms a frame with one helper, 403 with two,
+ * 242 with three, 199 with four). One for every `processors` of them, `most` at most, and one for
+ * every `frames` frames (a helper takes a second or so to start).
+ */
+export const OCR_HELPERS = { processors: 4, most: 3, frames: 4 };
+
+/** How many OCR helpers read `count` frames on this computer. */
+export function helpersFor(count: number, processors = cpus().length, rules = OCR_HELPERS): number {
+  return Math.max(1, Math.min(rules.most, Math.floor(processors / rules.processors), Math.ceil(count / rules.frames)));
+}
+
+/**
+ * Reads the screen's text of `screen` at `times` (source seconds) with OCR helpers (`helpers`, else
+ * `helpersFor`), the frames in order; `onProgress` gets the share done. `ocr-missing` where no
+ * helper can run; a helper that cannot start besides one that can only leaves the others more to do.
  */
 export async function readFrames(
   screen: string,
   times: readonly number[],
   size: { width: number; height: number },
-  options: { onProgress?: (fraction: number) => void; signal?: AbortSignal } = {},
+  options: { onProgress?: (fraction: number) => void; signal?: AbortSignal; helpers?: number } = {},
 ): Promise<{ frames: ScreenTextFrame[]; language: string }> {
-  const reader = await ScreenReader.start();
+  const started = await Promise.allSettled(Array.from({ length: options.helpers ?? helpersFor(times.length) }, () => ScreenReader.start()));
+  const readers = started.flatMap((result) => (result.status === 'fulfilled' ? [result.value] : []));
+  if (readers.length === 0) throw (started[0] as PromiseRejectedResult).reason;
   const folder = mkdtempSync(join(tmpdir(), 'cuttle-screen-'));
   const extract = async (k: number) => {
     const path = join(folder, `${k}.png`);
@@ -101,25 +117,40 @@ export async function readFrames(
     return path;
   };
   const frames: ScreenTextFrame[] = [];
-  try {
-    // the next frame is written while the OCR reads this one
-    let next = times.length > 0 ? extract(0) : undefined;
-    for (let k = 0; k < times.length; k++) {
-      if (options.signal?.aborted) throw new CoreError('cancelled', 'reading the screen was cancelled');
-      const path = await next!;
-      next = k + 1 < times.length ? extract(k + 1) : undefined;
-      next?.catch(() => {});
-      const lines = await reader.read(path, size.width, size.height);
-      rmSync(path, { force: true });
-      frames.push({ t: times[k]!, lines });
-      options.onProgress?.((k + 1) / times.length);
+  let taken = 0;
+  let done = 0;
+  let failed = false;
+  /** One helper's share: the next frame not taken yet, written while the helper reads the one before. */
+  const work = async (reader: ScreenReader) => {
+    let k = taken++;
+    let next = k < times.length ? extract(k) : undefined;
+    try {
+      while (k < times.length && !failed) {
+        if (options.signal?.aborted) throw new CoreError('cancelled', 'reading the screen was cancelled');
+        const path = await next!;
+        const after = taken++;
+        next = after < times.length ? extract(after) : undefined;
+        next?.catch(() => {});
+        const lines = await reader.read(path, size.width, size.height);
+        rmSync(path, { force: true });
+        frames[k] = { t: times[k]!, lines };
+        options.onProgress?.(++done / times.length);
+        k = after;
+      }
+    } catch (error) {
+      failed = true; // the other helpers take no new frame
+      throw error;
+    } finally {
+      await next?.catch(() => {});
     }
-    await next?.catch(() => {});
+  };
+  try {
+    await Promise.all(readers.map(work));
   } finally {
-    reader.close();
+    for (const reader of readers) reader.close();
     rmSync(folder, { recursive: true, force: true });
   }
-  return { frames, language: reader.language };
+  return { frames, language: readers[0]!.language };
 }
 
 /**

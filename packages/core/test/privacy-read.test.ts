@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 import { runFfmpeg } from '../src/ffmpeg';
-import { READ_RULES, framesToRead } from '../src/privacy/read';
+import { READ_RULES, framesToRead, helpersFor } from '../src/privacy/read';
 
 const dirs: string[] = [];
 afterAll(() => Promise.all(dirs.map((dir) => rm(dir, { recursive: true, force: true }))));
@@ -45,5 +45,13 @@ describe('framesToRead', () => {
   it('reads each span from its first frame, in source seconds', async () => {
     const file = await screen(4, [{ from: 2.45, to: 4, x: 40 }]);
     expect(await framesToRead(file, [{ from: 0.5, to: 1.5 }, { from: 2, to: 4 }], size)).toEqual([0.5, 2, 2.5]);
+  });
+});
+
+describe('helpersFor', () => {
+  it('reads with one OCR helper for every four logical processors, three at most, and one for every four frames', () => {
+    expect([helpersFor(1, 16), helpersFor(6, 16), helpersFor(15, 16), helpersFor(100, 32)]).toEqual([1, 2, 3, 3]);
+    expect([helpersFor(15, 8), helpersFor(15, 4), helpersFor(15, 2)]).toEqual([2, 1, 1]);
+    expect(helpersFor(0, 16)).toBe(1);
   });
 });

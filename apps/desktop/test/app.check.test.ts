@@ -11,7 +11,7 @@ import { whisperCliPath } from '@cuttle/core';
 import { parseEventsJsonl, parseProjectJson } from '@cuttle/project';
 import { sceneSpans, typingClicks } from '@cuttle/timeline';
 import { _electron, type ElectronApplication, type Page } from 'playwright';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { FIXTURE_OUTPUT, makeFixture, makeMotionFixture, makePrivateFixture, makeRestingFixture, makeSpokenFixture } from './fixture';
 
 /**
@@ -396,6 +396,16 @@ describe.runIf(enabled)('the Cuttle app', () => {
     await editor.emulateMedia({ reducedMotion: 'reduce' });
     await editor.waitForSelector('.app[data-phase="ready"]', { timeout: 30_000 });
   }, 60_000);
+
+  // A test that failed while a take recorded (its HUD, its windows) would fail the tests after it,
+  // which find no new window while it runs: the take is stopped, and the next test waits for its end.
+  afterEach(async () => {
+    type Host = { recording: boolean; stop(): void };
+    const running = () => app.evaluate(() => (globalThis as { __recorder?: Host }).__recorder?.recording ?? false);
+    if (!(await running().catch(() => false))) return;
+    await app.evaluate(() => (globalThis as { __recorder?: Host }).__recorder?.stop());
+    await expect.poll(running, { timeout: 30_000 }).toBe(false);
+  });
 
   afterAll(async () => {
     await app?.close().catch(() => {});
@@ -1414,7 +1424,8 @@ describe.runIf(enabled)('the Cuttle app', () => {
     expect(await prompter.locator('[data-testid=prompter-count]').textContent()).toBe('Step 1 of 3');
     await wait(800);
     await click(prompter, '[data-testid=prompter-next]');
-    await expect.poll(() => prompter.locator('[data-testid=prompter-title]').textContent()).toBe('Turn on dark mode');
+    // the step goes to the recorder's process and back: under load more than a second
+    await expect.poll(() => prompter.locator('[data-testid=prompter-title]').textContent(), { timeout: 5_000 }).toBe('Turn on dark mode');
     expect(await prompter.locator('[data-testid=prompter-count]').textContent()).toBe('Step 2 of 3');
     expect(await prompter.locator('.prompter-note').textContent()).toBe('Say that it follows the system.');
     expect(await prompter.locator('.prompter-then').textContent()).toBe('Then Export the video');

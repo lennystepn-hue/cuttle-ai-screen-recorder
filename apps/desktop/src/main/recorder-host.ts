@@ -1,7 +1,7 @@
 import { utilityProcess, type UtilityProcess } from 'electron';
 import type { Bounds, Devices, RecordOptions, RecorderEvent, Take } from '@cuttle/recorder';
 import type { HostReply, HostRequest, LiveRequest } from '../shared/recording';
-import { TEST_BACKEND } from './check';
+import { CHECK, TEST_BACKEND } from './check';
 import { bundlePath } from './protocols';
 
 /** A failed recording, with the recorder's error code (`capture`, `device-not-found`, …). */
@@ -176,3 +176,5 @@ export class RecorderHost {
 }
 
 export const recorderHost = new RecorderHost();
+// the end-to-end check stops a take that a failed test left running, so the next test starts clean
+if (CHECK) Object.assign(globalThis, { __recorder: recorderHost });

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { alpha, at, bezier, ease, highlight, inOut, keys, mix, random, spring, stagger, typed, typedUntil } from '../kit/motion.js';
+import { alpha, at, bezier, ease, frameAt, highlight, inOut, keys, mix, random, spring, stagger, typed, typedUntil } from '../kit/motion.js';
 
 describe("Cuttle's motion helpers", () => {
   it('ease from 0 to 1, as CSS does', () => {
@@ -40,6 +40,20 @@ describe("Cuttle's motion helpers", () => {
     expect([0, 1, 2, 3, 4].map((i) => stagger(i, 5, 0.1))).toEqual([0, 0.1, 0.2, 0.30000000000000004, 0.4]);
     expect([0, 1, 2, 3, 4].map((i) => stagger(i, 5, 1, 'center'))).toEqual([2, 1, 0, 1, 2]);
     expect(stagger(0, 5, 1, 'end')).toBe(4);
+  });
+
+  it('say which frame of a sequence shows: each one once, from the first to the last', () => {
+    // the video's frames n / 30 s, a sequence of 198 frames at 30 fps from 1.2 s
+    const times = Array.from({ length: 300 }, (_, n) => n / 30);
+    const shown = times.map((t) => frameAt(t, { start: 1.2, fps: 30, count: 198 }));
+    expect(shown.slice(0, 37)).toEqual(Array(37).fill(0));
+    expect(shown.slice(36, 234)).toEqual(Array.from({ length: 198 }, (_, k) => k));
+    expect(shown.slice(233)).toEqual(Array(67).fill(197));
+    // what the floor alone does there: a frame twice, the next one never
+    const floored = times.slice(36, 234).map((t) => Math.floor((t - 1.2) * 30));
+    expect(floored.filter((k, i) => k !== i).length).toBeGreaterThan(10);
+    expect(frameAt(2.5)).toBe(75);
+    expect(frameAt(1, { fps: 24 })).toBe(24);
   });
 
   it('give the same random numbers for the same seed', () => {

@@ -30,6 +30,7 @@ export function mix(a: string, b: string, t: number): string;
 export function alpha(color: string, a: number): string;
 export function keys<T extends KeyValue>(t: number, frames: [time: number, value: T, curve?: Curve][]): T;
 export function stagger(index: number, count: number, each: number, from?: 'start' | 'end' | 'center' | number): number;
+export function frameAt(t: number, options?: { start?: number; fps?: number; count?: number }): number;
 export function random(seed: number): () => number;
 export function split(element: Element, by?: 'word' | 'char'): HTMLSpanElement[];
 export function typed(text: string, t: number, options?: { start?: number; cps?: number; pause?: number }): string;

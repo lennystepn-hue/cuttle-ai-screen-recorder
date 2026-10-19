@@ -1,11 +1,13 @@
-// Reads the screen recording's frames for a motion page (`cuttle.take.frame`), in a worker of its own,
-// so the page's virtual clock does not hold it up. mediabunny reads the file over the project's URL
-// (in ranges) and WebCodecs decodes it, on forward from the frame asked last where it can. Each frame
-// goes back to the page as an ImageBitmap, the project's privacy masks painted over it as the video
-// paints them: `fill` with the colour around it, `blur` beyond reading.
+// Reads a video's frames for a motion page, in a worker of its own (one per video), so the page's
+// virtual clock does not hold it up: the screen recording's (`cuttle.take.frame`) or a video of the
+// project's (`cuttle.video`). mediabunny reads the file over the project's URL (in ranges) and
+// WebCodecs decodes it, on forward from the frame asked last where it can. Each frame goes back to the
+// page as an ImageBitmap; the recording's with the project's privacy masks painted over it as the
+// video paints them: `fill` with the colour around it, `blur` beyond reading.
 //
-// Messages: { type: 'open', url, masks } once, then { type: 'frame', id, source, width? }; each frame
-// is answered with { id, bitmap } or { id, error }, in the order asked.
+// Messages: { type: 'open', url, name, masks } once (`name` says what the video is, in errors), then
+// { type: 'frame', id, source, width? }; each frame is answered with { id, bitmap } or { id, error },
+// in the order asked.
 import { ALL_FORMATS, Input, UrlSource, VideoSampleSink } from './mediabunny/mediabunny.min.mjs';
 import { masksAt, ringColor } from './take.js';
 
@@ -25,12 +27,12 @@ let ended = false;
 let startedAt = -Infinity;
 let last = -Infinity;
 
-async function open({ url, masks }) {
+async function open({ url, name = 'the screen recording', masks }) {
   const input = new Input({ source: new UrlSource(url), formats: ALL_FORMATS });
   const track = await input.getPrimaryVideoTrack();
-  if (!track) throw new Error('the screen recording has no video track');
-  if (!(await track.canDecode())) throw new Error('the screen recording cannot be decoded here');
-  take = { sink: new VideoSampleSink(track), first: await track.getFirstTimestamp(), width: track.displayWidth, height: track.displayHeight, masks: masks ?? [] };
+  if (!track) throw new Error(String(name) + ' has no video track');
+  if (!(await track.canDecode())) throw new Error(String(name) + ' cannot be decoded here');
+  take = { name, sink: new VideoSampleSink(track), first: await track.getFirstTimestamp(), width: track.displayWidth, height: track.displayHeight, masks: masks ?? [] };
 }
 
 function restart(t) {
@@ -94,10 +96,10 @@ function blur(canvas, ctx, [x, y, w, h]) {
 }
 
 async function frame({ id, source, width }) {
-  if (!take) throw failure ?? new Error('the screen recording is not open');
+  if (!take) throw failure ?? new Error('the video is not open');
   const t = Math.max(Number.isFinite(source) ? source : 0, take.first);
   const sample = await sampleAt(t);
-  if (!sample) throw new Error(`the screen recording has no frame at ${t.toFixed(3)} s`);
+  if (!sample) throw new Error(`${take.name} has no frame at ${t.toFixed(3)} s`);
   const w = Math.min(MAX_WIDTH, Math.max(1, Math.round(width ?? take.width)));
   const h = Math.max(1, Math.round((take.height * w) / take.width));
   const canvas = new OffscreenCanvas(w, h);

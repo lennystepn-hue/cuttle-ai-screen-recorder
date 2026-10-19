@@ -207,7 +207,7 @@ describe.concurrent('record (test backend)', () => {
     expect(new Set(levels)).toEqual(new Set([-90]));
   }, SLOW);
 
-  it("hands the mic's samples to onAudio while it records: whole samples, as long as the take", async () => {
+  it("hands the mic's samples to onAudio while it records: whole samples, as long as the take recorded", async () => {
     const projectDir = project();
     const chunks: Uint8Array[] = [];
     let recordingSeen = false;
@@ -227,9 +227,11 @@ describe.concurrent('record (test backend)', () => {
     }).done;
     expect(early).toBe(0);
     expect(chunks.every((samples) => samples.length % 2 === 0)).toBe(true);
+    // the 1.5 s recorded until the stop; the screen's file runs on while its capture ends (longer on a
+    // loaded machine), the samples do not
     const seconds = chunks.reduce((sum, samples) => sum + samples.length, 0) / 2 / 16_000;
-    expect(seconds).toBeGreaterThan(take.seconds - 0.5);
-    expect(seconds).toBeLessThan(take.seconds + 0.5);
+    expect(seconds).toBeGreaterThan(1.5 - 0.4);
+    expect(seconds).toBeLessThan(Math.max(take.seconds, 1.5) + 0.3);
   }, SLOW);
 
   it('stops handing samples to an onAudio that throws, with a warning, and keeps the take', async () => {
@@ -504,6 +506,88 @@ describe('record until a Claude Code turn ends (test backend)', () => {
       expect(markers.map(({ kind, label }) => (label ? `${kind}:${label}` : kind))).toEqual(['prompt', 'tool:Bash', 'answer']);
       const answer = markers[2]!.t;
       expect(take.seconds).toBeGreaterThan(answer + CLAUDE_TAIL_SECONDS - 0.3);
+      expect(take.seconds).toBeLessThan(answer + CLAUDE_TAIL_SECONDS + 1);
+    });
+  }, SLOW);
+
+  /** Claude Code's notice that the background work started by tool call `id` ended. */
+  const notice = (id: string) => `<task-notification>\n<task-id>b1</task-id>\n<tool-use-id>${id}</tool-use-id>\n<status>completed</status>\n<summary>Background command completed (exit code 0)</summary>\n</task-notification>`;
+  const background = (write: (session: string, value: object) => void, id: string, command: string) => {
+    write('demo', { type: 'assistant', message: { id: `m-${id}`, stop_reason: 'tool_use', content: [{ type: 'tool_use', id, name: 'Bash', input: { command, run_in_background: true } }] } });
+    write('demo', { type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: id, content: `Command running in background with ID: b-${id}. Output is being written to: b-${id}.output` }] } });
+  };
+
+  it('waits for what Claude left running in the background, and stops after its answer once that is done', async () => {
+    const projectDir = project();
+    const { config, cwd, write } = transcripts();
+    await withConfig(config, async () => {
+      const recording = record({ ...test, projectDir, stop: { untilClaude: cwd, maxSeconds: 20 } });
+      let ended = false;
+      recording.done.then(
+        () => (ended = true),
+        () => (ended = true),
+      );
+      await sleep(600);
+      write('demo', { type: 'user', message: { content: 'show me the table' } });
+      await sleep(300);
+      background(write, 't1', 'sqlite3 shop.db "select * from orders"');
+      write('demo', { type: 'assistant', message: { id: 'a1', stop_reason: 'end_turn', content: [{ type: 'text', text: 'The query runs in the background; the table follows.' }] } });
+      // past the tail of that answer: the take goes on
+      await sleep((CLAUDE_TAIL_SECONDS + 1.5) * 1000);
+      expect(ended).toBe(false);
+      write('demo', { type: 'queue-operation', operation: 'enqueue', content: notice('t1') });
+      write('demo', { type: 'user', message: { content: notice('t1') } });
+      await sleep(300);
+      write('demo', { type: 'assistant', message: { id: 'a2', stop_reason: 'end_turn', content: [{ type: 'text', text: '| order | total |' }] } });
+      const take = await recording.done;
+
+      expect(take.stopReason).toBe('claude');
+      expect(take.warnings).toEqual([]);
+      const markers = markersOf(projectDir, take.markers);
+      expect(markers.map(({ kind, label }) => (label ? `${kind}:${label}` : kind))).toEqual(['prompt', 'tool:Bash', 'answer', 'answer']);
+      // the table's answer, not the first one, ends the take
+      expect(take.seconds).toBeGreaterThan(markers[3]!.t + CLAUDE_TAIL_SECONDS - 0.3);
+      expect(take.seconds).toBeLessThan(markers[3]!.t + CLAUDE_TAIL_SECONDS + 1);
+    });
+  }, SLOW);
+
+  it('stops anyway once the session has been quiet for untilClaudeQuietSeconds, and says why (a server never ends)', async () => {
+    const projectDir = project();
+    const { config, cwd, write } = transcripts();
+    await withConfig(config, async () => {
+      const recording = record({ ...test, projectDir, stop: { untilClaude: cwd, untilClaudeQuietSeconds: 2, maxSeconds: 20 } });
+      await sleep(600);
+      write('demo', { type: 'user', message: { content: 'start the app' } });
+      await sleep(300);
+      background(write, 't1', 'npm run dev');
+      write('demo', { type: 'assistant', message: { id: 'a1', stop_reason: 'end_turn', content: [{ type: 'text', text: 'It runs at http://localhost:3000.' }] } });
+      const take = await recording.done;
+
+      expect(take.stopReason).toBe('claude');
+      expect(take.warnings).toEqual(['Claude Code left a command or agent running in the background (a server?): the take ended 2 s after the last step in its session']);
+      const answer = markersOf(projectDir, take.markers).find((marker) => marker.kind === 'answer')!.t;
+      expect(take.seconds).toBeGreaterThan(answer + 2 + CLAUDE_TAIL_SECONDS - 0.3);
+      expect(take.seconds).toBeLessThan(answer + 2 + CLAUDE_TAIL_SECONDS + 1.5);
+    });
+  }, SLOW);
+
+  it('counts work Claude stopped itself as done: the take ends after its answer', async () => {
+    const projectDir = project();
+    const { config, cwd, write } = transcripts();
+    await withConfig(config, async () => {
+      const recording = record({ ...test, projectDir, stop: { untilClaude: cwd, maxSeconds: 15 } });
+      await sleep(600);
+      write('demo', { type: 'user', message: { content: 'check the page, then stop the server' } });
+      await sleep(300);
+      background(write, 't1', 'npm run dev');
+      write('demo', { type: 'assistant', message: { id: 'm-t2', stop_reason: 'tool_use', content: [{ type: 'tool_use', id: 't2', name: 'TaskStop', input: { task_id: 'b-t1' } }] } });
+      write('demo', { type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 't2', content: '{"message":"Successfully stopped task: b-t1 (npm run dev)","task_id":"b-t1"}' }] } });
+      write('demo', { type: 'assistant', message: { id: 'a1', stop_reason: 'end_turn', content: [{ type: 'text', text: 'The page works; the server is stopped.' }] } });
+      const take = await recording.done;
+
+      expect(take.stopReason).toBe('claude');
+      expect(take.warnings).toEqual([]);
+      const answer = markersOf(projectDir, take.markers).find((marker) => marker.kind === 'answer')!.t;
       expect(take.seconds).toBeLessThan(answer + CLAUDE_TAIL_SECONDS + 1);
     });
   }, SLOW);

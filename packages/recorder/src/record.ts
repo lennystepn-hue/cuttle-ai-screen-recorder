@@ -18,6 +18,12 @@ import type { Bounds, RawInput, RecordOptions, Recording, RecorderEvent, StopOpt
 const DEFAULT_COUNTDOWN_SECONDS = 3;
 /** Seconds kept after Claude's final answer, so the video shows it. */
 export const CLAUDE_TAIL_SECONDS = 2;
+/**
+ * When Claude answers while commands or agents it started still run in the background, the take
+ * waits for them and for its answer after them, but not past this many seconds without anything new
+ * in its transcript: a server it started never ends.
+ */
+export const CLAUDE_BACKGROUND_SECONDS = 60;
 /** Seconds a track may take to deliver its first frame or sample (a DirectShow device can be slow to open, macOS may ask for access first). */
 const START_TIMEOUT_SECONDS = 20;
 const FILE_POLL_MS = 200;
@@ -504,11 +510,39 @@ async function recordTake({ options, control, platform, area, cameraMode, projec
       claudeTimer = timer(() => control.request('claude'), CLAUDE_TAIL_SECONDS * 1000);
     };
     startTriggers(options.stop, recordedNow, control, () => capturing && tracks !== undefined && tracks.frozen && now() - lastInput >= (options.stop.untilIdleSeconds ?? Infinity), timer);
-    claude?.attach((signal) => {
-      addMarker({ kind: signal.kind, ...(signal.label !== undefined && { label: signal.label }) }, signal.time);
-      if (signal.kind !== 'answer' || claudeStop) return;
+    // An answer while commands or agents Claude started still run in the background is not the end:
+    // their results come in a later answer. Anything new in the session restarts the wait for it.
+    /** The tool calls that started background work still running, and their task ids (Claude stops a task by its id). */
+    const background = new Set<string>();
+    const tasks = new Map<string, string>();
+    let waiting = false;
+    let quietTimer: ReturnType<typeof setTimeout> | undefined;
+    const quiet = options.stop.untilClaudeQuietSeconds ?? CLAUDE_BACKGROUND_SECONDS;
+    const claudeDone = () => {
       claudeStop = true;
+      clearTimeout(quietTimer);
       if (capturing) stopForClaude();
+    };
+    claude?.attach((signal) => {
+      if (signal.kind === 'background' && signal.id !== undefined) {
+        background.add(signal.id);
+        if (signal.task !== undefined) tasks.set(signal.task, signal.id);
+      } else if (signal.kind === 'finished') {
+        const id = signal.id ?? (signal.task === undefined ? undefined : tasks.get(signal.task));
+        if (id !== undefined) background.delete(id);
+      } else if (signal.kind !== 'background') addMarker({ kind: signal.kind, ...(signal.label !== undefined && { label: signal.label }) }, signal.time);
+      if (claudeStop) return;
+      if (signal.kind === 'answer') {
+        if (background.size === 0) return claudeDone();
+        waiting = true;
+      }
+      if (!waiting) return;
+      clearTimeout(quietTimer);
+      quietTimer = timer(() => {
+        if (claudeStop) return;
+        reporter.warn(`Claude Code left ${background.size === 1 ? 'a command or agent' : `${background.size} commands or agents`} running in the background (a server?): the take ended ${quiet} s after the last step in its session`);
+        claudeDone();
+      }, quiet * 1000);
     });
 
     let reason: StopReason;
@@ -706,6 +740,7 @@ function checkOptions(options: RecordOptions, projectDir: string): void {
   };
   positive('maxSeconds', options.stop.maxSeconds);
   positive('untilIdleSeconds', options.stop.untilIdleSeconds);
+  positive('untilClaudeQuietSeconds', options.stop.untilClaudeQuietSeconds);
   const countdown = options.countdownSeconds;
   if (countdown !== undefined && !(Number.isFinite(countdown) && countdown >= 0)) throw invalid('countdownSeconds must be 0 or more');
   const flag = options.stop.untilFile === undefined ? undefined : resolve(options.stop.untilFile);

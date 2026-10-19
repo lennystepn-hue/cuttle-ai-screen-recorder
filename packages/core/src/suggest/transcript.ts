@@ -3,7 +3,7 @@
 import { readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { parseSegmentsJson, parseTakeJson, takeTime, type Marker } from '@cuttle/project';
-import { claudeTranscriptDir, SessionReader, type ClaudeSignal } from '@cuttle/recorder';
+import { claudeTranscriptDir, isMarkerSignal, SessionReader, type ClaudeSignal } from '@cuttle/recorder';
 
 /**
  * The prompt, tool-call and answer markers of the session that was most active while the take ran,
@@ -21,6 +21,7 @@ export async function transcriptMarkers(cwd: string, clock: (wall: number) => nu
     const markers: Marker[] = [];
     for (const line of text.split('\n')) {
       for (const signal of reader.read(line)) {
+        if (!isMarkerSignal(signal)) continue;
         const t = clock(signal.time);
         if (t === undefined || t < 0 || t > duration || duplicate(signal, seen)) continue;
         markers.push({ t: Math.round(t * 1000) / 1000, kind: signal.kind, ...(signal.label !== undefined && { label: signal.label }) });

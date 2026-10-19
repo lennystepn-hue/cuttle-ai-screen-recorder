@@ -68,9 +68,13 @@ export interface StopOptions {
   /**
    * The folder Claude Code runs in. Stops `CLAUDE_TAIL_SECONDS` after the first session in that folder
    * that submits a prompt after `record()` was called (the countdown included) finishes its turn; its
-   * prompts, tool calls and final answer become markers.
+   * prompts, tool calls and answers become markers. A turn that left commands or agents running in the
+   * background is not the end: the take stops after Claude's answer once they are done, or after
+   * `untilClaudeQuietSeconds` without anything new in the session (a server it started never ends).
    */
   untilClaude?: string;
+  /** See `untilClaude` (default `CLAUDE_BACKGROUND_SECONDS`). */
+  untilClaudeQuietSeconds?: number;
 }
 
 export interface RecordOptions {

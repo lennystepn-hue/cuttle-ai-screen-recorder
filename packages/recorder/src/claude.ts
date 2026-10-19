@@ -1,4 +1,5 @@
-// Watches Claude Code transcripts for `untilClaude`: prompts, tool calls and the end of the turn.
+// Watches Claude Code transcripts for `untilClaude`: prompts, tool calls, the end of the turn, and
+// the commands and agents Claude leaves running in the background until their notice says they ended.
 import { open, readdir, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -23,13 +24,23 @@ export function claudeTranscriptDir(cwd: string, configDir = process.env.CLAUDE_
 }
 
 export interface ClaudeSignal {
-  kind: 'prompt' | 'tool' | 'answer';
+  /**
+   * `prompt`, `tool` and `answer` become markers. `background`: a command, an agent or a monitor
+   * Claude left running in the background (`id` is the tool call that started it); `finished`: one
+   * of them ended (its notice, or Claude stopped it).
+   */
+  kind: 'prompt' | 'tool' | 'answer' | 'background' | 'finished';
   /** Wall-clock seconds, from the line's `timestamp`. */
   time: number;
   /** The tool's name, for `tool`. */
   label?: string;
-  /** For deduplication: the prompt line's uuid, the tool call's id, or the message id of an `answer`. */
+  /**
+   * For deduplication: the prompt line's uuid, the tool call's id, or the message id of an `answer`.
+   * For background work, the tool call that started it (unknown when Claude stopped it).
+   */
   id?: string;
+  /** Background work's task id, where the transcript names it. */
+  task?: string;
   /** A prompt that is a slash command: a real prompt only once Claude answers it (`SessionReader`). */
   command?: true;
 }
@@ -43,7 +54,14 @@ interface TranscriptLine {
   isCompactSummary?: unknown;
   isApiErrorMessage?: unknown;
   message?: { id?: unknown; stop_reason?: unknown; content?: unknown };
+  /** A queue line's text (`queue-operation`). */
+  content?: unknown;
+  attachment?: { type?: unknown; prompt?: unknown };
 }
+
+/** The signals that become markers. */
+export type MarkerSignal = ClaudeSignal & { kind: 'prompt' | 'tool' | 'answer' };
+export const isMarkerSignal = (signal: ClaudeSignal): signal is MarkerSignal => signal.kind === 'prompt' || signal.kind === 'tool' || signal.kind === 'answer';
 
 /** Stop reasons that end a turn (`tool_use` continues it); an API error ends it as well. */
 const TURN_ENDS = new Set(['end_turn', 'refusal']);
@@ -56,10 +74,57 @@ const TURN_ENDS = new Set(['end_turn', 'refusal']);
 const NOT_PROMPTS = ['<local-command-', '<bash-', '<task-notification>', '[Request interrupted'];
 
 /**
+ * Tool results that say the work goes on in the background and reports back later, with its task
+ * id: a command (Bash, PowerShell), an agent (started, or resumed with a message), a monitor.
+ */
+const BACKGROUND_RESULTS = [
+  /^Command running in background with ID: ([\w-]+)/,
+  /^Async agent launched[\s\S]*?agentId: ([\w-]+)/,
+  /^Monitor started \(task ([\w-]+)/,
+  /^\{"success":true,"message":"Resuming agent ([\w-]+)/,
+];
+/** Claude stopped a background task itself (TaskStop): no notice follows. */
+const TASK_STOPPED = /^\{"message":"Successfully stopped task: ([\w-]+)/;
+/** In a background task's notice: its task id, the tool call that started it, and a status once it ended. */
+const NOTICE_TASK = /<task-id>([^<\s]+)<\/task-id>/;
+const NOTICE_TOOL = /<tool-use-id>([^<\s]+)<\/tool-use-id>/;
+/** A notice of a task that ended (completed, failed, killed); a monitor's events have no status. */
+const NOTICE_ENDED = /<status>[a-z_]+<\/status>/;
+
+/**
+ * The text of a background task's notice, wherever Claude Code wrote it: queued (`queue-operation`),
+ * handed to Claude during a turn (a `queued_command` attachment), or as the user line that starts
+ * a turn when Claude was idle.
+ */
+function taskNotice(line: TranscriptLine): string | undefined {
+  const text =
+    line.type === 'queue-operation'
+      ? line.content
+      : line.type === 'attachment' && line.attachment?.type === 'queued_command'
+        ? line.attachment.prompt
+        : line.type === 'user'
+          ? typeof line.message?.content === 'string'
+            ? line.message.content
+            : Array.isArray(line.message?.content)
+              ? (line.message.content as { type?: unknown; text?: unknown }[]).find((item) => item?.type === 'text')?.text
+              : undefined
+          : undefined;
+  return typeof text === 'string' && text.trimStart().startsWith('<task-notification>') ? text : undefined;
+}
+
+/** The text of a tool result (a string, or text blocks). */
+function resultText(content: unknown): string {
+  if (typeof content === 'string') return content;
+  if (!Array.isArray(content)) return '';
+  return (content as { type?: unknown; text?: unknown }[]).map((item) => (item?.type === 'text' && typeof item.text === 'string' ? item.text : '')).join('');
+}
+
+/**
  * The signals in one transcript line. Subagent lines (`isSidechain`), meta lines and compaction
  * summaries are skipped. A prompt is a user line with text (tool results are user lines too); every
  * line of an assistant message carries the message's final `stop_reason`, so the end of a turn shows
- * up once per line and is deduplicated by message id.
+ * up once per line and is deduplicated by message id. Work left running in the background shows as
+ * a tool call with `run_in_background` or as its result's words, and its end as a notice.
  */
 export function readTranscriptLine(text: string): ClaudeSignal[] {
   let line: TranscriptLine;
@@ -68,10 +133,30 @@ export function readTranscriptLine(text: string): ClaudeSignal[] {
   } catch {
     return [];
   }
-  if (typeof line !== 'object' || line === null || line.isSidechain === true || line.isMeta === true || line.isCompactSummary === true) return [];
+  if (typeof line !== 'object' || line === null || line.isSidechain === true) return [];
   const time = typeof line.timestamp === 'string' ? Date.parse(line.timestamp) / 1000 : Number.NaN;
   if (!Number.isFinite(time)) return [];
+  const notice = taskNotice(line);
+  if (notice !== undefined) {
+    if (!NOTICE_ENDED.test(notice)) return [];
+    const id = NOTICE_TOOL.exec(notice)?.[1];
+    const task = NOTICE_TASK.exec(notice)?.[1];
+    return id === undefined && task === undefined ? [] : [{ kind: 'finished', time, ...(id !== undefined && { id }), ...(task !== undefined && { task }) }];
+  }
+  if (line.isMeta === true || line.isCompactSummary === true) return [];
   const content = line.message?.content;
+  if (line.type === 'user' && Array.isArray(content) && content.some((item: { type?: unknown }) => item?.type === 'tool_result')) {
+    const signals: ClaudeSignal[] = [];
+    for (const item of content as { type?: unknown; tool_use_id?: unknown; content?: unknown }[]) {
+      if (item?.type !== 'tool_result' || typeof item.tool_use_id !== 'string') continue;
+      const said = resultText(item.content).trimStart();
+      const task = BACKGROUND_RESULTS.map((pattern) => pattern.exec(said)?.[1]).find((match) => match !== undefined);
+      if (task !== undefined) signals.push({ kind: 'background', time, id: item.tool_use_id, task });
+      const stopped = TASK_STOPPED.exec(said)?.[1];
+      if (stopped !== undefined) signals.push({ kind: 'finished', time, task: stopped });
+    }
+    return signals;
+  }
   if (line.type === 'user') {
     const prompt = promptText(content);
     if (prompt === undefined) return [];
@@ -80,9 +165,10 @@ export function readTranscriptLine(text: string): ClaudeSignal[] {
   }
   if (line.type !== 'assistant') return [];
   const signals: ClaudeSignal[] = [];
-  for (const item of Array.isArray(content) ? (content as { type?: unknown; name?: unknown; id?: unknown }[]) : []) {
+  for (const item of Array.isArray(content) ? (content as { type?: unknown; name?: unknown; id?: unknown; input?: { run_in_background?: unknown } }[]) : []) {
     if (item?.type === 'tool_use' && typeof item.name === 'string') {
       signals.push({ kind: 'tool', time, label: item.name, ...(typeof item.id === 'string' && { id: item.id }) });
+      if (item.input?.run_in_background === true && typeof item.id === 'string') signals.push({ kind: 'background', time, id: item.id });
     }
   }
   if (TURN_ENDS.has(String(line.message?.stop_reason)) || line.isApiErrorMessage === true) {
@@ -115,6 +201,11 @@ export class SessionReader {
   read(text: string): ClaudeSignal[] {
     const signals: ClaudeSignal[] = [];
     for (const signal of readTranscriptLine(text)) {
+      // background work says nothing about a slash command
+      if (!isMarkerSignal(signal)) {
+        signals.push(signal);
+        continue;
+      }
       if (signal.kind === 'prompt') {
         this.command = signal.command ? signal : undefined; // a command nobody answered was a local one
         if (!signal.command) signals.push(signal);
@@ -153,8 +244,9 @@ export function watchClaude(dir: string, since: number, onSignal: (signal: Claud
       session = file;
     }
     if (file !== session) return;
-    if (signal.id !== undefined) {
-      const key = `${signal.kind}:${signal.id}`;
+    // background work: its tool call alone, and then with its task id from the result, are two signals
+    if (signal.id !== undefined || signal.task !== undefined) {
+      const key = `${signal.kind}:${signal.id ?? ''}:${signal.task ?? ''}`;
       if (seen.has(key)) return;
       seen.add(key);
     }

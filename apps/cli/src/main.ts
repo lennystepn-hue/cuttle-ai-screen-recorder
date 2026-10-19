@@ -141,7 +141,7 @@ export async function runCli(argv: readonly string[], streams?: Streams): Promis
     .option('--window <title>', 'a window, by (part of) its title')
     .option('--webcam [name]', 'record a webcam (default: the first one)')
     .option('--mic [name]', 'record a microphone (default: the first one)')
-    .option('--until-claude [cwd]', 'stop when the Claude Code session in that folder (default: here) finishes its turn')
+    .option('--until-claude [cwd]', 'stop when the Claude Code session in that folder (default: here) finishes its turn, after what it runs in the background')
     .option('--until-file <path>', 'stop when this file appears')
     .option('--until-idle <seconds>', 'stop when the screen and the input rested this long', positive)
     .option('--max <seconds>', 'stop after this long', positive)

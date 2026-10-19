@@ -1,10 +1,10 @@
-export { record, CLAUDE_TAIL_SECONDS } from './record';
+export { record, CLAUDE_BACKGROUND_SECONDS, CLAUDE_TAIL_SECONDS } from './record';
 export { joinSegments } from './join';
 export { listDevices } from './devices';
 export { RecorderError, type RecorderErrorCode } from './errors';
 export { HOTKEYS } from './input';
 export { LEVEL_FLOOR, PCM_RATE, levelMeter, wholeSamples, type MicLevel } from './level';
-export { claudeTranscriptDir, readTranscriptLine, recentClaudeFolders, SessionReader, type ClaudeFolder, type ClaudeSignal } from './claude';
+export { claudeTranscriptDir, isMarkerSignal, readTranscriptLine, recentClaudeFolders, SessionReader, type ClaudeFolder, type ClaudeSignal, type MarkerSignal } from './claude';
 export { focusWindow } from './devices';
 /** macOS's helper (native/macos/capture.swift), which also reads pictures' text (`cuttle-capture ocr`). */
 export { captureHelper } from './mac-capture';

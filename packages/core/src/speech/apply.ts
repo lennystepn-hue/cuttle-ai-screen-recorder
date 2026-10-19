@@ -1,14 +1,16 @@
-// The speech edits applied to a project: retakes (the mistake key, a spoken "nochmal"), and filler
-// and pause cuts from its transcript, merged with the cuts there by the tag rules. `suggest` does
-// this as part of its run; the app does it again once the transcript arrives after the cut.
+// The speech edits applied to a project: retakes (the mistake key, a spoken "nochmal", a sentence
+// begun again), and filler and pause cuts from its transcript, with their edges in the mic's quiet,
+// merged with the cuts there by the tag rules. `suggest` does this as part of its run; the app does
+// it again once the transcript arrives after the cut.
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
-import { parseEventsJsonl, parseMarkersJson, usedIds, type CuttleProject, type InputEvent, type Marker, type TranscriptFile } from '@cuttle/project';
+import { parseEventsJsonl, parseMarkersJson, usedIds, type CuttleProject, type InputEvent, type Marker, type TranscriptFile, type TranscriptWord } from '@cuttle/project';
 import { CoreError } from '../errors';
 import { readProjectFile, writeProjectFile } from '../project-file';
 import { analyseScreen } from '../suggest/media';
 import { union, type Span } from '../suggest/spans';
-import { mergeCuts, speechCuts, type RawCut } from './edits';
+import { inputSpans, mergeCuts, restingAt, SPEECH_EDIT_RULES, speechCuts, type RawCut, type SpeechCut } from './edits';
+import { guardCut, quietStretches } from './guard';
 import { micLevels, speechStretches } from './levels';
 import { retakeCuts, type RetakeCut } from './retakes';
 import { micOffset, readTranscript, transcriptOfMic } from './transcribe';
@@ -40,6 +42,22 @@ export async function speechActivity(
   }
 }
 
+/**
+ * Where the mic is quiet, in source seconds (`quietStretches`): where speech cuts may begin and end.
+ * Undefined without a mic, when it hears no speech, or when it cannot be read.
+ */
+export async function micQuiet(dir: string, sources: CuttleProject['sources']): Promise<Span[] | undefined> {
+  if (sources.mic === undefined) return undefined;
+  const mic = resolve(dir, sources.mic);
+  try {
+    const [levels, offset] = await Promise.all([micLevels(mic), micOffset(resolve(dir, sources.screen), mic)]);
+    return quietStretches(levels, offset);
+  } catch (error) {
+    if (error instanceof CoreError && error.code === 'ffmpeg-missing') throw error;
+    return undefined;
+  }
+}
+
 export interface SpeechCutsResult {
   cuts: RawCut[];
   fillers: number;
@@ -60,6 +78,8 @@ export interface SpeechCutsInput {
   events: readonly InputEvent[];
   /** The clips' source stretches and speeds: fillers and pauses are cut in 1× clips only. */
   clips: readonly (Span & { speed: number })[];
+  /** Where the mic is quiet (`micQuiet`): the cuts' edges are moved there. Without it they stay as made. */
+  quiet?: readonly Span[];
 }
 
 /** Filler and pause cuts this close to a retake, in its clip, become part of it. */
@@ -79,9 +99,40 @@ function joinRetake(retakes: RetakeCut[], cut: Span, clips: readonly Span[]): bo
 }
 
 /**
+ * The cuts with their edges in the mic's quiet (`guardCut`), inside the clip each was made in. A
+ * filler's or a pause's cut that grew must still lie where the picture rests, and a pause's cut
+ * still remove `pauseCutMin`; the cuts that cannot are left out.
+ */
+function inTheQuiet<T extends RetakeCut | SpeechCut>(made: readonly T[], input: SpeechCutsInput, words: readonly TranscriptWord[], quiet: readonly Span[]): { cuts: T[]; moved: number; dropped: number } {
+  const busy = inputSpans(input.events);
+  const cuts: T[] = [];
+  let moved = 0;
+  let dropped = 0;
+  for (const cut of made) {
+    const clip = input.clips.find((span) => span.from <= cut.from && cut.to <= span.to);
+    const guarded = guardCut(cut, words, quiet);
+    const next = guarded && clip ? { ...guarded, from: Math.max(clip.from, guarded.from), to: Math.min(clip.to, guarded.to) } : guarded;
+    const grew = next !== undefined && (next.from < cut.from || next.to > cut.to);
+    const fits =
+      next !== undefined &&
+      next.to > next.from &&
+      (cut.auto === 'retake' || !grew || restingAt(next, input, SPEECH_EDIT_RULES, busy)) &&
+      (cut.auto !== 'pause' || next.to - next.from >= SPEECH_EDIT_RULES.pauseCutMin);
+    if (!next || !fits) {
+      dropped++;
+      continue;
+    }
+    moved += Number(next.from !== cut.from) + Number(next.to !== cut.to);
+    cuts.push(next);
+  }
+  return { cuts, moved, dropped };
+}
+
+/**
  * The project's cuts with the speech edits: the retakes (the mistake key's markers, and with a
- * transcript the spoken cues), then the filler and pause cuts of the transcript (one that touches a
- * retake joins it). The tagged cuts of the kinds made are replaced; every other cut is kept.
+ * transcript the spoken cues and the sentences begun again), then the filler and pause cuts of the
+ * transcript (one that touches a retake joins it), with their edges in the mic's quiet when it is
+ * known. The tagged cuts of the kinds made are replaced; every other cut is kept.
  */
 export function withSpeechCuts(raw: Record<string, unknown>, project: CuttleProject, input: SpeechCutsInput, taken = usedIds(raw)): SpeechCutsResult {
   const { transcript } = input;
@@ -103,14 +154,15 @@ export function withSpeechCuts(raw: Record<string, unknown>, project: CuttleProj
     : [];
   // without a transcript the filler and pause cuts there stay as they are: nothing to make them again from
   const kinds = transcript ? ['retake', 'filler', 'pause'] : ['retake'];
-  const made = [...retakes, ...speech].sort((a, b) => a.from - b.from);
+  const sorted = [...retakes, ...speech].sort((a, b) => a.from - b.from);
+  const { cuts: made, moved, dropped } = input.quiet ? inTheQuiet(sorted, input, transcript?.words ?? [], input.quiet) : { cuts: sorted, moved: 0, dropped: 0 };
   const { cuts, added, kept } = mergeCuts((raw.cuts as RawCut[] | undefined) ?? [], made, kinds, taken);
   const fillers = added.filter((cut) => cut.auto === 'filler').length;
   const pauses = added.filter((cut) => cut.auto === 'pause').length;
   const retaken = added.filter((cut) => cut.auto === 'retake').length;
   const off = added.filter((cut) => cut.enabled === false).length;
   const notes: string[] = [];
-  if (retaken > 0) notes.push(`cut ${retaken} retake${retaken === 1 ? '' : 's'}: back to the pause before each slip (the mistake key, or a spoken "nochmal" that was then said again)`);
+  if (retaken > 0) notes.push(`cut ${retaken} retake${retaken === 1 ? '' : 's'}: back to the pause before each slip (the mistake key, a spoken "nochmal" that was then said again, or a sentence begun again)`);
   if (!project.autoEdits.retakes) notes.push('retake cuts are switched off (autoEdits.retakes)');
   if (fillers + pauses > 0) {
     const removed = added.filter((cut) => cut.enabled !== false && cut.auto !== 'retake').reduce((sum, cut) => sum + cut.to - cut.from, 0);
@@ -118,6 +170,8 @@ export function withSpeechCuts(raw: Record<string, unknown>, project: CuttleProj
   }
   if (transcript && !project.autoEdits.fillers) notes.push('filler cuts are switched off (autoEdits.fillers)');
   if (transcript && !project.autoEdits.pauses) notes.push('pause cuts are switched off (autoEdits.pauses)');
+  if (moved > 0) notes.push(`moved ${moved} cut edge${moved === 1 ? '' : 's'} into the mic's quiet, clear of the speech`);
+  if (dropped > 0) notes.push(`left out ${dropped} cut${dropped === 1 ? '' : 's'} with no quiet in the mic near ${dropped === 1 ? 'its' : 'their'} edges: the words there run together`);
   if (kept > 0) notes.push(`kept ${kept} cut${kept === 1 ? '' : 's'} made by hand or by other steps`);
   return { cuts, fillers, pauses, retakes: retaken, off, notes };
 }
@@ -161,7 +215,8 @@ export async function applySpeechEdits(projectDir: string, options: { link?: str
   }
   const markers = sources.markers ? await readMarkers(resolve(file.dir, sources.markers)) : [];
   const clips = file.project.scenes.flatMap((scene) => (scene.type === 'clip' ? [{ from: scene.from, to: scene.to, speed: scene.speed }] : []));
-  const result = withSpeechCuts(file.raw, file.project, { transcript, markers, speech: wordStretches(transcript), still: screen.still, events, clips });
+  const quiet = await micQuiet(file.dir, sources);
+  const result = withSpeechCuts(file.raw, file.project, { transcript, markers, speech: wordStretches(transcript), still: screen.still, events, clips, ...(quiet && { quiet }) });
   const before = JSON.stringify(file.raw.cuts ?? []);
   const linking = (options.link !== undefined && options.link !== sources.transcript) || (options.cleanMic !== undefined && options.cleanMic !== sources.cleanMic);
   if (JSON.stringify(result.cuts) === before && !linking) return { ...result, project: file.path, written: false };

@@ -16,7 +16,7 @@ import { union } from './suggest/spans';
 import { screenStretches, typingZooms, type ScreenChange } from './suggest/typing';
 import { withStepTitles, type StepTitles } from './suggest/steps';
 import { takeClock, transcriptMarkers } from './suggest/transcript';
-import { readMarkers, speechActivity, withSpeechCuts, wordStretches } from './speech/apply';
+import { micQuiet, readMarkers, speechActivity, withSpeechCuts, wordStretches } from './speech/apply';
 import type { RawCut } from './speech/edits';
 import { chooseModel } from './speech/models';
 import { readTranscript, transcribeTake } from './speech/transcribe';
@@ -198,7 +198,9 @@ export async function suggestProject(projectDir: string, args: SuggestOptions = 
     // the pauses before a slip: between the words, or between the mic's loud stretches
     const pauses = transcript ? wordStretches(transcript) : speech.from === 'mic' ? speech.spans : [];
     const clips = suggestion.clips.map(({ from: start, to, speed }) => ({ from: start, to, speed }));
-    const result = withSpeechCuts(file.raw, file.project, { ...(transcript && { transcript }), markers, speech: pauses, still: screenInfo.still, events, clips }, taken);
+    // the cuts' edges go where the mic is quiet: word times are estimates
+    const quiet = args.speech !== false ? await micQuiet(file.dir, sources) : undefined;
+    const result = withSpeechCuts(file.raw, file.project, { ...(transcript && { transcript }), markers, speech: pauses, still: screenInfo.still, events, clips, ...(quiet && { quiet }) }, taken);
     notes.push(...result.notes);
     cuts = result.cuts;
     made = { fillers: result.fillers, pauses: result.pauses, retakes: result.retakes };

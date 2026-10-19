@@ -131,6 +131,16 @@ export function stagger(index, count, each, from = 'start') {
   return Math.abs(index - origin) * each;
 }
 
+/**
+ * Which frame of a sequence shows at time `t`: `fps` frames a second from `start` seconds, kept
+ * between the first and the last (`count`). `Math.floor((t - start) * fps)` alone lands just below a
+ * whole number now and then (at 38 / 30 s from 1.2 s it is 1.9999999999999996), which shows one frame
+ * twice and skips the next.
+ */
+export function frameAt(t, { start = 0, fps = 30, count = Infinity } = {}) {
+  return clamp(Math.floor((t - start) * fps + 1e-6), 0, count - 1);
+}
+
 /** A seeded random number generator (mulberry32): `random(7)` gives the same numbers every time. */
 export function random(seed) {
   let state = seed >>> 0;

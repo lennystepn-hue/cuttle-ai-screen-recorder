@@ -201,6 +201,62 @@ describe('the motion runtime', () => {
     await expect(page('', '').cuttle.take.frame(1)).rejects.toThrow('no screen recording');
   });
 
+  it('hands the page frames of a video of the project, from a reader of its own, without the take\'s masks', async () => {
+    // a stand-in for the kit's worker: red a tenth of the second asked, green 100 for a.mp4 (200 for any other), blue its masks
+    const worker = URL.createObjectURL(
+      new Blob(
+        [
+          `let opened;
+          self.onmessage = (event) => {
+            const message = event.data;
+            if (message.type === 'open') return void (opened = message);
+            if (message.source > 5) return self.postMessage({ id: message.id, error: opened.name + ' has no frame at ' + message.source });
+            const canvas = new OffscreenCanvas(message.width ?? 16, 4);
+            const g = canvas.getContext('2d');
+            g.fillStyle = 'rgb(' + Math.round(message.source * 10) + ', ' + (opened.url.endsWith('a.mp4') ? 100 : 200) + ', ' + opened.masks.length + ')';
+            g.fillRect(0, 0, canvas.width, 4);
+            const bitmap = canvas.transferToImageBitmap();
+            self.postMessage({ id: message.id, bitmap }, [bitmap]);
+          };`,
+        ],
+        { type: 'text/javascript' },
+      ),
+    );
+    const take: TakeData = {
+      screen: { width: 32, height: 18 },
+      events: [],
+      words: [],
+      markers: [],
+      zooms: [],
+      masks: [{ from: 0, to: 9, rect: [0, 0, 4, 4], style: 'fill' }],
+      clips: [],
+      cursor: null,
+      window: null,
+      recording: 'cuttle-motion://project/takes/1/screen.mp4',
+    };
+    const win = page(
+      '',
+      `const a = cuttle.video('cuttle-motion://project/clips/a.mp4');
+       const b = cuttle.video('cuttle-motion://project/clips/b.mp4');
+       seen.push({ same: cuttle.video('cuttle-motion://project/clips/a.mp4') === a, src: a.src });
+       const pixel = (bitmap) => { const g = new OffscreenCanvas(1, 1).getContext('2d'); g.drawImage(bitmap, 0, 0); return [...g.getImageData(0, 0, 1, 1).data.slice(0, 3)]; };
+       cuttle.onFrame(async (t) => {
+         const [first, second, recording] = await Promise.all([a.frame(t), b.frame(2 * t, { width: 8 }), cuttle.take.frame(t)]);
+         seen.push({ t, a: pixel(first), b: [...pixel(second), second.width], take: pixel(recording) });
+       });`,
+      { ...INIT, take, takeWorker: worker },
+    );
+    expect(await win.__cuttleDraw(500)).toBe(1);
+    expect(win.seen).toEqual([
+      { same: true, src: 'cuttle-motion://project/clips/a.mp4' },
+      { t: 0.5, a: [5, 100, 0], b: [10, 200, 0, 8], take: [5, 200, 1] },
+    ]);
+    // what a reader could not do, the page is told, with the video's name
+    await expect(win.cuttle.video('cuttle-motion://project/clips/a.mp4').frame(6)).rejects.toThrow('cuttle-motion://project/clips/a.mp4 has no frame at 6');
+    // without the kit's worker nothing is read
+    await expect(page('', '').cuttle.video('clip.mp4').frame(1)).rejects.toThrow('the frames of clip.mp4 cannot be read here');
+  });
+
   it('gives a transition page the frames it goes between before it draws, and how far it is', async () => {
     // two raw frames at the page's size: red and blue
     const raw = (rgb: number[]) => {

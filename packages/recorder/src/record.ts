@@ -772,7 +772,7 @@ function checkOptions(options: RecordOptions, projectDir: string): void {
 }
 
 /** Creates the next free `takes/<n>` folder; `mkdir` fails on an existing one, so two recorders never share one. */
-function allocateTake(projectDir: string): string {
+export function allocateTake(projectDir: string): string {
   const takes = join(projectDir, 'takes');
   mkdirSync(takes, { recursive: true });
   let next = readdirSync(takes).reduce((max, name) => (/^\d+$/.test(name) ? Math.max(max, Number(name)) : max), 0) + 1;

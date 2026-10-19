@@ -11,7 +11,7 @@ const WALLCLOCK = ['-use_wallclock_as_timestamps', '1'];
  * BT.601 by default). `setparams` replaces the sRGB transfer that ddagrab frames carry, which the
  * encoder flags alone do not override.
  */
-const VIDEO_CHAIN =
+export const VIDEO_CHAIN =
   'scale=out_color_matrix=bt709:out_range=tv,format=yuv420p,setparams=color_primaries=bt709:color_trc=bt709:colorspace=bt709:range=tv';
 
 /** H.264 at high quality; a key frame every 2 s, so a fragment (one GOP) loses at most 2 s in a crash. */

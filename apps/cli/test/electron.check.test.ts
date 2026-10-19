@@ -385,6 +385,52 @@ describe.runIf(enabled)('cuttle in Electron', () => {
     }
   }, 180_000);
 
+  it('plays an imported video and a video a page draws frame by frame: each frame once, none skipped', () => {
+    const dir = join(mkdtempSync(join(tmpdir(), 'cuttle-video-')), 'video');
+    try {
+      expect(cuttle('init', dir).code).toBe(0);
+      // A video whose frame n is red 20 + n × 6: which frame the video shows can be read off a pixel.
+      // BT.709 and tagged, so the browser and ffmpeg turn it into the same colours (an untagged one
+      // they do not).
+      mkdirSync(join(dir, 'clips'), { recursive: true });
+      const clip = join(dir, 'clips', 'count.mp4');
+      const colours = "format=rgb24,geq=r='20+N*6':g=128:b=0,scale=out_color_matrix=bt709:out_range=tv,format=yuv420p";
+      const tags = ['-colorspace', 'bt709', '-color_primaries', 'bt709', '-color_trc', 'bt709', '-color_range', 'tv'];
+      spawnSync('ffmpeg', ['-v', 'error', '-f', 'lavfi', '-i', `color=c=black:s=320x180:r=30:d=1.2,${colours}`, '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '10', ...tags, '-y', clip]);
+      expect(cuttle('-C', dir, 'import', clip).json).toMatchObject({ take: 'takes/1', width: 320, height: 180 });
+      // after the imported take, a page that draws the same video from the project, a frame at each of its seconds
+      mkdirSync(join(dir, 'motion', 'count'), { recursive: true });
+      writeFileSync(
+        join(dir, 'motion', 'count', 'index.html'),
+        `<!doctype html><body style="margin:0;background:#000"><canvas id="c" width="1920" height="1080"></canvas><script>
+        const g = document.getElementById('c').getContext('2d');
+        const video = cuttle.video('/clips/count.mp4');
+        cuttle.onFrame(async (t) => { const frame = await video.frame(t); g.drawImage(frame, 0, 0, 1920, 1080); frame.close(); });
+        </script></body>`,
+      );
+      const file = join(dir, 'cuttle.json');
+      const raw = JSON.parse(readFileSync(file, 'utf8')) as { scenes: unknown[] };
+      writeFileSync(file, JSON.stringify({ ...raw, look: { frame: { enabled: false }, transition: { enabled: false } }, scenes: [...raw.scenes, { type: 'motion', src: 'motion/count/index.html', duration: 1 }] }));
+      const { code, json } = cuttle('-C', dir, 'render', '-o', join(dir, 'out.mp4'));
+      expect(code).toBe(0);
+      expect((json.motion as { errors: string[] }[]).flatMap((report) => report.errors)).toEqual([]);
+      // The red in the middle of each frame: of the video, of the imported take and of the clip. Each frame
+      // of the video is nearest to the frame it should show (the clip's frames come through the take's
+      // colours, the page's through the browser's): none twice, none skipped.
+      const reds = (file: string, x: number, y: number) =>
+        [...spawnSync('ffmpeg', ['-v', 'error', '-i', file, '-vf', `crop=4:4:${x}:${y},scale=1:1`, '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-'], { maxBuffer: 1 << 20 }).stdout].filter((_, i) => i % 3 === 0);
+      const video = reds(join(dir, 'out.mp4'), 958, 538);
+      const take = reds(join(dir, 'takes', '1', 'screen.mp4'), 158, 88);
+      const source = reds(clip, 158, 88);
+      expect([video.length, take.length, source.length]).toEqual([66, 36, 36]);
+      const nearest = (red: number, frames: number[]) => frames.reduce((best, value, k) => (Math.abs(value - red) < Math.abs(frames[best]! - red) ? k : best), 0);
+      expect(video.slice(0, 36).map((red) => nearest(red, take))).toEqual(Array.from({ length: 36 }, (_, k) => k));
+      expect(video.slice(36).map((red) => nearest(red, source))).toEqual(Array.from({ length: 30 }, (_, k) => k));
+    } finally {
+      rmSync(dirname(dir), { recursive: true, force: true });
+    }
+  }, 180_000);
+
   it('goes into a scene through its transition page: the fold turns the card over onto the clip', () => {
     const dir = join(mkdtempSync(join(tmpdir(), 'cuttle-fold-')), 'fold');
     cpSync(project, dir, { recursive: true });

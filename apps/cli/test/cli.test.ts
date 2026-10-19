@@ -820,6 +820,30 @@ describe('cuttle suggest and recover', () => {
     expect(existsSync(join(take, 'markers.json'))).toBe(false);
   }, 30_000);
 
+  it('imports a video made elsewhere as the next take, which suggest cuts by its picture alone; not into a project open in the app', async () => {
+    const dir = join(temp(), 'imported');
+    const file = join(temp(), 'phone.mp4');
+    // a moving picture, 5 s of a still one, a moving one again
+    spawnSync('ffmpeg', ['-v', 'error', '-filter_complex', 'testsrc2=s=320x240:r=25:d=1.5[a];color=c=gray:s=320x240:r=25:d=5[b];testsrc2=s=320x240:r=25:d=1.5[c];[a][b][c]concat=n=3:v=1:a=0', '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', '-y', file]);
+    const imported = await cli('--json', '-C', dir, 'import', file, '--to', '7.5');
+    expect(imported.code).toBe(0);
+    expect(stable(imported.json, dir)).toMatchObject({ project: '<project>/cuttle.json', take: 'takes/1', width: 320, height: 240, tracks: ['screen'] });
+
+    const suggested = await cli('--json', '-C', dir, 'suggest');
+    expect(suggested.code).toBe(0);
+    const scenes = JSON.parse(readFileSync(join(dir, 'cuttle.json'), 'utf8')).scenes as { from: number; to: number }[];
+    // the still middle is cut, half a second kept on both sides
+    expect(scenes.map((scene) => [Math.round(scene.from * 10) / 10, Math.round(scene.to * 10) / 10])).toEqual([[0, 2], [6, 7.5]]);
+
+    mkdirSync(join(dir, '.cuttle'), { recursive: true });
+    writeFileSync(join(dir, '.cuttle', 'editor.lock'), JSON.stringify({ host: hostname(), pid: process.pid }));
+    const refused = await cli('--json', '-C', dir, 'import', file);
+    expect(refused.json).toMatchObject({ error: { code: 'project-open' } });
+    expect(existsSync(join(dir, 'takes', '2'))).toBe(false);
+    const missing = await cli('--json', '-C', dir, 'import', join(dir, 'nothing.mp4'), '--force');
+    expect(missing).toMatchObject({ code: 1, json: { error: { code: 'missing-file' } } });
+  }, 60_000);
+
   it('refuses a take outside the project and one without video', async () => {
     const dir = temp();
     const outside = await cli('--json', '-C', dir, 'recover', '..');

@@ -50,12 +50,19 @@ page in `motion/` you did not write.
   that sets everything from `t` there is right on every frame; free-running CSS animations work too,
   but keyframes you compute are easier to time. A draw may be `async` (it awaits a frame of the take):
   the frame waits for it. `import { at, ease, keys, stagger, split, typed,
-  highlight, spring, random } from 'cuttle'` gives you easing, keyframes, staggering, text splitting,
-  typing with a rhythm, syntax colours and springs, all as functions of time.
+  highlight, spring, random, frameAt } from 'cuttle'` gives you easing, keyframes, staggering, text
+  splitting, typing with a rhythm, syntax colours, springs and frame numbers, all as functions of time.
 - **`window.cuttle`:** `time` and `duration` (the item's seconds), `videoTime` (the video's),
   `fps`, `size` (the output's pixels), `format` (`16:9`, `9:16`, `1:1`), `params`, `theme`,
-  `ready(promise)` (the first frame waits for it: fonts, data, a model), `sound(…)` (below) and
-  `take` (below).
+  `ready(promise)` (the first frame waits for it: fonts, data, a model), `sound(…)` (below),
+  `video(src)` and `take` (below).
+- **A video in the page, frame by frame:** `const clip = cuttle.video('/clips/intro.mp4')` (a path
+  from the page, or from the project with a leading `/`) reads it in a worker of its own;
+  `await clip.frame(seconds)` is the frame the file shows at that second, an ImageBitmap to draw
+  (close it after). So `clip.frame(t - 1.2)` plays it from 1.2 s on, each frame once. A `<video>`
+  element does not follow the page's clock. For a sequence of images, `frameAt(t, { start, fps,
+  count })` says which one shows: `Math.floor((t - start) * fps)` alone lands just below a whole
+  number now and then, which shows one image twice and skips the next.
 - **Size:** the page is the output, one CSS pixel per pixel (1920×1080 for 16:9, 1080×1920 for
   9:16). Size things from the short side so one page works in every format:
   `--u: calc(100vmin / 1080)` and `font-size: calc(120 * var(--u))`. Canvases: `cuttle.size`.

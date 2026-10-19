@@ -1,7 +1,8 @@
 // @cuttle/core: what the CLI and the app do to a project folder, in Node: read and write cuttle.json
-// as written (with backups), point the project at a take, suggest scenes, recover a take, grab a
-// frame, run ffmpeg, transcribe the mic (the speech models, whisper, live captions, the speech
-// edits), keep brand kits, and read a product's colours and the desktop's wallpaper for a background.
+// as written (with backups), point the project at a take, import a video as a take, suggest scenes,
+// recover a take, grab a frame, run ffmpeg, transcribe the mic (the speech models, whisper, live
+// captions, the speech edits), keep brand kits, and read a product's colours and the desktop's
+// wallpaper for a background.
 export { CoreError, type CoreErrorCode } from './errors';
 export { EDITOR_LOCK, editorLockOf, type EditorLock } from './editor-lock';
 export { ffmpegPath, runFfmpeg } from './ffmpeg';
@@ -9,6 +10,7 @@ export { BACKUPS, PROJECT_FILE, PROJECT_GITIGNORE, backupFile, newProjectFile, p
 export { samePath, useTake, type TakeFiles } from './use-take';
 export { suggestProject, type SuggestOptions, type SuggestResult } from './suggest';
 export { recoverTake, type RecoverResult } from './recover';
+export { IMPORT_RULES, importTake, type ImportOptions, type ImportResult } from './import';
 export { GRID_STEP, grabFrame, gridFilter, type FrameOptions, type FrameResult } from './frame';
 export { ANALYSIS_DIR, analyseScreen, cachedAnalysis, grabGray, parseAnalysis, probeScreen, streamSeconds, type Gray, type ScreenAnalysis } from './suggest/media';
 export { applyLengthFit, withLengthFit, withoutLengthFit, type LengthApplied, type LengthFitResult, type LengthInput } from './suggest/length';

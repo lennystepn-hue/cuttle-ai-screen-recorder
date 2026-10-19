@@ -1,4 +1,5 @@
-export { record, CLAUDE_BACKGROUND_SECONDS, CLAUDE_TAIL_SECONDS } from './record';
+export { record, allocateTake, CLAUDE_BACKGROUND_SECONDS, CLAUDE_TAIL_SECONDS } from './record';
+export { VIDEO_CHAIN } from './args';
 export { joinSegments } from './join';
 export { listDevices } from './devices';
 export { RecorderError, type RecorderErrorCode } from './errors';

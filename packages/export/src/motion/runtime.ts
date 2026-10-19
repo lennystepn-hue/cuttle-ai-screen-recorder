@@ -112,6 +112,19 @@ export interface CuttleTake extends Omit<TakeData, 'cursor'> {
   readonly view: MotionView;
 }
 
+/** A video of the project, read frame by frame (`cuttle.video`). */
+export interface CuttleVideo {
+  /** Its URL in the page. */
+  readonly src: string;
+  /**
+   * The frame the video shows at second `seconds` of the file (the last one starting by then: exact,
+   * whatever the page's frame rate), `width` px wide (the video's own size without). Await it in
+   * `onFrame` (the frame waits for an async draw); close a bitmap once it is drawn. Frames read
+   * forward fastest.
+   */
+  frame(seconds: number, options?: { width?: number }): Promise<ImageBitmap>;
+}
+
 /** A sound a page asks for (`cuttle.sound`): seconds into its showing (`at`) or an output second (`video`). */
 export interface PageSound {
   sound: string;
@@ -145,6 +158,11 @@ export interface CuttleApi {
   ready(promise: Promise<unknown>): void;
   /** The take (empty lists when the item has no take). */
   readonly take: CuttleTake;
+  /**
+   * A video of the project (an MP4, MOV or WebM: a path from the page, or from the project with a
+   * leading `/`) to draw frame by frame. Each video gets a reader of its own, as the take does.
+   */
+  video(src: string): CuttleVideo;
   /**
    * A transition page's outgoing and incoming frame for the frame being drawn (the output's size,
    * opaque; null in other pages and before the first frame), and how far it is from one to the other
@@ -261,39 +279,62 @@ export function motionRuntime(init: MotionInit): void {
     const sy = content[1] + ((y - zoom[1]) * content[3]) / zoom[3];
     return { x: sx, y: sy, inside: sx >= content[0] && sx <= content[0] + content[2] && sy >= content[1] && sy <= content[1] + content[3] };
   };
-  // the recording's frames: read in the kit's worker (off the page's clock), one request at a time
-  let reader: Worker | undefined;
-  let readerFailure: string | undefined;
-  let asked = 0;
-  const replies = new Map<number, { resolve: (bitmap: ImageBitmap) => void; reject: (error: Error) => void }>();
-  const failAll = (message: string) => {
-    readerFailure = message;
-    for (const reply of replies.values()) reply.reject(new Error(message));
-    replies.clear();
+  // A video's frames (the take's recording, or a video the page asks for): read in the kit's worker
+  // (off the page's clock), a worker per video, one request at a time. `what` names them in errors.
+  const frameReader = (open: { url: string; name: string; masks: TakeData['masks']; screen?: TakeData['screen'] }, what: string) => {
+    let reader: Worker | undefined;
+    let failure: string | undefined;
+    let asked = 0;
+    const replies = new Map<number, { resolve: (bitmap: ImageBitmap) => void; reject: (error: Error) => void }>();
+    const failAll = (message: string) => {
+      failure = message;
+      for (const reply of replies.values()) reply.reject(new Error(message));
+      replies.clear();
+    };
+    return (source: number, options: { width?: number } = {}): Promise<ImageBitmap> => {
+      if (!init.takeWorker) return Promise.reject(new Error(`${what} cannot be read here`));
+      if (failure) return Promise.reject(new Error(failure));
+      if (!reader) {
+        // a worker must come from the page's own origin: a module of the page's that imports the kit's
+        const boot = URL.createObjectURL(new Blob([`import ${JSON.stringify(init.takeWorker)};`], { type: 'text/javascript' }));
+        reader = new Worker(boot, { type: 'module' });
+        reader.onmessage = (event: MessageEvent<{ id: number; bitmap?: ImageBitmap; error?: string }>) => {
+          const { id, bitmap, error } = event.data;
+          const reply = replies.get(id);
+          replies.delete(id);
+          if (bitmap) reply?.resolve(bitmap);
+          else reply?.reject(new Error(error ?? 'no frame'));
+        };
+        reader.onerror = (event) => failAll(`${what} could not be read: ${event.message || 'the reader failed'}`);
+        reader.postMessage({ type: 'open', ...open });
+      }
+      const id = ++asked;
+      const width = options.width === undefined ? undefined : Math.max(1, Math.round(Number(options.width)));
+      return new Promise((resolve, reject) => {
+        replies.set(id, { resolve, reject });
+        reader!.postMessage({ type: 'frame', id, source: Number(source), width });
+      });
+    };
   };
-  const frameOf = (source: number, options: { width?: number } = {}): Promise<ImageBitmap> => {
-    if (!data.recording || !init.takeWorker) return Promise.reject(new Error('this item has no screen recording to take frames from'));
-    if (readerFailure) return Promise.reject(new Error(readerFailure));
-    if (!reader) {
-      // a worker must come from the page's own origin: a module of the page's that imports the kit's
-      const boot = URL.createObjectURL(new Blob([`import ${JSON.stringify(init.takeWorker)};`], { type: 'text/javascript' }));
-      reader = new Worker(boot, { type: 'module' });
-      reader.onmessage = (event: MessageEvent<{ id: number; bitmap?: ImageBitmap; error?: string }>) => {
-        const { id, bitmap, error } = event.data;
-        const reply = replies.get(id);
-        replies.delete(id);
-        if (bitmap) reply?.resolve(bitmap);
-        else reply?.reject(new Error(error ?? 'no frame'));
-      };
-      reader.onerror = (event) => failAll(`the take's frames could not be read: ${event.message || 'the reader failed'}`);
-      reader.postMessage({ type: 'open', url: data.recording, masks: data.masks, screen: data.screen });
+  const takeFrame = data.recording ? frameReader({ url: data.recording, name: 'the screen recording', masks: data.masks, screen: data.screen }, "the take's frames") : undefined;
+  const frameOf = (source: number, options?: { width?: number }): Promise<ImageBitmap> =>
+    takeFrame && init.takeWorker ? takeFrame(source, options) : Promise.reject(new Error('this item has no screen recording to take frames from'));
+  // the project's videos the page asks for (cuttle.video), by their URL in the page
+  const videos = new Map<string, CuttleVideo>();
+  const video = (src: string): CuttleVideo => {
+    let url = String(src);
+    try {
+      url = new URL(url, location.href).href;
+    } catch {
+      // a page without a base keeps the path as it is: its reader says what it could not open
     }
-    const id = ++asked;
-    const width = options.width === undefined ? undefined : Math.max(1, Math.round(Number(options.width)));
-    return new Promise((resolve, reject) => {
-      replies.set(id, { resolve, reject });
-      reader!.postMessage({ type: 'frame', id, source: Number(source), width });
-    });
+    let known = videos.get(url);
+    if (!known) {
+      const read = frameReader({ url, name: String(src), masks: [] }, `the frames of ${String(src)}`);
+      known = { src: url, frame: (seconds, options) => read(seconds, options) };
+      videos.set(url, known);
+    }
+    return known;
   };
 
   const { cursor: path, ...takeFields } = data;
@@ -369,6 +410,7 @@ export function motionRuntime(init: MotionInit): void {
     onFrame: (draw) => void drawers.push(draw),
     ready: (promise) => void holds.push(Promise.resolve(promise).catch(note)),
     take,
+    video,
     sound: (name, options = {}) => {
       if (typeof name !== 'string' || name === '') return void note(new Error('cuttle.sound needs the name of a sound'));
       const volume = Math.min(1, Math.max(0, Number(options.volume ?? 0.8)));

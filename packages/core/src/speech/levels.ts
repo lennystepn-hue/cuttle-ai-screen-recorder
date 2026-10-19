@@ -73,7 +73,8 @@ export const SPEECH_RULES = {
   minRange: 12,
 };
 
-function percentile(sorted: Float32Array, p: number): number {
+/** The value at share `p` of sorted levels. */
+export function percentile(sorted: Float32Array, p: number): number {
   return sorted[Math.min(sorted.length - 1, Math.max(0, Math.floor(p * sorted.length)))]!;
 }
 

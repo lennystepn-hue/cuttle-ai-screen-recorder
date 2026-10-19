@@ -184,11 +184,16 @@ Then refine `cuttle.json` ([project.md](project.md)) and preview again:
   - Find when it appears and when it goes: run `frame` at earlier and later source seconds
     (halving the step), then pad 0.5 s on each side for the mask's `from` and `to`. Text that
     scrolls moves: give each position its own mask, or cut the stretch out.
-  - Use `fill` for secrets. Check every mask with `preview --at` 0.1 s inside each end and in the
-    middle (output second = scene start + (source second − `from`) ÷ `speed`); each still's
-    `source` must lie inside the mask's `[from, to)`, since a still shows the whole frame its time
-    falls in.
+  - Use `fill` for secrets. Check every mask with
+    `cuttle -C "<project>" --json preview --masks`: stills 0.1 s before each mask starts, inside its
+    start and its end, and 0.1 s after it ends, a row of `preview/sheet.png` per mask (`masks` in
+    the JSON says which still shows which mask's edge). Inside, what it hides must be covered;
+    before and after, it must not show yet (or no more). Where it does, move the mask's `from` or
+    `to` out by 0.5 s and check again. For a mask's middle, use `preview --at` (output second =
+    scene start + (source second − `from`) ÷ `speed`).
   - Masks apply to clips only: look at a captured page yourself before you add it.
+  - Only rendered videos and stills are masked. The project folder keeps the take as recorded
+    (`takes/`, `.cuttle/`): never upload, attach or commit the folder, only the rendered video.
 - **Story.** Trim what does not help. Keep the prompt readable (1.5 s or more) and the answer on
   screen for 2–3 s. A speed-up shows a "12× speed" badge.
 - **Length.** For a length the user names (X: under 60 s), fit it last, after your zooms and

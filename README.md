@@ -165,7 +165,15 @@ needs `cuttle` on PATH (`pnpm cli:install`). Then ask Claude Code for a demo vid
 Cuttle works on your computer. Recording, cutting, the screen's text (Windows' own OCR or macOS's
 Vision), transcription (Whisper models, downloaded once) and the export all run locally; nothing is
 uploaded. Masks over private things are suggestions to check, not a guarantee: look at the stills
-before you share a video.
+before you share a video (`cuttle preview --masks` shows each mask's edges).
+
+The masks are drawn only into what Cuttle renders (the export, previews). The project folder keeps
+the take as it was recorded (`takes/`, with the text the screen showed) and the editor's copies of it
+(`.cuttle/`): share the exported video, never the folder. New projects get a `.gitignore` that
+keeps both out of git. The input log counts key presses; it never stores what was typed.
+
+Reading the screen's text needs Windows' OCR or macOS's Vision: on other systems (Linux) `suggest`
+masks no text.
 
 ## The desktop app
 

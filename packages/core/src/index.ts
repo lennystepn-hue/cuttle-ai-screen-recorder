@@ -33,7 +33,7 @@ export { DIALOG_RULES, dialogZooms, type DialogZoom } from './suggest/dialogs';
 export { MARK, RANDOM_RULES, SECRET_KINDS, SECRET_LABELS, SPECIFIC, findSecrets, isMark, lineSecrets, randomLooking, secretWords, type Secret, type SecretKind } from './privacy/patterns';
 export { redactFrames } from './privacy/redact';
 export { MASK_RULES, privacyMasks, type PrivacyMask } from './privacy/masks';
-export { ScreenReader } from './privacy/ocr';
+export { OCR_TIMEOUT, ScreenReader } from './privacy/ocr';
 export { READ_RULES, SCREEN_TEXT_FILE, framesToRead, readFrames, writeScreenText } from './privacy/read';
 export { applyPrivacy, readScreenTake, readScreenText, withPrivacyMasks, type PrivacyInput, type PrivacyMasksResult, type PrivacyResult, type RawMask } from './privacy/apply';
 export { NOTIFICATION_RULES, notificationMasks, type NotificationMask } from './privacy/notifications';

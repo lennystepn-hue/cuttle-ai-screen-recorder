@@ -4,6 +4,7 @@ import { rm } from 'node:fs/promises';
 import { hostname, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { OCR_TIMEOUT } from '@cuttle/core';
 import { VERSION, runCli } from '../src/main';
 
 const dirs: string[] = [];
@@ -912,7 +913,8 @@ describe.runIf(process.platform === 'win32' || process.platform === 'darwin')('c
     } finally {
       if (off !== undefined) process.env.CUTTLE_OCR = off;
     }
-  }, 120_000);
+    // and the time macOS may take to prepare Vision (on its first use a minute)
+  }, 120_000 + OCR_TIMEOUT.prepare * 1000);
 });
 
 describe('cuttle suggest --length', () => {

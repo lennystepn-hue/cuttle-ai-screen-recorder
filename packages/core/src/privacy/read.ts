@@ -100,6 +100,8 @@ export function helpersFor(count: number, processors = cpus().length, rules = OC
  * Reads the screen's text of `screen` at `times` (source seconds) with OCR helpers (`helpers`, else
  * `helpersFor`), the frames in order; `onProgress` gets the share done. `ocr-missing` where no
  * helper can run; a helper that cannot start besides one that can only leaves the others more to do.
+ * Where the helpers prepare the OCR (macOS), the first starts alone and the others once it is ready:
+ * then they find it prepared, and none of them waits for the others' preparing.
  */
 export async function readFrames(
   screen: string,
@@ -107,7 +109,11 @@ export async function readFrames(
   size: { width: number; height: number },
   options: { onProgress?: (fraction: number) => void; signal?: AbortSignal; helpers?: number } = {},
 ): Promise<{ frames: ScreenTextFrame[]; language: string }> {
-  const started = await Promise.allSettled(Array.from({ length: options.helpers ?? helpersFor(times.length) }, () => ScreenReader.start()));
+  const count = options.helpers ?? helpersFor(times.length);
+  const start = (helpers: number) => Promise.allSettled(Array.from({ length: helpers }, () => ScreenReader.start()));
+  const first = ScreenReader.prepares ? await start(1) : [];
+  // where the first could not start, the others would not either: they would only wait as long again
+  const started = first[0]?.status === 'rejected' ? first : [...first, ...(await start(count - first.length))];
   const readers = started.flatMap((result) => (result.status === 'fulfilled' ? [result.value] : []));
   if (readers.length === 0) throw (started[0] as PromiseRejectedResult).reason;
   const folder = mkdtempSync(join(tmpdir(), 'cuttle-screen-'));

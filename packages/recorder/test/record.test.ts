@@ -3,7 +3,7 @@ import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFi
 import { rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterAll, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
 import { parseEventsJsonl, parseMarkersJson, parseSegmentsJson, parseTakeJson, trackOffset } from '@cuttle/project';
 import { CLAUDE_TAIL_SECONDS, claudeTranscriptDir, record, type RecordOptions, type RecorderEvent } from '../src/index';
 import { inDeadZone } from '../src/record';
@@ -333,6 +333,15 @@ describe.concurrent('record (test backend)', () => {
     expect(Math.hypot(first.x + 100 - 640, first.y + 60 - 360)).toBeCloseTo(200, -1);
   }, SLOW);
 
+  it('records a window by itself, its frame changing only now and then, at 30 frames a second', async () => {
+    const projectDir = project();
+    const take = await record({ ...test, projectDir, source: { kind: 'window', title: 'Test Window' }, stop: { maxSeconds: 2 } }).done;
+    expect(take.warnings).toEqual([]);
+    // the test window's pattern changes 10 times a second; the take has a frame every 1/30 s
+    const { stdout } = spawnSync('ffprobe', ['-v', 'error', '-count_frames', '-show_entries', 'stream=nb_read_frames', '-of', 'csv=p=0', join(projectDir, take.screen)], { encoding: 'utf8' });
+    expect(Number(stdout) / take.seconds).toBeGreaterThan(26);
+  }, SLOW);
+
   it('refuses options it cannot record with, before creating a take folder', async () => {
     const projectDir = project();
     const flag = join(projectDir, 'exists.flag');
@@ -622,4 +631,19 @@ describe('inDeadZone', () => {
     expect(inDeadZone({ type: 'shape', time: 0, shape: 'text' }, zones)).toBe(false);
     expect(inDeadZone({ type: 'move', time: 0, x: 150, y: 120 }, [])).toBe(false);
   });
+});
+
+describe('record (test backend), a window that is closed', () => {
+  afterEach(() => vi.unstubAllEnvs());
+
+  it('ends the take when the window it records by itself is closed, and says so', async () => {
+    vi.stubEnv('CUTTLE_TEST_WINDOW_CLOSES', '1');
+    const projectDir = project();
+    const take = await record({ ...test, projectDir, source: { kind: 'window', id: 1001 }, stop: { maxSeconds: 10 } }).done;
+    expect(take.stopReason).toBe('window');
+    expect(take.warnings).toEqual(['the window was closed: the take ends there']);
+    expect(take.seconds).toBeGreaterThan(0.8);
+    expect(take.seconds).toBeLessThan(3);
+    expect(probe(join(projectDir, take.screen))).toMatchObject({ width: 640, height: 360 });
+  }, SLOW);
 });

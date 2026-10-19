@@ -35,10 +35,13 @@ export interface ScreenArea {
   crop?: Bounds;
   /**
    * The window a window take shows (`WindowInfo.id`). macOS's capture helper takes that window by
-   * itself, at the crop's size: what lies over it is not in the take. Elsewhere the crop is the screen
-   * where the window is.
+   * itself, at the crop's size, and so does Windows' gfxcapture (window-capture.ts), all of it
+   * (`wholeWindow`): what lies over it is not in the take. Otherwise the crop is the screen where the
+   * window is.
    */
   window?: number;
+  /** A window take: the window's frame on the desktop when the take starts. */
+  frame?: Bounds;
 }
 
 /** The area's size and its top-left corner on the desktop (where events.jsonl's origin lies). */
@@ -87,9 +90,20 @@ export function resolveArea(source: CaptureSource, devices: Devices): ScreenArea
       const bottom = Math.min(window.bounds.y + window.bounds.height, bounds.y + bounds.height) - bounds.y;
       const crop = { x: left, y: top, width: even(right - left), height: even(bottom - top) };
       if (crop.width < 2 || crop.height < 2) throw new RecorderError('invalid-options', `window "${window.title}" is not visible on a monitor`);
-      return { monitor, crop: fullOrCrop(monitor, crop), window: window.id };
+      return { monitor, crop: fullOrCrop(monitor, crop), window: window.id, frame: window.bounds };
     }
   }
+}
+
+/**
+ * A window take of the window by itself (Windows' gfxcapture): all of the window, also where it
+ * reaches past its monitor, in even sizes (the right and bottom are cut). Its origin is the window's
+ * corner, as the window gate's.
+ */
+export function wholeWindow(area: ScreenArea): ScreenArea {
+  const { frame, monitor } = area;
+  if (!frame) return area;
+  return { ...area, crop: { x: frame.x - monitor.bounds.x, y: frame.y - monitor.bounds.y, width: even(frame.width), height: even(frame.height) } };
 }
 
 function fullOrCrop(monitor: Monitor, crop: Bounds): Bounds | undefined {

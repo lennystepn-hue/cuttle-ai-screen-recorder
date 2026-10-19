@@ -21,11 +21,12 @@ export function samePath(a: string, b: string): boolean {
 
 /**
  * Points the project at a take: `sources` names its files. A project is one take: by default the
- * take becomes one clip scene, and the scenes, zooms, masks, texts, motion overlays and cuts of the previous take
- * (which refer to its source times) are dropped. With `keepEdit` (recovering the take the project already
- * uses) they stay, and a clip over the whole take is added only when there are no scenes. Returns
- * whether the project had scenes or overlays, so the caller keeps the previous cuttle.json as a
- * backup when it writes (`writeProjectFile`'s `backup`).
+ * take becomes one clip scene, and the scenes, zooms, masks, texts, motion overlays and cuts of the
+ * previous take (which refer to its source times) are dropped; a take with a camera switches the
+ * webcam bubble on. With `keepEdit` (recovering the take the project already uses) they stay, and a
+ * clip over the whole take is added only when there are no scenes. Returns whether the project had
+ * scenes or overlays, so the caller keeps the previous cuttle.json as a backup when it writes
+ * (`writeProjectFile`'s `backup`).
  */
 export function useTake(file: ProjectFile, take: TakeFiles, keepEdit = false): boolean {
   const { scenes, zooms, masks, texts, overlays, cuts } = file.project;
@@ -45,6 +46,11 @@ export function useTake(file: ProjectFile, take: TakeFiles, keepEdit = false): b
   }
   // Milliseconds rounded down: the clip must end inside the screen track.
   file.raw.scenes = [{ type: 'clip', from: 0, to: Math.floor(take.seconds * 1000) / 1000 }];
+  // A take with a camera shows it: the bubble comes on (it is off by default), drawn as it was set.
+  if (take.webcam) {
+    const look = (file.raw.look ?? {}) as Record<string, unknown>;
+    file.raw.look = { ...look, webcam: { ...((look.webcam as Record<string, unknown> | undefined) ?? {}), enabled: true } };
+  }
   delete file.raw.zooms;
   delete file.raw.masks;
   delete file.raw.texts;

@@ -33,6 +33,23 @@ describe('useTake', () => {
     expect((file.raw.sources as { transcript?: string }).transcript).toBe('takes/1/transcript.json');
   });
 
+  it('switches the webcam bubble on for a take with a camera, keeping where and how it is drawn', () => {
+    const file = fileWith({ ...first, look: { frame: { style: 'mac-light' }, webcam: { corner: 'top-right', size: 0.25 } } });
+    useTake(file, { screen: 'takes/2/screen.mp4', webcam: 'takes/2/webcam.mp4', seconds: 8 });
+    expect(file.raw.look).toEqual({ frame: { style: 'mac-light' }, webcam: { corner: 'top-right', size: 0.25, enabled: true } });
+    // switched off by the person and a new take with a camera: on again (the camera was chosen for it)
+    const off = fileWith({ ...first, look: { webcam: { enabled: false } } });
+    useTake(off, { screen: 'takes/2/screen.mp4', webcam: 'takes/2/webcam.mp4', seconds: 8 });
+    expect(off.raw.look).toEqual({ webcam: { enabled: true } });
+    // a take without a camera, and the same take recovered, leave the look as it is
+    const plain = fileWith(first);
+    useTake(plain, { screen: 'takes/2/screen.mp4', seconds: 8 });
+    expect(plain.raw.look).toBeUndefined();
+    const same = fileWith({ ...first, look: { webcam: { enabled: false } } });
+    useTake(same, { screen: 'takes/1/screen.mp4', webcam: 'takes/1/webcam.mp4', seconds: 10 }, true);
+    expect(same.raw.look).toEqual({ webcam: { enabled: false } });
+  });
+
   it('drops the motion overlays, which are timed on the previous take, and counts them as an edit', () => {
     const raw = { version: 1, sources: first.sources, overlays: [{ id: 'o1', src: 'motion/callouts/index.html', at: 2, duration: 3 }] };
     const file = fileWith(raw);

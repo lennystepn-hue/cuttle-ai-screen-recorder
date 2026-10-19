@@ -1,8 +1,8 @@
 # cuttle.json reference
 
-`cuttle.json` is the only file to edit. `cuttle record` and `cuttle suggest` write it, you refine
-it by hand, check it with `cuttle preview` and export it with `cuttle render`. Unknown fields are
-errors, and every command names the path of a problem, counting from 0
+`cuttle.json` is the only file to edit. `cuttle record` (or `cuttle import`) and `cuttle suggest`
+write it, you refine it by hand, check it with `cuttle preview` and export it with `cuttle render`.
+Unknown fields are errors, and every command names the path of a problem, counting from 0
 (`scenes[1].to: "to" must be greater than "from"`). A clip must end inside the take.
 
 ## Times and pixels

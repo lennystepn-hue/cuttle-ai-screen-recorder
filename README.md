@@ -269,6 +269,7 @@ recent projects (open, rename, show, remove).
 cuttle init demo && cd demo
 cuttle devices                       # monitors, windows, cameras, microphones
 cuttle record --mic --until-claude   # stops when Claude Code in this folder has answered, background work included (or Ctrl+C)
+cuttle import phone.mp4 --to 40      # or a video made elsewhere as the take (30 fps, BT.709), its sound as the mic
 cuttle suggest                       # scenes: quiet start and end trimmed, idle cut, waiting sped up, zooms on the answer and on clicks
 cuttle preview                       # 12 stills and a contact sheet in preview/
 cuttle frame 42.5 --grid             # a source frame with a numbered pixel grid, for masks and zooms
@@ -291,8 +292,8 @@ permission, 3 render, 130 cancelled with Ctrl+C.
 | `@cuttle/engine` | WebGL2 compositor: backgrounds, window frames, zoom, masks, cursors, webcam, texts, stills, cards, crossfades |
 | `@cuttle/export` | MP4 export in a hidden Electron window: decode, render, encode H.264, mux; mic cut to the scenes with ffmpeg (AAC) |
 | `@cuttle/recorder` | Records a take on Windows (ddagrab, a window by itself through gfxcapture, DirectShow, a global input hook) and macOS (avfoundation, an event tap): a monitor, region or window, webcam and mic, input events, markers; stops by hotkey, time, a file, an idle screen or the end of a Claude Code turn |
-| `@cuttle/core` | Project operations for the CLI and the app: `cuttle.json` as written (hash-checked writes, backups), takes, suggest, recover, frame, ffmpeg |
-| `apps/cli` | The `cuttle` command: init, devices, record, suggest, preview, frame, capture-page, render, recover; `--json` for Claude |
+| `@cuttle/core` | Project operations for the CLI and the app: `cuttle.json` as written (hash-checked writes, backups), takes, import, suggest, recover, frame, ffmpeg |
+| `apps/cli` | The `cuttle` command: init, devices, record, import, suggest, preview, frame, capture-page, render, recover; `--json` for Claude |
 | `apps/desktop` | The Cuttle app (Electron, React): the pill and tray, an editor per project (the export's engine in the output view, played with the mic as the clock; a timeline with thumbnails, waveform, markers and input activity; the export sheet) |
 | `skill/` | The Claude skill: `SKILL.md` (the workflow) and `project.md` (the `cuttle.json` reference), installed by `pnpm skill:install` |
 

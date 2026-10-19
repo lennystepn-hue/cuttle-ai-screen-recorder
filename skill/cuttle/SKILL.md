@@ -116,6 +116,17 @@ the task ended without that line (killed, crashed), run
 `cuttle -C "<project>" --json recover takes/<n>` before anything else. A new take replaces the
 previous take's scenes and overlays; older versions stay as `cuttle.json.bak`, `.bak.1` and so on.
 
+**A video made elsewhere** (a phone, OBS, a recording the user was sent) becomes the take with
+`import` instead of `record`; `--from` and `--to` (seconds of the file) take a stretch of it:
+
+```bash
+cuttle -C "<project>" --json import "<file>" --from 12 --to 40
+```
+
+The picture is converted as a recording is (30 fps, BT.709, at most 3840 px on its long side) and
+the sound becomes the mic. An imported take has no input events and no markers: `suggest` cuts it
+by its picture and sound alone, so add zooms by hand where something happens.
+
 ## 3. Edit
 
 ```bash

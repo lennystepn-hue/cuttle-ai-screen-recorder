@@ -36,7 +36,9 @@ export async function maskPrivacy(dir: string, asked = false): Promise<{ started
     return { problem };
   }
   void (async () => {
-    const status = (progress: number) => setEditorStatus(dir, { text: `Reading the screen… ${Math.round(progress * 100)} %`, state: 'working' });
+    // while macOS prepares its text recognition (a minute the first time), then the share read
+    const status = (progress: number, preparing = false) =>
+      setEditorStatus(dir, { text: preparing ? 'Reading the screen… preparing (the first time, about a minute)' : `Reading the screen… ${Math.round(progress * 100)} %`, state: 'working' });
     try {
       await speechDone(dir);
       const file = await readProjectFile(dir);
@@ -47,7 +49,7 @@ export async function maskPrivacy(dir: string, asked = false): Promise<{ started
       if (read) {
         try {
           await status(0);
-          await mediaWorker.run({ job: 'read-screen', input: dir, output: '' }, (progress) => void status(progress)).promise;
+          await mediaWorker.run({ job: 'read-screen', input: dir, output: '' }, (progress, preparing) => void status(progress, preparing)).promise;
           link = relative(file.dir, join(dirname(resolve(file.dir, file.project.sources.screen)), SCREEN_TEXT_FILE)).split(sep).join('/');
         } catch (error) {
           if ((error as { code?: string }).code !== 'ocr-missing') throw error;

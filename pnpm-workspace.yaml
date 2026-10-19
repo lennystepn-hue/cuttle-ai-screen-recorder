@@ -5,5 +5,7 @@ packages:
 allowBuilds:
   # its postinstall downloads the Electron binary (checked against its checksums)
   electron: true
+  # electron-builder's Squirrel installer, which Cuttle does not build (its installer is NSIS)
+  electron-winstaller: false
   koffi: false
   uiohook-napi: false

@@ -15,6 +15,7 @@ import { createRequire } from 'node:module';
 import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { packager } from '@electron/packager';
+import { APP_UPDATE_YML } from './releases.mjs';
 
 const desktop = fileURLToPath(new URL('..', import.meta.url));
 const build = join(desktop, 'build');
@@ -28,6 +29,9 @@ if (!existsSync(join(desktop, 'dist', 'main', 'index.mjs'))) throw new Error('ap
 if (!existsSync(join(cli, 'cuttle.mjs'))) throw new Error('apps/cli/dist is missing: run "pnpm cli:build" first');
 rmSync(build, { recursive: true, force: true });
 mkdirSync(stage, { recursive: true });
+// the update feed, beside the app's archive in its resources folder (electron-updater looks there)
+const updateFeed = join(build, 'app-update.yml');
+writeFileSync(updateFeed, APP_UPDATE_YML);
 
 /**
  * The real folder of package `name` as Node finds it from the folder `from` (node_modules there and
@@ -123,6 +127,7 @@ const [out] = await packager({
   platform: process.platform,
   arch: process.arch,
   icon: join(desktop, 'assets', process.platform === 'win32' ? 'icon.ico' : process.platform === 'darwin' ? 'icon.icns' : 'icon.png'),
+  extraResource: [updateFeed],
   // the CLI and the native modules whole (with their package.json files), so Node resolves them
   asar: { unpack: '**/{*.node,*.dll,cuttle-capture}', unpackDir: `{cli,${[...modules.keys()].map((name) => `node_modules/${name}`).join(',')}}` },
   prune: false,

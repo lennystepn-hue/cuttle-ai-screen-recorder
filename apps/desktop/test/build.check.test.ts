@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -50,6 +50,10 @@ describe.runIf(enabled)('the unpacked Cuttle app', () => {
 
   it('opens a project and draws its first frame', async () => {
     expect(await app.evaluate(({ app: electronApp }) => [electronApp.getName(), electronApp.isPackaged])).toEqual(['Cuttle', true]);
+    // its version, and its update feed beside the archive (electron-updater reads it there)
+    const { version } = JSON.parse(readFileSync(fileURLToPath(new URL('../package.json', import.meta.url)), 'utf8')) as { version: string };
+    expect(await app.evaluate(({ app: electronApp }) => electronApp.getVersion())).toBe(version);
+    expect(readFileSync(join(RESOURCES, 'app-update.yml'), 'utf8')).toContain('updaterCacheDirName: cuttle-updater');
     const pixels: string = await editor.evaluate(() => (window as unknown as { __cuttleCheck: { pixels(): string } }).__cuttleCheck.pixels());
     expect(pixels.length).toBeGreaterThan(10_000);
   });

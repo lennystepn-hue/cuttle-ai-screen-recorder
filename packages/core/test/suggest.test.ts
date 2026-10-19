@@ -32,6 +32,21 @@ describe('suggestClips', () => {
     expect(result.notes).toEqual(['trimmed the quiet start (0.0–3.2 s)', 'trimmed the quiet end (7.5–20.0 s)']);
   });
 
+  it('keeps a step reached after the last activity, with time for its title', () => {
+    // Typing from 1 to 2 s; the person moves on to step 2 at 6 s and stops at 12 s without doing more.
+    const markers: Marker[] = [
+      { t: 0, kind: 'step', label: 'step1' },
+      { t: 6, kind: 'step', label: 'step2' },
+    ];
+    const result = suggestClips({ duration: 12, events: keys(1, 2), markers, still: [{ from: 0, to: 0.8 }, { from: 2.5, to: 12 }] });
+    // Active 0.7–2.5 s and from just before the step to 2 s after it; the idle 2.5–5.7 s is cut to 3.0–5.2 s.
+    expect(result.clips).toEqual([
+      { from: 0.2, to: 3, speed: 1 },
+      { from: 5.2, to: 9, speed: 1 },
+    ]);
+    expect(result.notes).toContain('trimmed the quiet end (9.0–12.0 s)');
+  });
+
   it('cuts an idle stretch, keeping half a second on both sides', () => {
     const result = suggestClips({ duration: 14, events: keys(1, 2, 10, 11), markers: [], still: [{ from: 0, to: 14 }] });
     // Active 0.7–2.3 and 9.7–11.3; the idle 2.3–9.7 is cut to 2.8–9.2.

@@ -1,7 +1,7 @@
 // The settings window, and the first run in the same window (#welcome): ffmpeg, the cuttle command
 // and the Claude skill, then the pill. Every change is kept at once; there is no Save.
 import { useEffect, useLayoutEffect, useRef, useState, type ComponentType, type KeyboardEvent, type ReactNode } from 'react';
-import type { Motion, RequestArgument, SettingsPage, SettingsView, SpeechLanguage, SpeechModelName, SpeechStatus, ToolsStatus } from '../../shared/ipc';
+import type { Motion, RequestArgument, SettingsPage, SettingsView, SpeechLanguage, SpeechModelName, SpeechStatus, ToolsStatus, UpdateStatus } from '../../shared/ipc';
 import { bridge } from '../bridge';
 import { CheckIcon, CloseIcon, CopyIcon, FolderIcon, GearIcon, Mark, MaskIcon, MicIcon, RecordIcon, TerminalIcon, WarningIcon } from '../icons';
 import { hotkeyKeys } from '../keys';
@@ -205,6 +205,9 @@ export function Settings() {
                         testid="motion"
                       />
                     </Row>
+                  </Section>
+                  <Section title="Updates">
+                    <Updates view={view} change={change} />
                   </Section>
                 </>
               )}
@@ -523,6 +526,106 @@ function ToolLine({ state, name, detail, title, testid, busy, plain, children }:
         {children && <div className="tool-extra">{children}</div>}
       </div>
     </div>
+  );
+}
+
+/** "today at 14:05", or the date. */
+function when(ms: number): string {
+  const at = new Date(ms);
+  const time = at.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  return at.toDateString() === new Date().toDateString() ? `today at ${time}` : `${at.toLocaleDateString()} at ${time}`;
+}
+
+/**
+ * Updates from GitHub's releases: this version, what the last check found, the download, Restart
+ * and update; and whether Cuttle looks by itself once a day.
+ */
+function Updates({ view, change }: { view: SettingsView | undefined; change: (next: RequestArgument<'settings:set'>) => void }) {
+  const [status, setStatus] = useState<UpdateStatus>();
+  const [problem, setProblem] = useState<string>();
+  useEffect(() => {
+    void bridge.invoke('updates:status').then(setStatus);
+    return bridge.on('updates:status', setStatus);
+  }, []);
+  const version = status?.version ?? view?.version ?? '';
+  const download = status?.download;
+  const percent = download && download.total > 0 ? Math.floor((download.received / download.total) * 100) : 0;
+  const checked = status?.checked !== undefined ? ` Looked ${when(status.checked)}.` : '';
+  const detail = !status
+    ? 'Looking…'
+    : !status.supported
+      ? 'Run from the repository: update it with git pull.'
+      : status.state === 'checking'
+        ? 'Looking for a new version…'
+        : status.state === 'current'
+          ? `This is the newest version.${checked}`
+          : status.state === 'available'
+            ? `Version ${status.next} is out.`
+            : status.state === 'downloading'
+              ? `Downloading version ${status.next}…${download ? ` ${percent} %` : ''}`
+              : status.state === 'ready'
+                ? `Version ${status.next} is downloaded. It is installed when Cuttle quits, or now.`
+                : status.state === 'failed'
+                  ? status.next !== undefined
+                    ? `Downloading version ${status.next} failed: ${status.failure}`
+                    : `Cuttle could not look for a new version: ${status.failure}`
+                  : 'Not looked for a new version yet.';
+  const look = () => {
+    setProblem(undefined);
+    void bridge.invoke('updates:check').then(setStatus);
+  };
+  return (
+    <>
+      <ToolLine
+        state={!status ? 'unknown' : status.state === 'failed' ? 'failed' : status.state === 'current' || status.state === 'ready' ? 'ok' : 'off'}
+        name={`Cuttle ${version}`}
+        detail={problem ?? detail}
+        testid="updates-line"
+        busy={status?.state === 'checking' || status?.state === 'downloading'}
+        plain
+      >
+        {status?.supported &&
+          (status.state === 'downloading' ? (
+            download && <progress className="download" max={download.total} value={download.received} aria-label={`Downloading version ${status.next}`} />
+          ) : status.state === 'ready' ? (
+            <button
+              className="primary"
+              onClick={() => void bridge.invoke('updates:install').then((answer) => setProblem(answer.problem))}
+              data-testid="updates-install"
+            >
+              Restart and update
+            </button>
+          ) : status.state === 'available' ? (
+            <button className="primary" onClick={() => void bridge.invoke('updates:download').then(setStatus)} data-testid="updates-download">
+              Download version {status.next}
+            </button>
+          ) : (
+            <>
+              <button className="ghost" onClick={look} disabled={status.state === 'checking'} data-testid="updates-check">
+                {status.state === 'failed' ? 'Try again' : 'Check now'}
+              </button>
+              {status.state === 'failed' && (
+                <button className="ghost" onClick={() => void bridge.invoke('updates:releases')} data-testid="updates-releases">
+                  Download page
+                </button>
+              )}
+            </>
+          ))}
+      </ToolLine>
+      <Row label="Check for updates" hint="Once a day Cuttle asks GitHub for a new version and downloads it; it is installed when Cuttle quits. Nothing about you or your recordings is sent.">
+        <button
+          className="toggle"
+          role="switch"
+          aria-checked={view?.updates ?? true}
+          aria-label="Check for updates"
+          disabled={!view || status?.supported === false}
+          onClick={() => view && change({ updates: !view.updates })}
+          data-testid="updates-auto"
+        >
+          <i />
+        </button>
+      </Row>
+    </>
   );
 }
 

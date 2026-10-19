@@ -10,6 +10,8 @@ export const RULES = {
   tail: 1,
   /** Kept after Claude's final answer, so it can be read. */
   answerTail: 2.5,
+  /** A step of the script reached after the last activity counts as active this long after it (then `tail`): its title shows. */
+  stepTail: 2,
   /** Before a prompt marker: the prompt being sent is on screen. */
   promptLead: 2,
   /** An input event counts as activity this long before and after it. */
@@ -80,7 +82,12 @@ export function suggestClips(input: SuggestInput): Suggestion {
   const speechSpans = union(
     (input.speech ?? []).map((span) => ({ from: Math.max(0, span.from - RULES.inputPad), to: Math.min(duration, span.to + RULES.inputPad) })),
   );
-  const active = union([...inputSpans, ...speechSpans, ...gaps(input.still, 0, duration), ...turn]);
+  const happened = union([...inputSpans, ...speechSpans, ...gaps(input.still, 0, duration), ...turn]);
+  // A step the person moved on to after everything else (Next, then the stop) stays in the video, long
+  // enough for its title; a step before more activity is shown where the video goes on.
+  const lastStep = input.markers.filter((marker) => marker.kind === 'step').at(-1)?.t;
+  const stepEnd = lastStep !== undefined && lastStep > (happened.at(-1)?.to ?? 0) ? [{ from: Math.max(0, lastStep - RULES.inputPad), to: Math.min(duration, lastStep + RULES.stepTail) }] : [];
+  const active = union([...happened, ...stepEnd]);
   if (active.length === 0 || duration <= 0) {
     return { clips: duration > 0 ? [{ from: 0, to: ms(duration), speed: 1 }] : [], notes: ['nothing happened on screen or at the keyboard: the whole take, unchanged'] };
   }

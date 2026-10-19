@@ -36,9 +36,20 @@ jobs:
           node-version: 24
           cache: pnpm
 
+      # Gyan's full build (what winget installs), checked against its digest; Chocolatey's feed
+      # failed on GitHub's runners
       - name: ffmpeg (Windows)
         if: runner.os == 'Windows'
-        run: choco install ffmpeg -y --no-progress
+        shell: pwsh
+        run: |
+          $archive = Join-Path $env:RUNNER_TEMP 'ffmpeg.7z'
+          Invoke-WebRequest -Uri 'https://github.com/GyanD/codexffmpeg/releases/download/9.0.2/ffmpeg-9.0.2-full_build.7z' -OutFile $archive
+          $digest = (Get-FileHash $archive -Algorithm SHA256).Hash.ToLower()
+          if ($digest -ne 'f0e46253c70dfe902bac915dfb4224f0cf1b7c6eeab9da2ccc9a5581f9a71b13') { throw "ffmpeg's archive has another digest: $digest" }
+          7z x $archive "-o$env:RUNNER_TEMP" -y | Out-Null
+          $bin = Join-Path $env:RUNNER_TEMP 'ffmpeg-9.0.2-full_build\bin'
+          & (Join-Path $bin 'ffmpeg.exe') -hide_banner -version | Select-Object -First 1
+          $bin | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
 
       # ffmpeg-full: Homebrew's ffmpeg has no drawtext, which the OCR checks draw their screens' text with
       - name: ffmpeg (macOS)
@@ -76,9 +87,20 @@ jobs:
           node-version: 24
           cache: pnpm
 
+      # Gyan's full build (what winget installs), checked against its digest; Chocolatey's feed
+      # failed on GitHub's runners
       - name: ffmpeg (Windows)
         if: runner.os == 'Windows'
-        run: choco install ffmpeg -y --no-progress
+        shell: pwsh
+        run: |
+          $archive = Join-Path $env:RUNNER_TEMP 'ffmpeg.7z'
+          Invoke-WebRequest -Uri 'https://github.com/GyanD/codexffmpeg/releases/download/9.0.2/ffmpeg-9.0.2-full_build.7z' -OutFile $archive
+          $digest = (Get-FileHash $archive -Algorithm SHA256).Hash.ToLower()
+          if ($digest -ne 'f0e46253c70dfe902bac915dfb4224f0cf1b7c6eeab9da2ccc9a5581f9a71b13') { throw "ffmpeg's archive has another digest: $digest" }
+          7z x $archive "-o$env:RUNNER_TEMP" -y | Out-Null
+          $bin = Join-Path $env:RUNNER_TEMP 'ffmpeg-9.0.2-full_build\bin'
+          & (Join-Path $bin 'ffmpeg.exe') -hide_banner -version | Select-Object -First 1
+          $bin | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
 
       # ffmpeg-full: Homebrew's ffmpeg has no drawtext, which the OCR checks draw their screens' text with
       - name: ffmpeg (macOS)

@@ -100,8 +100,13 @@ export const WINDOW_CHANNELS = {
       'speech:download',
       'speech:cancel',
       'speech:remove',
+      'updates:status',
+      'updates:check',
+      'updates:download',
+      'updates:install',
+      'updates:releases',
     ],
-    events: ['settings:changed', 'settings:page', 'speech:status', 'app:motion'],
+    events: ['settings:changed', 'settings:page', 'speech:status', 'updates:status', 'app:motion'],
   },
 } as const satisfies Record<string, { requests: readonly Request[]; events: readonly Event[] }>;
 

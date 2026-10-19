@@ -201,6 +201,22 @@ async function exported(page: Page): Promise<void> {
   });
 }
 
+/** The check's update feed (electron-updater's latest.yml, latest-mac.yml): a version far ahead of any. */
+const UPDATE_FEED = [
+  'version: 99.0.0',
+  'files:',
+  '  - url: Cuttle-99.0.0-win-x64.exe',
+  '    sha512: AAAA',
+  '    size: 1',
+  '  - url: Cuttle-99.0.0-mac-arm64.zip',
+  '    sha512: AAAA',
+  '    size: 1',
+  'path: Cuttle-99.0.0-win-x64.exe',
+  'sha512: AAAA',
+  "releaseDate: '2026-10-19T00:00:00.000Z'",
+  '',
+].join('\n');
+
 describe.runIf(enabled)('the Cuttle app', () => {
   let root: string;
   let project: string;
@@ -332,8 +348,9 @@ describe.runIf(enabled)('the Cuttle app', () => {
     if (SHOTS) mkdirSync(SHOTS, { recursive: true });
     // New recordings go into a folder of the check's own.
     mkdirSync(join(root, 'user-data'));
-    // The screen is read after a take's cut only where the check asks for it (it says so in the settings).
-    writeFileSync(join(root, 'user-data', 'settings.json'), JSON.stringify({ projectsFolder: join(root, 'projects'), privacy: { read: false } }));
+    // The screen is read after a take's cut only where the check asks for it (it says so in the settings),
+    // and updates are looked for only when the check asks.
+    writeFileSync(join(root, 'user-data', 'settings.json'), JSON.stringify({ projectsFolder: join(root, 'projects'), privacy: { read: false }, updates: false }));
     // the desktop's wallpaper the check gives the app
     spawnSync('ffmpeg', ['-v', 'error', '-y', '-f', 'lavfi', '-i', 'testsrc2=s=1280x720', '-frames:v', '1', join(root, 'wallpaper.png')], { windowsHide: true });
     // the logo the brand's file dialog picks
@@ -341,6 +358,9 @@ describe.runIf(enabled)('the Cuttle app', () => {
     models = createServer((request, response) => {
       if (request.url === '/ggml-base.bin' && BASE_MODEL) return void response.end(readFileSync(BASE_MODEL));
       if (request.url === '/ggml-small.bin') return void response.end('not a model');
+      // the update feed (asked with ?noCache=…): a version far ahead of this app's (run from the repository it reports Electron's)
+      const path = request.url?.split('?')[0];
+      if (path === '/updates/latest.yml' || path === '/updates/latest-mac.yml') return void response.end(UPDATE_FEED);
       if (request.url === '/ggml-large-v3-turbo-q5_0.bin') {
         response.write(Buffer.alloc(1_000_000));
         return void hanging.push(response);
@@ -372,6 +392,8 @@ describe.runIf(enabled)('the Cuttle app', () => {
         CUTTLE_WALLPAPER: join(root, 'wallpaper.png'),
         // what the spoken test mic says
         CUTTLE_TEST_SPEECH: SPOKEN,
+        // the updates' feed, the check's own server (never GitHub)
+        CUTTLE_UPDATE_FEED: `http://127.0.0.1:${(models.address() as { port: number }).port}/updates/`,
       },
     });
     // Unhandled rejections in the main process are bugs: collect them for the last test.
@@ -1547,6 +1569,15 @@ describe.runIf(enabled)('the Cuttle app', () => {
     await settings.waitForSelector('[data-testid=launch-at-login][aria-checked=true]');
     await click(settings, '[data-testid=launch-at-login]');
     await expect.poll(() => saved().launchAtLogin).toBe(false);
+    // updates, from the check's feed: not looked for by itself (the settings say so), found when asked
+    const updateLine = () => settings.locator('[data-testid=updates-line] .row-hint').textContent();
+    expect(await updateLine()).toBe('Not looked for a new version yet.');
+    expect(await settings.locator('[data-testid=updates-auto]').getAttribute('aria-checked')).toBe('false');
+    await click(settings, '[data-testid=updates-check]');
+    await expect.poll(updateLine, { timeout: 10_000 }).toBe('Version 99.0.0 is out.');
+    expect(await settings.locator('[data-testid=updates-download]').textContent()).toBe('Download version 99.0.0');
+    await settings.locator('[data-testid=updates-line]').evaluate((element) => element.scrollIntoView({ block: 'center' }));
+    await shotOf('49-updates', '/settings.html');
     // demo is open in its editor: Rename is off there, and the main process refuses it too
     await click(settings, '[data-testid=settings-page-projects]');
     await settings.waitForSelector('.recent li');
@@ -1610,6 +1641,8 @@ describe.runIf(enabled)('the Cuttle app', () => {
     expect(await settings.locator('.row:has([data-testid=speech-live]) .row-hint').textContent()).toBe('The HUD shows what the mic hears as you speak. It needs a speech model: download one above.');
     await click(settings, '[data-testid=speech-live]');
     await expect.poll(() => saved().speech?.live).toBe(false);
+    // the switch shows it before it is pressed again (a press reads the state it shows)
+    await settings.waitForSelector('[data-testid=speech-live][aria-checked=false]');
     await click(settings, '[data-testid=speech-live]');
     await expect.poll(() => saved().speech?.live).toBe(true);
     if (!BASE_MODEL || !hasWhisper) {

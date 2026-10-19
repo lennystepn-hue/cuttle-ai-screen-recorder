@@ -22,13 +22,18 @@ export const SECRET_LABELS: Record<SecretKind, string> = {
   random: 'Random-looking string',
 };
 
+/** A part of a mark: the kind of a private thing and its id. */
+const MARK_PART = `(?:${SECRET_KINDS.join('|')})-[a-z]{8}`;
 /**
- * A private thing in the screen's text as it is kept (redact.ts): a mark of its kind and an id,
- * word for word, `⟦key-qwhzbtrk⟧`.
+ * A private thing in the screen's text as it is kept (redact.ts): each word of it replaced by a mark
+ * of its kind and id, `⟦key-qwhzbtrk⟧`, or of each, where two rules found it (`⟦key-qwhzbtrk+value-mdkeuxpa⟧`).
+ * The id is the private thing's as the masks follow it from frame to frame (`trackSecrets`).
  */
-export const MARK = new RegExp(`⟦(${SECRET_KINDS.join('|')})-([a-z]{8})⟧`);
+export const MARK = new RegExp(`⟦(${MARK_PART}(?:\\+${MARK_PART})*)⟧`);
 /** A word that is a mark. */
 export const isMark = (text: string) => new RegExp(`^${MARK.source}$`).test(text);
+/** Whether a secret's key is a mark's part (`key-qwhzbtrk`), not a text read (`key:sk-ant-…`). */
+export const isMarkKey = (key: string) => new RegExp(`^${MARK_PART}$`).test(key);
 
 /**
  * A random-looking string, a key without a known prefix or a name beside it (an AWS secret in a
@@ -186,15 +191,27 @@ interface Match {
   from: number;
   to: number;
   text: string;
+  /** A mark's part: the key that tells it in other frames (else its text does). */
+  key?: string;
 }
 
 /** The private things of a line of text: character ranges of `text`. */
 export function findSecrets(text: string, words: readonly string[] = []): Match[] {
-  const found: Match[] = [];
-  const add = (kind: SecretKind, from: number, to: number) => found.push({ kind, from, to, text: text.slice(from, to) });
+  let found: Match[] = [];
+  const add = (kind: SecretKind, from: number, to: number, key?: string) => found.push({ kind, from, to, text: text.slice(from, to), ...(key !== undefined && { key }) });
 
-  // what the kept text already marks (redact.ts): the mark, repeated word for word
-  for (const match of text.matchAll(new RegExp(`${MARK.source}(?: ⟦\\1-\\2⟧)*`, 'g'))) add(match[1] as SecretKind, match.index, match.index + match[0].length);
+  // what the kept text already marks (redact.ts): each part of a mark, over the marks in a row that have it
+  const marks = [...text.matchAll(new RegExp(MARK.source, 'g'))].map((match) => ({ from: match.index, to: match.index + match[0].length, parts: match[1]!.split('+') }));
+  marks.forEach((mark, k) => {
+    for (const part of mark.parts) {
+      // a part the mark before has too is counted from there
+      const before = marks[k - 1];
+      if (before && before.to + 1 === mark.from && before.parts.includes(part)) continue;
+      let last = k;
+      while (marks[last + 1] && marks[last]!.to + 1 === marks[last + 1]!.from && marks[last + 1]!.parts.includes(part)) last++;
+      add(part.slice(0, part.indexOf('-')) as SecretKind, mark.from, marks[last]!.to, part);
+    }
+  });
   // email addresses
   for (const match of text.matchAll(/[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}/g)) add('email', match.index, match.index + match[0].length);
   // a token in a link, and a password in one (https://user:password@host)
@@ -257,6 +274,9 @@ export function findSecrets(text: string, words: readonly string[] = []): Match[
     if (found.some((other) => other.from < to && from < other.to)) continue;
     if (randomLooking(match[0], text)) add('random', from, to);
   }
+  // a rule finds nothing in marks alone (a `password:` before a value marked): the marks say what they are
+  const outside = (match: Match) => text.slice(match.from, match.to).replace(new RegExp(MARK.source, 'g'), '').trim() !== '';
+  found = found.filter((match) => match.key !== undefined || outside(match));
   return found;
 }
 
@@ -285,6 +305,6 @@ export function secretWords(line: ScreenTextLine, words: readonly string[] = [])
     const top = Math.min(...rects.map((rect) => rect[1]));
     const right = Math.max(...rects.map((rect) => rect[0] + rect[2]));
     const bottom = Math.max(...rects.map((rect) => rect[1] + rect[3]));
-    return [{ kind: match.kind, rect: [left, top, right - left, bottom - top] as Rect, key: `${match.kind}:${keyOf(match.text)}`, words: covered }];
+    return [{ kind: match.kind, rect: [left, top, right - left, bottom - top] as Rect, key: match.key ?? `${match.kind}:${keyOf(match.text)}`, words: covered }];
   });
 }

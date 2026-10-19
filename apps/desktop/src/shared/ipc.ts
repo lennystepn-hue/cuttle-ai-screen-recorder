@@ -147,6 +147,24 @@ export interface SpeechStatus {
   failure?: { name: SpeechModelName; message: string };
 }
 
+/** The app's updates (GitHub releases): what the last check found, a download, a version ready to install. */
+export interface UpdateStatus {
+  /** This app's version. */
+  version: string;
+  /** Whether it updates at all: the packaged app does (run from the repository it is updated with git). */
+  supported: boolean;
+  /**
+   * `current`: nothing newer; `available`: `next` can be downloaded; `downloading`, then `ready`:
+   * installed when Cuttle quits; `failed`: `failure` says why.
+   */
+  state: 'idle' | 'checking' | 'current' | 'available' | 'downloading' | 'ready' | 'failed';
+  next?: string;
+  download?: { received: number; total: number };
+  failure?: string;
+  /** When the last check ended (ms since 1970). */
+  checked?: number;
+}
+
 /** The tools around the app: ffmpeg, and for Claude Code the cuttle command and the skill. */
 export interface ToolsStatus {
   /** ffmpeg where the OS's PATH has it now (or WinGet's links folder), with its version. */
@@ -193,6 +211,8 @@ export interface SettingsView {
   /** `open`: the project is open in Cuttle, here (`here`) or on the computer named. */
   recent: { dir: string; name: string; opened: number; open?: string }[];
   version: string;
+  /** Check for a new version once a day and download it. */
+  updates: boolean;
 }
 
 /** The params a motion page declares (its `cuttle-params`), and what is wrong with the declaration. */
@@ -430,6 +450,7 @@ export const REQUESTS = {
     speechLive: z.boolean().optional(),
     privacyRead: z.boolean().optional(),
     privacyWords: z.array(z.string().trim().min(1).max(PRIVACY_WORD_MAX)).max(PRIVACY_WORDS_MAX).optional(),
+    updates: z.boolean().optional(),
   }),
   /** Asks for the projects folder (a folder dialog) and keeps it. */
   'settings:choose-folder': z.undefined(),
@@ -455,6 +476,15 @@ export const REQUESTS = {
   'speech:download': z.enum(SPEECH_MODEL_NAMES),
   'speech:cancel': z.undefined(),
   'speech:remove': z.enum(SPEECH_MODEL_NAMES),
+  'updates:status': z.undefined(),
+  /** Asks GitHub for a newer version now. */
+  'updates:check': z.undefined(),
+  /** Downloads the version found (the check downloads only when asked). */
+  'updates:download': z.undefined(),
+  /** Quits and installs the version downloaded (not while a take records). */
+  'updates:install': z.undefined(),
+  /** Opens the releases page in the browser. */
+  'updates:releases': z.undefined(),
   /** Reads the screen's text of the project's take again and masks what it showed (the Auto tab, Try again). */
   'project:read-screen': z.undefined(),
   /** Fits the video to this many seconds where it rests, or takes the fit out (null). */
@@ -588,6 +618,12 @@ export interface Responses {
   'speech:download': SpeechStatus;
   'speech:cancel': void;
   'speech:remove': SpeechStatus;
+  'updates:status': UpdateStatus;
+  'updates:check': UpdateStatus;
+  'updates:download': UpdateStatus;
+  /** Quitting to install, or why not. */
+  'updates:install': { problem?: string };
+  'updates:releases': void;
   /** Started (the title bar shows it), or why not. */
   'project:read-screen': { started: true } | { problem: string };
   /** What the fit did, once it is done, or why it could not. */
@@ -661,6 +697,8 @@ export interface Events {
   'settings:page': SettingsPage;
   /** The speech models changed, or a download moved on. */
   'speech:status': SpeechStatus;
+  /** An update was looked for, found, downloaded, or failed. */
+  'updates:status': UpdateStatus;
   /** Every window: how motion is set now (`data-motion` on the page's root). */
   'app:motion': Motion;
   /** The motion items' pages in the editor's preview: loading, ready or failed, and what they said. */

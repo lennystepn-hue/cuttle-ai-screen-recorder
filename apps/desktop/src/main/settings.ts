@@ -48,6 +48,8 @@ const SettingsSchema = z.object({
     })
     .catch({ read: true, words: [] })
     .default({ read: true, words: [] }),
+  /** Check for a new version once a day and download it (updates.ts). */
+  updates: z.boolean().catch(true).default(true),
   /** The picker bar's choices, kept between recordings (the camera and mic are the defaults in the settings). */
   record: z
     .object({ camera: z.string().optional(), mic: z.string().optional(), stop: z.enum(['none', 'claude', 'idle']).default('none'), claudeFolder: z.string().optional() })
@@ -144,6 +146,7 @@ export async function settingsView(): Promise<SettingsView> {
     privacy: { read: settings.privacy.read, words: [...settings.privacy.words] },
     recent: settings.recent,
     version: appVersion(),
+    updates: settings.updates,
   };
 }
 

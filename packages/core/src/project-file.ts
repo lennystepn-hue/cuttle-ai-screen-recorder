@@ -53,6 +53,18 @@ export function newProjectFile(projectDir: string): ProjectFile {
   return { dir, path: join(dir, PROJECT_FILE), raw, project: parse(raw) };
 }
 
+/**
+ * What a new project's folder keeps out of git: the takes and the editor's copies of them show the
+ * screen as it was recorded. The masks are drawn only into what is rendered (the export, previews).
+ */
+export const PROJECT_GITIGNORE = [
+  '# Cuttle: the takes and the editor\'s copies of them show the screen as it was recorded, unmasked',
+  '# (keys, email addresses, notifications). Share the exported video, not these folders.',
+  'takes/',
+  '.cuttle/',
+  '',
+].join('\n');
+
 export function projectExists(projectDir: string): boolean {
   return existsSync(join(resolve(projectDir), PROJECT_FILE));
 }
@@ -102,6 +114,8 @@ export async function writeProjectFile(file: ProjectFile, operation: string, opt
       }
     };
     await unchanged();
+    // a new project: its folder keeps the raw takes out of git (a .gitignore already there stays)
+    if (file.hash === undefined) await writeFile(join(file.dir, '.gitignore'), PROJECT_GITIGNORE, { flag: 'wx' }).catch(() => {});
     const backup = options.backup && existsSync(file.path) ? await backupFile(file.path) : undefined;
     const temp = `${file.path}.${process.pid}-${++temps}.tmp`;
     await writeFile(temp, text);

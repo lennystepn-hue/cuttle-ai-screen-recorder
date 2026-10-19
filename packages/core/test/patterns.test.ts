@@ -55,6 +55,41 @@ describe('findSecrets, on lines as Windows OCR read the fixture page (its slips 
     for (const clean of ['npm_config_cache C:\\npm-cache', 'TZ Asia/Tokyo', 'vite sg.config.ts', 'hf_hub_download(repo_id)', 'r8_model ready', 'see ya29.example']) expect(found(clean), clean).toEqual([]);
   });
 
+  it('finds a random-looking string without a prefix or a name beside it', () => {
+    // random keys, made here from a fixed seed (no key-like text stands in the source)
+    let seed = 7;
+    const pick = (alphabet: string, length: number) =>
+      Array.from({ length }, () => alphabet[Math.floor(((seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x80000000) * alphabet.length)]).join('');
+    const base64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+    for (let i = 0; i < 3; i++) {
+      const secret = pick(base64, 40);
+      expect(found(`| prod | ${secret} |`), secret).toEqual([['random', secret]]);
+      const hex = pick('0123456789abcdef', 40);
+      expect(found(`token ${hex}`), hex).toEqual([['random', hex]]);
+    }
+  });
+
+  it("leaves hashes, ids, paths, identifiers and versions alone, and finds the kept text's marks", () => {
+    for (const clean of [
+      'commit 3f786850e387550fdab836ed7e6dc881de23001b',
+      'docker pull node@sha256:9d4aeb2f8e0b6a3c71b2c5e4d3f2a1b0c9d8e7f6a5b4c3d2e1f0a9b8c7d6e5f4',
+      '"integrity": "sha512-AbCdEfGhIjKlMnOpQrStUvWxYz0123456789AbCdEfGhIjKlMnOpQrStUvWxYz0123456789=="',
+      'id 550e8400-e29b-41d4-a716-446655440000',
+      'createUser2024Session1234Handler',
+      'my-component-v2-final-2024-release-candidate',
+      '/home/user/projects/app-2024/src/components/Button123.tsx',
+      'node_modules/.pnpm/@vitest+browser-playwright@5.0.5_playwright@1.55.0',
+      'ThisIsAVeryLongCamelCaseIdentifier42ForTesting',
+      'TEST_DATABASE_CONNECTION_POOL_SIZE_2024_V2',
+      'abcdefghijklmnopqrstuvwxyz0123456789',
+    ]) expect(found(clean), clean).toEqual([]);
+    expect(found('API_KEY=⟦key-abcdefgh⟧ sent to ⟦email-qwertyui⟧ ⟦email-qwertyui⟧')).toEqual([
+      ['key', '⟦key-abcdefgh⟧'],
+      ['email', '⟦email-qwertyui⟧ ⟦email-qwertyui⟧'],
+      ['value', '⟦key-abcdefgh⟧ sent to ⟦email-qwertyui⟧ ⟦email-qwertyui⟧'],
+    ]);
+  });
+
   it('finds tokens in links, and the value of a private name', () => {
     expect(found('$ curl "https://api.examp1e.com/v1/items?access_token=abc123def456ghi789"')).toContainEqual(['token', 'abc123def456ghi789']);
     expect(found('Password: hunter2 (do not share)')).toEqual([['value', 'hunter2 (do not share)']]);

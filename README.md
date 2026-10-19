@@ -169,9 +169,14 @@ a second at most while it keeps changing), also where something showed only a mo
 private things are suggestions to check, not a guarantee: look at the stills before you share a
 video (`cuttle preview --masks` shows each mask's edges).
 
+The text it reads is checked for email addresses, keys and tokens (by their prefixes, by a name
+such as `API_KEY=` beside them, or because they look random), IBANs, card and phone numbers and the
+words you name. What it finds is kept in the project only as a mark (`⟦key-qwhzbtrk⟧`, the same
+mark for the same text), never as it was.
+
 The masks are drawn only into what Cuttle renders (the export, previews). The project folder keeps
-the take as it was recorded (`takes/`, with the text the screen showed) and the editor's copies of it
-(`.cuttle/`): share the exported video, never the folder. New projects get a `.gitignore` that
+the take as it was recorded (`takes/`, the video still shows what the screen showed) and the
+editor's copies of it (`.cuttle/`): share the exported video, never the folder. New projects get a `.gitignore` that
 keeps both out of git. The input log counts key presses; it never stores what was typed.
 
 Reading the screen's text needs Windows' OCR or macOS's Vision: on other systems (Linux) `suggest`

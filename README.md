@@ -39,7 +39,7 @@ LinkedIn or Reels. You can change every edit afterwards, in the app or in one pl
     <td width="50%"><img src="docs/media/feature-auto-edit.jpg" alt="Cuttle's timeline after its cut: 4:12 became 0:38" /></td>
   </tr>
   <tr>
-    <td valign="top"><b>Record a window, a screen or a region.</b> With your webcam and mic, a countdown and a small recording bar that never shows in the video. On a Mac a window take records only that window, so you can keep working (or chatting) beside it. Pause, mark a slip with one key, and keep a script of your steps in a prompter.</td>
+    <td valign="top"><b>Record a window, a screen or a region.</b> With your webcam and mic, a countdown and a small recording bar that never shows in the video. A window take records only that window, also while another one lies over it, so you can keep working (or chatting) beside it. Pause, mark a slip with one key, and keep a script of your steps in a prompter.</td>
     <td valign="top"><b>It cuts itself.</b> Idle stretches out, waiting sped up with a speed badge, slips and long pauses gone, zooms placed where they belong. A take of four minutes becomes a tight demo, in seconds, on your computer.</td>
   </tr>
   <tr>
@@ -112,6 +112,7 @@ Cuttle runs from this repository for now (no signed download yet).
 | Node 22 or newer | `winget install OpenJS.NodeJS.LTS` | `brew install node`, or the installer from nodejs.org |
 | pnpm 11 | `corepack enable` (or `npm install -g pnpm@11`) | the same |
 | ffmpeg and ffprobe | `winget install Gyan.FFmpeg` | `brew install ffmpeg` |
+| A window by itself | in ffmpeg 8 and newer (its `gfxcapture` source); with an older one Cuttle records the screen where the window is | the same as a screen |
 | Transcription (whisper) | in Gyan's ffmpeg (its `whisper` filter) | `brew install whisper-cpp` (no macOS ffmpeg has the filter; Cuttle runs `whisper-cli` instead) |
 | Permissions | none | the first recording asks for them (below) |
 
@@ -289,7 +290,7 @@ permission, 3 render, 130 cancelled with Ctrl+C.
 | `@cuttle/timeline` | What is on screen at any output time: scenes, speed, zooms, masks, texts, cursor, crossfades (none at a continuous cut), overlay ramps in output time |
 | `@cuttle/engine` | WebGL2 compositor: backgrounds, window frames, zoom, masks, cursors, webcam, texts, stills, cards, crossfades |
 | `@cuttle/export` | MP4 export in a hidden Electron window: decode, render, encode H.264, mux; mic cut to the scenes with ffmpeg (AAC) |
-| `@cuttle/recorder` | Records a take on Windows (ddagrab, DirectShow, a global input hook) and macOS (avfoundation, an event tap): a monitor, region or window, webcam and mic, input events, markers; stops by hotkey, time, a file, an idle screen or the end of a Claude Code turn |
+| `@cuttle/recorder` | Records a take on Windows (ddagrab, a window by itself through gfxcapture, DirectShow, a global input hook) and macOS (avfoundation, an event tap): a monitor, region or window, webcam and mic, input events, markers; stops by hotkey, time, a file, an idle screen or the end of a Claude Code turn |
 | `@cuttle/core` | Project operations for the CLI and the app: `cuttle.json` as written (hash-checked writes, backups), takes, suggest, recover, frame, ffmpeg |
 | `apps/cli` | The `cuttle` command: init, devices, record, suggest, preview, frame, capture-page, render, recover; `--json` for Claude |
 | `apps/desktop` | The Cuttle app (Electron, React): the pill and tray, an editor per project (the export's engine in the output view, played with the mic as the clock; a timeline with thumbnails, waveform, markers and input activity; the export sheet) |

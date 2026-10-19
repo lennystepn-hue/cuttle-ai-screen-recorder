@@ -12,7 +12,7 @@ import { union } from '../suggest/spans';
 import { privacyMasks, type PrivacyMask } from './masks';
 import { notificationMasks } from './notifications';
 import type { SecretKind } from './patterns';
-import { SCREEN_TEXT_FILE, framesToRead, readFrames, writeScreenText } from './read';
+import { SCREEN_TEXT_FILE, framesToRead, keepRedacted, readFrames, writeScreenText } from './read';
 
 /** A mask as written to cuttle.json. */
 export type RawMask = Record<string, unknown> & { from: number; to: number; rect: Rect; auto?: string; enabled?: boolean; label?: string };
@@ -33,6 +33,7 @@ const NAMES: Record<SecretKind, [string, string]> = {
   card: ['card number', 'card numbers'],
   phone: ['phone number', 'phone numbers'],
   word: ['word you always mask', 'words you always mask'],
+  random: ['random-looking string', 'random-looking strings'],
 };
 
 export interface PrivacyInput {
@@ -130,7 +131,7 @@ export async function readScreenTake(dir: string, options: { onProgress?: (fract
   const times = await framesToRead(screen, clipSpans(file.project), size);
   const { frames, language } = await readFrames(screen, times, size, options);
   const path = join(dirname(screen), SCREEN_TEXT_FILE);
-  writeScreenText(path, frames);
+  writeScreenText(path, frames, file.project.privacy.words);
   return { path: relative(file.dir, path).split(sep).join('/'), frames: frames.length, language };
 }
 
@@ -149,12 +150,14 @@ export async function applyPrivacy(dir: string, options: { link?: string; words?
   const file = await readProjectFile(dir);
   const { sources } = file.project;
   const linked = options.link ?? sources.screenText;
-  const frames = linked ? await readScreenText(resolve(file.dir, linked)) : undefined;
-  if (options.link && !frames) throw new CoreError('missing-file', `${options.link} cannot be read`);
+  const read = linked ? await readScreenText(resolve(file.dir, linked)) : undefined;
+  if (options.link && !read) throw new CoreError('missing-file', `${options.link} cannot be read`);
   const text = sources.events ? await readFile(resolve(file.dir, sources.events), 'utf8').catch(() => undefined) : undefined;
   const events = text === undefined ? undefined : parseEventsJsonl(text).events;
   const size = await probeScreen(resolve(file.dir, sources.screen));
   const words = [...new Set([...file.project.privacy.words, ...(options.words ?? []).map((word) => word.trim()).filter(Boolean)])];
+  // the file as it is kept: what an older version, or a word added since, left readable is marked now
+  const frames = read && linked ? keepRedacted(resolve(file.dir, linked), read, words) : undefined;
   const result = withPrivacyMasks(file.raw, file.project, { ...(frames && { frames }), ...(events && { events }), screen: size, words });
   const { masks: _masks, ...counts } = result;
   const linking = options.link !== undefined && options.link !== sources.screenText;

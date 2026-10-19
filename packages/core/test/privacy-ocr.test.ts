@@ -2,6 +2,7 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import type { Rect } from '@cuttle/project';
 import { privacyMasks } from '../src/privacy/masks';
+import { redactFrames } from '../src/privacy/redact';
 import { ScreenReader } from '../src/privacy/ocr';
 
 /**
@@ -39,5 +40,12 @@ describe.runIf(process.platform === 'win32' || process.platform === 'darwin')('r
       expect(line, clean).toBeDefined();
       expect(under(line!.rect), clean).toBe(false);
     }
+    // as the text is kept: none of what it found is left, the clean lines are, the masks are the same
+    const read = [{ t: 1, lines }, { t: 2, lines: [] }, { t: 3, lines: [] }];
+    const kept = redactFrames(read, []).frames;
+    const keptText = JSON.stringify(kept);
+    for (const secret of ['lena.mueller@example.com', 'DE89', 'AbCdEf', 'AKIA', 'SESSION=']) expect(keptText, secret).not.toContain(secret);
+    for (const clean of ['Release', 'Order']) expect(keptText, clean).toContain(clean);
+    expect(privacyMasks(kept, [], { width: 1920, height: 1080 })).toEqual(masks);
   }, 60_000);
 });

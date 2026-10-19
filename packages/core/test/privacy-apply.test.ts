@@ -55,8 +55,13 @@ describe('applyPrivacy', () => {
       ['Email address', 'privacy'],
       ['Notification', 'notification'],
     ]);
-    // again, with nothing new: nothing is written
+    // the screen text as it is kept: the address marked (an older version wrote it as it was)
+    const kept = readFileSync(join(dir, 'takes', '1', 'screen-text.jsonl'), 'utf8');
+    expect(kept).not.toContain('lena@example.com');
+    expect(kept).toMatch(/⟦email-[a-z]{8}⟧/);
+    // again, with nothing new: nothing is written, the screen text neither
     expect((await applyPrivacy(dir)).written).toBe(false);
+    expect(readFileSync(join(dir, 'takes', '1', 'screen-text.jsonl'), 'utf8')).toBe(kept);
   });
 
   it('masks the notifications without the screen\'s text, and leaves the privacy masks there as they are', async () => {

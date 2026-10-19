@@ -7,7 +7,7 @@ import { readProjectFile, writeProjectFile } from './project-file';
 import { areaStretches, bandCrop, cropPieces, type CropStretch } from './suggest/crop';
 import { dialogZooms } from './suggest/dialogs';
 import { readScreenText, withPrivacyMasks, type RawMask } from './privacy/apply';
-import { SCREEN_TEXT_FILE, framesToRead, readFrames, writeScreenText } from './privacy/read';
+import { SCREEN_TEXT_FILE, framesToRead, keepRedacted, readFrames, writeScreenText } from './privacy/read';
 import { cachedAnalysis, grabGray, grayFrames, screenBands } from './suggest/media';
 import { withLengthFit } from './suggest/length';
 import { suggestClips } from './suggest/plan';
@@ -284,7 +284,7 @@ export async function suggestProject(projectDir: string, args: SuggestOptions = 
   let masks: RawMask[] | undefined;
   let privacy = { read: false, masks: 0, notifications: 0 };
   if (args.privacy !== false && file.project.autoEdits.privacy) {
-    const text = await screenTextFor(file.dir, screen, sources.screenText, clips, screenInfo, args, notes);
+    const text = await screenTextFor(file.dir, screen, sources.screenText, clips, screenInfo, words, args, notes);
     const result = withPrivacyMasks(file.raw, file.project, { ...(text && { frames: text.frames }), events, screen: screenInfo, words }, taken);
     notes.push(...result.notes);
     masks = result.masks;
@@ -352,12 +352,14 @@ async function screenTextFor(
   linked: string | undefined,
   clips: readonly { from: number; to: number }[],
   size: { width: number; height: number },
+  words: readonly string[],
   args: SuggestOptions,
   notes: string[],
 ): Promise<{ frames: ScreenTextFrame[]; made?: string } | undefined> {
   if (linked) {
     const frames = await readScreenText(resolve(dir, linked));
-    if (frames) return { frames };
+    // what an older version, or a word added since, left readable in it is marked now (not in a dry run)
+    if (frames) return { frames: args.dryRun ? frames : keepRedacted(resolve(dir, linked), frames, words) };
     notes.push(`${linked} cannot be read: it is read again`);
   }
   if (args.dryRun) {
@@ -376,9 +378,9 @@ async function screenTextFor(
       },
     });
     const path = join(dirname(screen), SCREEN_TEXT_FILE);
-    writeScreenText(path, frames);
+    const kept = writeScreenText(path, frames, words);
     notes.push(`read the screen's text in ${frames.length} frame${frames.length === 1 ? '' : 's'} (${language}), into ${relative(dir, path).split(sep).join('/')}`);
-    return { frames, made: relative(dir, path).split(sep).join('/') };
+    return { frames: kept, made: relative(dir, path).split(sep).join('/') };
   } catch (error) {
     if (!(error instanceof CoreError) || error.code !== 'ocr-missing') throw error;
     notes.push(`the screen's text was not read: ${error.message}; no privacy masks from it, so look for private things yourself`);

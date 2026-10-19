@@ -1,8 +1,9 @@
 // Reading the screen's text for the privacy masks: the frames where the picture changed inside the
 // clips (compared 10 times a second; read at most 2 a second while it keeps changing, at least one
 // every 5 s, and once more where a change showed only a moment), each read with the system's OCR
-// (ocr.ts), written as the take's screen-text.jsonl. Only the frames that are read are written to a
-// temporary folder, one at a time, and removed once read.
+// (ocr.ts), written as the take's screen-text.jsonl with each private thing in it marked instead
+// (redact.ts). Only the frames that are read are written to a temporary folder, one at a time, and
+// removed once read.
 import { mkdtempSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -11,6 +12,7 @@ import { CoreError } from '../errors';
 import { runFfmpeg } from '../ffmpeg';
 import type { Span } from '../suggest/spans';
 import { ScreenReader } from './ocr';
+import { redactFrames } from './redact';
 
 export const READ_RULES = {
   /** The picture is compared this many times a second, so a change that shows only a moment is seen… */
@@ -120,8 +122,25 @@ export async function readFrames(
   return { frames, language: reader.language };
 }
 
-/** Writes screen-text.jsonl (whole, or not at all). */
-export function writeScreenText(path: string, frames: readonly ScreenTextFrame[]): void {
-  writeFileSync(`${path}.part`, frames.map((frame) => `${JSON.stringify(frame)}\n`).join(''));
+/**
+ * Writes screen-text.jsonl (whole, or not at all), each private thing in it marked (`redactFrames`,
+ * with the person's `words`); returns the frames as written, which make the same masks.
+ */
+export function writeScreenText(path: string, frames: readonly ScreenTextFrame[], words: readonly string[] = []): ScreenTextFrame[] {
+  const kept = redactFrames(frames, words).frames;
+  writeFileSync(`${path}.part`, kept.map((frame) => `${JSON.stringify(frame)}\n`).join(''));
   renameSync(`${path}.part`, path);
+  return kept;
+}
+
+/**
+ * The frames of a screen-text.jsonl read back, with what is still readable in them marked (one an
+ * older version wrote, or a word added since); the file is written again only then.
+ */
+export function keepRedacted(path: string, frames: readonly ScreenTextFrame[], words: readonly string[] = []): ScreenTextFrame[] {
+  const { frames: kept, redacted } = redactFrames(frames, words);
+  if (redacted === 0) return [...frames];
+  writeFileSync(`${path}.part`, kept.map((frame) => `${JSON.stringify(frame)}\n`).join(''));
+  renameSync(`${path}.part`, path);
+  return kept;
 }

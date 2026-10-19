@@ -5,6 +5,11 @@ import { defineConfig } from 'vitest/config';
 import { matchGolden } from './tools/vitest/golden-command.ts';
 
 /**
+ * The recorder's takes in real time (the test backend): beside a hundred other test files their
+ * input and their timing come out short, so they run after them.
+ */
+const REALTIME = ['packages/recorder/test/record.test.ts'];
+/**
  * Tests that transcribe with a real speech model (where one is downloaded): they keep the GPU and
  * the processor busy for many seconds, and beside them the recorder's takes in real time come out
  * short. They run after every other test, one file at a time.
@@ -23,8 +28,17 @@ export default defineConfig({
           name: 'node',
           environment: 'node',
           include: ['packages/*/test/**/*.test.ts', 'apps/*/test/**/*.test.ts', 'skill/test/**/*.test.ts'],
-          exclude: ['packages/*/test/**/*.browser.test.ts', ...HEAVY],
+          exclude: ['packages/*/test/**/*.browser.test.ts', ...REALTIME, ...HEAVY],
           env: NODE_ENV,
+        },
+      },
+      {
+        test: {
+          name: 'realtime',
+          environment: 'node',
+          include: REALTIME,
+          env: NODE_ENV,
+          sequence: { groupOrder: 1 },
         },
       },
       {
@@ -34,7 +48,7 @@ export default defineConfig({
           include: HEAVY,
           env: NODE_ENV,
           fileParallelism: false,
-          sequence: { groupOrder: 1 },
+          sequence: { groupOrder: 2 },
         },
       },
       {

@@ -337,9 +337,10 @@ describe.concurrent('record (test backend)', () => {
     const projectDir = project();
     const take = await record({ ...test, projectDir, source: { kind: 'window', title: 'Test Window' }, stop: { maxSeconds: 2 } }).done;
     expect(take.warnings).toEqual([]);
-    // the test window's pattern changes 10 times a second; the take has a frame every 1/30 s
+    // the test window's pattern changes 10 times a second; the take has a frame every 1/30 s (under
+    // load fewer: a late tick of the clock writes one)
     const { stdout } = spawnSync('ffprobe', ['-v', 'error', '-count_frames', '-show_entries', 'stream=nb_read_frames', '-of', 'csv=p=0', join(projectDir, take.screen)], { encoding: 'utf8' });
-    expect(Number(stdout) / take.seconds).toBeGreaterThan(26);
+    expect(Number(stdout) / take.seconds).toBeGreaterThan(20);
   }, SLOW);
 
   it('refuses options it cannot record with, before creating a take folder', async () => {

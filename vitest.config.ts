@@ -4,6 +4,16 @@ import { playwright } from '@vitest/browser-playwright';
 import { defineConfig } from 'vitest/config';
 import { matchGolden } from './tools/vitest/golden-command.ts';
 
+/**
+ * Tests that transcribe with a real speech model (where one is downloaded): they keep the GPU and
+ * the processor busy for many seconds, and beside them the recorder's takes in real time come out
+ * short. They run after every other test, one file at a time.
+ */
+const HEAVY = ['packages/core/test/live.test.ts', 'packages/core/test/speech-take.test.ts'];
+// No speech model unless a test asks for one: a take with a mic is never transcribed by chance; and
+// no OCR, which reads the screen of every take (a test that reads asks for it).
+const NODE_ENV = { CUTTLE_MODELS_DIR: join(tmpdir(), 'cuttle-test-no-models'), CUTTLE_OCR: 'off' };
+
 export default defineConfig({
   test: {
     passWithNoTests: true,
@@ -13,10 +23,18 @@ export default defineConfig({
           name: 'node',
           environment: 'node',
           include: ['packages/*/test/**/*.test.ts', 'apps/*/test/**/*.test.ts', 'skill/test/**/*.test.ts'],
-          exclude: ['packages/*/test/**/*.browser.test.ts'],
-          // No speech model unless a test asks for one: a take with a mic is never transcribed by
-          // chance; and no OCR, which reads the screen of every take (a test that reads asks for it).
-          env: { CUTTLE_MODELS_DIR: join(tmpdir(), 'cuttle-test-no-models'), CUTTLE_OCR: 'off' },
+          exclude: ['packages/*/test/**/*.browser.test.ts', ...HEAVY],
+          env: NODE_ENV,
+        },
+      },
+      {
+        test: {
+          name: 'heavy',
+          environment: 'node',
+          include: HEAVY,
+          env: NODE_ENV,
+          fileParallelism: false,
+          sequence: { groupOrder: 1 },
         },
       },
       {

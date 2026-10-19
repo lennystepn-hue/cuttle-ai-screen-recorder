@@ -99,7 +99,7 @@ export function helpersFor(count: number, processors = cpus().length, rules = OC
 /**
  * Reads the screen's text of `screen` at `times` (source seconds) with OCR helpers (`helpers`, else
  * `helpersFor`), the frames in order; `onProgress` gets the share done, `onPreparing` is called when
- * a helper takes long to prepare the OCR (macOS's first use of Vision: `ScreenReader.start`).
+ * a helper takes long to prepare the OCR (macOS compiling Vision's text recognition: `ScreenReader.start`).
  * `ocr-missing` where no helper can run; a helper that cannot start besides one that can only leaves
  * the others more to do. Where the helpers prepare the OCR (macOS), the first starts alone and the
  * others once it is ready: then they find it prepared, and none of them waits for the others' preparing.

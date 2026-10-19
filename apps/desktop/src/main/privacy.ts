@@ -36,9 +36,9 @@ export async function maskPrivacy(dir: string, asked = false): Promise<{ started
     return { problem };
   }
   void (async () => {
-    // while macOS prepares its text recognition (a minute the first time), then the share read
+    // while macOS prepares its text recognition (a minute where it compiles it), then the share read
     const status = (progress: number, preparing = false) =>
-      setEditorStatus(dir, { text: preparing ? 'Reading the screen… preparing (the first time, about a minute)' : `Reading the screen… ${Math.round(progress * 100)} %`, state: 'working' });
+      setEditorStatus(dir, { text: preparing ? 'Reading the screen… preparing (this can take a minute)' : `Reading the screen… ${Math.round(progress * 100)} %`, state: 'working' });
     try {
       await speechDone(dir);
       const file = await readProjectFile(dir);

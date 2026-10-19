@@ -98,7 +98,7 @@ export interface ThumbnailsMeta {
 export type WorkerRequest = { id: number; cancel?: false } & MediaJob;
 export type WorkerCancel = { id: number; cancel: true };
 export type WorkerReply =
-  // `preparing`: the OCR is being prepared, which takes long (read-screen: macOS's first use of Vision)
+  // `preparing`: the OCR is being prepared, which takes long (read-screen: macOS compiling Vision's text recognition)
   | { id: number; progress: number; preparing?: boolean }
   | { id: number; done: true; meta?: JobResult }
   | { id: number; error: string; cancelled?: boolean; code?: string };

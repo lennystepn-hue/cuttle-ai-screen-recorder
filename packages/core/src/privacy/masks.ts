@@ -2,7 +2,7 @@
 // to just after it was last seen, following it where it moved (text that scrolls). Pure.
 import type { Rect, ScreenTextFrame, ZoomMove } from '@cuttle/project';
 import { maskRectAt } from '@cuttle/timeline';
-import { SECRET_LABELS, lineSecrets, type SecretKind } from './patterns';
+import { SECRET_LABELS, SPECIFIC, lineSecrets, type SecretKind } from './patterns';
 
 export const MASK_RULES = {
   /** A mask starts this long before the first sight and ends this long after the last (source s). */
@@ -152,9 +152,6 @@ export function privacyMasks(frames: readonly ScreenTextFrame[], words: readonly
     .sort((a, b) => a.from - b.from);
   return joinCovering(masks);
 }
-
-/** Which kind names a mask that two rules found: the more specific. */
-const SPECIFIC: readonly SecretKind[] = ['key', 'token', 'iban', 'card', 'email', 'phone', 'word', 'value'];
 
 /**
  * Masks over the same text, found by two rules (a key in a `NAME=value` line), are one: those that

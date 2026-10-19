@@ -3,8 +3,11 @@
 // a slashed zero reads as ø, and a key's prefix may have one wrong letter. Pure.
 import { normWord, type Rect, type ScreenTextLine } from '@cuttle/project';
 
-export const SECRET_KINDS = ['email', 'key', 'token', 'value', 'iban', 'card', 'phone', 'word'] as const;
+export const SECRET_KINDS = ['email', 'key', 'token', 'value', 'iban', 'card', 'phone', 'word', 'random'] as const;
 export type SecretKind = (typeof SECRET_KINDS)[number];
+
+/** Which kind names what two rules found: the more specific first (a key in a NAME=value line is a key). */
+export const SPECIFIC: readonly SecretKind[] = ['key', 'token', 'iban', 'card', 'email', 'phone', 'word', 'value', 'random'];
 
 /** What to call a mask over each kind, for people. */
 export const SECRET_LABELS: Record<SecretKind, string> = {
@@ -16,7 +19,50 @@ export const SECRET_LABELS: Record<SecretKind, string> = {
   card: 'Card number',
   phone: 'Phone number',
   word: 'Always masked',
+  random: 'Random-looking string',
 };
+
+/**
+ * A private thing in the screen's text as it is kept (redact.ts): a mark of its kind and an id,
+ * word for word, `⟦key-qwhzbtrk⟧`.
+ */
+export const MARK = new RegExp(`⟦(${SECRET_KINDS.join('|')})-([a-z]{8})⟧`);
+/** A word that is a mark. */
+export const isMark = (text: string) => new RegExp(`^${MARK.source}$`).test(text);
+
+/**
+ * A random-looking string, a key without a known prefix or a name beside it (an AWS secret in a
+ * table, a bare token): a run of key characters (letters, digits, `+ / = _ -`) at least `length`
+ * long, with a stretch between its separators at least `stretch` long (words joined by dashes are
+ * not random), letters and digits that take turns often (`changes`: the share of neighbours of
+ * another class; an identifier like createUser2024Handler changes seldom), and as varied as random
+ * characters nearly are (`varied`: the share of the most a run that long can be, in bits a
+ * character). A run of hex digits counts from `hex` characters, and not on a line that names a
+ * hash (a commit, a digest). Of random keys of letters and digits it finds 92 % at 24 characters,
+ * 97 % at 32 and 99 % at 40; of base64 ones (an AWS secret, 40 characters) 92 %; of hex ones nearly
+ * all from 32. On typical lines of a developer's screen (hashes, UUIDs, paths, identifiers,
+ * versions) it finds nothing.
+ */
+export const RANDOM_RULES = { length: 24, stretch: 16, changes: 0.3, varied: 0.8, hex: 32 };
+const HASH_NAMES = /\b(sha\d*|md5|commit|hash|digest|checksum|integrity)\b/i;
+
+/** Whether `run` (a run of key characters on `line`) looks random (`RANDOM_RULES`). */
+export function randomLooking(run: string, line: string, rules = RANDOM_RULES): boolean {
+  if (run.length < rules.length) return false;
+  // a path, or a hash with its algorithm in front (sha512-…)
+  if (run.startsWith('/') || /^(sha\d+|md5)-/i.test(run)) return false;
+  if (Math.max(...run.split(/[+/=_-]+/).map((part) => part.length)) < rules.stretch) return false;
+  const counts = new Map<string, number>();
+  for (const char of run) counts.set(char, (counts.get(char) ?? 0) + 1);
+  let bits = 0;
+  for (const n of counts.values()) bits -= (n / run.length) * Math.log2(n / run.length);
+  if (/^[0-9a-f]+$/i.test(run)) return run.length >= rules.hex && !HASH_NAMES.test(line) && bits >= rules.varied * Math.log2(Math.min(run.length, 16));
+  if ((run.match(/\d/g) ?? []).length < 2 || (run.match(/[a-z]/gi) ?? []).length < 2) return false;
+  const kind = (char: string) => (/\d/.test(char) ? 0 : /[a-z]/.test(char) ? 1 : /[A-Z]/.test(char) ? 2 : 3);
+  let changes = 0;
+  for (let i = 1; i < run.length; i++) if (kind(run[i]!) !== kind(run[i - 1]!)) changes++;
+  return changes / (run.length - 1) >= rules.changes && bits >= rules.varied * Math.log2(Math.min(run.length, 64));
+}
 
 /** A private thing on a line: its kind, the words it covers (their rect), and its text, compared across frames. */
 export interface Secret {
@@ -147,6 +193,8 @@ export function findSecrets(text: string, words: readonly string[] = []): Match[
   const found: Match[] = [];
   const add = (kind: SecretKind, from: number, to: number) => found.push({ kind, from, to, text: text.slice(from, to) });
 
+  // what the kept text already marks (redact.ts): the mark, repeated word for word
+  for (const match of text.matchAll(new RegExp(`${MARK.source}(?: ⟦\\1-\\2⟧)*`, 'g'))) add(match[1] as SecretKind, match.index, match.index + match[0].length);
   // email addresses
   for (const match of text.matchAll(/[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}/g)) add('email', match.index, match.index + match[0].length);
   // a token in a link, and a password in one (https://user:password@host)
@@ -202,6 +250,13 @@ export function findSecrets(text: string, words: readonly string[] = []): Match[
       if (same) add('word', tokens[i]!.index, tokens[i + parts.length - 1]!.index + tokens[i + parts.length - 1]![0].length);
     }
   }
+  // a random-looking string that no rule above found
+  for (const match of text.matchAll(/[A-Za-z0-9+/=_-]{24,}/g)) {
+    const from = match.index;
+    const to = from + match[0].length;
+    if (found.some((other) => other.from < to && from < other.to)) continue;
+    if (randomLooking(match[0], text)) add('random', from, to);
+  }
   return found;
 }
 
@@ -210,6 +265,11 @@ export function findSecrets(text: string, words: readonly string[] = []): Match[
  * text is its words joined by spaces.
  */
 export function lineSecrets(line: ScreenTextLine, words: readonly string[] = []): Secret[] {
+  return secretWords(line, words).map(({ kind, rect, key }) => ({ kind, rect, key }));
+}
+
+/** `lineSecrets`, with the indexes of the words each covers (to mark them, redact.ts). */
+export function secretWords(line: ScreenTextLine, words: readonly string[] = []): (Secret & { words: number[] })[] {
   const spans: { from: number; to: number; rect: Rect }[] = [];
   let at = 0;
   for (const word of line.words) {
@@ -218,12 +278,13 @@ export function lineSecrets(line: ScreenTextLine, words: readonly string[] = [])
   }
   const text = line.words.map((word) => word.text).join(' ');
   return findSecrets(text, words).flatMap((match) => {
-    const covered = spans.filter((span) => span.from < match.to && match.from < span.to);
+    const covered = spans.flatMap((span, index) => (span.from < match.to && match.from < span.to ? [index] : []));
     if (covered.length === 0) return [];
-    const left = Math.min(...covered.map((span) => span.rect[0]));
-    const top = Math.min(...covered.map((span) => span.rect[1]));
-    const right = Math.max(...covered.map((span) => span.rect[0] + span.rect[2]));
-    const bottom = Math.max(...covered.map((span) => span.rect[1] + span.rect[3]));
-    return [{ kind: match.kind, rect: [left, top, right - left, bottom - top] as Rect, key: `${match.kind}:${keyOf(match.text)}` }];
+    const rects = covered.map((index) => spans[index]!.rect);
+    const left = Math.min(...rects.map((rect) => rect[0]));
+    const top = Math.min(...rects.map((rect) => rect[1]));
+    const right = Math.max(...rects.map((rect) => rect[0] + rect[2]));
+    const bottom = Math.max(...rects.map((rect) => rect[1] + rect[3]));
+    return [{ kind: match.kind, rect: [left, top, right - left, bottom - top] as Rect, key: `${match.kind}:${keyOf(match.text)}`, words: covered }];
   });
 }

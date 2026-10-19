@@ -224,3 +224,7 @@ Expected: PASS, 58 tests.
 - **#60's explanation of the first failure was a guess.** It added the case of a step reached after all activity, which is right for the product, but a moving screen never has that case. This failure is the check stopping too soon.
 - **The check now waits 2 s before the stop.** When the title is missing, the check names the step times and the clips; the runner's log had said nothing about them.
 - Checked: the script check three times in a row, then `app:check` (58).
+- **Windows, on the next run: the music check's sound chip had no box** (`TypeError: Cannot read properties of null (reading 'x')` at the drag). The chip had just shown, and the next moment `boundingBox()` was null.
+  - The lane comes with the first sound and the editor redraws it as its save comes back, so the chip can be between two layouts.
+  - The drag needs a place that holds still anyway. It now waits for the same box twice in a row, 100 ms apart, for at most 4 s.
+  - Checked: the music check three times in a row.

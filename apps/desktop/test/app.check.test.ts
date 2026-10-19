@@ -2170,8 +2170,19 @@ describe.runIf(enabled)('the Cuttle app', () => {
     const chip = page.locator('.item.sound[data-id=a1]');
     await chip.waitFor();
     expect(await page.locator('[data-testid=sound-volume]').count()).toBe(1);
-    // dragged half a second later on its lane
-    const box = (await chip.boundingBox())!;
+    // dragged half a second later on its lane, once the chip holds still: the lane comes with the
+    // first sound, and right after the chip showed it once had no box (Windows's runner)
+    const settled = async () => {
+      let last = '';
+      for (let tries = 0; tries < 40; tries++) {
+        const found = await chip.boundingBox();
+        if (found && JSON.stringify(found) === last) return found;
+        last = JSON.stringify(found);
+        await page.waitForTimeout(100);
+      }
+      throw new Error(`the sound's chip did not hold still: ${last}`);
+    };
+    const box = await settled();
     const pps = await page.evaluate(() => (window as unknown as { __cuttleCheck: { pps(): number } }).__cuttleCheck.pps());
     await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
     await page.mouse.down();

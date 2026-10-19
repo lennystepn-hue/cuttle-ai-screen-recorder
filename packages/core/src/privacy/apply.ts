@@ -123,8 +123,9 @@ const clipSpans = (project: CuttleProject) => union(project.scenes.flatMap((scen
 /**
  * Reads the screen's text inside the project's clips (`dir`: its folder) into its take's
  * screen-text.jsonl, not linked yet (`applyPrivacy` links it with the masks, in one write).
+ * `onPreparing`: macOS takes long to prepare its text recognition (`readFrames`).
  */
-export async function readScreenTake(dir: string, options: { onProgress?: (fraction: number) => void; signal?: AbortSignal } = {}): Promise<{ path: string; frames: number; language: string }> {
+export async function readScreenTake(dir: string, options: { onProgress?: (fraction: number) => void; onPreparing?: () => void; signal?: AbortSignal } = {}): Promise<{ path: string; frames: number; language: string }> {
   const file = await readProjectFile(dir);
   const screen = resolve(file.dir, file.project.sources.screen);
   const size = await probeScreen(screen);

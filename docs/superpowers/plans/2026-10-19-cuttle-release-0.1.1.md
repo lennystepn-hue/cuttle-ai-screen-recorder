@@ -1768,6 +1768,18 @@ Expected: no output.
 - The checks ran on the finished prototype, whose tree the replay matches byte for byte. The packaged build ran on the replayed commits. Every screenshot was looked at.
 - CI is on again with this PR: it runs on Windows and macOS for the PR, and the merge waits for it.
 
+**What CI found on this PR (its first run since 2026-10-17), fixed in a commit after the plan's**
+- **Windows: no ffmpeg.** `choco install ffmpeg` failed on Chocolatey's feed ("Failed to fetch results from V2 feed"), so every test that runs ffmpeg failed. `ci.yml` now downloads Gyan's full build 9.0.2 (what winget installs) from its GitHub release, checks it against the digest GitHub gives (sha256 `f0e46253…71b13`), and puts its `bin` on PATH.
+- **macOS: one mask too many where Vision misread a scrolling key** (`cuttle suggest reads the screen`: 4 masks, not 3).
+  - Since privacy 3 (#57) the masks are made from the kept text, whose marks were one per text (a keyed hash of it) and one kind per word.
+  - Vision read the scrolling `ghp_` token with a slip in its prefix in two frames, so only the `NAME=` rule found it there. The masks from the text join such readings to the token (by place, and by text that reads nearly the same); the marks could not, as their ids differ.
+  - Now `redactFrames` follows the secrets from frame to frame as the masks do (`trackSecrets`, which `privacyMasks` uses too) and gives each track one id. A word found by two rules gets a mark of each (`⟦key-…+value-…⟧`). The tracks match exactly-equal readings first, so a frame's order does not change them, and `alike` never compares two ids.
+  - A track that has a word marked already keeps its id, so a file written before stays as it is.
+  - A rule other than the marks' finds nothing that is marks alone (a `Password:` before a marked value).
+  - A test makes the frames of that run (a slip that leaves only the `NAME=` rule, a slip the prefix rule still finds) and checks that the kept text makes the same masks. The code before the fix fails it.
+- **macOS: a switch pressed twice too quickly** in the app check (live captions): the second press read the state the page had not drawn yet. It waits for the switch to show the first press, as the login item's check does.
+- Checked here after the fix: `pnpm test` (997 passed, 81 skipped, two full runs), the typecheck, `cli:check` (16) and `app:check` (58 on its second run; the first, right after a fresh build, met the known recording flake: a take not started in 30 s). The screenshots of the privacy steps were looked at.
+
 **Found while checking, and already in the plan above**
 - **The first typecheck failed on the new test's types:** a fake updater built on Node's `EventEmitter` does not fit the updater's narrow type, and `releases.mjs` had no types. The fake keeps its own listeners now, and `releases.d.mts` declares the module.
 - **The first app check failed its update step:** electron-updater asks for `latest.yml?noCache=…`. The check's server matched the whole address and answered 404, and the updates read every 404 as "no release yet", so the line said "This is the newest version." The server matches the path now. Only GitHub's own words for a missing release count as nothing newer; another 404 is a failure, and a test says so.

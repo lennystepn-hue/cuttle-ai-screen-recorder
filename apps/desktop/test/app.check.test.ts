@@ -1641,6 +1641,8 @@ describe.runIf(enabled)('the Cuttle app', () => {
     expect(await settings.locator('.row:has([data-testid=speech-live]) .row-hint').textContent()).toBe('The HUD shows what the mic hears as you speak. It needs a speech model: download one above.');
     await click(settings, '[data-testid=speech-live]');
     await expect.poll(() => saved().speech?.live).toBe(false);
+    // the switch shows it before it is pressed again (a press reads the state it shows)
+    await settings.waitForSelector('[data-testid=speech-live][aria-checked=false]');
     await click(settings, '[data-testid=speech-live]');
     await expect.poll(() => saved().speech?.live).toBe(true);
     if (!BASE_MODEL || !hasWhisper) {

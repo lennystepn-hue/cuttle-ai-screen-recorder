@@ -46,7 +46,8 @@ describe('redactFrames', () => {
   it('gives the same text one mark in a file, other texts other marks, of letters only; the line reads as its words', () => {
     const { frames } = redactFrames(FRAMES, WORDS);
     const word = (t: number, line: number, index: number) => frames.find((one) => one.t === t)!.lines[line]!.words[index]!.text;
-    expect(word(1, 0, 0)).toMatch(/^⟦key-[a-z]{8}⟧$/);
+    // the key in a NAME=value line: found by two rules, a mark of each
+    expect(word(1, 0, 0)).toMatch(/^⟦key-[a-z]{8}\+value-[a-z]{8}⟧$/);
     // the key moved: the same mark
     expect(word(2, 0, 0)).toBe(word(1, 0, 0));
     expect(word(1, 1, 3)).toMatch(/^⟦email-[a-z]{8}⟧$/);
@@ -63,5 +64,42 @@ describe('redactFrames', () => {
     expect(redactFrames(once, WORDS)).toEqual({ frames: once, redacted: 0 });
     const other = redactFrames(FRAMES, WORDS, Buffer.alloc(16, 2)).frames;
     expect(other[0]!.lines[0]!.words[0]!.text).not.toBe(once[0]!.lines[0]!.words[0]!.text);
+  });
+
+  // a token that scrolls up 15 px a frame, as Vision reads it on a Mac: a slip in its prefix in two
+  // frames (only the NAME= rule finds it there), another slip in one (found by its prefix still)
+  const TOKEN = 'ghp_' + '1234567890abcdefghijklmnop';
+  const SLIPPED = 'qhq_' + '1234567890abcdefghijklmnop';
+  const NEARLY = 'ghp_' + '1234567890abcdefghijk1mnop';
+  const scrolling = [TOKEN, NEARLY, SLIPPED, SLIPPED, TOKEN, TOKEN].map((token, k) =>
+    frame(0.5 * k, line('Signed in as lena.mueller@example.com', 80, 80), line(`export GITHUB_TOKEN=${token}`, 80, 420 - 15 * k), line('Thanks, Lena Müller', 80, 640)),
+  );
+
+  it('makes the masks the text made where the OCR read a scrolling key with slips, and marks each private thing with one id', () => {
+    const { frames } = redactFrames(scrolling, WORDS);
+    expect(JSON.stringify(frames)).not.toContain('1234567890');
+    expect(privacyMasks(frames, WORDS, screen)).toEqual(privacyMasks(scrolling, WORDS, screen));
+    // the token's line: one key and one value, the same in every frame its prefix was read
+    const marks = frames.map((one) => one.lines[1]!.words[1]!.text);
+    expect(marks[0]).toBe(marks[1]);
+    expect(marks[2]).toBe(marks[3]);
+    expect(marks[2]).toBe(`⟦${marks[0]!.split('+')[1]}`);
+    // and so again from the kept text: nothing changes
+    expect(redactFrames(frames, WORDS).redacted).toBe(0);
+  });
+
+  it('keeps the ids an older version gave (each slip its own), and marks what it left', () => {
+    // as the version before marked it: each text its own id
+    const older = scrolling.map((one, k) => ({
+      ...one,
+      lines: one.lines.map((each, l) => (l === 1 ? line(`export ⟦${k === 2 || k === 3 ? 'value-mmmmmmmm' : k === 1 ? 'key-nnnnnnnn' : 'key-kkkkkkkk'}⟧`, 80, 420 - 15 * k) : each)),
+    }));
+    const once = redactFrames(older, WORDS);
+    expect(once.redacted).toBeGreaterThan(0);
+    // the address and the name were left (the line marked before stays as it was)
+    expect(once.frames.map((one) => one.lines[1]!.words[1]!.text)).toEqual(older.map((one) => one.lines[1]!.words[1]!.text));
+    expect(JSON.stringify(once.frames)).not.toContain('lena.mueller');
+    expect(privacyMasks(once.frames, WORDS, screen)).toEqual(privacyMasks(older, WORDS, screen));
+    expect(redactFrames(once.frames, WORDS).redacted).toBe(0);
   });
 });

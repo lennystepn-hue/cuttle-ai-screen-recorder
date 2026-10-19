@@ -1779,6 +1779,13 @@ Expected: no output.
   - A test makes the frames of that run (a slip that leaves only the `NAME=` rule, a slip the prefix rule still finds) and checks that the kept text makes the same masks. The code before the fix fails it.
 - **macOS: a switch pressed twice too quickly** in the app check (live captions): the second press read the state the page had not drawn yet. It waits for the switch to show the first press, as the login item's check does.
 - Checked here after the fix: `pnpm test` (997 passed, 81 skipped, two full runs), the typecheck, `cli:check` (16) and `app:check` (58 on its second run; the first, right after a fresh build, met the known recording flake: a take not started in 30 s). The screenshots of the privacy steps were looked at.
+- **Second run, macOS: a step reached just before the stop had no title.** The app check's script take titled only `Open the settings`, not `Turn on dark mode`.
+  - The test passed in the first run (4.7 s) and failed in the second (6.6 s), with no change to the code it runs in between.
+  - Nothing changes on the runner's screen after the countdown, and on a slower run the test presses Next a little later. Step 2 then came after the last activity plus `tail`, and `suggest` trimmed it away as the quiet end: no title, no chapter.
+  - A step is something the person marked on purpose. `suggestClips` now counts the last step as active from just before it to `stepTail` (2 s) after it, when it comes after all other activity. The video keeps it, with 3 s for its title.
+  - A step followed by more activity is handled as before: an idle stretch around it is cut, and its title shows where the video goes on.
+  - A unit test (a step at 6 s after typing that ended at 2 s) fails without the change.
+  - Checked here after this fix: `pnpm test` (998 passed, 81 skipped, two full runs), the typecheck, `cli:check` (16) and `app:check` (58). The step titles' screenshot shows both titles. Here the check's screen keeps changing, so the unit test is what covers the runner's still screen.
 
 **Found while checking, and already in the plan above**
 - **The first typecheck failed on the new test's types:** a fake updater built on Node's `EventEmitter` does not fit the updater's narrow type, and `releases.mjs` had no types. The fake keeps its own listeners now, and `releases.d.mts` declares the module.

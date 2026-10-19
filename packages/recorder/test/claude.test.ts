@@ -71,6 +71,35 @@ describe('readTranscriptLine', () => {
     expect(readTranscriptLine(line({ type: 'assistant', isSidechain: true, message: { id: 'm4', stop_reason: 'end_turn', content: [] } }))).toEqual([]);
   });
 
+  it('reads work left running in the background (commands, agents, monitors): by its tool call or its result, and the notice that it ended', () => {
+    // a command started with run_in_background: a tool call, and background work under its id
+    const started = line({ type: 'assistant', message: { id: 'm1', stop_reason: 'tool_use', content: [{ type: 'tool_use', id: 't1', name: 'Bash', input: { command: 'npm test', run_in_background: true } }] } });
+    expect(readTranscriptLine(started)).toEqual([
+      { kind: 'tool', time, label: 'Bash', id: 't1' },
+      { kind: 'background', time, id: 't1' },
+    ]);
+    // a command, an agent (in the background unless told otherwise), a monitor, a resumed agent: by
+    // their results, with the task id they name
+    const result = (id: string, content: unknown) => line({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: id, content }] } });
+    expect(readTranscriptLine(result('t3', 'Command running in background with ID: b1. Output is being written to: C:\\tasks\\b1.output'))).toEqual([{ kind: 'background', time, id: 't3', task: 'b1' }]);
+    expect(readTranscriptLine(result('t2', [{ type: 'text', text: 'Async agent launched successfully. (internal)\nagentId: a1 (internal ID)' }]))).toEqual([{ kind: 'background', time, id: 't2', task: 'a1' }]);
+    expect(readTranscriptLine(result('t5', 'Monitor started (task b2, expires in 15m unless the session ends)'))).toEqual([{ kind: 'background', time, id: 't5', task: 'b2' }]);
+    expect(readTranscriptLine(result('t6', '{"success":true,"message":"Resuming agent a1","resumedAgent":"a1"}'))).toEqual([{ kind: 'background', time, id: 't6', task: 'a1' }]);
+    expect(readTranscriptLine(result('t4', 'done'))).toEqual([]);
+    // Claude stops one itself: no notice follows, its task id says which
+    expect(readTranscriptLine(result('t7', '{"message":"Successfully stopped task: b1 (npm run dev)","task_id":"b1"}'))).toEqual([{ kind: 'finished', time, task: 'b1' }]);
+    // its end, wherever Claude Code wrote the notice: queued, handed over during a turn, or as the line that starts one
+    const notice = '<task-notification>\n<task-id>b1</task-id>\n<tool-use-id>t3</tool-use-id>\n<output-file>C:\\tasks\\b1.output</output-file>\n<status>completed</status>\n<summary>Background command "npm test" completed (exit code 0)</summary>\n</task-notification>';
+    const ended = [{ kind: 'finished', time, id: 't3', task: 'b1' }];
+    expect(readTranscriptLine(line({ type: 'queue-operation', operation: 'enqueue', content: notice }))).toEqual(ended);
+    expect(readTranscriptLine(line({ type: 'attachment', attachment: { type: 'queued_command', prompt: notice } }))).toEqual(ended);
+    expect(readTranscriptLine(line({ type: 'user', message: { role: 'user', content: notice } }))).toEqual(ended);
+    expect(readTranscriptLine(line({ type: 'user', isMeta: true, message: { content: [{ type: 'text', text: notice }] } }))).toEqual(ended);
+    // a monitor's event has no status: nothing ended; a subagent's own notices are not the session's
+    expect(readTranscriptLine(line({ type: 'user', message: { content: '<task-notification>\n<task-id>b2</task-id>\n<summary>Monitor event: "build"</summary>\n<event>ok</event>\n</task-notification>' } }))).toEqual([]);
+    expect(readTranscriptLine(line({ type: 'user', isSidechain: true, message: { content: notice } }))).toEqual([]);
+  });
+
   it('ignores lines it cannot read', () => {
     expect(readTranscriptLine('{"type":"user"')).toEqual([]);
     expect(readTranscriptLine('null')).toEqual([]);
@@ -87,6 +116,12 @@ describe('SessionReader', () => {
   it('drops a local slash command, which only writes its output', () => {
     const reader = new SessionReader();
     expect([command('/model'), output, line({ type: 'user', message: { content: 'build it' } })].flatMap((text) => reader.read(text))).toEqual([{ kind: 'prompt', time }]);
+  });
+
+  it('does not take a background notice for Claude answering a slash command', () => {
+    const reader = new SessionReader();
+    const notice = line({ type: 'user', message: { content: '<task-notification>\n<tool-use-id>t1</tool-use-id>\n<status>completed</status>\n</task-notification>' } });
+    expect([command('/model'), notice, line({ type: 'user', message: { content: 'build it' } })].flatMap((text) => reader.read(text)).map((signal) => signal.kind)).toEqual(['finished', 'prompt']);
   });
 
   it('keeps a slash command that Claude answers, before the answer', () => {

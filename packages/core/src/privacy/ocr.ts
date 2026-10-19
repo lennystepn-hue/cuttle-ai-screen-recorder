@@ -2,7 +2,7 @@
 // Windows PowerShell 5.1 helper, on macOS the Vision framework through the recorder's cuttle-capture
 // (`cuttle-capture ocr`, native/macos/capture.swift). Either, started once, reads PNG files one
 // request per line on stdin and answers one JSON line each; macOS's says first that it prepares
-// Vision, which on its first use takes a minute. Nothing leaves this computer.
+// Vision, which can take a minute. Nothing leaves this computer.
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { createInterface } from 'node:readline';
 import type { Rect, ScreenTextLine } from '@cuttle/project';
@@ -56,7 +56,7 @@ export const OCR_SCALE = 2;
 
 /**
  * Seconds the helper may take to start (Windows PowerShell, cold, can take several), to prepare
- * Vision on macOS (on its first use a minute on an M1, see capture.swift's readText; else a fraction
+ * Vision on macOS (a minute on an M1 where it compiles, see capture.swift's readText; else a fraction
  * of one; a helper ended meanwhile loses what it was compiling) and to read one picture (well under
  * one here) before it counts as hung: then it is ended, and the screen is not read.
  */
@@ -117,8 +117,8 @@ export class ScreenReader {
 
   /**
    * Whether the helper prepares the OCR before it is ready (macOS: Vision, `start`): then one helper
-   * starts alone and the others once it is ready (`readFrames`), since the first use of Vision's text
-   * recognition is compiled one network at a time for every helper that asks.
+   * starts alone and the others once it is ready (`readFrames`), since Vision's text recognition,
+   * where it is compiled, is compiled one network at a time for every helper that asks.
    */
   static readonly prepares = process.platform === 'darwin';
 

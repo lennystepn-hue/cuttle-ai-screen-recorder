@@ -25,7 +25,7 @@ describe('answerWithin', () => {
 
 /**
  * A stand-in for macOS's `cuttle-capture ocr` in `dir`: it says it prepares, prepares for `ms` (as
- * Vision does on its first use; -1: for good), then reads every picture as empty. It notes in `log`
+ * Vision does where it compiles; -1: for good), then reads every picture as empty. It notes in `log`
  * when it started and when it was ready, each line "<pid> <what> <ms since 1970>".
  */
 function preparingHelper(dir: string, ms: number, log: string): string {
@@ -117,7 +117,7 @@ describe.runIf(process.platform === 'darwin')('an OCR helper that prepares Visio
  * The system's own OCR (Windows', macOS's Vision) on a page with planted fake secrets
  * (fixtures/privacy/secrets.html, rendered at 1920 × 1080 by `cuttle capture-page`): each secret it
  * reads gets a mask, the clean lines none. It runs where there is one; elsewhere it is skipped. Each
- * test has the time macOS may take to prepare Vision besides its own (on its first use a minute).
+ * test has the time macOS may take to prepare Vision besides its own (a minute where it compiles).
  */
 describe.runIf(process.platform === 'win32' || process.platform === 'darwin')('reading the screen with the system OCR', () => {
   it('reads the page and masks what is private on it, and nothing on the clean lines', async () => {

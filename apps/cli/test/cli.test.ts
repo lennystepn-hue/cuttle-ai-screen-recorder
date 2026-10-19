@@ -913,7 +913,7 @@ describe.runIf(process.platform === 'win32' || process.platform === 'darwin')('c
     } finally {
       if (off !== undefined) process.env.CUTTLE_OCR = off;
     }
-    // and the time macOS may take to prepare Vision (on its first use a minute)
+    // and the time macOS may take to prepare Vision (a minute where it compiles)
   }, 120_000 + OCR_TIMEOUT.prepare * 1000);
 });
 

@@ -2,12 +2,12 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** On macOS, reading the screen after a take works the first time, too.
+**Goal:** On macOS, reading the screen after a take works also when macOS first compiles Vision's text recognition.
 
 In the installed Cuttle 0.1.1 (signed, notarized), reading the screen stayed at 0 % and then said "Cuttle could not read the screen: the OCR helper did not answer within 60 s (reading …/0.png)". The helper had said it was ready, then took longer than 60 s for its first picture.
 
 **Architecture:**
-- **The helper prepares Vision first.** `cuttle-capture ocr` (`packages/recorder/native/macos/capture.swift`) first says `{"preparing": true}`. Then it reads a line of text of its own (320 × 64, drawn with CoreText), and only then says it is ready. On a first use, that one picture is where macOS compiles Vision's networks.
+- **The helper prepares Vision first.** `cuttle-capture ocr` (`packages/recorder/native/macos/capture.swift`) first says `{"preparing": true}`. Then it reads a line of text of its own (320 × 64, drawn with CoreText), and only then says it is ready. Where macOS has to compile Vision's networks, it does so on that one picture.
 - **Preparing has its own limit.** `ScreenReader.start` (`packages/core/src/privacy/ocr.ts`) gives the preparation `OCR_TIMEOUT.prepare` (300 s). A picture still has 60 s, and the start still has 60 s.
 - **One helper prepares alone.** On macOS (`ScreenReader.prepares`), `readFrames` (`packages/core/src/privacy/read.ts`) starts one helper, and the others only once it is ready. The others then find the networks compiled. If the first cannot start, the others are not tried.
 - **Windows does not change:** its helper says no `preparing`, and its helpers start together, as #59 measured.
@@ -46,7 +46,19 @@ The machine is a MacBook Air M1 (MacBookAir10,1, 8 logical processors) on macOS 
 - The second large network started at 23:16:16. Both helpers were ended at 23:16:18, 60 s after their first picture, and that compile was lost.
 - The next run of the installed helper (34 s) compiled only that second network. What was compiled before had been kept.
 
-**What compiled networks are kept for.** A copy of the dev helper, a new build of it with a new LC_UUID, and the same helper again were all fast. A new signing identity (`codesign -s - -i <new>`) was always slow the first time, and so was the dev helper rebuilt from changed source (68 s in the first test run of this branch). Whatever the key, a newly installed or built helper can pay the minute once.
+**What compiled networks are kept for.**
+- Fast: a copy of the dev helper, a new build of it with a new LC_UUID, and the same helper again.
+- Slow the first time: every new signing identity (`codesign -s - -i <new>`).
+- **For one signing identity at a time.** Found after the PR was opened, so the PR's text was corrected:
+
+| Run, one after the other | Ready after |
+|---|---|
+| Dev helper, compiled before | 0.21 s |
+| A new identity | 63.0 s |
+| The dev helper again | **61.1 s** |
+| The new identity again | **64.9 s** |
+
+So a helper prepares for a minute on its first use, and again once another program had macOS compile the same networks for itself. That also explains why the dev helper was slow again in this branch's test runs: each new identity measured in between had pushed it out. Cuttle cannot share the compiled networks with other programs, so the preparation gets its own step and limit.
 
 **One helper alone is too slow, too.** Under identities never used before:
 
@@ -72,7 +84,7 @@ What these show:
 - **Fix the cause:** prepare Vision, as one step, before the helper says it is ready. Raising the 60 s a picture would only have hidden it:
   - The helper is ended in the middle of compiling, which loses that network.
   - With three helpers, each waits for the others' compiles, so the wait grows.
-- **300 s for preparing** is five times the minute measured on the slowest Apple silicon Mac here. A picture still has 60 s: a helper that hangs while reading is ended as before.
+- **300 s for preparing** is five times the minute measured on an M1, the oldest Apple silicon there is. A picture still has 60 s: a helper that hangs while reading is ended as before.
 - **One helper prepares, the others start after it:**
   - With the networks compiled, three helpers still read more than twice as fast as one (0.28 s against 0.20 s a picture, three at once). So `helpersFor` stays.
   - Starting one after the other costs about 0.4 s once they are compiled (preparing then takes 0.35 s).

@@ -15,8 +15,8 @@
 // Reads the text of pictures with the Vision framework, for the privacy masks: as Windows' OCR helper
 // in core's privacy/ocr.ts, one request per line on stdin ({"path"}), one JSON line per answer
 // ({"lines": [[{"t", "r": [x, y, w, h]}]]}, in the picture's pixels), after a first line that says it
-// prepares Vision ({"preparing": true}: on its first use a minute or so, see readText) and one that
-// says it is ready and in which languages. Nothing leaves this computer.
+// prepares Vision ({"preparing": true}: that can take a minute, see readText) and one that says it
+// is ready and in which languages. Nothing leaves this computer.
 import CoreGraphics
 import CoreMedia
 import CoreText
@@ -171,10 +171,11 @@ func sampleLine() -> CGImage? {
 
 /**
  * `cuttle-capture ocr`: pictures' text through Vision until stdin closes. Vision is prepared first, on
- * a line of its own: on the first use of its text recognition by a newly installed or built helper,
- * macOS compiles the recognition's networks for the Neural Engine. That took a minute for one helper
- * on an M1, one network at a time for all processes that ask (two helpers at once: 87 s and 113 s).
- * The networks then stay compiled, and preparing takes a fraction of a second.
+ * a line of its own: macOS compiles its text recognition's networks for the Neural Engine on this
+ * helper's first use of them, and again once another program had them compiled for itself (it kept
+ * them for one at a time here). That took a minute for one helper on an M1, one network at a time
+ * for all processes that ask (two helpers at once: 87 s and 113 s); compiled, preparing takes a
+ * fraction of a second.
  */
 func readText() -> Never {
   answer(["preparing": true])

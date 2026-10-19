@@ -1458,7 +1458,9 @@ describe.runIf(enabled)('the Cuttle app', () => {
     // the steps are not the person's markers: the HUD counts none
     expect(await hud.locator('.marker small').count()).toBe(0);
     await shotOf('47-prompter', '/prompter.html');
-    await wait(600);
+    // A step's title needs 0.8 s of video after the step. After 0.6 s here step 2 had 1.17 s of it,
+    // and a quicker stop left none (macOS's runner); 2 s leaves it room.
+    await wait(2000);
     await click(hud, '[data-testid=hud-stop]');
 
     const dir = await newProject(before);
@@ -1480,8 +1482,10 @@ describe.runIf(enabled)('the Cuttle app', () => {
     await expect.poll(() => opened.locator('.flag span').allTextContents(), { timeout: 15_000 }).toContain('2 · Turn on dark mode');
     await shotOf('47b-step-pins', '/editor.html', `${basename(dir)} · Cuttle`);
     // the cut titled the steps the video shows: a title over step 2, listed in the Auto tab
-    const titled = JSON.parse(readFileSync(join(dir, 'cuttle.json'), 'utf8')) as { texts?: { text: string; auto?: string }[] };
-    expect(titled.texts?.filter((text) => text.auto === 'title').map((text) => text.text)).toContain('Turn on dark mode');
+    const titled = JSON.parse(readFileSync(join(dir, 'cuttle.json'), 'utf8')) as { texts?: { text: string; auto?: string }[]; scenes: unknown[] };
+    // where the steps came and what the cut kept, should it fail
+    const facts = JSON.stringify({ steps: markers.filter((marker) => marker.kind === 'step'), scenes: titled.scenes });
+    expect(titled.texts?.filter((text) => text.auto === 'title').map((text) => text.text), facts).toContain('Turn on dark mode');
     await click(opened, '#tab-auto');
     await opened.waitForSelector('[data-testid=auto-group-titles]');
     await click(opened, '[data-testid=auto-group-titles] .auto-toggle');

@@ -214,3 +214,13 @@ Expected: PASS, 58 tests.
 - The checks ran on the replayed commit.
 
 - On the prototype: `pnpm test` passed (998, 81 skipped) after the frame-rate bound; before it, a full run failed at 18.8 frames a second.
+
+**What CI found on this PR, fixed in a commit after the plan's**
+- **macOS: the script check's step 2 had no title again** (`app.check.test.ts`, "records with a script": titles `[Open the settings]` only). The branch already had #60's fix for a step after the last activity, which this failure turned out not to be.
+- **Measured here, with the step times and the take's length logged:**
+  - With the check's 0.6 s before the stop, step 2 came at 1.96 s and the take ended at 3.13 s. Its title got 1.17 s, only 0.37 s above the 0.8 s a title needs (`MIN_TITLE_SECONDS`).
+  - Without the wait, step 2 came at 2.02 s and the take ended at 2.13 s. There was no title, and the check failed as on the runner.
+  - The check's screen (the test pattern) moves all the time, so nothing is trimmed: the take simply ended too soon after the step.
+- **#60's explanation of the first failure was a guess.** It added the case of a step reached after all activity, which is right for the product, but a moving screen never has that case. This failure is the check stopping too soon.
+- **The check now waits 2 s before the stop.** When the title is missing, the check names the step times and the clips; the runner's log had said nothing about them.
+- Checked: the script check three times in a row, then `app:check` (58).

@@ -491,6 +491,9 @@ async function recordTake({ options, control, platform, area, byItself, cameraMo
       },
     );
     if (input.warning) reporter.warn(input.warning);
+    const source = input;
+    // the pointer, its shape and the content area when the screen starts (or resumes), through the window take's gate
+    const firstEvents = (time: number) => source.initial(time).filter((raw) => !gate || gate.allows(raw));
 
     // The screen track's start is the take's clock: input, markers and maxSeconds count from it.
     const first = await startSegment(1);
@@ -498,7 +501,7 @@ async function recordTake({ options, control, platform, area, byItself, cameraMo
     if (!first.segment) throw cancelled('the screen track started');
     const screenAt = first.segment.screen.start;
     segments.push(first.segment);
-    writer.setStart(screenAt, input.initial(screenAt));
+    writer.setStart(screenAt, firstEvents(screenAt));
     const begun = first.segment;
     writeJson(path(FILES.take), {
       version: TAKE_VERSION,
@@ -623,7 +626,7 @@ async function recordTake({ options, control, platform, area, byItself, cameraMo
       const offset = recordedBefore();
       segments.push(resumed.segment);
       writeSegments();
-      writer.setStart(resumed.segment.screen.start - offset, input.initial(resumed.segment.screen.start));
+      writer.setStart(resumed.segment.screen.start - offset, firstEvents(resumed.segment.screen.start));
       lastInput = now();
       capturing = true;
       reporter.emit({ type: 'resumed' });

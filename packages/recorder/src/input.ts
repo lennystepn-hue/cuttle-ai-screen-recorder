@@ -92,16 +92,19 @@ type Watched = Pick<import('./win32').Win32, 'foreground' | 'contentArea' | 'pop
 /**
  * The window shown and what opens over it: called on every shape read, it passes on the foreground
  * window's content area when it changes (`area`, null for none), and each dialog or menu that opens
- * or closes (`window`).
+ * or closes (`window`). `initial` is the content area as last read, for the take's first events: the
+ * first read comes before the take's first frame, which drops it, and an area that stays is not
+ * passed on again.
  */
-export function windowWatch(win: Watched, onInput: InputSink): (time: number) => void {
+export function windowWatch(win: Watched, onInput: InputSink): ((time: number) => void) & { initial(time: number): RawInput[] } {
   let reads = -1;
   let shown: { id: number; bounds: Caret } | undefined;
   let area: Caret | null | undefined;
   let open = new Map<number, ReturnType<Watched['popups']>[number]>();
   const same = (a: Caret | null | undefined, b: Caret | null) =>
     a === b || (!!a && !!b && Math.abs(a.x - b.x) <= AREA_SLACK && Math.abs(a.y - b.y) <= AREA_SLACK && Math.abs(a.width - b.width) <= AREA_SLACK && Math.abs(a.height - b.height) <= AREA_SLACK);
-  return (time) => {
+  const initial = (time: number): RawInput[] => (area === undefined ? [] : [{ type: 'area', time, rect: area }]);
+  return Object.assign((time: number) => {
     reads++;
     if (reads % WINDOWS_EVERY !== 0) return;
     const now = new Map(win.popups().map((popup) => [popup.id, popup]));
@@ -116,7 +119,7 @@ export function windowWatch(win: Watched, onInput: InputSink): (time: number) =>
     if (area !== undefined && same(area, next)) return;
     area = next;
     onInput({ type: 'area', time, rect: next });
-  };
+  }, { initial });
 }
 
 /**
@@ -205,6 +208,7 @@ async function startWindowsInput(onInput: InputSink, onHotkey: HotkeySink): Prom
       return [
         { type: 'move', time, x, y },
         { type: 'shape', time, shape },
+        ...windows.initial(time),
       ];
     },
     stop() {
@@ -282,7 +286,7 @@ async function startMacInput(onInput: InputSink, onHotkey: HotkeySink): Promise<
     }
   }, SHAPE_POLL_MS);
   return {
-    initial: (time) => [{ type: 'move', time, ...mac.cursorPosition() }, { type: 'shape', time, shape }],
+    initial: (time) => [{ type: 'move', time, ...mac.cursorPosition() }, { type: 'shape', time, shape }, ...windows.initial(time)],
     stop: () => {
       clearInterval(poll);
       tap?.stop();

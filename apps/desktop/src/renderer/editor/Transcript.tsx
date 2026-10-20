@@ -1,6 +1,7 @@
 // The Transcript tab: what the mic said, in paragraphs. The word being played is lit; a click goes
-// there, a double click fixes its text (the subtitles follow), selected words are cut out of the
-// video with Delete and come back with Restore; filler words are faint; Ctrl+F finds a word.
+// there, a double click fixes its text, and Edit text (or Enter) fixes the selected words as one
+// phrase (the subtitles follow); selected words are cut out of the video with Delete and come back
+// with Restore; filler words are faint; Ctrl+F finds a word.
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent } from 'react';
 import { likelyFiller, normWord, type CuttleProject, type TranscriptFile } from '@cuttle/project';
 import { applyCaptionFixes, sceneSpans, type SceneSpan } from '@cuttle/timeline';
@@ -66,7 +67,8 @@ export function TranscriptPanel() {
   const source = useStore(store, (state) => state.player.source);
   const findRequest = useStore(store, (state) => state.findRequest);
   const [selection, setSelection] = useState<{ anchor: number; focus: number }>();
-  const [editing, setEditing] = useState<number>();
+  /** The words whose text is being fixed, as one phrase. */
+  const [editing, setEditing] = useState<{ from: number; to: number }>();
   const [query, setQuery] = useState('');
   const find = useRef<HTMLInputElement>(null);
   const list = useRef<HTMLDivElement>(null);
@@ -123,15 +125,20 @@ export function TranscriptPanel() {
     const commands: Command[] = over.map((cut) => (cut.auto ? { type: 'set', list: 'cuts', id: cut.id!, fields: { enabled: false } } : { type: 'delete', list: 'cuts', id: cut.id! }));
     if (commands.length > 0) edit(commands, 'Restore words');
   };
-  const fix = (index: number, text: string) => {
-    const word = words[index]!;
+  /** The words from `range.from` to `range.to` read as `text`: one fix, up to where the next word starts. */
+  const fix = (range: { from: number; to: number }, text: string) => {
+    const fixing = words.slice(range.from, range.to + 1);
     setEditing(undefined);
-    if (text.trim() === word.text) return;
-    edit([{ type: 'caption-fix', at: word.t, end: word.end, text: text.trim() }], `Fix “${quoted([word])}”`);
+    if (text.trim() === fixing.map((word) => word.text).join(' ')) return;
+    const [first, last, after] = [fixing[0]!, fixing.at(-1)!, words[range.to + 1]];
+    const end = after && after.t > first.t && after.t < last.end ? after.t : last.end;
+    edit([{ type: 'caption-fix', at: first.t, end, text: text.trim() }], `Fix “${quoted(fixing)}”`);
   };
-  const unfix = (word: Word) => edit([{ type: 'caption-fix', at: word.t, end: word.end, text: undefined }], `Unfix “${quoted([word])}”`);
+  /** Takes away the fixes over the selected words. */
+  const unfix = () => edit([{ type: 'caption-fix', at: chosen[0]!.t, end: chosen.at(-1)!.end, text: undefined }], `Unfix “${quoted(chosen)}”`);
   const canCut = chosen.length > 0 && chosen.some((word) => word.state === 'shown' || word.state === 'fast');
   const canRestore = chosen.some((word) => word.state === 'cut');
+  const canEdit = chosen.length > 0 && chosen.every((word) => word.state !== 'out');
   const onKey = (event: KeyboardEvent) => {
     if (editing !== undefined || chosen.length === 0) return;
     if (event.key === 'Delete' || event.key === 'Backspace') {
@@ -143,9 +150,9 @@ export function TranscriptPanel() {
     } else if (event.key === 'Escape') {
       event.stopPropagation();
       setSelection(undefined);
-    } else if (event.key === 'Enter' && chosen.length === 1) {
+    } else if (event.key === 'Enter' && canEdit) {
       event.preventDefault();
-      setEditing(from);
+      setEditing({ from, to });
     }
   };
   const next = (step: 1 | -1) => {
@@ -184,15 +191,22 @@ export function TranscriptPanel() {
       <p className="hint transcript-meta">
         {words.length} words · {transcript.language === 'auto' ? 'language not told' : transcript.language === 'de' ? 'German' : transcript.language === 'en' ? 'English' : transcript.language} · {transcript.model} model
       </p>
+      <p className="hint transcript-meta" data-testid="transcript-hint">
+        Double-click a word to correct it, or select words (Shift+click) and Edit text to correct them as one. The subtitles follow.
+      </p>
       <div className="transcript-words" ref={list} tabIndex={0} onKeyDown={onKey} role="listbox" aria-multiselectable="true" aria-label="Transcript">
         {paragraphs.map((paragraph) => (
           <p key={paragraph[0]}>
             <span className="transcript-time">{formatTime(outputTimesOf(spans, words[paragraph[0]!]!.t)[0] ?? words[paragraph[0]!]!.t)}</span>
             {paragraph.map((index) => {
               const word = words[index]!;
-              if (editing === index) {
-                return <WordField key={index} initial={word.text} onDone={(text) => (text === undefined ? setEditing(undefined) : fix(index, text))} />;
+              if (editing && index === editing.from) {
+                const range = editing;
+                const initial = words.slice(range.from, range.to + 1).map((each) => each.text).join(' ');
+                return <WordField key={index} initial={initial} onDone={(text) => (text === undefined ? setEditing(undefined) : fix(range, text))} />;
               }
+              // the phrase's other words are in its field
+              if (editing && index > editing.from && index <= editing.to) return null;
               const classes = [
                 'word',
                 word.state,
@@ -215,7 +229,7 @@ export function TranscriptPanel() {
                     list.current?.focus();
                     pick(index, event);
                   }}
-                  onDoubleClick={() => word.state !== 'out' && setEditing(index)}
+                  onDoubleClick={() => word.state !== 'out' && setEditing({ from: index, to: index })}
                 >
                   {word.text || '·'}{' '}
                 </span>
@@ -229,6 +243,11 @@ export function TranscriptPanel() {
           <span className="hint">
             {chosen.length === 1 ? `“${quoted(chosen)}”` : `${chosen.length} words`} · {formatTime(chosen[0]!.t)}
           </span>
+          {canEdit && editing === undefined && (
+            <button type="button" className="ghost small" onClick={() => setEditing({ from, to })} data-testid="transcript-edit">
+              Edit text
+            </button>
+          )}
           {canCut && (
             <button type="button" className="ghost small" onClick={cutOut} data-testid="transcript-cut">
               Cut out
@@ -239,8 +258,8 @@ export function TranscriptPanel() {
               Restore
             </button>
           )}
-          {chosen.length === 1 && chosen[0]!.fixed && (
-            <button type="button" className="ghost small" onClick={() => unfix(chosen[0]!)} data-testid="transcript-unfix">
+          {chosen.some((word) => word.fixed) && (
+            <button type="button" className="ghost small" onClick={unfix} data-testid="transcript-unfix">
               Undo fix
             </button>
           )}
@@ -252,11 +271,14 @@ export function TranscriptPanel() {
 
 const round = (seconds: number) => Math.round(seconds * 1000) / 1000;
 
-/** The text of a word being fixed: Enter keeps it, Esc goes back. */
+/** The text of the words being fixed: Enter keeps it, Esc goes back. */
 function WordField({ initial, onDone }: { initial: string; onDone: (text: string | undefined) => void }) {
   const input = useRef<HTMLInputElement>(null);
   const ended = useRef(false);
-  useEffect(() => input.current?.select(), []);
+  useEffect(() => {
+    input.current?.focus();
+    input.current?.select();
+  }, []);
   const end = (text: string | undefined) => {
     if (ended.current) return;
     ended.current = true;
@@ -267,8 +289,8 @@ function WordField({ initial, onDone }: { initial: string; onDone: (text: string
       ref={input}
       className="word-field"
       defaultValue={initial}
-      aria-label="The word's text"
-      size={Math.max(4, initial.length + 1)}
+      aria-label="The words' text"
+      size={Math.min(60, Math.max(4, initial.length + 1))}
       onKeyDown={(event) => {
         event.stopPropagation();
         if (event.key === 'Enter') end(event.currentTarget.value);

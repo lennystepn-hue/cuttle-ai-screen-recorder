@@ -1644,13 +1644,17 @@ describe.runIf(enabled)('the Cuttle app', () => {
     // the language spoken
     await click(settings, '[data-testid=speech-language] button:nth-child(3)');
     await expect.poll(() => saved().speech?.language).toBe('en');
-    // live captions while recording: on until switched off; without a model the row says what they need
-    expect(await settings.locator('[data-testid=speech-live]').getAttribute('aria-checked')).toBe('true');
+    // live captions while recording: off until switched on; without a model the row says what they need
+    expect(await settings.locator('[data-testid=speech-live]').getAttribute('aria-checked')).toBe('false');
     expect(await settings.locator('.row:has([data-testid=speech-live]) .row-hint').textContent()).toBe('The HUD shows what the mic hears as you speak. It needs a speech model: download one above.');
     await click(settings, '[data-testid=speech-live]');
-    await expect.poll(() => saved().speech?.live).toBe(false);
+    await expect.poll(() => saved().speech?.live).toBe(true);
     // the switch shows it before it is pressed again (a press reads the state it shows)
+    await settings.waitForSelector('[data-testid=speech-live][aria-checked=true]');
+    await click(settings, '[data-testid=speech-live]');
+    await expect.poll(() => saved().speech?.live).toBe(false);
     await settings.waitForSelector('[data-testid=speech-live][aria-checked=false]');
+    // on again, for the HUD's live captions further on
     await click(settings, '[data-testid=speech-live]');
     await expect.poll(() => saved().speech?.live).toBe(true);
     if (!BASE_MODEL || !hasWhisper) {
@@ -1767,6 +1771,25 @@ describe.runIf(enabled)('the Cuttle app', () => {
     await expect.poll(() => saved().captions?.fixes).toEqual([{ at: cuttle.t, end: cuttle.end, text: 'Cuttle!' }]);
     // one word for one: it keeps its place in the list
     await page.waitForSelector(`${word('Cuttle')}.fixed`);
+    // words selected with Shift are fixed as one phrase with Edit text, and Undo fix brings them back
+    expect(await page.locator('[data-testid=transcript-hint]').textContent()).toContain('Double-click a word to correct it');
+    await click(page, word('edits'));
+    await page.evaluate((selector) => document.querySelector(selector)!.dispatchEvent(new MouseEvent('click', { bubbles: true, shiftKey: true })), word('video'));
+    await click(page, '[data-testid=transcript-edit]');
+    expect(await page.inputValue('[data-testid=word-field]')).toBe('edits the video');
+    await page.fill('[data-testid=word-field]', 'edits your video');
+    await page.press('[data-testid=word-field]', 'Enter');
+    const [edits, video] = [words[index('edits')]!, words[index('video')]!];
+    await expect.poll(() => saved().captions?.fixes).toEqual([
+      { at: cuttle.t, end: cuttle.end, text: 'Cuttle!' },
+      { at: edits.t, end: video.end, text: 'edits your video' },
+    ]);
+    await page.waitForSelector(`${word('edits')}.fixed`);
+    expect(await page.locator(word('edits')).textContent()).toBe('edits your video ');
+    await click(page, word('edits'));
+    await click(page, '[data-testid=transcript-unfix]');
+    await expect.poll(() => saved().captions?.fixes).toEqual([{ at: cuttle.t, end: cuttle.end, text: 'Cuttle!' }]);
+    expect(await page.locator('[data-testid=transcript] .word').count()).toBe(words.length);
     // Delete cuts the selected word out of the video; Restore brings it back
     await click(page, word('every'));
     await page.keyboard.press('Delete');

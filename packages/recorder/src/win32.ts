@@ -1,12 +1,13 @@
 // Windows APIs through koffi: monitors in ddagrab order, windows, pointer position and shape, the
 // caret, the content area of a window, and the dialogs and menus over the desktop.
 import type { CursorShape, WindowKind } from '@cuttle/project';
+import { OWN_PIDS } from './own-process';
 import type { Bounds, Monitor, WindowInfo } from './types';
 
 export interface Win32 {
   /** Outputs of the default adapter, in the order of ffmpeg ddagrab's `output_idx`. */
   monitors(): Monitor[];
-  /** Visible top-level windows with a title on one of the monitors, front to back; not this process's own. */
+  /** Visible top-level windows with a title on one of the monitors, front to back; not Cuttle's own (`own-process.ts`). */
   windows(): WindowInfo[];
   /** The pointer in physical desktop pixels, like the input hook's events. */
   cursorPosition(): { x: number; y: number };
@@ -27,7 +28,7 @@ export interface Win32 {
   contentArea(id: number, hidden?: boolean): Bounds | undefined;
   /** A process's executable's name (`node.exe`); '' when it cannot be read. */
   processName(pid: number): string;
-  /** The dialogs, menus and notifications on the desktop now (not this process's own). */
+  /** The dialogs, menus and notifications on the desktop now (not Cuttle's own). */
   popups(): { id: number; kind: WindowKind; bounds: Bounds }[];
   /**
    * Timers of this process to the millisecond (`timeBeginPeriod(1)`; Windows' default is 15.6 ms),
@@ -250,7 +251,7 @@ async function create(): Promise<Win32> {
       // The recorder's own console (cmd.exe titles it with the command line) and windows; see also ownTitle.
       const pid = [0];
       GetWindowThreadProcessId(hwnd, pid);
-      if (pid[0] === process.pid || (ownConsole !== 0n && koffi.address(hwnd) === ownConsole)) return 1;
+      if (OWN_PIDS.has(pid[0]!) || (ownConsole !== 0n && koffi.address(hwnd) === ownConsole)) return 1;
       const classBuffer = Buffer.alloc(512);
       const className = classBuffer.toString('utf16le', 0, GetClassNameW(hwnd, classBuffer, 256) * 2);
       if (SHELL_CLASSES.has(className)) return 1;
@@ -360,7 +361,7 @@ async function create(): Promise<Win32> {
         if (!IsWindowVisible(hwnd) || IsIconic(hwnd)) return 1;
         const pid = [0];
         GetWindowThreadProcessId(hwnd, pid);
-        if (pid[0] === process.pid) return 1;
+        if (OWN_PIDS.has(pid[0]!)) return 1;
         if (DwmGetWindowAttribute(hwnd, DWMWA_CLOAKED, cloaked, 4) >= 0 && cloaked.readUInt32LE(0) !== 0) return 1;
         const bounds = frame(hwnd);
         const kindOf = className(hwnd);

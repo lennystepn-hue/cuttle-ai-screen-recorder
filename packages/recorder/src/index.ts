@@ -7,6 +7,7 @@ export { HOTKEYS } from './input';
 export { LEVEL_FLOOR, PCM_RATE, levelMeter, wholeSamples, type MicLevel } from './level';
 export { claudeTranscriptDir, isMarkerSignal, readTranscriptLine, recentClaudeFolders, SessionReader, type ClaudeFolder, type ClaudeSignal, type MarkerSignal } from './claude';
 export { focusWindow, inputAllowed } from './devices';
+export { APP_PID_VARIABLE } from './own-process';
 /** macOS's helper (native/macos/capture.swift), which also reads pictures' text (`cuttle-capture ocr`). */
 export { captureHelper } from './mac-capture';
 export type {

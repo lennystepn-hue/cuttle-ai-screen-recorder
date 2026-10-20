@@ -1,5 +1,5 @@
 import { utilityProcess, type UtilityProcess } from 'electron';
-import type { Bounds, Devices, RecordOptions, RecorderEvent, Take } from '@cuttle/recorder';
+import { APP_PID_VARIABLE, type Bounds, type Devices, type RecordOptions, type RecorderEvent, type Take } from '@cuttle/recorder';
 import type { HostReply, HostRequest, LiveRequest } from '../shared/recording';
 import { CHECK, TEST_BACKEND } from './check';
 import { bundlePath } from './protocols';
@@ -39,7 +39,9 @@ export class RecorderHost {
 
   private start(): UtilityProcess {
     if (this.process) return this.process;
-    const child = utilityProcess.fork(bundlePath('main', 'recorder-host.mjs'), TEST_BACKEND ? ['--test-backend'] : [], { serviceName: 'Cuttle recorder', stdio: 'ignore' });
+    // the app's windows (the editor, the settings, the HUD) are the recorder's own, as its process's are
+    const env = { ...process.env, [APP_PID_VARIABLE]: String(process.pid) };
+    const child = utilityProcess.fork(bundlePath('main', 'recorder-host.mjs'), TEST_BACKEND ? ['--test-backend'] : [], { serviceName: 'Cuttle recorder', stdio: 'ignore', env });
     child.on('message', (message: HostReply) => this.receive(message));
     child.on('exit', (code) => {
       // a host let go by refresh(): the new one's listings and recording are not its own

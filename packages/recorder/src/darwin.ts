@@ -9,12 +9,13 @@
 // scales differ), and a point on it lies `scale` pixels apart from the next. `toPixels` maps a point,
 // as the input hook and CoreGraphics report it, onto the display that holds it.
 import type { CursorShape, WindowKind } from '@cuttle/project';
+import { OWN_PIDS } from './own-process';
 import type { Bounds, Monitor, WindowInfo } from './types';
 
 export interface Darwin {
   /** Active displays, in the order of CGGetActiveDisplayList: avfoundation's "Capture screen <index>". */
   monitors(): Monitor[];
-  /** Normal on-screen windows with a size, front to back; not this process's own. */
+  /** Normal on-screen windows with a size, front to back; not Cuttle's own (`own-process.ts`). */
   windows(): WindowInfo[];
   /** The pointer in desktop pixels. */
   cursorPosition(): { x: number; y: number };
@@ -48,7 +49,7 @@ export interface Darwin {
   watchInput(keys: boolean, onEvent: (event: TapEvent) => void): { stop(): void } | undefined;
   /** Camera or microphone access: AVAuthorizationStatus. */
   mediaAccess(kind: 'camera' | 'mic'): 'not-determined' | 'restricted' | 'denied' | 'authorized';
-  /** The front window (not this process's): its id and its frame, in desktop pixels. */
+  /** The front window (not Cuttle's own): its id and its frame, in desktop pixels. */
   foreground(): { id: number; bounds: Bounds } | undefined;
   /**
    * A window's page (a browser's, through the Accessibility API): Safari's and Firefox's web area,
@@ -58,7 +59,7 @@ export interface Darwin {
    */
   contentArea(id: number, hidden?: boolean): Bounds | undefined;
   /**
-   * The dialogs, menus and notifications on the desktop now (not this process's own), in desktop
+   * The dialogs, menus and notifications on the desktop now (not Cuttle's own), in desktop
    * pixels (see `macPopups`). A notification is each banner the Notification Center shows (through
    * the Accessibility API, once it holds still), or without that permission the right side of its
    * display, where banners and the centre open.
@@ -84,7 +85,7 @@ export const NOTIFICATION_CENTER = 'com.apple.notificationcenterui';
 const SHEET_SLACK = 2;
 
 /**
- * What the windows over the desktop are, of `windows` (front to back, not this process's): a modal
+ * What the windows over the desktop are, of `windows` (front to back, not Cuttle's own): a modal
  * panel (an alert, a save panel) or a sheet (a smaller window of the same app centred inside the
  * window right behind it) a dialog, a pop-up menu a menu, and the Notification Center's windows
  * above the desktop a notification (where its banners are is asked of the Accessibility API). Pure.
@@ -470,7 +471,7 @@ async function create(): Promise<Darwin> {
         if (integerOf(CFDictionaryGetValue(info, KEYS.layer)) !== 0) continue;
         if ((doubleOf(CFDictionaryGetValue(info, KEYS.alpha)) ?? 1) <= 0) continue;
         const pid = integerOf(CFDictionaryGetValue(info, KEYS.pid)) ?? 0;
-        if (pid === process.pid) continue;
+        if (OWN_PIDS.has(pid)) continue;
         const id = integerOf(CFDictionaryGetValue(info, KEYS.number));
         const bounds = CFDictionaryGetValue(info, KEYS.bounds);
         if (id === undefined || !bounds || !CGRectMakeWithDictionaryRepresentation(bounds, rect)) continue;
@@ -516,7 +517,7 @@ async function create(): Promise<Darwin> {
     return bundle;
   };
 
-  /** The windows on the screen at every level above the desktop, front to back, in points; not this process's. */
+  /** The windows on the screen at every level above the desktop, front to back, in points; not Cuttle's own. */
   const listed = (): ListedWindow[] => {
     const array = CGWindowListCopyWindowInfo(kCGWindowListOptionOnScreenOnly | kCGWindowListExcludeDesktopElements, 0);
     if (!array) return [];
@@ -529,7 +530,7 @@ async function create(): Promise<Darwin> {
         const pid = integerOf(CFDictionaryGetValue(info, KEYS.pid)) ?? 0;
         const id = integerOf(CFDictionaryGetValue(info, KEYS.number));
         const bounds = CFDictionaryGetValue(info, KEYS.bounds);
-        if (pid === process.pid || id === undefined || !bounds || !CGRectMakeWithDictionaryRepresentation(bounds, rect)) continue;
+        if (OWN_PIDS.has(pid) || id === undefined || !bounds || !CGRectMakeWithDictionaryRepresentation(bounds, rect)) continue;
         if (rect.size.width < 2 || rect.size.height < 2) continue;
         const layer = integerOf(CFDictionaryGetValue(info, KEYS.layer)) ?? 0;
         found.push({ id, pid, layer, points: { x: rect.origin.x, y: rect.origin.y, width: rect.size.width, height: rect.size.height }, bundle: bundleOf(pid) });
@@ -609,7 +610,7 @@ async function create(): Promise<Darwin> {
       for (let i = 0; i < Number(CFArrayGetCount(array)); i++) {
         const info = CFArrayGetValueAtIndex(array, i);
         const pid = integerOf(CFDictionaryGetValue(info, KEYS.pid));
-        if (integerOf(CFDictionaryGetValue(info, KEYS.layer)) === 0 && pid !== undefined && pid !== process.pid) return pid;
+        if (integerOf(CFDictionaryGetValue(info, KEYS.layer)) === 0 && pid !== undefined && !OWN_PIDS.has(pid)) return pid;
       }
       return undefined;
     } finally {

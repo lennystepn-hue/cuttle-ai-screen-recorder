@@ -1,7 +1,8 @@
 // Reading the screen's text with the system's own OCR: on Windows Windows.Media.Ocr through a
 // Windows PowerShell 5.1 helper, on macOS the Vision framework through the recorder's cuttle-capture
 // (`cuttle-capture ocr`, native/macos/capture.swift). Either, started once, reads PNG files one
-// request per line on stdin and answers one JSON line each. Nothing leaves this computer.
+// request per line on stdin and answers one JSON line each; macOS's says first that it prepares
+// Vision, which can take a minute. Nothing leaves this computer.
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { createInterface } from 'node:readline';
 import type { Rect, ScreenTextLine } from '@cuttle/project';
@@ -54,10 +55,12 @@ while ($null -ne ($line = [Console]::In.ReadLine())) {
 export const OCR_SCALE = 2;
 
 /**
- * Seconds the helper may take to start (Windows PowerShell, cold, can take several) and to read one
- * picture (well under one here) before it counts as hung: then it is ended, and the screen is not read.
+ * Seconds the helper may take to start (Windows PowerShell, cold, can take several), to prepare
+ * Vision on macOS (a minute on an M1 where it compiles, see capture.swift's readText; else a fraction
+ * of one; a helper ended meanwhile loses what it was compiling) and to read one picture (well under
+ * one here) before it counts as hung: then it is ended, and the screen is not read.
  */
-export const OCR_TIMEOUT = { start: 60, read: 60 };
+export const OCR_TIMEOUT = { start: 60, prepare: 300, read: 60 };
 
 /**
  * The helper's next answer, or `ocr-missing` when none came within `seconds` (`hung` is called
@@ -108,13 +111,22 @@ export class ScreenReader {
     readonly language: string,
     /** Whether pictures are read larger than they are (Windows' OCR), up to `OCR_SCALE`. */
     private readonly upscales: boolean,
+    /** Seconds a picture may take (`OCR_TIMEOUT.read`). */
+    private readonly readTimeout: number,
   ) {}
 
   /**
-   * Starts the helper; `ocr-missing` where it cannot run (neither Windows nor macOS, PowerShell
-   * refused, no OCR language, cuttle-capture not built).
+   * Whether the helper prepares the OCR before it is ready (macOS: Vision, `start`): then one helper
+   * starts alone and the others once it is ready (`readFrames`), since Vision's text recognition,
+   * where it is compiled, is compiled one network at a time for every helper that asks.
    */
-  static async start(): Promise<ScreenReader> {
+  static readonly prepares = process.platform === 'darwin';
+
+  /**
+   * Starts the helper; `ocr-missing` where it cannot run (neither Windows nor macOS, PowerShell
+   * refused, no OCR language, cuttle-capture not built) or does not answer within `timeout`.
+   */
+  static async start(timeout = OCR_TIMEOUT): Promise<ScreenReader> {
     // the switch first: it says the same on every platform (the checks and the tests set it)
     if (process.env.CUTTLE_OCR === 'off') throw new CoreError('ocr-missing', 'reading the screen is switched off (CUTTLE_OCR=off)');
     let child: ChildProcessWithoutNullStreams;
@@ -135,20 +147,24 @@ export class ScreenReader {
     let stderr = '';
     child.stderr.on('data', (chunk: Buffer) => (stderr += chunk.toString('utf8')));
     const started = new Promise<never>((_, reject) => child.on('error', (error) => reject(new CoreError('ocr-missing', `the OCR helper did not start (${error.message})`))));
-    const first = await Promise.race([answerWithin(answers, OCR_TIMEOUT.start, 'starting', () => child.kill()), started]);
-    const hello = first.done ? undefined : (JSON.parse(first.value) as { ready: boolean; language?: string; max?: number });
+    const next = async (seconds: number, what: string) => {
+      const line = await Promise.race([answerWithin(answers, seconds, what, () => child.kill()), started]);
+      return line.done ? undefined : (JSON.parse(line.value) as { preparing?: boolean; ready?: boolean; language?: string; max?: number });
+    };
+    let hello = await next(timeout.start, 'starting');
+    if (hello?.preparing) hello = await next(timeout.prepare, "preparing macOS's text recognition");
     if (!hello?.ready) {
       child.kill();
       throw new CoreError('ocr-missing', hello ? 'Windows has no OCR language installed (Settings > Time & language > Language)' : `the OCR helper did not start${stderr ? `: ${stderr.trim().split(/\r?\n/)[0]}` : ''}`);
     }
-    return new ScreenReader(child, answers, hello.max ?? 10_000, (hello.language ?? '').split(',').filter(Boolean).join(', '), process.platform === 'win32');
+    return new ScreenReader(child, answers, hello.max ?? 10_000, (hello.language ?? '').split(',').filter(Boolean).join(', '), process.platform === 'win32', timeout.read);
   }
 
   /** The text of a PNG of `width` × `height` (on Windows read at up to `OCR_SCALE` times its size); rects in its pixels. */
   async read(path: string, width: number, height: number): Promise<ScreenTextLine[]> {
     const scale = this.upscales ? Math.max(1, Math.min(OCR_SCALE, this.maxSide / Math.max(width, height))) : 1;
     this.child.stdin.write(`${JSON.stringify({ path, scale })}\n`);
-    const next = await answerWithin(this.answers, OCR_TIMEOUT.read, `reading ${path}`, () => this.child.kill());
+    const next = await answerWithin(this.answers, this.readTimeout, `reading ${path}`, () => this.child.kill());
     if (next.done) throw new CoreError('ocr-missing', 'the OCR helper stopped');
     const answer = JSON.parse(next.value) as Answer;
     if (answer.error) throw new CoreError('invalid-media', `the OCR could not read ${path}: ${answer.error}`);

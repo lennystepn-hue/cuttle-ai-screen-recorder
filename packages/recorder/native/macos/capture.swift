@@ -15,9 +15,11 @@
 // Reads the text of pictures with the Vision framework, for the privacy masks: as Windows' OCR helper
 // in core's privacy/ocr.ts, one request per line on stdin ({"path"}), one JSON line per answer
 // ({"lines": [[{"t", "r": [x, y, w, h]}]]}, in the picture's pixels), after a first line that says it
+// prepares Vision ({"preparing": true}: that can take a minute, see readText) and one that says it
 // is ready and in which languages. Nothing leaves this computer.
 import CoreGraphics
 import CoreMedia
+import CoreText
 import CoreVideo
 import Foundation
 import ImageIO
@@ -141,8 +143,42 @@ func words(of candidate: VNRecognizedText, in size: CGSize) -> [[String: Any]] {
   }
 }
 
-/** `cuttle-capture ocr`: pictures' text through Vision until stdin closes. */
+/** A request for a picture's text in `languages`. */
+func textRequest(_ languages: [String]) -> VNRecognizeTextRequest {
+  let read = VNRecognizeTextRequest()
+  read.recognitionLevel = .accurate
+  read.recognitionLanguages = languages
+  // what is on the screen as it is written: no words "corrected" into others (addresses, keys)
+  read.usesLanguageCorrection = false
+  read.minimumTextHeight = 0
+  return read
+}
+
+/** A line of text of its own, black on white: what Vision is prepared on. */
+func sampleLine() -> CGImage? {
+  let width = 320, height = 64
+  guard let context = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0, space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
+  context.setFillColor(gray: 1, alpha: 1)
+  context.fill(CGRect(x: 0, y: 0, width: width, height: height))
+  let attributes: [NSAttributedString.Key: Any] = [
+    NSAttributedString.Key(kCTFontAttributeName as String): CTFontCreateWithName("Helvetica" as CFString, 28, nil),
+    NSAttributedString.Key(kCTForegroundColorAttributeName as String): CGColor(gray: 0, alpha: 1),
+  ]
+  context.textPosition = CGPoint(x: 16, y: 20)
+  CTLineDraw(CTLineCreateWithAttributedString(NSAttributedString(string: "Cuttle 0123", attributes: attributes)), context)
+  return context.makeImage()
+}
+
+/**
+ * `cuttle-capture ocr`: pictures' text through Vision until stdin closes. Vision is prepared first, on
+ * a line of its own: macOS compiles its text recognition's networks for the Neural Engine on this
+ * helper's first use of them, and again once another program had them compiled for itself (it kept
+ * them for one at a time here). That took a minute for one helper on an M1, one network at a time
+ * for all processes that ask (two helpers at once: 87 s and 113 s); compiled, preparing takes a
+ * fraction of a second.
+ */
 func readText() -> Never {
+  answer(["preparing": true])
   let probe = VNRecognizeTextRequest()
   probe.recognitionLevel = .accurate
   let supported = (try? probe.supportedRecognitionLanguages()) ?? []
@@ -152,6 +188,8 @@ func readText() -> Never {
   }
   if languages.isEmpty { languages = ["en-US"] }
   languages = languages.reduce(into: []) { if !$0.contains($1) { $0.append($1) } }
+  // should Vision fail on it, each picture asked for says why
+  if let sample = sampleLine() { try? VNImageRequestHandler(cgImage: sample, options: [:]).perform([textRequest(languages)]) }
   answer(["ready": true, "language": languages.joined(separator: ","), "max": 16384])
   while let line = readLine() {
     autoreleasepool {
@@ -161,12 +199,7 @@ func readText() -> Never {
       guard let source = CGImageSourceCreateWithURL(URL(fileURLWithPath: path) as CFURL, nil), let image = CGImageSourceCreateImageAtIndex(source, 0, nil) else {
         return answer(["error": "cannot open \(path)"])
       }
-      let read = VNRecognizeTextRequest()
-      read.recognitionLevel = .accurate
-      read.recognitionLanguages = languages
-      // what is on the screen as it is written: no words "corrected" into others (addresses, keys)
-      read.usesLanguageCorrection = false
-      read.minimumTextHeight = 0
+      let read = textRequest(languages)
       do {
         try VNImageRequestHandler(cgImage: image, options: [:]).perform([read])
       } catch {

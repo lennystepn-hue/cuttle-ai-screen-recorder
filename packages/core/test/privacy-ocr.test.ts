@@ -1,13 +1,15 @@
-import { spawnSync } from 'node:child_process';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { spawn, spawnSync } from 'node:child_process';
+import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { createInterface } from 'node:readline';
 import { describe, expect, it, vi } from 'vitest';
 import type { Rect } from '@cuttle/project';
+import { captureHelper } from '@cuttle/recorder';
 import { privacyMasks } from '../src/privacy/masks';
 import { readFrames } from '../src/privacy/read';
 import { redactFrames } from '../src/privacy/redact';
-import { ScreenReader, answerWithin } from '../src/privacy/ocr';
+import { OCR_TIMEOUT, ScreenReader, answerWithin } from '../src/privacy/ocr';
 
 describe('answerWithin', () => {
   it("ends a helper that does not answer in time, and passes an answer that comes", async () => {
@@ -22,9 +24,100 @@ describe('answerWithin', () => {
 });
 
 /**
+ * A stand-in for macOS's `cuttle-capture ocr` in `dir`: it says it prepares, prepares for `ms` (as
+ * Vision does where it compiles; -1: for good), then reads every picture as empty. It notes in `log`
+ * when it started and when it was ready, each line "<pid> <what> <ms since 1970>".
+ */
+function preparingHelper(dir: string, ms: number, log: string): string {
+  const file = join(dir, `ocr-${ms}.mjs`);
+  writeFileSync(
+    file,
+    `#!/usr/bin/env node
+import { appendFileSync } from 'node:fs';
+import { createInterface } from 'node:readline';
+const note = (what) => appendFileSync(${JSON.stringify(log)}, process.pid + ' ' + what + ' ' + Date.now() + '\\n');
+note('started');
+process.stdout.write('{"preparing":true}\\n');
+if (${ms} < 0) setInterval(() => {}, 1000);
+else setTimeout(() => {
+  note('ready');
+  process.stdout.write('{"ready":true,"language":"en-US","max":16384}\\n');
+  createInterface({ input: process.stdin }).on('line', () => process.stdout.write('{"lines":[]}\\n'));
+}, ${ms});
+`,
+  );
+  chmodSync(file, 0o755);
+  return file;
+}
+
+describe.runIf(process.platform === 'darwin')('an OCR helper that prepares Vision first (macOS)', () => {
+  const withHelper = async (ms: number, run: (dir: string, log: string) => Promise<void>) => {
+    const dir = mkdtempSync(join(tmpdir(), 'cuttle-ocr-'));
+    const log = join(dir, 'helpers.log');
+    const chosen = process.env.CUTTLE_CAPTURE_HELPER;
+    const off = process.env.CUTTLE_OCR;
+    delete process.env.CUTTLE_OCR;
+    process.env.CUTTLE_CAPTURE_HELPER = preparingHelper(dir, ms, log);
+    try {
+      await run(dir, log);
+    } finally {
+      if (chosen === undefined) delete process.env.CUTTLE_CAPTURE_HELPER;
+      else process.env.CUTTLE_CAPTURE_HELPER = chosen;
+      if (off !== undefined) process.env.CUTTLE_OCR = off;
+      rmSync(dir, { recursive: true, force: true });
+    }
+  };
+
+  it("gives the preparing its own time, not a picture's, and ends a helper that does not get ready", async () => {
+    // prepared in 0.5 s, longer than a picture may take here: the first picture is read all the same
+    await withHelper(500, async (dir) => {
+      const reader = await ScreenReader.start({ start: 10, prepare: 10, read: 0.25 });
+      try {
+        expect(await reader.read(join(dir, 'a.png'), 64, 36)).toEqual([]);
+      } finally {
+        reader.close();
+      }
+    });
+    await withHelper(-1, async () => {
+      await expect(ScreenReader.start({ start: 10, prepare: 0.25, read: 10 })).rejects.toMatchObject({ code: 'ocr-missing', message: "the OCR helper did not answer within 0.25 s (preparing macOS's text recognition)" });
+    });
+  });
+
+  it('starts one helper alone, and the others once it is ready', async () => {
+    await withHelper(300, async (dir, log) => {
+      const video = join(dir, 'still.mp4');
+      expect(spawnSync('ffmpeg', ['-v', 'error', '-f', 'lavfi', '-i', 'color=c=white:s=64x36:r=10:d=2', '-pix_fmt', 'yuv420p', '-y', video]).status).toBe(0);
+      const times = [0, 0.5, 1, 1.5];
+      const { frames } = await readFrames(video, times, { width: 64, height: 36 }, { helpers: 3 });
+      expect(frames.map((frame) => frame.t)).toEqual(times);
+      const notes = readFileSync(log, 'utf8').trim().split('\n').map((line) => line.split(' '));
+      const [lead] = notes[0]!;
+      const ready = Number(notes.find(([pid, what]) => pid === lead && what === 'ready')![2]);
+      const others = notes.filter(([pid, what]) => pid !== lead && what === 'started');
+      expect(others).toHaveLength(2);
+      for (const [, , at] of others) expect(Number(at)).toBeGreaterThanOrEqual(ready);
+    });
+  });
+
+  it('is what cuttle-capture does: it says it prepares, then that it is ready', async () => {
+    const helper = captureHelper('');
+    expect(helper, 'cuttle-capture is built (pnpm install)').toBeDefined();
+    const child = spawn(helper!, ['ocr']);
+    try {
+      const lines = createInterface({ input: child.stdout })[Symbol.asyncIterator]();
+      expect(JSON.parse((await lines.next()).value as string)).toEqual({ preparing: true });
+      expect(JSON.parse((await lines.next()).value as string)).toMatchObject({ ready: true });
+    } finally {
+      child.kill();
+    }
+  }, (OCR_TIMEOUT.prepare + 10) * 1000);
+});
+
+/**
  * The system's own OCR (Windows', macOS's Vision) on a page with planted fake secrets
  * (fixtures/privacy/secrets.html, rendered at 1920 × 1080 by `cuttle capture-page`): each secret it
- * reads gets a mask, the clean lines none. It runs where there is one; elsewhere it is skipped.
+ * reads gets a mask, the clean lines none. It runs where there is one; elsewhere it is skipped. Each
+ * test has the time macOS may take to prepare Vision besides its own (a minute where it compiles).
  */
 describe.runIf(process.platform === 'win32' || process.platform === 'darwin')('reading the screen with the system OCR', () => {
   it('reads the page and masks what is private on it, and nothing on the clean lines', async () => {
@@ -63,7 +156,7 @@ describe.runIf(process.platform === 'win32' || process.platform === 'darwin')('r
     for (const secret of ['lena.mueller@example.com', 'DE89', 'AbCdEf', 'AKIA', 'SESSION=']) expect(keptText, secret).not.toContain(secret);
     for (const clean of ['Release', 'Order']) expect(keptText, clean).toContain(clean);
     expect(privacyMasks(kept, [], { width: 1920, height: 1080 })).toEqual(masks);
-  }, 60_000);
+  }, 60_000 + OCR_TIMEOUT.prepare * 1000);
 
   it('reads frames with several helpers at once, each frame its own text, in order', async () => {
     delete process.env.CUTTLE_OCR;
@@ -88,5 +181,5 @@ describe.runIf(process.platform === 'win32' || process.platform === 'darwin')('r
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
-  }, 120_000);
+  }, 120_000 + OCR_TIMEOUT.prepare * 1000);
 });

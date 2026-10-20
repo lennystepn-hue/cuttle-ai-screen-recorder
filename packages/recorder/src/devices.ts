@@ -46,6 +46,17 @@ export async function focusWindow(id: number, options: { backend?: Backend } = {
   return (await loadWin32()).focus(id);
 }
 
+/**
+ * Whether a take logs the clicks and the keys: macOS needs Input Monitoring for them (the first call
+ * shows macOS's prompt), Windows and the test backend need nothing. Asked before a take, so the
+ * prompt never opens in one.
+ */
+export async function inputAllowed(options: { backend?: Backend } = {}): Promise<boolean> {
+  if (platformFor(options.backend) !== 'macos') return true;
+  const { loadDarwin } = await import('./darwin');
+  return (await loadDarwin()).keyboardAccess();
+}
+
 /** The windows now, for a window source that is resolved again when the countdown ends. */
 export async function windowsFor(platform: Platform): Promise<WindowInfo[]> {
   if (platform === 'test') return structuredClone(TEST_DEVICES.windows);

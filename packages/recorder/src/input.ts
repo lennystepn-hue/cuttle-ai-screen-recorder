@@ -225,10 +225,11 @@ const WHERE_INPUT_MONITORING = 'allow the app that runs Cuttle (your terminal, o
  * macOS: an event tap of darwin.ts (see there why not uiohook) in desktop pixels, each event at its
  * own timestamp (a caret read or a busy moment of this thread does not shift it); the pointer's
  * shape, the windows' dialogs, menus and notifications and the page shown read as on Windows.
- * Without Input Monitoring only the mouse is logged (no key counts, no hotkeys, no caret); the caret
- * and the page also need the Accessibility permission (without it, zooms on typing follow what the
- * screen changes, the crop comes from the picture, and a notification is masked on the whole right
- * side of its display).
+ * Without Input Monitoring no key is logged (no key counts, no hotkeys, no caret), and recent macOS
+ * sends the tap no mouse event either: until the tap sends one, the pointer's position is read with
+ * its shape, so the take keeps the pointer's way (no clicks). The caret and the page also need the
+ * Accessibility permission (without it, zooms on typing follow what the screen changes, the crop
+ * comes from the picture, and a notification is masked on the whole right side of its display).
  */
 async function startMacInput(onInput: InputSink, onHotkey: HotkeySink): Promise<InputSource> {
   const { loadDarwin } = await import('./darwin');
@@ -237,7 +238,10 @@ async function startMacInput(onInput: InputSink, onHotkey: HotkeySink): Promise<
   // modifier keys come as flag changes, not as key presses: none to leave out
   const keys = keyHandler(new Set(), MAC_HOTKEYS, onInput, onHotkey);
   let typedAt = -Infinity;
+  /** Whether the tap has sent an event: until then the pointer is read (`poll`). */
+  let tapped = false;
   const tap = mac.watchInput(keyboard, (event) => {
+    tapped = true;
     const { time } = event;
     if (event.type === 'key') {
       const key = { keycode: event.keycode, ctrlKey: event.ctrl, shiftKey: event.shift, altKey: event.alt };
@@ -248,20 +252,26 @@ async function startMacInput(onInput: InputSink, onHotkey: HotkeySink): Promise<
     if (event.type === 'down') return onInput({ type: 'click', time, x: event.x, y: event.y, button: event.button });
     onInput({ type: 'scroll', time, x: event.x, y: event.y, dx: event.dx, dy: event.dy });
   });
-  const warning = !tap
-    ? `the mouse and the keyboard are not logged (no clicks, no zooms on them, no hotkeys): ${WHERE_INPUT_MONITORING}`
-    : !keyboard
-      ? `the keyboard is not logged (no typing activity, no hotkeys): ${WHERE_INPUT_MONITORING}`
+  const warning = !keyboard
+    ? `the keyboard is not logged, and recent macOS sends no clicks either (no typing activity, no hotkeys, no zooms on clicks): ${WHERE_INPUT_MONITORING}, then quit and reopen it`
+    : !tap
+      ? 'the clicks and the keyboard are not logged, only where the pointer goes (no zooms on clicks, no typing activity, no hotkeys): macOS did not let Cuttle watch the input'
       : undefined;
   // the pointer's shape, the caret and the windows, read as on Windows (the caret a few times a second while keys come)
   const caret = caretWatch(() => mac.caret(), onInput);
   const windows = windowWatch(mac, onInput);
   let shape = mac.cursorShape();
+  let pointer = mac.cursorPosition();
   const poll = setInterval(() => {
     // an answer the system could not give must not end the recording: the next look tries again
     try {
+      if (!tapped) {
+        const at = mac.cursorPosition();
+        if (at.x !== pointer.x || at.y !== pointer.y) onInput({ type: 'move', time: now(), ...at });
+        pointer = at;
+      }
       const current = mac.cursorShape();
-      if (tap && current !== shape) {
+      if (current !== shape) {
         shape = current;
         onInput({ type: 'shape', time: now(), shape });
       }

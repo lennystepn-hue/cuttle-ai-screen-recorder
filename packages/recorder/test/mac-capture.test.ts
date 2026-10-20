@@ -1,6 +1,18 @@
+import { execFileSync } from 'node:child_process';
+import { createRequire } from 'node:module';
+import { dirname, join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { helperArgs, helperInput } from '../src/mac-capture';
+import { captureHelper, helperArgs, helperInput } from '../src/mac-capture';
 import { screenLatency } from '../src/sources';
+
+/** The oldest macOS a Mach-O file runs on (its LC_BUILD_VERSION's minos), as "13.0". */
+const minosOf = (file: string) => execFileSync('otool', ['-l', file], { encoding: 'utf8' }).match(/cmd LC_BUILD_VERSION[\s\S]*?minos (\S+)/)?.[1];
+/** Below 0 when macOS `a` is older than `b`, 0 when they are the same. */
+const compareVersions = (a: string, b: string) => {
+  const [x, y] = [a, b].map((version) => version.split('.').map(Number));
+  for (let i = 0; i < Math.max(x!.length, y!.length); i++) if ((x![i] ?? 0) !== (y![i] ?? 0)) return (x![i] ?? 0) - (y![i] ?? 0);
+  return 0;
+};
 
 const monitor = { index: 0, name: 'Built-in Display', bounds: { x: 0, y: 0, width: 2880, height: 1800 }, scale: 2, primary: true, displayId: 1 };
 
@@ -22,6 +34,17 @@ describe('the macOS capture helper', () => {
     expect(screenLatency('macos', false)).toBe(0.08);
     expect(screenLatency('windows', false)).toBe(0);
     expect(screenLatency('test', false)).toBe(0);
+  });
+
+  it.runIf(process.platform === 'darwin')('is built for the oldest macOS the app runs on, not for the SDK of the Mac that builds it', () => {
+    const helper = captureHelper('');
+    expect(helper, 'cuttle-capture is built (pnpm install)').toBeDefined();
+    // the app's minimum is Electron's own (package.mjs takes its Info.plist as it is)
+    const electron = dirname(createRequire(join(import.meta.dirname, '..', '..', '..', 'package.json')).resolve('electron/package.json'));
+    const app = execFileSync('plutil', ['-extract', 'LSMinimumSystemVersion', 'raw', join(electron, 'dist', 'Electron.app', 'Contents', 'Info.plist')], { encoding: 'utf8' }).trim();
+    const minos = minosOf(helper!);
+    expect(minos).toBeDefined();
+    expect(compareVersions(minos!, app), `cuttle-capture needs macOS ${minos}, the app runs on ${app}`).toBeLessThanOrEqual(0);
   });
 
   it('takes a window by itself, at its size', () => {

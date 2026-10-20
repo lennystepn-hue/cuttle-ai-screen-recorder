@@ -8,7 +8,9 @@
 - **A fixed target.** `packages/recorder/native/build-macos.mjs` builds the helper for `<arch>-apple-macos13.0`, the app's minimum. Before, it took the build machine's SDK.
   - An API newer than 13.0 is then a compile error. A later change has to guard it with `#available`.
   - The helper is built again when the build script changed, not only when `capture.swift` did. A target that changes then reaches every checkout.
-- **A guard when packaging.** `apps/desktop/scripts/package.mjs` stops on macOS if the packaged helper's `minos` is newer than the app's `LSMinimumSystemVersion`. The release workflow runs `package.mjs`, so a release cannot ship it again.
+- **A guard when packaging.** `apps/desktop/scripts/package.mjs` stops on macOS before it packages, if the helper the app takes (the CLI's copy) has a `minos` newer than Electron's `LSMinimumSystemVersion`.
+  - The release workflow runs `package.mjs`, so a release cannot ship such a helper again.
+  - It stops before signing and notarizing.
 - **A test.** A node test on macOS checks that the built helper needs no newer macOS than Electron's app does. CI runs it on `macos-latest` for every pull request.
 
 **Tech Stack:** Swift (`swiftc -target`), Node scripts, vitest, `otool`, `plutil`.
@@ -50,7 +52,10 @@ Conventions for every task:
 - **13.0, from Electron:** the helper runs wherever the app does. The value is written once in `build-macos.mjs`, with why.
   - The test compares the built helper with Electron's own `LSMinimumSystemVersion`. An Electron that raises its minimum leaves the helper fine, since it runs on more. Only a helper that needs more fails.
 - **Rebuild when the script changes:** the stale check compares the binary with `capture.swift` and with `build-macos.mjs`. Without that, `pnpm install` in a checkout that had built the helper before would keep its 27.0 build.
-- **The guard is in `package.mjs`, not in the build check.** The release workflow runs `package.mjs` directly and not `build.check.test.ts`. It reads the packaged helper's `minos` with `otool -l` and the packaged app's `LSMinimumSystemVersion` with `plutil`.
+- **The guard is in `package.mjs`, not in the build check.**
+  - The release workflow runs `package.mjs` directly and not `build.check.test.ts`.
+  - The guard reads the `minos` of `apps/cli/dist/cuttle-capture` (copied into `app.asar.unpacked/cli`) with `otool -l`, and Electron's `LSMinimumSystemVersion` (which the packaged app keeps) with `plutil`.
+  - It runs before `packager`, so nothing is signed or notarized for nothing.
 - **Not done here:** a fallback to avfoundation when the helper cannot start. With the target, it starts.
 
 ## File structure
@@ -92,9 +97,10 @@ The stale check also takes the script's own time: `statSync(fileURLToPath(import
 
 - [ ] **Step 3: The guard** (`package.mjs`)
 
-After packaging on macOS:
-- Compare the helper's `minos` under `Cuttle.app/Contents/Resources/app.asar.unpacked/cli/cuttle-capture` with the app's `LSMinimumSystemVersion`.
-- Throw when the helper's is newer, naming both.
+Before `packager` on macOS:
+- Compare the `minos` of `apps/cli/dist/cuttle-capture` with `LSMinimumSystemVersion` in `electron/dist/Electron.app/Contents/Info.plist`.
+- Throw when the helper's is newer, naming both and `build-macos.mjs`.
+- Check it once: with a helper built for 28.0 in `apps/cli/dist`, `node apps/desktop/scripts/package.mjs` stops with that error. Then `pnpm cli:build` puts the 13.0 one back.
 
 - [ ] **Step 4: Run the test, then commit**
 

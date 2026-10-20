@@ -116,7 +116,19 @@ function macSigning() {
 }
 const signing = macSigning();
 
-const electronVersion = JSON.parse(readFileSync(createRequire(join(desktop, '..', '..', 'package.json')).resolve('electron/package.json'), 'utf8')).version;
+const electron = createRequire(join(desktop, '..', '..', 'package.json')).resolve('electron/package.json');
+const electronVersion = JSON.parse(readFileSync(electron, 'utf8')).version;
+if (process.platform === 'darwin') {
+  // the capture helper (the CLI's copy, which the app takes) runs wherever the app does: on the macOS of
+  // Electron's own Info.plist. 0.1.1's was built for the release runner's macOS 26. Before packaging,
+  // so a release stops before it is signed and notarized.
+  const helper = join(cli, 'cuttle-capture');
+  const app = execFileSync('plutil', ['-extract', 'LSMinimumSystemVersion', 'raw', join(dirname(electron), 'dist', 'Electron.app', 'Contents', 'Info.plist')], { encoding: 'utf8' }).trim();
+  const minos = existsSync(helper) ? execFileSync('otool', ['-l', helper], { encoding: 'utf8' }).match(/cmd LC_BUILD_VERSION[\s\S]*?minos (\S+)/)?.[1] : undefined;
+  const parts = (version) => version.split('.').map(Number);
+  const newer = minos !== undefined && parts(minos).reduce((order, part, i) => order || part - (parts(app)[i] ?? 0), 0) > 0;
+  if (newer) throw new Error(`cuttle-capture needs macOS ${minos}, the app runs on ${app}: build it for ${app} (packages/recorder/native/build-macos.mjs)`);
+}
 const [out] = await packager({
   dir: stage,
   out: build,

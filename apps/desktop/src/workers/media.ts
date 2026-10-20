@@ -129,7 +129,7 @@ async function run(id: number, job: MediaJob): Promise<JobResult | undefined> {
       const controller = new AbortController();
       controllers.set(id, controller);
       try {
-        await readScreenTake(job.input, { signal: controller.signal, onProgress: (progress) => reply({ id, progress }) });
+        await readScreenTake(job.input, { signal: controller.signal, onProgress: (progress) => reply({ id, progress }), onPreparing: () => reply({ id, progress: 0, preparing: true }) });
       } finally {
         controllers.delete(id);
       }

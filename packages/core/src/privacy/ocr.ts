@@ -62,6 +62,9 @@ export const OCR_SCALE = 2;
  */
 export const OCR_TIMEOUT = { start: 60, prepare: 300, read: 60 };
 
+/** Seconds a helper may prepare before it is said to (`onPreparing`): prepared before, it takes a fraction of one. */
+export const PREPARING_NOTICE = 2;
+
 /**
  * The helper's next answer, or `ocr-missing` when none came within `seconds` (`hung` is called
  * then: it ends the helper).
@@ -125,8 +128,9 @@ export class ScreenReader {
   /**
    * Starts the helper; `ocr-missing` where it cannot run (neither Windows nor macOS, PowerShell
    * refused, no OCR language, cuttle-capture not built) or does not answer within `timeout`.
+   * `onPreparing` is called once when it still prepares after `notice` seconds.
    */
-  static async start(timeout = OCR_TIMEOUT): Promise<ScreenReader> {
+  static async start({ timeout = OCR_TIMEOUT, onPreparing, notice = PREPARING_NOTICE }: { timeout?: typeof OCR_TIMEOUT; onPreparing?: () => void; notice?: number } = {}): Promise<ScreenReader> {
     // the switch first: it says the same on every platform (the checks and the tests set it)
     if (process.env.CUTTLE_OCR === 'off') throw new CoreError('ocr-missing', 'reading the screen is switched off (CUTTLE_OCR=off)');
     let child: ChildProcessWithoutNullStreams;
@@ -152,7 +156,14 @@ export class ScreenReader {
       return line.done ? undefined : (JSON.parse(line.value) as { preparing?: boolean; ready?: boolean; language?: string; max?: number });
     };
     let hello = await next(timeout.start, 'starting');
-    if (hello?.preparing) hello = await next(timeout.prepare, "preparing macOS's text recognition");
+    if (hello?.preparing) {
+      const told = onPreparing && setTimeout(onPreparing, notice * 1000);
+      try {
+        hello = await next(timeout.prepare, "preparing macOS's text recognition");
+      } finally {
+        clearTimeout(told);
+      }
+    }
     if (!hello?.ready) {
       child.kill();
       throw new CoreError('ocr-missing', hello ? 'Windows has no OCR language installed (Settings > Time & language > Language)' : `the OCR helper did not start${stderr ? `: ${stderr.trim().split(/\r?\n/)[0]}` : ''}`);

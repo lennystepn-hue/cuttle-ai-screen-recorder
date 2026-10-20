@@ -35,7 +35,8 @@ const OUTPUT: Record<Kind, string> = { proxy: 'proxy.mp4', thumbnails: 'thumbnai
 
 interface Job {
   job: MediaJob;
-  onProgress: (progress: number) => void;
+  /** `preparing`: the OCR is being prepared, which takes long (read-screen, `WorkerReply`). */
+  onProgress: (progress: number, preparing?: boolean) => void;
   resolve: (meta?: JobResult) => void;
   reject: (error: Error) => void;
 }
@@ -57,7 +58,7 @@ class Worker {
     child.on('message', (message: WorkerReply) => {
       const job = this.pending.get(message.id);
       if (!job) return;
-      if ('progress' in message) return job.onProgress(message.progress);
+      if ('progress' in message) return job.onProgress(message.progress, message.preparing === true);
       this.finish(message.id);
       if ('done' in message) job.resolve(message.meta);
       else job.reject(Object.assign(new Error(message.error), { cancelled: message.cancelled === true, ...(message.code && { code: message.code }) }));
@@ -92,7 +93,7 @@ class Worker {
   }
 
   /** Queues a job; `T`: what it answers (the thumbnails' layout, a length fit's report). */
-  run<T extends JobResult = ThumbnailsMeta>(media: MediaJob, onProgress: (progress: number) => void): { promise: Promise<T | undefined>; cancel(): void } {
+  run<T extends JobResult = ThumbnailsMeta>(media: MediaJob, onProgress: (progress: number, preparing?: boolean) => void): { promise: Promise<T | undefined>; cancel(): void } {
     const id = this.next++;
     const promise = new Promise<T | undefined>((resolve, reject) => {
       const job = { job: media, onProgress, resolve: resolve as (meta?: JobResult) => void, reject };

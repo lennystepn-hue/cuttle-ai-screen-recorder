@@ -24,26 +24,29 @@ describe('answerWithin', () => {
 });
 
 /**
- * A stand-in for macOS's `cuttle-capture ocr` in `dir`: it says it prepares, prepares for `ms` (as
- * Vision does where it compiles; -1: for good), then reads every picture as empty. It notes in `log`
- * when it started and when it was ready, each line "<pid> <what> <ms since 1970>".
+ * A stand-in for macOS's `cuttle-capture ocr` in `dir`: it says it prepares, prepares for `ms` (-1:
+ * for good) until one of its runs was ready, then at once (as Vision's networks stay compiled once
+ * compiled for it), and reads every picture as empty. It notes in `log` when it started and when it
+ * was ready, each line "<pid> <what> <ms since 1970>".
  */
 function preparingHelper(dir: string, ms: number, log: string): string {
   const file = join(dir, `ocr-${ms}.mjs`);
   writeFileSync(
     file,
     `#!/usr/bin/env node
-import { appendFileSync } from 'node:fs';
+import { appendFileSync, existsSync, writeFileSync } from 'node:fs';
 import { createInterface } from 'node:readline';
+const prepared = ${JSON.stringify(join(dir, 'prepared'))};
 const note = (what) => appendFileSync(${JSON.stringify(log)}, process.pid + ' ' + what + ' ' + Date.now() + '\\n');
 note('started');
 process.stdout.write('{"preparing":true}\\n');
 if (${ms} < 0) setInterval(() => {}, 1000);
 else setTimeout(() => {
+  writeFileSync(prepared, '');
   note('ready');
   process.stdout.write('{"ready":true,"language":"en-US","max":16384}\\n');
   createInterface({ input: process.stdin }).on('line', () => process.stdout.write('{"lines":[]}\\n'));
-}, ${ms});
+}, existsSync(prepared) ? 0 : ${ms});
 `,
   );
   chmodSync(file, 0o755);
@@ -71,7 +74,7 @@ describe.runIf(process.platform === 'darwin')('an OCR helper that prepares Visio
   it("gives the preparing its own time, not a picture's, and ends a helper that does not get ready", async () => {
     // prepared in 0.5 s, longer than a picture may take here: the first picture is read all the same
     await withHelper(500, async (dir) => {
-      const reader = await ScreenReader.start({ start: 10, prepare: 10, read: 0.25 });
+      const reader = await ScreenReader.start({ timeout: { start: 10, prepare: 10, read: 0.25 } });
       try {
         expect(await reader.read(join(dir, 'a.png'), 64, 36)).toEqual([]);
       } finally {
@@ -79,17 +82,30 @@ describe.runIf(process.platform === 'darwin')('an OCR helper that prepares Visio
       }
     });
     await withHelper(-1, async () => {
-      await expect(ScreenReader.start({ start: 10, prepare: 0.25, read: 10 })).rejects.toMatchObject({ code: 'ocr-missing', message: "the OCR helper did not answer within 0.25 s (preparing macOS's text recognition)" });
+      await expect(ScreenReader.start({ timeout: { start: 10, prepare: 0.25, read: 10 } })).rejects.toMatchObject({ code: 'ocr-missing', message: "the OCR helper did not answer within 0.25 s (preparing macOS's text recognition)" });
     });
   });
 
-  it('starts one helper alone, and the others once it is ready', async () => {
-    await withHelper(300, async (dir, log) => {
+  it('says once that the helper prepares when it takes long, and not when it was prepared before', async () => {
+    await withHelper(600, async () => {
+      const onPreparing = vi.fn();
+      (await ScreenReader.start({ notice: 0.2, onPreparing })).close();
+      expect(onPreparing).toHaveBeenCalledOnce();
+      (await ScreenReader.start({ notice: 0.2, onPreparing })).close();
+      expect(onPreparing).toHaveBeenCalledOnce();
+    });
+  });
+
+  it('starts one helper alone and the others once it is ready, and says once that it prepares', async () => {
+    // longer than PREPARING_NOTICE (2 s): the first helper is said to prepare, the others find it prepared
+    await withHelper(2300, async (dir, log) => {
       const video = join(dir, 'still.mp4');
       expect(spawnSync('ffmpeg', ['-v', 'error', '-f', 'lavfi', '-i', 'color=c=white:s=64x36:r=10:d=2', '-pix_fmt', 'yuv420p', '-y', video]).status).toBe(0);
       const times = [0, 0.5, 1, 1.5];
-      const { frames } = await readFrames(video, times, { width: 64, height: 36 }, { helpers: 3 });
+      const onPreparing = vi.fn();
+      const { frames } = await readFrames(video, times, { width: 64, height: 36 }, { helpers: 3, onPreparing });
       expect(frames.map((frame) => frame.t)).toEqual(times);
+      expect(onPreparing).toHaveBeenCalledOnce();
       const notes = readFileSync(log, 'utf8').trim().split('\n').map((line) => line.split(' '));
       const [lead] = notes[0]!;
       const ready = Number(notes.find(([pid, what]) => pid === lead && what === 'ready')![2]);

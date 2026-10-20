@@ -378,6 +378,7 @@ async function screenTextFor(
         const percent = Math.floor(fraction * 10) * 10;
         if (percent > shown) args.onStatus?.(`reading the screen … ${(shown = percent)} %`);
       },
+      onPreparing: () => args.onStatus?.("reading the screen … preparing macOS's text recognition (about a minute)"),
     });
     const path = join(dirname(screen), SCREEN_TEXT_FILE);
     const kept = writeScreenText(path, frames, words);

@@ -900,22 +900,26 @@ describe.runIf(enabled)('the Cuttle app', () => {
 
   it('shows a privacy mask that follows text up the screen: its path in the source view, the Auto tab row, Hold still', async () => {
     const original = readFileSync(projectFile(), 'utf8');
-    // suggest's mask over a token that scrolled up between 0.5 and 2.5 s
+    // suggest's mask over a token that scrolled up 200 px from 1 s, followed frame by frame: still at
+    // y 500 until 1 s, then 10 px up in each frame
     const outside = onDisk() as unknown as { masks: unknown[] };
-    outside.masks.push({ id: 'm8', label: 'Key', from: 0.2, to: 2.8, rect: [300, 500, 500, 40], moves: [{ at: 1, rect: [300, 500, 500, 40] }, { at: 1.5, rect: [300, 400, 500, 40] }, { at: 2, rect: [300, 300, 500, 40] }], style: 'fill', auto: 'privacy' });
+    const up = Array.from({ length: 20 }, (_, k) => ({ at: Math.round((1 + (k + 1) / 30) * 1000) / 1000, rect: [300, 490 - 10 * k, 500, 40] }));
+    outside.masks.push({ id: 'm8', label: 'Key', from: 0.2, to: 2.8, rect: [300, 500, 500, 40], moves: [{ at: 1, rect: [300, 500, 500, 40] }, ...up], style: 'fill', auto: 'privacy' });
     writeFileSync(projectFile(), `${JSON.stringify(outside, null, 2)}\n`);
     await editor.waitForSelector('.item.mask[data-id=m8] .move-mark');
     await click(editor, '#tab-auto');
     await click(editor, '[data-testid=auto-group-privacy] .auto-toggle');
     await click(editor, '[data-testid=auto-group-privacy] .auto-item');
     await editor.waitForSelector('[data-testid=mask-path]');
-    // between two places it covers both: one place is 500 × 40, at 1.25 s it is 500 × 140
-    const shape = async () => {
-      const box = (await editor.locator('.source-box.mask.selected').boundingBox())!;
-      return box.width / box.height;
+    // at the playhead it is where the text was then: at 1.25 s, 80 px up (between two frames' places it covers both)
+    const top = async () => {
+      const [box, view] = await Promise.all([editor.locator('.source-box.mask.selected').boundingBox(), editor.locator('[data-testid=source-view]').boundingBox()]);
+      return ((box!.y - view!.y) / view!.height) * 720;
     };
     await seek(1.25);
-    await expect.poll(shape).toBeLessThan(5);
+    await expect.poll(top).toBeGreaterThan(390);
+    expect(await top()).toBeLessThan(440);
+    await shot('33a-privacy-mask-path');
     await click(editor, '#tab-selection');
     await editor.waitForSelector('[data-testid=mask-hold]');
     await shot('33-privacy-mask');

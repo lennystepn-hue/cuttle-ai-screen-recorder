@@ -230,7 +230,7 @@ export function SourceView() {
       <canvas ref={canvas} style={{ width: size.width, height: size.height }} />
       {(selected?.kind === 'zoom' || selected?.kind === 'crop') && <ZoomDim fit={fit} rect={selected.rect} size={size} />}
       {selected?.kind === 'zoom' && <ZoomPath fit={fit} zoom={project.zooms.find((zoom) => zoom.id === selected.id)} />}
-      {selected?.kind === 'mask' && <ZoomPath fit={fit} zoom={project.masks.find((mask) => mask.id === selected.id)} kind="mask" />}
+      {selected?.kind === 'mask' && <ZoomPath fit={fit} mask={project.masks.find((mask) => mask.id === selected.id)} />}
       {!selected && tool === 'crop' && boxes.some((box) => box.kind === 'crop') && <ZoomDim fit={fit} rect={boxes.find((box) => box.kind === 'crop')!.rect} size={size} />}
       {boxes.map((box) => {
         const at = toStage(box.rect, fit);
@@ -300,11 +300,24 @@ export function SourceView() {
   );
 }
 
-/** A selected zoom or mask that follows: the rects it moves through, dashed, and the way from one to the next. */
-function ZoomPath({ fit, zoom, kind = 'zoom' }: { fit: Fit; zoom?: { rect: Rect; moves?: { rect: Rect }[] }; kind?: 'zoom' | 'mask' }) {
-  if (!zoom?.moves?.length) return null;
-  const rects = [zoom.rect, ...zoom.moves.map((move) => move.rect)].map((rect) => toStage(rect, fit));
-  const middles = rects.map((rect) => `${rect.x + rect.width / 2},${rect.y + rect.height / 2}`);
+/** A place where a zoom or mask that follows stays this long (seconds) is one it rests at. */
+const REST = 0.25;
+
+type Following = { rect: Rect; moves?: { at: number; rect: Rect }[] };
+
+/**
+ * A selected zoom or mask that follows: the way through its places, and dashed, the rects where it
+ * rests (its first and last place, and where it stays `REST` or longer). A privacy mask has a place
+ * in each frame its text moved: those are on the way only.
+ */
+function ZoomPath({ fit, zoom, mask }: { fit: Fit; zoom?: Following & { at: number; duration: number }; mask?: Following & { from: number; to: number } }) {
+  const item = zoom ?? mask;
+  if (!item?.moves?.length) return null;
+  const kind = zoom ? 'zoom' : 'mask';
+  const [from, to] = zoom ? [zoom.at, zoom.at + zoom.duration] : [mask!.from, mask!.to];
+  const places = [{ at: from, rect: item.rect }, ...item.moves];
+  const rects = places.filter((place, i) => i === 0 || i === places.length - 1 || (places[i + 1]?.at ?? to) - place.at >= REST).map((place) => toStage(place.rect, fit));
+  const middles = places.map((place) => toStage(place.rect, fit)).map((rect) => `${rect.x + rect.width / 2},${rect.y + rect.height / 2}`);
   return (
     <svg className={`zoom-path${kind === 'mask' ? ' mask' : ''}`} data-testid={`${kind}-path`}>
       {rects.map((rect, i) => (

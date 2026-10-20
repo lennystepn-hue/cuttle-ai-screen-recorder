@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { ScreenTextFrame, ScreenTextLine } from '@cuttle/project';
-import { privacyMasks } from '../src/privacy/masks';
+import type { Stretch } from '../src/privacy/follow';
+import { privacyMasks, trackName, trackSecrets } from '../src/privacy/masks';
 
 /** A line of text at (x, y): each character 10 px wide and 20 px high, words one character apart. */
 function line(text: string, x: number, y: number): ScreenTextLine {
@@ -77,6 +78,68 @@ describe('privacyMasks', () => {
         kind: 'key',
         label: 'Key',
       },
+    ]);
+  });
+
+  it('makes a mask for each stretch a track was followed on screen, with a place where it moved and the last one before', () => {
+    const key = (y: number) => line('ghp_1234567890abcdefghijklmnop', 100, y);
+    const frames = [frame(1, key(300)), frame(1.5, key(300)), frame(2, key(200)), frame(2.5), frame(3), frame(6, key(500)), frame(6.5), frame(7)];
+    const [track] = trackSecrets(frames, []).tracks;
+    const at = (t: number, y: number) => ({ at: t, rect: [100, y, 300, 20] as [number, number, number, number] });
+    // still from 1 s, up 50 px a frame from 1.9 s, out at the top at 2.2 s; in again at the bottom at 5.8 s
+    const stretches: Stretch[] = [
+      { from: 0.5, to: 2.2, places: [at(1, 300), at(1.5, 300), at(1.833, 300), at(1.867, 300), at(1.9, 250), at(1.933, 200), at(1.967, 200), at(2, 200), at(2.033, 150), at(2.067, 100), at(2.1, 50), at(2.133, 0)] },
+      { from: 5.8, to: 7, places: [at(5.833, 1060), at(5.867, 1010), at(5.9, 500), at(6, 500)] },
+    ];
+    expect(privacyMasks(frames, [], screen, 10, undefined, new Map([[trackName(track!), stretches]]))).toEqual([
+      {
+        from: 0.5,
+        to: 2.2,
+        rect: [94, 294, 312, 32],
+        // still until 1.867 s (its last place there kept), then a place in each frame it moved
+        moves: [
+          { at: 1.867, rect: [94, 294, 312, 32] },
+          { at: 1.9, rect: [94, 244, 312, 32] },
+          { at: 1.933, rect: [94, 194, 312, 32] },
+          { at: 2, rect: [94, 194, 312, 32] },
+          { at: 2.033, rect: [94, 144, 312, 32] },
+          { at: 2.067, rect: [94, 94, 312, 32] },
+          { at: 2.1, rect: [94, 44, 312, 32] },
+          { at: 2.133, rect: [94, 0, 312, 26] },
+        ],
+        kind: 'key',
+        label: 'Key',
+      },
+      { from: 5.8, to: 7, rect: [94, 1054, 312, 26], moves: [{ at: 5.867, rect: [94, 1004, 312, 32] }, { at: 5.9, rect: [94, 494, 312, 32] }], kind: 'key', label: 'Key' },
+    ]);
+  });
+
+  it('leaves out a place the two around it hold within its room', () => {
+    const frames = [frame(1, line('ghp_1234567890abcdefghijklmnop', 100, 300)), frame(2), frame(2.5)];
+    const [track] = trackSecrets(frames, []).tracks;
+    // a slow drift, 2 px a frame: a place every third frame (6 px)
+    const places = Array.from({ length: 10 }, (_, k) => ({ at: Math.round((1 + k / 30) * 1000) / 1000, rect: [100, 300 - 2 * k, 300, 20] as [number, number, number, number] }));
+    const [mask] = privacyMasks(frames, [], screen, 10, undefined, new Map([[trackName(track!), [{ from: 0.5, to: 2, places }]]]));
+    expect(mask!.moves!.map((move) => [move.at, move.rect[1]])).toEqual([
+      [1.1, 288],
+      [1.2, 282],
+      [1.3, 276],
+    ]);
+  });
+
+  it('joins the masks of two rules over the same text where both show it, and grows neither where the other does not', () => {
+    // a key from 1 s on, up 100 px at 2.9 s; its text read as a random-looking string only at 3 s
+    const key = (y: number, text = 'ghp_1234567890abcdefghijklmnop') => line(`token ${text}`, 100, y);
+    const frames = [frame(1, key(300)), frame(2, key(300)), frame(3, key(200, 'Zx9Kq2Lm7Np4Rt8Vw3Yb6Cd1Fg5Hj0')), frame(3.5), frame(4), frame(5)];
+    const { tracks } = trackSecrets(frames, []);
+    expect(tracks.map((track) => track.kind)).toEqual(['key', 'random']);
+    const places = (t: number, y: number) => ({ at: t, rect: [160, y, 300, 20] as [number, number, number, number] });
+    const followed = new Map<string, Stretch[]>([
+      [trackName(tracks[0]!), [{ from: 0.5, to: 3.5, places: [places(1, 300), places(2.867, 300), places(2.9, 200)] }]],
+      [trackName(tracks[1]!), [{ from: 2.9, to: 3.5, places: [places(2.9, 200)] }]],
+    ]);
+    expect(privacyMasks(frames, [], screen, Infinity, undefined, followed)).toEqual([
+      { from: 0.5, to: 3.5, rect: [154, 294, 312, 32], moves: [{ at: 2.867, rect: [154, 294, 312, 32] }, { at: 2.9, rect: [154, 194, 312, 32] }], kind: 'key', label: 'Key' },
     ]);
   });
 

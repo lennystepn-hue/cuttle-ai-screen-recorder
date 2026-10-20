@@ -6,10 +6,14 @@ import { createInterface } from 'node:readline';
 import { describe, expect, it, vi } from 'vitest';
 import type { Rect } from '@cuttle/project';
 import { captureHelper } from '@cuttle/recorder';
+import { activeMasks } from '@cuttle/timeline';
+import { runFfmpeg } from '../src/ffmpeg';
+import { followScreenText } from '../src/privacy/apply';
 import { privacyMasks } from '../src/privacy/masks';
-import { readFrames } from '../src/privacy/read';
+import { framesToRead, readFrames } from '../src/privacy/read';
 import { redactFrames } from '../src/privacy/redact';
 import { OCR_TIMEOUT, ScreenReader, answerWithin } from '../src/privacy/ocr';
+import { SCROLL_TAKE, scrolledAt, writeScrollTake } from './scrolling';
 
 describe('answerWithin', () => {
   it("ends a helper that does not answer in time, and passes an answer that comes", async () => {
@@ -194,6 +198,45 @@ describe.runIf(process.platform === 'win32' || process.platform === 'darwin')('r
       expect([counts[2], counts[4]]).toEqual([counts[0], counts[0]]);
       expect([counts[3], counts[5]]).toEqual([counts[1], counts[1]]);
       expect(progress).toEqual([1, 2, 3, 4, 5, 6].map((done) => done / 6));
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }, 120_000 + OCR_TIMEOUT.prepare * 1000);
+
+  it('keeps the key of a page that scrolls covered in every frame: read where the screen changed, followed from frame to frame', async () => {
+    delete process.env.CUTTLE_OCR;
+    const { width, height, header, rate, seconds } = SCROLL_TAKE;
+    const dir = mkdtempSync(join(tmpdir(), 'cuttle-scroll-'));
+    try {
+      // the page (fixtures/privacy/scroll.html, rendered 1280 px wide by `cuttle capture-page --scroll`), in grey;
+      // its planted key's value at (197, 991), 354 × 13 px
+      const png = join(import.meta.dirname, 'fixtures', 'privacy', 'scroll.png');
+      const { stdout } = await runFfmpeg(['-i', png, '-vf', 'format=gray', '-f', 'rawvideo', '-']);
+      const key: Rect = [197, 991, 354, 13];
+      const video = join(dir, 'screen.mp4');
+      await writeScrollTake(video, { height: stdout.length / width, data: new Uint8Array(stdout) });
+      const size = { width, height };
+      const { frames } = await readFrames(video, await framesToRead(video, [{ from: 0, to: seconds }], size), size);
+      /** Frames where some of the key shows outside every mask, and frames with a mask where none of it shows. */
+      const look = (masks: ReturnType<typeof privacyMasks>) => {
+        let open = 0;
+        let astray = 0;
+        for (let n = 0; n < seconds * rate; n++) {
+          const t = n / rate;
+          const top = Math.max(header, key[1] - scrolledAt(t));
+          const bottom = Math.min(height, key[1] - scrolledAt(t) + key[3]);
+          const shown = activeMasks(masks.map((mask, k) => ({ ...mask, id: `m${k}`, style: 'fill' as const, enabled: true })), t).map((mask) => mask.rect);
+          if (bottom <= top) astray += shown.length > 0 ? 1 : 0;
+          else if (!shown.some((mask) => mask[0] <= key[0] && mask[0] + mask[2] >= key[0] + key[2] && mask[1] <= top && mask[1] + mask[3] >= bottom)) open++;
+        }
+        return { open, astray };
+      };
+      // the places the reads found leave it open as it comes in, goes up and back, and goes out
+      expect(look(privacyMasks(frames, [], size, seconds)).open).toBeGreaterThan(10);
+      const followed = await followScreenText(video, frames, [], { ...size, duration: seconds });
+      const after = look(privacyMasks(frames, [], size, seconds, undefined, followed));
+      expect(after.open).toBe(0);
+      expect(after.astray).toBeLessThanOrEqual(2);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

@@ -1,7 +1,8 @@
-// The privacy masks applied to a project: made from the screen's text (screen-text.jsonl), the
-// person's words and the notifications the recorder saw, merged with the masks there by the tag
-// rules: Cuttle's privacy and notification masks are made again, one the person switched off stays
-// off, every other mask stays. The app runs this as steps of its own after the cut.
+// The privacy masks applied to a project: made from the screen's text (screen-text.jsonl), followed
+// from frame to frame in the take (follow.ts), the person's words and the notifications the recorder
+// saw, merged with the masks there by the tag rules: Cuttle's privacy and notification masks are
+// made again, one the person switched off stays off, every other mask stays. The app runs this as
+// steps of its own after the cut.
 import { readFile } from 'node:fs/promises';
 import { dirname, join, relative, resolve, sep } from 'node:path';
 import { newId, parseEventsJsonl, parseScreenTextJsonl, usedIds, type CuttleProject, type InputEvent, type Rect, type ScreenTextFrame } from '@cuttle/project';
@@ -9,7 +10,8 @@ import { CoreError } from '../errors';
 import { readProjectFile, writeProjectFile } from '../project-file';
 import { probeScreen } from '../suggest/media';
 import { union } from '../suggest/spans';
-import { privacyMasks, type PrivacyMask } from './masks';
+import { followTracks, type Stretch } from './follow';
+import { privacyMasks, trackName, trackSecrets, type PrivacyMask } from './masks';
 import { notificationMasks } from './notifications';
 import type { SecretKind } from './patterns';
 import { SCREEN_TEXT_FILE, framesToRead, keepRedacted, readFrames, writeScreenText } from './read';
@@ -45,6 +47,8 @@ export interface PrivacyInput {
   screen: { width: number; height: number; duration?: number };
   /** The words to mask (default the project's `privacy.words`). */
   words?: readonly string[];
+  /** Where each private thing in `frames` was followed in the take's frames (`followScreenText`); without, the masks hold the places the frames read. */
+  followed?: ReadonlyMap<string, readonly Stretch[]>;
 }
 
 export interface PrivacyMasksResult {
@@ -86,7 +90,7 @@ export function withPrivacyMasks(raw: Record<string, unknown>, project: CuttlePr
     reused.add(same.id);
     return same.id as string;
   };
-  const made: PrivacyMask[] = input.frames ? privacyMasks(input.frames, input.words ?? project.privacy.words, screen, screen.duration) : [];
+  const made: PrivacyMask[] = input.frames ? privacyMasks(input.frames, input.words ?? project.privacy.words, screen, screen.duration, undefined, input.followed) : [];
   const shown = input.events ? notificationMasks(input.events, screen, screen.duration) : [];
   const fresh: RawMask[] = [
     ...made.map((mask) => ({
@@ -115,6 +119,16 @@ export function withPrivacyMasks(raw: Record<string, unknown>, project: CuttlePr
   if (shown.length > 0) notes.push(`masked ${shown.length} notification${shown.length === 1 ? '' : 's'} while ${shown.length === 1 ? 'it was' : 'they were'} open`);
   if (stayOff > 0) notes.push(`${stayOff} mask${stayOff === 1 ? '' : 's'} you switched off stay${stayOff === 1 ? 's' : ''} off`);
   return { masks: [...kept, ...fresh].sort((a, b) => a.from - b.from), made: made.length, kinds, notifications: shown.length, notes };
+}
+
+/**
+ * Each private thing the screen's text shows (with the person's `words`), followed from frame to
+ * frame in the take's `screen` video (`followTracks`), by its track's name (`trackName`).
+ */
+export async function followScreenText(screen: string, frames: readonly ScreenTextFrame[], words: readonly string[], size: { width: number; height: number; duration?: number }): Promise<Map<string, Stretch[]>> {
+  const { tracks } = trackSecrets(frames, words);
+  const followed = await followTracks(screen, tracks, frames.map((frame) => frame.t), size, size.duration ?? Infinity);
+  return new Map([...followed].map(([track, stretches]) => [trackName(track), stretches]));
 }
 
 /** The source stretches the project's clips show. */
@@ -155,11 +169,13 @@ export async function applyPrivacy(dir: string, options: { link?: string; words?
   if (options.link && !read) throw new CoreError('missing-file', `${options.link} cannot be read`);
   const text = sources.events ? await readFile(resolve(file.dir, sources.events), 'utf8').catch(() => undefined) : undefined;
   const events = text === undefined ? undefined : parseEventsJsonl(text).events;
-  const size = await probeScreen(resolve(file.dir, sources.screen));
+  const screen = resolve(file.dir, sources.screen);
+  const size = await probeScreen(screen);
   const words = [...new Set([...file.project.privacy.words, ...(options.words ?? []).map((word) => word.trim()).filter(Boolean)])];
   // the file as it is kept: what an older version, or a word added since, left readable is marked now
   const frames = read && linked ? keepRedacted(resolve(file.dir, linked), read, words) : undefined;
-  const result = withPrivacyMasks(file.raw, file.project, { ...(frames && { frames }), ...(events && { events }), screen: size, words });
+  const followed = frames ? await followScreenText(screen, frames, words, size) : undefined;
+  const result = withPrivacyMasks(file.raw, file.project, { ...(frames && { frames, followed }), ...(events && { events }), screen: size, words });
   const { masks: _masks, ...counts } = result;
   const linking = options.link !== undefined && options.link !== sources.screenText;
   const wordsAdded = words.length > file.project.privacy.words.length;

@@ -6,7 +6,7 @@ import { CoreError } from './errors';
 import { readProjectFile, writeProjectFile } from './project-file';
 import { areaStretches, bandCrop, cropPieces, type CropStretch } from './suggest/crop';
 import { dialogZooms } from './suggest/dialogs';
-import { readScreenText, withPrivacyMasks, type RawMask } from './privacy/apply';
+import { followScreenText, readScreenText, withPrivacyMasks, type RawMask } from './privacy/apply';
 import { SCREEN_TEXT_FILE, framesToRead, keepRedacted, readFrames, writeScreenText } from './privacy/read';
 import { cachedAnalysis, grabGray, grayFrames, screenBands } from './suggest/media';
 import { withLengthFit } from './suggest/length';
@@ -287,7 +287,8 @@ export async function suggestProject(projectDir: string, args: SuggestOptions = 
   let privacy = { read: false, masks: 0, notifications: 0 };
   if (args.privacy !== false && file.project.autoEdits.privacy) {
     const text = await screenTextFor(file.dir, screen, sources.screenText, clips, screenInfo, words, args, notes);
-    const result = withPrivacyMasks(file.raw, file.project, { ...(text && { frames: text.frames }), events, screen: screenInfo, words }, taken);
+    const followed = text ? await followScreenText(screen, text.frames, words, screenInfo) : undefined;
+    const result = withPrivacyMasks(file.raw, file.project, { ...(text && { frames: text.frames, followed }), events, screen: screenInfo, words }, taken);
     notes.push(...result.notes);
     masks = result.masks;
     privacy = { read: text !== undefined, masks: result.made, notifications: result.notifications };

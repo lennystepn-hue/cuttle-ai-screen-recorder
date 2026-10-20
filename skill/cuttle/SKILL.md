@@ -188,7 +188,7 @@ Then refine `cuttle.json` ([project.md](project.md)) and preview again:
   was open (`auto: "notification"`). It also reads the screen's text (Windows' own OCR or macOS's
   Vision, on this computer) and masks what it finds: email addresses, keys and tokens, the value of a `…KEY=`,
   `…TOKEN=` or `password:` line, IBANs, card and phone numbers, and random-looking strings (a key
-  without a known prefix; masks tagged `auto: "privacy"`, following text that scrolls). The text it
+  without a known prefix; masks tagged `auto: "privacy"`, following text that scrolls frame by frame). The text it
   keeps (`takes/<n>/screen-text.jsonl`) has each find replaced by a mark such as `⟦key-qwhzbtrk⟧`. Pass the user's name and address once with
   `--mask "<word>"` (kept in cuttle.json). This is a help, not a guarantee: the OCR misses small
   grey text and some lines, so **still look** yourself. Look for names, email addresses, tokens and

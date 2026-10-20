@@ -4,17 +4,17 @@
 
 **Goal:** While macOS prepares Vision's text recognition, the app and the CLI say so, so it no longer looks stuck at 0 %.
 
-Since #66, macOS's OCR helper prepares Vision before it says it is ready. Where macOS compiles Vision's text recognition, that takes a minute on an M1, otherwise a fraction of a second. It compiles on a helper's first use, and again once another program had the networks compiled for itself (#66's plan: macOS kept them for one signing identity at a time). Until now, the editor showed "Reading the screen… 0 %" for that whole minute, and the CLI showed "reading the screen …".
+Since #66, macOS's OCR helper prepares Vision before it says it is ready. Where macOS compiles Vision's text recognition, that takes a minute on an M1, otherwise a fraction of a second. It compiles on a helper's first use, and again once another program had the networks compiled for itself (#66's plan: macOS kept them for one signing identity at a time). Until now, the editor showed "Reading the screen… 0 %" for that whole time, and the CLI showed "reading the screen …".
 
 **Architecture:**
 - **The reader says it.** `ScreenReader.start` (`packages/core/src/privacy/ocr.ts`) takes options `{ timeout, onPreparing, notice }`.
   - When the helper still prepares after `PREPARING_NOTICE` seconds (2), it calls `onPreparing` once.
   - A warm start (0.25–0.35 s) never calls it, so the status does not flash.
 - **It is passed along.** `readFrames` and `readScreenTake` take `onPreparing` and hand it to every start.
-- **The CLI.** `suggest` says "reading the screen … preparing macOS's text recognition (this can take a minute)".
+- **The CLI.** `suggest` says "reading the screen … preparing macOS's text recognition (about a minute)".
 - **The app.**
   - The media worker answers `{ id, progress: 0, preparing: true }` (`WorkerReply`), and `mediaWorker.run`'s `onProgress` gets `preparing` as its second argument.
-  - The editor's status chip then says "Reading the screen… preparing (this can take a minute)". The chip shows the start of it, and its title shows all of it. The first frame read sets "Reading the screen… N %" again.
+  - The editor's status chip then says "Reading the screen… preparing (a minute)": short enough for the chip's 260 px. The longer "… preparing (this can take a minute)" needed 314 px and was cut off after "this can ta…". The first frame read sets "Reading the screen… N %" again.
 - **Windows does not change:** its helper never says it prepares.
 
 **Tech Stack:** TypeScript strict, vitest, Electron utility process.
@@ -29,17 +29,24 @@ Conventions for every task:
 
 - **2 s before it is said.**
   - Prepared before, the helper is ready in 0.25–0.35 s (#66's measurements). A notice then would only flash.
-  - Compiling takes about a minute, so 2 s of "0 %" before the notice does not matter.
+  - Compiling takes a minute or more, so 2 s of "0 %" before the notice does not matter.
 - **Once per start.** The notice is said once per helper start.
   - On macOS the first helper prepares alone. The others start once it is ready and find Vision prepared, so in practice it is said once per reading.
   - A second notice would only set the same text again.
-- **"This can take a minute", not "the first time".** The first draft said "the first time". Then it was measured that another signing identity's compile pushes a helper's compiled networks out (#66's plan), so the words name no reason they cannot keep.
+- **"(a minute)", not "the first time".**
+  - The first draft said "the first time". Then it was measured that another signing identity's compile pushes a helper's compiled networks out (#66's plan).
+  - "(this can take a minute)" needed 314 px of the chip's 260 and was cut off. "(a minute)" takes 239 px.
+  - A minute is what an M1 measured awake (#66's plan). Times taken while the Mac slept do not count. From about 00:15 the MacBook, on battery, only woke for seconds at a time (`pmset -g log`), which stretched one network's compile to 79 s and stopped later runs of the app check.
 - **Where it is decided.** The core decides when to say it, so the CLI and the app need no timers of their own. The words differ: the app's chip is short and starts like its other texts ("Reading the screen…"), while the CLI writes its whole line.
 - **The worker.** The flag rides on the progress reply instead of a new reply kind, since only read-screen uses it. Other jobs never set it.
 - **The stand-in helper** of `privacy-ocr.test.ts` now acts like Vision's compiled networks:
   - It prepares for `ms` until one of its runs in the same folder was ready (a marker file), then at once.
   - That is how the first helper prepares and the others find it prepared.
-- **Not checked by the app check:** there, Vision is prepared before (a fraction of a second), so the chip shows no notice. The app's part was checked once by hand, with a helper that prepares for real (a copy signed under a new identity), through `CUTTLE_CAPTURE_HELPER`. It is not committed.
+- **Not checked by the app check:** there, Vision is prepared before (a fraction of a second), so the chip shows no notice. The app's part was checked once, not committed:
+  - The app check's privacy test ran with `CUTTLE_CAPTURE_HELPER` set to a copy of `cuttle-capture` signed under a new identity, so it prepared for real.
+  - A few lines added before the new take's `projectWhen` read the chip.
+  - It went "Cutting the take…" → "Reading the screen… 0 %" → "Reading the screen… preparing (…)", and the text was measured against the chip's width.
+  - Before that, while the Mac was awake, a wrapper that held back the real helper's "ready" for 8 s showed the same sequence: "Reading the screen… 0 %" → "Reading the screen… preparing (…)" → done.
 
 ## File structure
 
@@ -84,7 +91,7 @@ export const PREPARING_NOTICE = 2;
 - [ ] **Step 3: Passed along, and the CLI's line**
 
 - `readFrames`' and `readScreenTake`'s options take `onPreparing` and pass it to `ScreenReader.start`.
-- In `suggest.ts`, `onPreparing: () => args.onStatus?.("reading the screen … preparing macOS's text recognition (this can take a minute)")`.
+- In `suggest.ts`, `onPreparing: () => args.onStatus?.("reading the screen … preparing macOS's text recognition (about a minute)")`.
 
 - [ ] **Step 4: Run the tests, then commit**
 
@@ -97,11 +104,11 @@ export const PREPARING_NOTICE = 2;
   - `WorkerReply`'s progress gets `preparing?: boolean`.
   - The read-screen job passes `onPreparing: () => reply({ id, progress: 0, preparing: true })`.
   - `Worker.run`'s `onProgress` is `(progress, preparing?) => void`.
-- [ ] **Step 2: The chip:** `status(progress, preparing)` in `privacy.ts` says "Reading the screen… preparing (this can take a minute)" while it prepares.
+- [ ] **Step 2: The chip:** `status(progress, preparing)` in `privacy.ts` says "Reading the screen… preparing (a minute)" while it prepares.
 - [ ] **Step 3: Commit**
 
 ### Task 3: The checks
 
 - [ ] `pnpm typecheck`, `pnpm test`.
 - [ ] On the Mac: `pnpm exec vitest run --project node apps/cli/test/cli.test.ts -t "reads the screen"` and `pnpm app:check`.
-- [ ] By hand, not committed: `pnpm app` with `CUTTLE_CAPTURE_HELPER` set to a copy of `cuttle-capture` signed under a new identity (`codesign -s - -i <new>`). In a project's Auto tab, "Read the screen" shows the preparing text in the chip for about a minute, then the percentages.
+- [ ] Once, not committed: the app check's privacy test with `CUTTLE_CAPTURE_HELPER` set to a copy of `cuttle-capture` signed under a new identity (`codesign -s - -i <new>`), and a look at the new take's chip (see the decisions).

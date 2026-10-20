@@ -1,7 +1,9 @@
 // The privacy masks: each private thing the screen showed, masked from just before it was first seen
-// to just after it was last seen, following it where it moved (text that scrolls). Pure.
+// to just after it was last seen, following it where it moved (text that scrolls): from read to
+// read, or in each frame where it was followed in the take (follow.ts). Pure.
 import type { Rect, ScreenTextFrame, ZoomMove } from '@cuttle/project';
 import { maskRectAt } from '@cuttle/timeline';
+import type { Stretch } from './follow';
 import { SECRET_LABELS, SPECIFIC, isMarkKey, secretWords, type Secret, type SecretKind } from './patterns';
 
 export const MASK_RULES = {
@@ -85,6 +87,9 @@ export interface Track {
   missed: number;
 }
 
+/** A track's name, the same in each run of `trackSecrets` on the same frames: its kind, first key and first time. */
+export const trackName = (track: Track) => `${track.kind}:${track.key}@${track.sightings[0]!.t}`;
+
 /** A secret of a frame (by its index in the frames given) and line, and the track it is part of. */
 export interface Found {
   frame: number;
@@ -149,9 +154,18 @@ export function trackSecrets(frames: readonly ScreenTextFrame[], words: readonly
 /**
  * The masks for what the frames read show of private things, and of the person's `words`, one for
  * each track (`trackSecrets`); a mask moved when its rect did. `end`: the take's length (source
- * seconds), where a mask ends that no later frame showed gone.
+ * seconds), where a mask ends that no later frame showed gone. `followed`: where each track was
+ * followed in the take's frames, by its name (follow.ts): one mask for each stretch it was on
+ * screen, with a place in each frame it moved in.
  */
-export function privacyMasks(frames: readonly ScreenTextFrame[], words: readonly string[], screen: { width: number; height: number }, end = Infinity, rules = MASK_RULES): PrivacyMask[] {
+export function privacyMasks(
+  frames: readonly ScreenTextFrame[],
+  words: readonly string[],
+  screen: { width: number; height: number },
+  end = Infinity,
+  rules = MASK_RULES,
+  followed?: ReadonlyMap<string, readonly Stretch[]>,
+): PrivacyMask[] {
   const { tracks } = trackSecrets(frames, words, rules);
   // Frames are read where the picture changes: a secret stays on screen until a frame read shows it
   // gone, so a mask lasts until then (to the take's end when none does).
@@ -166,8 +180,42 @@ export function privacyMasks(frames: readonly ScreenTextFrame[], words: readonly
     return [Math.round(left), Math.round(top), Math.round(Math.min(screen.width, rect[0] + rect[2] + rules.pad) - left), Math.round(Math.min(screen.height, rect[1] + rect[3] + rules.pad) - top)];
   };
   const moved = (a: Rect, b: Rect) => a.some((value, k) => Math.abs(value - b[k]!) > rules.moved);
+  /**
+   * A mask for each stretch a track was followed on screen, through its places: one is left out
+   * where the two around it hold it and are together at most `pad` larger than either (between two
+   * places a mask covers both), so a mask that stands has one place and one that moves a place in
+   * each frame it moved more than that.
+   */
+  const fromStretches = (group: Track, stretches: readonly Stretch[]): PrivacyMask[] =>
+    stretches.flatMap((stretch) => {
+      const places = stretch.places.filter((place) => place.at < stretch.to).map((place) => ({ at: place.at, rect: pad(place.rect) }));
+      if (places.length === 0 || !(stretch.to > stretch.from)) return [];
+      const kept = [places[0]!];
+      let held: Rect | undefined; // the places since the last kept one, together
+      for (let k = 1; k < places.length; k++) {
+        const last = kept.at(-1)!.rect;
+        const next = places[k]!.rect;
+        const both = union(last, next);
+        const fits = both[2] <= Math.max(last[2], next[2]) + rules.pad && both[3] <= Math.max(last[3], next[3]) + rules.pad && (!held || union(both, held).every((value, i) => value === both[i]));
+        if (!fits && k > 1 && places[k - 1] !== kept.at(-1)) {
+          kept.push(places[k - 1]!);
+          held = undefined;
+          k--;
+          continue;
+        }
+        held = held ? union(held, next) : next;
+      }
+      const end = places.at(-1)!;
+      if (end !== kept.at(-1)) kept.push(end);
+      // a place where it still stood is kept before one where it moved (else it covered both all along)
+      const same = (one: Rect, other: Rect) => one.every((value, i) => value === other[i]);
+      const moves = kept.filter((place, k) => k > 0 && place.at > stretch.from && !(same(place.rect, kept[k - 1]!.rect) && (k === kept.length - 1 || same(place.rect, kept[k + 1]!.rect))));
+      return [{ from: round(stretch.from), to: round(stretch.to), rect: kept[0]!.rect, ...(moves.length > 0 && { moves }), kind: group.kind, label: SECRET_LABELS[group.kind] }];
+    });
   const masks = tracks
-    .map((group): PrivacyMask => {
+    .flatMap((group): PrivacyMask[] => {
+      const stretches = followed?.get(trackName(group));
+      if (stretches && stretches.length > 0) return fromStretches(group, stretches);
       const [first, ...rest] = group.sightings as [Sighting, ...Sighting[]];
       const from = round(Math.max(0, first.t - rules.margin));
       const moves: { at: number; rect: Rect }[] = [];
@@ -189,7 +237,7 @@ export function privacyMasks(frames: readonly ScreenTextFrame[], words: readonly
         previous = sighting;
       }
       const path: ZoomMove[] = moves.map((move) => ({ at: move.at, rect: pad(move.rect) }));
-      return { from, to: round(until(previous.t)), rect: pad(base), ...(path.length > 0 && { moves: path }), kind: group.kind, label: SECRET_LABELS[group.kind] };
+      return [{ from, to: round(until(previous.t)), rect: pad(base), ...(path.length > 0 && { moves: path }), kind: group.kind, label: SECRET_LABELS[group.kind] }];
     })
     .sort((a, b) => a.from - b.from);
   return joinCovering(masks);
@@ -200,8 +248,8 @@ export function privacyMasks(frames: readonly ScreenTextFrame[], words: readonly
  * overlap in time and, place by place (their rect, then each move at the same time), one covers
  * most of the other. Masks whose places differ in time (one rule found its text in fewer frames)
  * are one when, at each place of either while both are shown, one covers most of the other as
- * they are drawn (between two places a mask covers both): the one with more places stays, each of
- * them grown to hold the other there.
+ * they are drawn (between two places a mask covers both): it has the places of both, each holding
+ * what either shows then (a mask that is not shown then adds nothing).
  */
 function joinCovering(masks: PrivacyMask[]): PrivacyMask[] {
   const covered = (a: Rect, b: Rect) => {
@@ -237,11 +285,18 @@ function joinCovering(masks: PrivacyMask[]): PrivacyMask[] {
       other.rect = both(other.rect, mask.rect);
       if (other.moves) other.moves = other.moves.map((move, k) => ({ at: move.at, rect: both(move.rect, mask.moves![k]!.rect) }));
     } else {
-      const [kept, rest] = placesOf(mask).length > placesOf(other).length ? [mask, { ...other }] : [{ ...other }, mask];
-      const there = (t: number) => maskRectAt(rest, Math.min(Math.max(t, rest.from), rest.to));
-      other.rect = both(kept.rect, there(kept.from));
-      other.moves = kept.moves?.map((move) => ({ at: move.at, rect: move.at < rest.to ? both(move.rect, there(move.at)) : move.rect }));
-      if (!other.moves) delete other.moves;
+      const two = [{ ...other }, mask];
+      const placeAt = (one: PrivacyMask, t: number) => (one.moves ?? []).filter((move) => move.at <= t).at(-1)?.rect ?? one.rect;
+      const shownAt = (t: number) => two.filter((one) => one.from <= t && t < one.to).map((one) => placeAt(one, t)).reduce(both);
+      const from = Math.min(other.from, mask.from);
+      const to = Math.max(other.to, mask.to);
+      const places = [...new Set([...placesOf(other), ...placesOf(mask)])].filter((t) => t >= from && t < to).sort((a, b) => a - b).map((t) => ({ at: t, rect: shownAt(t) }));
+      // a place like the one before is left out unless the next one differs (it ends a still stretch)
+      const same = (a: Rect, b: Rect) => a.every((value, i) => value === b[i]);
+      const moves = places.filter((place, k) => k > 0 && !(same(place.rect, places[k - 1]!.rect) && (k === places.length - 1 || same(place.rect, places[k + 1]!.rect))));
+      other.rect = places[0]!.rect;
+      if (moves.length > 0) other.moves = moves;
+      else delete other.moves;
     }
     other.from = Math.min(other.from, mask.from);
     other.to = Math.max(other.to, mask.to);

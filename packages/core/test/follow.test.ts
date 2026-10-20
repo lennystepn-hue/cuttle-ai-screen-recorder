@@ -1,10 +1,12 @@
-import { mkdtempSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { mkdtempSync, writeFileSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 import type { Rect, ScreenTextFrame } from '@cuttle/project';
 import { activeMasks } from '@cuttle/timeline';
+import { ffmpegPath } from '../src/ffmpeg';
 import { followTracks, locate, templateOf, type Picture } from '../src/privacy/follow';
 import { privacyMasks, trackName, trackSecrets } from '../src/privacy/masks';
 import { framesToRead } from '../src/privacy/read';
@@ -129,6 +131,36 @@ describe('followTracks', () => {
     const masks = privacyMasks(frames, [], size, seconds, undefined, named);
     expect(look(masks)).toEqual({ open: 0, astray: expect.any(Number) });
     expect(look(masks).astray).toBeLessThanOrEqual(2);
+  }, 60_000);
+
+  it("masks a secret from its first frame to its last in a take with a frame only when the screen changes (macOS's)", async () => {
+    const { width, height } = SCROLL_TAKE;
+    const blank = picture(width, height);
+    for (let line = 0; line < 20; line++) glyphs(blank, 48, 40 + line * 30, 30, line + 1);
+    const shown = { ...blank, data: blank.data.slice() };
+    glyphs(shown, 197, 300, 44, 501);
+    const dir = mkdtempSync(join(tmpdir(), 'cuttle-follow-'));
+    dirs.push(dir);
+    // the secret comes at 1.2121 s, the screen stays still, it goes at 2.0137 s: just after a 30th of
+    // a second, which ffmpeg's nearest frame would show already; no frame at the start of the range
+    const [comes, goes, seconds] = [1.2121, 2.0137, 3];
+    // four frames at these microseconds, as macOS's capture helper writes a take
+    const at = [0, comes, goes, seconds].map((t) => Math.round(t * 1e6));
+    const pts = at.slice(0, -1).reduceRight((rest, t, k) => `if(eq(N\\,${k})\\,${t}\\,${rest})`, String(at.at(-1)));
+    const video = join(dir, 'screen.mp4');
+    const made = spawnSync(ffmpegPath(), ['-v', 'error', '-f', 'rawvideo', '-pix_fmt', 'gray', '-s', `${width}x${height}`, '-r', '30', '-i', '-', '-vf', `settb=1/1000000,setpts='${pts}',scale=out_color_matrix=bt709:out_range=tv,format=yuv420p`, '-fps_mode', 'passthrough', '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '18', '-enc_time_base', '1/1000000', '-video_track_timescale', '1000000', '-y', video], { input: Buffer.concat([blank.data, shown.data, blank.data, blank.data]), maxBuffer: 1 << 26, encoding: 'utf8' });
+    expect(made.status, made.stderr).toBe(0);
+    const secret: Rect = [197, 300, 352, 12];
+    const line = { text: 'export ghp_1234567890abcdefghijklmnop', rect: [48, 300, 501, 12] as Rect, words: [{ text: 'export', rect: [48, 300, 141, 12] as Rect }, { text: 'ghp_1234567890abcdefghijklmnop', rect: secret }] };
+    const frames: ScreenTextFrame[] = [{ t: 0, lines: [] }, { t: 1.25, lines: [line] }, { t: 1.75, lines: [line] }, { t: 2.05, lines: [] }];
+    const { tracks } = trackSecrets(frames, []);
+    const followed = await followTracks(video, tracks, frames.map((frame) => frame.t), { width, height }, seconds);
+    const [stretch] = [...followed.values()].flat();
+    // from no later than its first frame and to no earlier than its last, a frame either side at most
+    expect(stretch!.from).toBeLessThanOrEqual(comes);
+    expect(stretch!.from).toBeGreaterThan(comes - 1 / 30 - 0.001);
+    expect(stretch!.to).toBeGreaterThanOrEqual(goes);
+    expect(stretch!.to).toBeLessThan(goes + 1 / 30 + 0.001);
   }, 60_000);
 
   it('holds still text whose reads draw its box a little larger or smaller (Vision): one place, grown to hold them', async () => {

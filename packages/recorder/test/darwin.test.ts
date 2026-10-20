@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { CURSOR_SIGNATURES, cursorSignature, displayOf, eventWallTime, LEVEL, macPopups, NOTIFICATION_CENTER, pageOf, pixelMapper, type ListedWindow } from '../src/darwin';
+import { CURSOR_SIGNATURES, cursorSignature, displayOf, eventWallTime, frontWindow, LEVEL, macPopups, NOTIFICATION_CENTER, pageOf, pixelMapper, type ListedWindow } from '../src/darwin';
 
 // A 1440×900 point Retina display (2880×1800 pixels) with a 1920×1080 display at 1× to its right,
 // and one at 2× above it.
@@ -94,6 +94,26 @@ describe('macPopups', () => {
     const banner = listed(16, 853, 21, [0, 0, 1440, 900], NOTIFICATION_CENTER);
     const widget = listed(19, 853, -2147483601, [188, 38, 180, 180], NOTIFICATION_CENTER);
     expect(macPopups([banner, widget]).map(({ window, kind }) => [window.id, kind])).toEqual([[16, 'notification']]);
+  });
+});
+
+describe('frontWindow', () => {
+  // the Claude app's window, picked for a window take, and the 66×20 point window it shows over its
+  // buttons while that window is captured (as CGWindowList gave them on macOS 27)
+  const claude = listed(11048, 55179, 0, [149, 37, 1200, 800]);
+  const buttons = listed(12307, 55179, 0, [155, 43, 66, 20]);
+
+  it("takes a small window of the front app inside another of its windows for that window", () => {
+    expect(frontWindow([buttons, claude, listed(1039, 1889, 0, [0, 30, 1440, 808])])?.id).toBe(11048);
+    // a sheet over its document, too
+    expect(frontWindow([listed(3053, 86403, 0, [261, 228, 404, 218]), listed(3049, 86403, 0, [170, 93, 586, 488])])?.id).toBe(3049);
+  });
+
+  it("keeps the first window when it is another app's, or as large as the window around it", () => {
+    expect(frontWindow([{ ...buttons, pid: 1 }, claude])?.id).toBe(12307);
+    expect(frontWindow([listed(7, 55179, 0, [160, 50, 1100, 760]), claude])?.id).toBe(7);
+    expect(frontWindow([claude])?.id).toBe(11048);
+    expect(frontWindow([])).toBeUndefined();
   });
 });
 

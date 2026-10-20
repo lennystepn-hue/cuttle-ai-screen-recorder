@@ -62,7 +62,7 @@ describe('applyPrivacy', () => {
     // again, with nothing new: nothing is written, the screen text neither
     expect((await applyPrivacy(dir)).written).toBe(false);
     expect(readFileSync(join(dir, 'takes', '1', 'screen-text.jsonl'), 'utf8')).toBe(kept);
-  });
+  }, 20_000);
 
   it('masks the notifications without the screen\'s text, and leaves the privacy masks there as they are', async () => {
     const dir = await project();

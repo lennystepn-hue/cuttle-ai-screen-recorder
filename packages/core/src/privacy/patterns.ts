@@ -186,6 +186,40 @@ export function cardValid(digits: string): boolean {
   return sum % 10 === 0;
 }
 
+const EMAIL = /[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}/g;
+
+/**
+ * Where the email addresses in a line are (character ranges of `text`), also as the OCR reads them
+ * in a monospaced font at an editor's size: a space beside a dot ("example . com", "j .doe",
+ * "first. last", the part after the dot in lower case or a digit), a dash read as a long one
+ * ("firma—beispiel.de"), an underscore read as a space ("max mustermann@…", the word before taken
+ * along after a comma, a colon or the line's start), and an l read as "I " ("I ena.mueller@…").
+ */
+export function emailsOf(text: string): [number, number][] {
+  // the line with those undone, and where each of its characters is in `text`
+  let plain = '';
+  const at: number[] = [];
+  for (let i = 0; i < text.length; i++) {
+    const char = text[i]!;
+    if (/\s/.test(char)) {
+      const before = plain.at(-1) ?? '';
+      const after = text.slice(i).replace(/^\s+/, '');
+      if ((before === '.' && /^[a-z0-9]/.test(after)) || (/[A-Za-z0-9_%+-]/.test(before) && /^\.\s*[a-z0-9]/.test(after))) continue;
+    }
+    plain += /[‐-―−]/.test(char) ? '-' : char;
+    at.push(i);
+  }
+  const found: [number, number][] = [];
+  for (const match of plain.matchAll(EMAIL)) {
+    let from = match.index;
+    const before = plain.slice(0, from);
+    const word = /(?:^|[,;:<(]\s*)([a-z0-9][a-z0-9._%+-]*)\s$/.exec(before) ?? /(?:^|\s)([Il|])\s$/.exec(before);
+    if (word) from -= word[1]!.length + 1;
+    found.push([at[from]!, at[match.index + match[0].length - 1]! + 1]);
+  }
+  return found;
+}
+
 interface Match {
   kind: SecretKind;
   from: number;
@@ -212,8 +246,8 @@ export function findSecrets(text: string, words: readonly string[] = []): Match[
       add(part.slice(0, part.indexOf('-')) as SecretKind, mark.from, marks[last]!.to, part);
     }
   });
-  // email addresses
-  for (const match of text.matchAll(/[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}/g)) add('email', match.index, match.index + match[0].length);
+  // email addresses, also as the OCR reads them in a monospaced font (`emailsOf`)
+  for (const [from, to] of emailsOf(text)) add('email', from, to);
   // a token in a link, and a password in one (https://user:password@host)
   for (const match of text.matchAll(/[?&](?:[a-z_]*token|key|api_?key|secret|sig|signature|password|session(?:_?id)?|code)=([^\s&"'#]+)/gi)) add('token', match.index + match[0].length - match[1]!.length, match.index + match[0].length);
   for (const match of text.matchAll(/\/\/[^\s/:@]+:([^\s/@]+)@/g)) add('token', match.index + 2, match.index + match[0].length - 1);

@@ -21,7 +21,7 @@ import { transcriptCommand } from './commands/transcript';
 import { CliError, EXIT, toCliError } from './errors';
 import { createOutput, type Output, type Streams } from './output';
 
-export const VERSION = '0.1.6';
+export const VERSION = '0.1.7';
 
 const seconds = (value: string): number => {
   const parsed = Number(value);

@@ -189,8 +189,10 @@ video (`cuttle preview --masks` shows each mask's edges).
 
 The text it reads is checked for email addresses, keys and tokens (by their prefixes, by a name
 such as `API_KEY=` beside them, or because they look random), IBANs, card and phone numbers and the
-words you name. What it finds is kept in the project only as a mark (`⟦key-qwhzbtrk⟧`, one id for
-each private thing, also where the OCR read it a little differently), never as it was.
+words you name. Email addresses are found also as the OCR reads them in a code editor's font: with
+spaces beside a dot, a long dash for a hyphen or a space for an underscore. What it finds is kept in
+the project only as a mark (`⟦key-qwhzbtrk⟧`, one id for each private thing, also where the OCR read
+it a little differently), never as it was.
 
 The masks are drawn only into what Cuttle renders (the export, previews). The project folder keeps
 the take as it was recorded (`takes/`, the video still shows what the screen showed) and the

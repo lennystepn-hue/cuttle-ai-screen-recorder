@@ -102,6 +102,25 @@ describe('findSecrets, on lines as Windows OCR read the fixture page (its slips 
     expect(found('Authorization: Bearer abc.def')).toContainEqual(['value', 'Bearer abc.def']);
   });
 
+  it('finds email addresses as Windows OCR reads them in a monospaced font: a space by a dot, a long dash, an underscore as a space', () => {
+    // Consolas, Cascadia Mono and Courier New at 13 to 15 px, in an editor's colours (fixtures/privacy/emails.html)
+    expect(found('// contact: I ena .mueller@example . com')).toEqual([['email', 'I ena .mueller@example . com']]);
+    expect(found('contact: lena.mueller@example.com, j .doe+test@mail.example.org,')).toEqual([
+      ['email', 'lena.mueller@example.com'],
+      ['email', 'j .doe+test@mail.example.org'],
+    ]);
+    expect(found('first. last@company. com')).toEqual([['email', 'first. last@company. com']]);
+    expect(found('// contact: lena.mueller@example.com, max_musternann@firma—beispiel.de,')).toContainEqual(['email', 'max_musternann@firma—beispiel.de']);
+    expect(found('// contact: lena.mueller@example.com, max mustermann@firma-beispiel.de,')).toContainEqual(['email', 'max mustermann@firma-beispiel.de']);
+  });
+
+  it('takes no more than the address: not a sentence after it, not the word before it in a sentence', () => {
+    expect(found('Mail lena@example.com. Thanks!')).toEqual([['email', 'lena@example.com']]);
+    expect(found('please write to lena@example.com')).toEqual([['email', 'lena@example.com']]);
+    expect(found('Done. See the docs . then call us')).toEqual([]);
+    expect(found("@Component({ selector: 'app' })")).toEqual([]);
+  });
+
   it('finds the person\'s words, one wrong letter allowed in long ones', () => {
     expect(found('Thanks, Lena Müller!', ['Lena Müller'])).toEqual([['word', 'Lena Müller!']]);
     expect(found('Lena Mūller wrote', ['Lena Müller'])).toEqual([['word', 'Lena Mūller']]);

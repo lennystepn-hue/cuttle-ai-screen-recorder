@@ -174,6 +174,28 @@ describe.runIf(process.platform === 'win32' || process.platform === 'darwin')('r
     expect(privacyMasks(kept, [], { width: 1920, height: 1080 })).toEqual(masks);
   }, 60_000 + OCR_TIMEOUT.prepare * 1000);
 
+  it('masks every email address it reads in an editor in a monospaced font, the spaces and long dashes the OCR reads in them too', async () => {
+    delete process.env.CUTTLE_OCR;
+    const reader = await ScreenReader.start();
+    let lines;
+    try {
+      // fixtures/privacy/emails.html, rendered at 1920 × 1080 by `cuttle capture-page`: lines of four
+      // addresses each in Consolas, Cascadia Mono and Courier New, an editor's colours
+      lines = await reader.read(join(import.meta.dirname, 'fixtures', 'privacy', 'emails.png'), 1920, 1080);
+    } finally {
+      reader.close();
+    }
+    const masks = privacyMasks([{ t: 1, lines }, { t: 2, lines: [] }, { t: 3, lines: [] }], [], { width: 1920, height: 1080 });
+    const under = (rect: Rect) => masks.some((mask) => rect[0] < mask.rect[0] + mask.rect[2] && mask.rect[0] < rect[0] + rect[2] && rect[1] < mask.rect[1] + mask.rect[3] && mask.rect[1] < rect[1] + rect[3]);
+    const read = lines.filter((line) => /contact/i.test(line.text));
+    expect(read.length, lines.map((line) => line.text).join('\n')).toBeGreaterThanOrEqual(4);
+    // after "contact:" a line holds addresses only: each word of it the OCR read is under a mask
+    for (const line of read) {
+      const start = line.words.findIndex((word) => /contact/i.test(word.text));
+      for (const word of line.words.slice(start + 1).filter((one) => /[a-z]/i.test(one.text))) expect(under(word.rect), `"${word.text}" in: ${line.text}`).toBe(true);
+    }
+  }, 60_000 + OCR_TIMEOUT.prepare * 1000);
+
   it('reads frames with several helpers at once, each frame its own text, in order', async () => {
     delete process.env.CUTTLE_OCR;
     const dir = mkdtempSync(join(tmpdir(), 'cuttle-ocr-'));

@@ -116,6 +116,21 @@ describe('windowWatch', () => {
     expect(state.areaReads).toBeLessThan(8);
   });
 
+  it("gives the content area as last read for a take's first events, also an area that stays", () => {
+    const { state, win } = desktop();
+    const watch = windowWatch(win, () => {});
+    expect(watch.initial(0)).toEqual([]);
+    // read before the take's first frame, and not passed on again while it stays
+    watch(1 / 30);
+    for (let i = 0; i < 60; i++) watch(1);
+    expect(watch.initial(2)).toEqual([{ type: 'area', time: 2, rect: { x: 10, y: 100, width: 980, height: 690 } }]);
+    // a window without one: none, so the take is not cropped from its picture
+    state.front = { id: 2, bounds: { x: 0, y: 0, width: 500, height: 400 } };
+    state.area = undefined;
+    for (let i = 0; i < 8; i++) watch(3);
+    expect(watch.initial(4)).toEqual([{ type: 'area', time: 4, rect: null }]);
+  });
+
   it('passes on each dialog or menu as it opens and closes', () => {
     const { state, win } = desktop();
     const seen: RawInput[] = [];

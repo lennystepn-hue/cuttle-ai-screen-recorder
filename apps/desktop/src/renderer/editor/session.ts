@@ -142,11 +142,12 @@ export async function openSession(canvas: HTMLCanvasElement): Promise<void> {
       // the check compares the editor's motion frames with the export's
       fullSizeMotion: query.get('check') === '1',
     });
+    // the check's hook before "ready", which the check waits for (the first frame's seek comes after)
+    if (query.get('check') === '1') exposeCheckHook(canvas);
     store.set({ phase: 'ready', media });
     player.setSoundtrack(store.get().soundtrack);
     await player.seek(0);
     followDocument();
-    if (query.get('check') === '1') exposeCheckHook(canvas);
     bridge.on('media:state', (state) => void applyMediaState(state));
     void applyMediaState(await bridge.invoke('media:state'));
     bridge.on('export:progress', (progress) => store.set({ exportProgress: progress }));

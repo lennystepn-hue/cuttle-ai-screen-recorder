@@ -391,7 +391,7 @@ function SpeechSettings({ view, change }: { view: SettingsView | undefined; chan
         <button
           className="toggle"
           role="switch"
-          aria-checked={view?.speech.live ?? true}
+          aria-checked={view?.speech.live ?? false}
           aria-label="Live captions while recording"
           disabled={!view}
           onClick={() => view && change({ speechLive: !view.speech.live })}

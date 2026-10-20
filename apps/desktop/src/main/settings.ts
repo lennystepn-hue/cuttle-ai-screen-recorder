@@ -30,16 +30,16 @@ const SettingsSchema = z.object({
   motion: z.enum(MOTIONS).catch('system').default('system'),
   /**
    * Transcribing a take after its cut: the speech model (`small` until the person picks), and the
-   * language spoken. `live`: the HUD shows what the mic hears while a take records.
+   * language spoken. `live`: the HUD shows what the mic hears while a take records (off until switched on).
    */
   speech: z
     .object({
       model: z.enum(['off', ...SPEECH_MODEL_NAMES]).catch('small').default('small'),
       language: z.enum(SPEECH_LANGUAGES).catch('auto').default('auto'),
-      live: z.boolean().catch(true).default(true),
+      live: z.boolean().catch(false).default(false),
     })
-    .catch({ model: 'small' as const, language: 'auto' as const, live: true })
-    .default({ model: 'small' as const, language: 'auto' as const, live: true }),
+    .catch({ model: 'small' as const, language: 'auto' as const, live: false })
+    .default({ model: 'small' as const, language: 'auto' as const, live: false }),
   /** The privacy step after a take's cut: read the screen's text (Windows' OCR, macOS's Vision) to mask what it showed, and the words always masked. */
   privacy: z
     .object({

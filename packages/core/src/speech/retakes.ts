@@ -1,5 +1,6 @@
-// Retakes: the person slipped, pressed the mistake key (a `retake` marker) or said "nochmal", and did
-// the bit again. The slip is cut: from the last pause before it to just after the key or the cue.
+// Retakes: the person slipped, pressed the mistake key (a `retake` marker), said "nochmal" or just
+// began the sentence again, and did the bit again. The slip is cut: from the last pause before it to
+// just after the key or the cue, or to just before the sentence begun again.
 // Pure: the inputs are the markers, the transcript (or the mic's speech stretches) and the input
 // events, in source seconds.
 import { fillerLexicon, normWord, type InputEvent, type Marker, type TranscriptWord } from '@cuttle/project';
@@ -25,6 +26,13 @@ export const RETAKE_RULES = {
   repeatMatch: 2,
   /** … which began at most these many words before the cue. */
   repeatWords: 12,
+  /**
+   * A phrase begun again without a cue: the next phrase repeats it word for word from its start,
+   * all of it (at least this many words) …
+   */
+  restartWords: 2,
+  /** … or this many words or more of it. */
+  restartMatch: 3,
 };
 
 /** The spoken cues for "once more", as normalised words in a row (the longest that fits wins). */
@@ -112,6 +120,49 @@ export function spokenCues(words: readonly TranscriptWord[], rules = RETAKE_RULE
   return found;
 }
 
+/** A phrase broken off and begun again without a cue. */
+export interface Restart {
+  /** Where it begins again: the first word said again. */
+  at: number;
+  /** Where the broken phrase began. */
+  slip: number;
+  /** The broken phrase's words. */
+  text: string;
+}
+
+/**
+ * The phrases begun again without a cue ("Dann klickt ihr auf … Dann klickt ihr auf Exportieren"): a
+ * phrase starts after a pause of `cuePause` (or with the take, or where a phrase began again), and
+ * the next one repeats it word for word from its start: all of it, `restartWords` words or more, or
+ * `restartMatch` words or more of it. No pause is asked for between the two: whisper often puts the
+ * broken phrase's last word right against the new start.
+ */
+export function restarts(words: readonly TranscriptWord[], rules = RETAKE_RULES): Restart[] {
+  const normal = words.map((word) => normWord(word.text));
+  const found: Restart[] = [];
+  let again = -1;
+  for (let i = 0; i < words.length; i++) {
+    if (i > 0 && i !== again && words[i]!.t - words[i - 1]!.end < rules.cuePause) continue;
+    for (let j = i + 1; j < words.length && j - i <= rules.repeatWords; j++) {
+      if (normal[j] !== normal[i]) continue;
+      let length = 0;
+      while (i + length < j && j + length < words.length && normal[i + length] === normal[j + length]) length++;
+      if ((i + length === j && length >= rules.restartWords) || length >= rules.restartMatch) {
+        const text = words
+          .slice(i, j)
+          .map((word) => word.text.replace(/[^\p{L}\p{N}]+$/u, ''))
+          .join(' ');
+        found.push({ at: words[j]!.t, slip: words[i]!.t, text });
+        // the new start is a phrase's start: it may be broken off and begun again too
+        again = j;
+        i = j - 1;
+        break;
+      }
+    }
+  }
+  return found;
+}
+
 /**
  * Where the slip before `back` began: the end of the last pause in the speech (a gap of `pause` or
  * more, with no click, key or scroll in its last `restingInput`), at most `lookBack` back; else
@@ -132,22 +183,24 @@ function slipStart(back: number, input: RetakeInput, floor: number, rules: typeo
 }
 
 /**
- * The retakes: one cut per mistake key (a `retake` marker) and per spoken cue that is followed by a
- * repeat, from the last pause before the slip to `after` past the key or the cue, inside the clip it
- * lies in. Cuts that overlap become one.
+ * The retakes: one cut per mistake key (a `retake` marker), per spoken cue that is followed by a
+ * repeat and per phrase begun again without a cue, from the last pause before the slip to `after`
+ * past the key or the cue (to `keepBefore` before a phrase begun again), inside the clip it lies in.
+ * Cuts that overlap become one.
  */
 export function retakeCuts(input: RetakeInput, rules = RETAKE_RULES): RetakeCut[] {
   // `back`: where to look back from for the pause before the slip (a cue's: the slip's first word)
-  const slips: { at: number; back: number; end: number; label: string }[] = [
-    ...input.markers.filter((marker) => marker.kind === 'retake').map((marker) => ({ at: marker.t, back: marker.t, end: marker.t, label: 'Retake' })),
-    ...(input.words ? spokenCues(input.words, rules).map((cue) => ({ at: cue.at, back: cue.slip + 0.001, end: cue.end, label: `Retake: “${cue.text}”` })) : []),
+  const slips: { at: number; back: number; to: number; label: string }[] = [
+    ...input.markers.filter((marker) => marker.kind === 'retake').map((marker) => ({ at: marker.t, back: marker.t, to: marker.t + rules.after, label: 'Retake' })),
+    ...(input.words ? spokenCues(input.words, rules).map((cue) => ({ at: cue.at, back: cue.slip + 0.001, to: cue.end + rules.after, label: `Retake: “${cue.text}”` })) : []),
+    ...(input.words ? restarts(input.words, rules).map((restart) => ({ at: restart.at, back: restart.slip + 0.001, to: restart.at - rules.keepBefore, label: `Restart: “${restart.text}”` })) : []),
   ];
   const cuts: RetakeCut[] = [];
   for (const slip of slips.sort((a, b) => a.at - b.at)) {
     const clip = input.clips.find((span) => span.from <= slip.at && slip.at < span.to);
     if (!clip) continue;
     const from = slipStart(slip.back, input, clip.from, rules);
-    const to = Math.min(clip.to, slip.end + rules.after);
+    const to = Math.min(clip.to, slip.to);
     if (!(to > from)) continue;
     const last = cuts.at(-1);
     if (last && from <= last.to) {

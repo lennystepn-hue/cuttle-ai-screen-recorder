@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { parseProject, type InputEvent, type Marker, type TranscriptWord } from '@cuttle/project';
 import { withSpeechCuts, wordStretches } from '../src/speech/apply';
-import { retakeCuts, spokenCues, type RetakeInput } from '../src/speech/retakes';
+import { restarts, retakeCuts, spokenCues, type RetakeInput } from '../src/speech/retakes';
 
 const key = (t: number): Marker => ({ t, kind: 'retake' });
 const said = (...items: [number, number, string][]): TranscriptWord[] => items.map(([t, end, text]) => ({ t, end, text }));
@@ -83,6 +83,47 @@ describe('a spoken cue', () => {
   });
 });
 
+describe('a sentence begun again', () => {
+  // "… die Einstellungen. Dann klickt ihr auf … Dann klickt ihr auf Exportieren": the noisy fixture's
+  // words as they were placed before the alignment knew full stops, the broken "auf" right against
+  // the new start (whisper puts it there, and a transcript may still have it so)
+  const words = said(
+    [8.61, 9.36, 'Einstellungen.'],
+    [11.17, 11.48, 'Dann'],
+    [11.48, 11.9, 'klickt'],
+    [11.9, 12.15, 'ihr'],
+    [12.97, 13.21, 'auf.'],
+    [13.21, 13.51, 'Dann'],
+    [13.51, 13.94, 'klickt'],
+    [13.94, 14.18, 'ihr'],
+    [14.18, 14.42, 'auf'],
+    [14.42, 15.15, 'Exportieren'],
+  );
+
+  it('is found without a cue: the next phrase repeats the broken one from its start', () => {
+    expect(restarts(words)).toEqual([{ at: 13.21, slip: 11.17, text: 'Dann klickt ihr auf' }]);
+    // and cut from the pause before it to just before the sentence begins again
+    expect(retakeCuts(input({ words, speech: wordStretches({ version: 1, language: 'de', model: 'small', words, sounds: [] }) }))).toEqual([
+      { from: 11.02, to: 13.06, auto: 'retake', label: 'Restart: “Dann klickt ihr auf”' },
+    ]);
+    // three words or more said again count too, though the rest differs ("Export" and then "Exportieren")
+    const changed = said([1, 1.3, 'Dann'], [1.3, 1.6, 'klickt'], [1.6, 1.8, 'ihr'], [1.8, 2, 'auf'], [2, 2.4, 'Export.'], [3, 3.3, 'Dann'], [3.3, 3.6, 'klickt'], [3.6, 3.8, 'ihr'], [3.8, 4, 'auf'], [4, 4.6, 'Exportieren']);
+    expect(restarts(changed)).toEqual([{ at: 3, slip: 1, text: 'Dann klickt ihr auf Export' }]);
+    // begun again twice: both broken starts go
+    const twice = said([1, 1.3, 'Wir'], [1.3, 1.6, 'öffnen'], [2.2, 2.5, 'Wir'], [2.5, 2.8, 'öffnen'], [3.4, 3.7, 'Wir'], [3.7, 4, 'öffnen'], [4, 4.3, 'die'], [4.3, 4.8, 'App']);
+    expect(restarts(twice).map((restart) => [restart.slip, restart.at])).toEqual([[1, 2.2], [2.2, 3.4]]);
+  });
+
+  it('is not a sentence that only begins alike, a word said twice, or a phrase within a sentence', () => {
+    // two sentences that begin with the same two words
+    expect(restarts(said([1, 1.3, 'Klickt'], [1.3, 1.5, 'auf'], [1.5, 2, 'Datei.'], [2.6, 2.9, 'Klickt'], [2.9, 3.1, 'auf'], [3.1, 3.7, 'Speichern.']))).toEqual([]);
+    // one word twice
+    expect(restarts(said([1, 1.3, 'Sehr,'], [1.5, 1.8, 'sehr'], [1.8, 2.1, 'gut.']))).toEqual([]);
+    // the repeat of words that did not start a phrase (no pause before them)
+    expect(restarts(said([1, 1.3, 'Ich'], [1.3, 1.5, 'sage'], [1.5, 1.8, 'dann'], [1.8, 2, 'klickt'], [2, 2.3, 'dann'], [2.3, 2.6, 'klickt'], [2.6, 2.9, 'ihr']))).toEqual([]);
+  });
+});
+
 describe('retakes among the speech edits', () => {
   const project = (rest: Record<string, unknown> = {}) => {
     const parsed = parseProject({ version: 1, sources: { screen: 's.mp4' }, scenes: [{ type: 'clip', from: 0, to: 30 }], ...rest });
@@ -107,6 +148,24 @@ describe('retakes among the speech edits', () => {
     const keyOnly = withSpeechCuts({ cuts: [{ id: 'c1', from: 9, to: 9.5, auto: 'filler' }] }, project(), base, new Set(['c1']));
     // without a transcript the filler cut stays as it was
     expect(keyOnly.cuts.map((cut) => cut.auto)).toEqual(['retake', 'filler']);
+  });
+
+  it('keep their edges in the mic’s quiet, and are left out where it has none near them', () => {
+    // the mic heard "äh" at 2.3–2.6, earlier than whisper wrote it
+    const quiet = [{ from: -Infinity, to: 1 }, { from: 1.5, to: 2.3 }, { from: 2.6, to: 3.5 }, { from: 4, to: 5.5 }, { from: 6, to: Infinity }];
+    const result = withSpeechCuts({ cuts: [] }, project(), { ...base, transcript, quiet }, new Set());
+    // the pause's cut ends 0.15 s before the "äh" the mic heard, the filler's starts before it
+    expect(result.cuts.map((cut) => [cut.auto, cut.from, cut.to])).toEqual([
+      ['pause', 1.7, 2.15],
+      ['filler', 2.27, 2.85],
+      ['retake', 3.35, 5.3],
+    ]);
+    expect(result.notes).toContain("moved 2 cut edges into the mic's quiet, clear of the speech");
+    // "Erstens" and "äh" ran together: no quiet near the pause's cut, nor before the filler
+    const glued = [{ from: -Infinity, to: 1 }, { from: 2.8, to: 3.5 }, { from: 4, to: 5.5 }, { from: 6, to: Infinity }];
+    const left = withSpeechCuts({ cuts: [] }, project(), { ...base, transcript, quiet: glued }, new Set());
+    expect(left.cuts.map((cut) => cut.auto)).toEqual(['retake']);
+    expect(left.notes).toContain("left out 2 cuts with no quiet in the mic near their edges: the words there run together");
   });
 
   it('are not made while switched off', () => {

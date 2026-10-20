@@ -4,7 +4,8 @@ import { rm } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
-import { parseTranscriptJson } from '@cuttle/project';
+import { normWord, parseProject, parseTranscriptJson } from '@cuttle/project';
+import { captionWords, sceneSpans } from '@cuttle/timeline';
 import { ffmpegPath, runFfmpeg } from '../src/ffmpeg';
 import { applySpeechEdits } from '../src/speech/apply';
 import { transcribeTake } from '../src/speech/transcribe';
@@ -24,14 +25,14 @@ const fixtures = join(import.meta.dirname, 'fixtures', 'speech');
 const dirs: string[] = [];
 afterAll(() => Promise.all(dirs.map((dir) => rm(dir, { recursive: true, force: true }))));
 
-/** A project whose take is a still screen and the English fixture as its mic, which started 0.2 s after the screen. */
-async function spokenTake(): Promise<string> {
+/** A project whose take is a still screen and a fixture as its mic, which started 0.2 s after the screen. */
+async function spokenTake(mic = 'en.m4a', seconds = 19.5): Promise<string> {
   const dir = mkdtempSync(join(tmpdir(), 'cuttle-spoken-'));
   dirs.push(dir);
   const take = join(dir, 'takes', '1');
   mkdirSync(take, { recursive: true });
-  await runFfmpeg(['-f', 'lavfi', '-i', 'color=c=0x202020:s=640x360:r=30:d=19.5', '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', '-y', join(take, 'screen.mp4')]);
-  copyFileSync(join(fixtures, 'en.m4a'), join(take, 'mic.m4a'));
+  await runFfmpeg(['-f', 'lavfi', '-i', `color=c=0x202020:s=640x360:r=30:d=${seconds}`, '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', '-y', join(take, 'screen.mp4')]);
+  copyFileSync(join(fixtures, mic), join(take, 'mic.m4a'));
   writeFileSync(join(take, 'events.jsonl'), '');
   writeFileSync(join(take, 'take.json'), JSON.stringify({ version: 1, tracks: { screen: { file: 'screen.mp4', start: 1000 }, mic: { file: 'mic.m4a', start: 1000.2 } } }));
   writeFileSync(join(dir, 'cuttle.json'), JSON.stringify({ version: 1, sources: { screen: 'takes/1/screen.mp4', mic: 'takes/1/mic.m4a', events: 'takes/1/events.jsonl' } }));
@@ -78,5 +79,32 @@ describe.runIf(model !== undefined && whisper)(`speech on a spoken take (${model
     const again = await applySpeechEdits(dir);
     expect(again.written).toBe(false);
     expect(readFileSync(join(dir, 'cuttle.json'), 'utf8')).toBe(before);
+  }, 120_000);
+
+  it('cuts a sentence begun again without a cue, never into the speech, and the captions say what stays', async () => {
+    process.env.CUTTLE_MODELS_DIR = modelsDir;
+    // "… die Einstellungen. Dann klickt ihr auf [0.7 s] Dann klickt ihr auf Exportieren …" over pink
+    // noise and breaths; what was said, measured on the mic, on the screen's time (+0.2 s)
+    const said = [[1.12, 4.31], [7.4, 9.37], [11.16, 12.25], [12.96, 16.92], [19.35, 20.64]].map(([from, to]) => ({ from: from! + 0.2, to: to! + 0.2 }));
+    const dir = await spokenTake('de-restart.m4a', 23);
+    await transcribeTake(dir, { model, language: 'de' });
+    const result = await suggestProject(dir);
+    const cuts = result.cuts ?? [];
+    // the broken "Dann klickt ihr auf" goes, up to just before it is said again
+    const restart = cuts.find((cut) => cut.label?.startsWith('Restart: '));
+    expect(restart, JSON.stringify(cuts)).toBeDefined();
+    expect(restart!.from).toBeLessThanOrEqual(said[2]!.from);
+    expect(restart!.to).toBeGreaterThanOrEqual(said[2]!.to);
+    expect(restart!.to).toBeLessThanOrEqual(said[3]!.from - 0.1);
+    // no cut begins or ends in what was said
+    for (const cut of cuts) for (const edge of [cut.from, cut.to]) expect(said.some((span) => span.from < edge && edge < span.to), `${cut.label} at ${edge}`).toBe(false);
+    // the captions: the sentence once, nothing of the broken one
+    const project = parseProject(JSON.parse(readFileSync(join(dir, 'cuttle.json'), 'utf8')));
+    if (!project.ok) throw new Error('invalid project');
+    const transcript = parseTranscriptJson(readFileSync(join(dir, 'takes', '1', 'transcript.json'), 'utf8'));
+    if (!transcript.ok) throw new Error('invalid transcript');
+    const shown = captionWords(transcript.transcript.words, sceneSpans(project.project.scenes, project.project.cuts)).map((word) => normWord(word.text)).join(' ');
+    expect(shown).toMatch(/einstellungen dann klickt ihr auf export/);
+    expect(shown.match(/dann klickt ihr/g)).toHaveLength(1);
   }, 120_000);
 });

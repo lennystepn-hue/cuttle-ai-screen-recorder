@@ -1,7 +1,8 @@
 // Word times from one whisper run (good text, coarse times) refined by the audio: each speech
 // stretch takes, in order, the run of words whose letters fit its length at the take's speaking rate,
-// near where whisper put them; inside a stretch the words share its length by their letters. In the
-// spike this cut the median start error from about 500 ms to 35 to 76 ms.
+// near where whisper put them, a word before a full stop or a comma at a stretch's end (people pause
+// there); inside a stretch the words share its length by their letters. In the spike this cut the
+// median start error from about 500 ms to 35 to 76 ms (29 to 57 ms with the stops and commas).
 import { normWord } from '@cuttle/project';
 import type { Span } from '../suggest/spans';
 import type { HeardWord } from './whisper';
@@ -23,6 +24,13 @@ export const ALIGN_RULES = {
    * stretch of its own, and whisper often puts it a little early or late.
    */
   fillerShared: 0.3,
+  /**
+   * What a word ending a sentence (".", "?", "!") costs inside a stretch's run, not at its end, and
+   * a word before a comma, colon or semicolon: people pause there, and whisper often puts the word
+   * before the pause after it ("Dann klickt ihr | auf. Dann klickt ihr auf Exportieren").
+   */
+  sentenceEnd: 0.6,
+  clauseEnd: 0.3,
 };
 
 export interface Alignment {
@@ -54,6 +62,7 @@ export function alignWords(
 ): Alignment {
   const rules = options.rules ?? ALIGN_RULES;
   const filler = words.map((word) => options.filler?.(word) ?? false);
+  const mark = words.map((word) => (/[.?!…]["'’”)\]]*$/.test(word.text) ? rules.sentenceEnd : /[,;:]["'’”)\]]*$/.test(word.text) ? rules.clauseEnd : 0));
   const W = words.length;
   const S = stretches.length;
   const unchanged = (): Alignment => ({ words: words.map((word) => ({ ...word })), sounds: [], dropped: [], aligned: false });
@@ -109,6 +118,8 @@ export function alignWords(
       let chars = 0;
       let far = 0;
       let fillers = 0;
+      // the pause marks of the words before the run's last
+      let marks = 0;
       for (let j = i + 1; j <= W; j++) {
         const word = words[j - 1]!;
         const mid = middle(word);
@@ -116,7 +127,8 @@ export function alignWords(
         chars += letters(word);
         far += mid < a ? a - mid : mid > b ? mid - b : 0;
         if (filler[j - 1]) fillers++;
-        relax(i, j, base + Math.abs(len - chars * rate) + far / (j - i) + (j - i > 1 ? fillers * rules.fillerShared : 0));
+        if (j - 1 > i) marks += mark[j - 2]!;
+        relax(i, j, base + Math.abs(len - chars * rate) + far / (j - i) + (j - i > 1 ? fillers * rules.fillerShared : 0) + marks);
         // Far more letters than fit: longer runs only cost more.
         if (chars * rate > len * 3 + 2) break;
       }

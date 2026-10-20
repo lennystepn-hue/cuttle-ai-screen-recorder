@@ -9,7 +9,7 @@ import type { InputEvent, TranscriptWord } from '@cuttle/project';
 import { runFfmpeg } from '../src/ffmpeg';
 import { streamSeconds } from '../src/suggest/media';
 import { suggestClips } from '../src/suggest/plan';
-import { alignWords, guessLanguage } from '../src/speech/align';
+import { ALIGN_RULES, alignWords, guessLanguage } from '../src/speech/align';
 import { cleanMic, cleanupFilter, denoiseLatency } from '../src/speech/cleanup';
 import { likelyFiller, normWord } from '@cuttle/project';
 import { fillerCuts, fillerWords, mergeCuts, pauseCuts, restingAt, speechCuts, type SpeechEditInput } from '../src/speech/edits';
@@ -117,10 +117,13 @@ describe('alignWords', () => {
     // the English fixture with the base model: "Um," heard at 7.0–7.54 s, spoken at 7.55–7.84 s
     const heard = parseWhisperLines(readFileSync(join(fixtures, 'en.base.txt'), 'utf8'));
     const stretches = [[0.11, 0.88], [2.02, 2.24], [2.62, 5.22], [7.55, 7.84], [8.22, 9.45], [10.29, 10.83], [11.65, 14], [15.65, 17.98]].map(([from, to]) => ({ from: from!, to: to! }));
-    expect(alignWords(heard, stretches).words.find((w) => w.text === 'Um,')?.t).toBe(8.22);
-    const result = alignWords(heard, stretches, { filler: (w) => w.text === 'Um,' });
+    const plain = { ...ALIGN_RULES, sentenceEnd: 0, clauseEnd: 0 };
+    expect(alignWords(heard, stretches, { rules: plain }).words.find((w) => w.text === 'Um,')?.t).toBe(8.22);
+    const result = alignWords(heard, stretches, { rules: plain, filler: (w) => w.text === 'Um,' });
     expect(result.words.find((w) => w.text === 'Um,')).toEqual({ text: 'Um,', t: 7.55, end: 7.84 });
     expect(result.sounds).toEqual([]);
+    // the comma after it does it too: the word before a comma goes before the pause
+    expect(alignWords(heard, stretches).words.find((w) => w.text === 'Um,')?.t).toBe(7.55);
   });
 
   it('leaves out words heard where the mic is quiet', () => {
@@ -178,8 +181,9 @@ function startErrors(truth: { t: number; text: string }[], words: { t: number; t
 }
 
 describe('the alignment on spoken fixtures', () => {
-  for (const [language, filler] of [['de', 8.73], ['en', 7.555]] as const) {
-    it(`lines up the small model's words in ${language} and finds the filler it left out`, async () => {
+  // the filler, spoken alone ("Ähm", which whisper wrote "M.", and "Um,"), and whisper's start for it
+  for (const [language, filler, text, heardAt] of [['de', 8.73, 'M.', 7], ['en', 7.555, 'Um,', 7.5]] as const) {
+    it(`lines up the small model's words in ${language}, the filler in its short stretch of its own`, async () => {
       const heard = parseWhisperLines(readFileSync(join(fixtures, `${language}.small.txt`), 'utf8'));
       const truth = JSON.parse(readFileSync(join(fixtures, `${language}.words.json`), 'utf8')) as { t: number; text: string }[];
       const result = alignWords(heard, speechStretches(await micLevels(join(fixtures, `${language}.m4a`))), { filler: (w) => likelyFiller(w.text, language) });
@@ -189,10 +193,22 @@ describe('the alignment on spoken fixtures', () => {
       expect(median(before)).toBeGreaterThan(0.2);
       expect(median(after)).toBeLessThan(0.1);
       expect(after[Math.floor(after.length * 0.9)]).toBeLessThan(0.25);
-      // the filler whisper did not write is a sound of its own
-      expect(result.sounds.some((sound) => Math.abs(sound.from - filler) < 0.1 && sound.to - sound.from < 0.8)).toBe(true);
+      expect(heard.find((w) => w.text === text)?.t).toBe(heardAt);
+      expect(result.words.find((w) => w.text === text)?.t).toBeCloseTo(filler, 1);
     });
   }
+
+  it('puts a word before a full stop or a comma before the pause, where whisper put it after', async () => {
+    // "Heute zeige ich euch, [pause] wie man …" and "Dann klickt ihr auf. [0.7 s] Dann klickt ihr auf
+    // Exportieren …" over pink noise and breaths: the small model heard "wie" before the first pause
+    // and the broken "auf." in the "Dann" said again (spoken at 2.87 s and 12.96 s)
+    const heard = parseWhisperLines(readFileSync(join(fixtures, 'de-restart.small.txt'), 'utf8'));
+    const result = alignWords(heard, speechStretches(await micLevels(join(fixtures, 'de-restart.m4a'))), { filler: (w) => likelyFiller(w.text, 'de') });
+    const said = (text: string, n = 0) => result.words.filter((w) => w.text === text)[n]!;
+    expect(said('wie').t).toBeCloseTo(2.87, 1);
+    expect(said('auf.').end).toBeLessThan(12.25);
+    expect(said('Dann', 1).t).toBeCloseTo(12.96, 1);
+  });
 });
 
 const tw = (t: number, end: number, text: string): TranscriptWord => ({ t, end, text });

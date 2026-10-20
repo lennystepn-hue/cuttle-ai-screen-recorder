@@ -121,9 +121,12 @@ const electronVersion = JSON.parse(readFileSync(electron, 'utf8')).version;
 if (process.platform === 'darwin') {
   // the capture helper (the CLI's copy, which the app takes) runs wherever the app does: on the macOS of
   // Electron's own Info.plist. 0.1.1's was built for the release runner's macOS 26. Before packaging,
-  // so a release stops before it is signed and notarized.
+  // so a release stops before it is signed and notarized. Electron's binary is not installed with the
+  // package (the packager takes a copy of its own): `require('electron')` fetches it where it is missing,
+  // and says where its executable is, in Electron.app/Contents/MacOS.
   const helper = join(cli, 'cuttle-capture');
-  const app = execFileSync('plutil', ['-extract', 'LSMinimumSystemVersion', 'raw', join(dirname(electron), 'dist', 'Electron.app', 'Contents', 'Info.plist')], { encoding: 'utf8' }).trim();
+  const executable = createRequire(join(desktop, '..', '..', 'package.json'))('electron');
+  const app = execFileSync('plutil', ['-extract', 'LSMinimumSystemVersion', 'raw', join(dirname(dirname(executable)), 'Info.plist')], { encoding: 'utf8' }).trim();
   const minos = existsSync(helper) ? execFileSync('otool', ['-l', helper], { encoding: 'utf8' }).match(/cmd LC_BUILD_VERSION[\s\S]*?minos (\S+)/)?.[1] : undefined;
   const parts = (version) => version.split('.').map(Number);
   const newer = minos !== undefined && parts(minos).reduce((order, part, i) => order || part - (parts(app)[i] ?? 0), 0) > 0;

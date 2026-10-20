@@ -39,9 +39,10 @@ describe('the macOS capture helper', () => {
   it.runIf(process.platform === 'darwin')('is built for the oldest macOS the app runs on, not for the SDK of the Mac that builds it', () => {
     const helper = captureHelper('');
     expect(helper, 'cuttle-capture is built (pnpm install)').toBeDefined();
-    // the app's minimum is Electron's own (package.mjs takes its Info.plist as it is)
-    const electron = dirname(createRequire(join(import.meta.dirname, '..', '..', '..', 'package.json')).resolve('electron/package.json'));
-    const app = execFileSync('plutil', ['-extract', 'LSMinimumSystemVersion', 'raw', join(electron, 'dist', 'Electron.app', 'Contents', 'Info.plist')], { encoding: 'utf8' }).trim();
+    // the app's minimum is Electron's own (package.mjs takes its Info.plist as it is); `require('electron')`
+    // fetches the binary where it is missing, as package.mjs does, and says where its executable is
+    const executable = createRequire(join(import.meta.dirname, '..', '..', '..', 'package.json'))('electron') as string;
+    const app = execFileSync('plutil', ['-extract', 'LSMinimumSystemVersion', 'raw', join(dirname(dirname(executable)), 'Info.plist')], { encoding: 'utf8' }).trim();
     const minos = minosOf(helper!);
     expect(minos).toBeDefined();
     expect(compareVersions(minos!, app), `cuttle-capture needs macOS ${minos}, the app runs on ${app}`).toBeLessThanOrEqual(0);

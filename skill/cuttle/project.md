@@ -145,7 +145,9 @@ path, change every rect by the same amount; without `moves` it holds still.
 around it, safest for tokens and keys; `blur`) and `enabled` (`true`). Make the rect generous: a
 few pixels too small leaves letters readable. Masks cover clips only, not still scenes (a captured
 page). A mask over text that scrolls has `moves` (`[{ "at", "rect" }]`, as a zoom's): its places
-are `rect` at `from`, then each move's; between two places it covers both. `privacy.words` are
+are `rect` at `from`, then each move's; between two places it covers both. `suggest` follows the
+text in every frame: a place in each frame it moved, and the mask ends where the text left the
+picture. `privacy.words` are
 words masked wherever the screen shows them (`suggest --mask` adds to them).
 
 `texts`: `at` and `duration` (source seconds), `text`, `style` (`pill`, `lower-third`, `caption`),

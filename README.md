@@ -183,7 +183,9 @@ needs `cuttle` on PATH (`pnpm cli:install`). Then ask Claude Code for a demo vid
 Cuttle works on your computer. Recording, cutting, the screen's text (Windows' own OCR or macOS's
 Vision), transcription (Whisper models, downloaded once) and the export all run locally; nothing is
 uploaded. The screen is compared ten times a second, and its text is read where it changed (twice
-a second at most while it keeps changing), also where something showed only a moment. Masks over
+a second at most while it keeps changing), also where something showed only a moment. What it
+finds is then followed in every frame of the take, so a mask stays on text that scrolls: as it
+comes in, between two reads and as it goes out. Masks over
 private things are suggestions to check, not a guarantee: look at the stills before you share a
 video (`cuttle preview --masks` shows each mask's edges).
 

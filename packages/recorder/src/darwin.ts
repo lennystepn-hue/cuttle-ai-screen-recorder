@@ -105,11 +105,28 @@ export function macPopups(windows: readonly ListedWindow[]): { window: ListedWin
   return found;
 }
 
+/** Whether `inner` lies inside `outer` (to a point). */
+const liesInside = (inner: ListedWindow['points'], outer: ListedWindow['points']) =>
+  inner.x >= outer.x - 1 && inner.y >= outer.y - 1 && inner.x + inner.width <= outer.x + outer.width + 1 && inner.y + inner.height <= outer.y + outer.height + 1;
+
 /** Whether `sheet` lies inside `window`, smaller, centred across it (as macOS puts a sheet). */
 function isSheet(sheet: ListedWindow['points'], window: ListedWindow['points']): boolean {
-  const inside = sheet.x >= window.x - 1 && sheet.y >= window.y - 1 && sheet.x + sheet.width <= window.x + window.width + 1 && sheet.y + sheet.height <= window.y + window.height + 1;
   const centre = Math.abs(sheet.x + sheet.width / 2 - (window.x + window.width / 2)) <= SHEET_SLACK;
-  return inside && centre && sheet.width * sheet.height < 0.9 * window.width * window.height;
+  return liesInside(sheet, window) && centre && sheet.width * sheet.height < 0.9 * window.width * window.height;
+}
+
+/**
+ * The window in front, of normal-level `windows` (front to back): the first, or, when it is a small
+ * window of its app inside another of that app's windows (a panel, a sheet, or the 66×20 point window
+ * the Claude app shows over its buttons while its window is captured), that window, as the
+ * Accessibility API's focused window would be. Pure.
+ */
+export function frontWindow(windows: readonly ListedWindow[]): ListedWindow | undefined {
+  const first = windows[0];
+  if (!first) return undefined;
+  const size = (window: ListedWindow) => window.points.width * window.points.height;
+  const holder = windows.find((window) => window !== first && window.pid === first.pid && liesInside(first.points, window.points) && size(first) < 0.5 * size(window));
+  return holder ?? first;
 }
 
 /** Chromium browsers: they show the Accessibility API no web area, only their toolbar. */
@@ -924,7 +941,7 @@ async function create(): Promise<Darwin> {
     foreground() {
       const windows = listed().filter((window) => window.layer === LEVEL.normal);
       // the front app's focused window (an app's small panels may lie in front of it), else its front one
-      let front = windows[0];
+      let front = frontWindow(windows);
       if (front && AXIsProcessTrusted()) {
         const app = appElement(front.pid, 0.1);
         const focused = app && copied(app, AXT.focusedWindow);

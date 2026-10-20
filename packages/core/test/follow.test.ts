@@ -130,4 +130,27 @@ describe('followTracks', () => {
     expect(look(masks)).toEqual({ open: 0, astray: expect.any(Number) });
     expect(look(masks).astray).toBeLessThanOrEqual(2);
   }, 60_000);
+
+  it('holds still text whose reads draw its box a little larger or smaller (Vision): one place, grown to hold them', async () => {
+    const { width, height } = SCROLL_TAKE;
+    const page = picture(width, height);
+    glyphs(page, 197, 300, 44, 501);
+    const dir = mkdtempSync(join(tmpdir(), 'cuttle-follow-'));
+    dirs.push(dir);
+    const video = join(dir, 'screen.mp4');
+    await writeScrollTake(video, page, () => 0, 3);
+    const boxes: Rect[] = [
+      [197, 300, 352, 12],
+      [195, 296, 356, 20],
+      [197, 300, 352, 12],
+      [196, 298, 354, 16],
+      [197, 301, 352, 11],
+    ];
+    const frames: ScreenTextFrame[] = boxes.map((rect, k) => ({ t: k * 0.5, lines: [{ text: 'ghp_1234567890abcdefghijklmnop', rect, words: [{ text: 'ghp_1234567890abcdefghijklmnop', rect }] }] }));
+    const size = { width, height };
+    const { tracks } = trackSecrets(frames, []);
+    const followed = await followTracks(video, tracks, frames.map((frame) => frame.t), size, 3);
+    const masks = privacyMasks(frames, [], size, 3, undefined, new Map([...followed].map(([track, stretches]) => [trackName(track), stretches])));
+    expect(masks.map((mask) => [mask.rect, mask.moves])).toEqual([[[189, 290, 368, 32], undefined]]);
+  }, 60_000);
 });

@@ -1879,3 +1879,4 @@ Expected: PASS, 58 tests.
 ## Changes during execution
 
 - It was written from the finished prototype and replayed on a fresh clone for its commits; the tree came out byte-identical to the prototype.
+- CI on macOS failed in `cli.test.ts` ("masks what the screen shows that is private, follows text that scrolls"): the email address that stands near the top got a move at 7.967 s, to a rect 13 px taller. Vision's boxes jitter around text that stands, and a read that agreed with the following made a new place with the grown rect: the mask moved instead of growing. A read whose box holds more of a thing now grows the places where it stood since it last moved, as the masks of the reads alone did (`follow.ts`); `follow.test.ts` has the case with boxes drawn as Vision draws them (it failed before, as on the Mac), `writeScrollTake` takes the motion and the length.

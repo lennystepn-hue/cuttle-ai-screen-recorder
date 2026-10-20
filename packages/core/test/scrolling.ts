@@ -25,15 +25,15 @@ export function scrolledAt(t: number): number {
   return Math.round(y);
 }
 
-/** Writes the take of `page` (grey, a byte a pixel, `SCROLL_TAKE.width` wide) to `file`. */
-export async function writeScrollTake(file: string, page: { height: number; data: Uint8Array }): Promise<void> {
-  const { width, height, header, rate, seconds } = SCROLL_TAKE;
+/** Writes the take of `page` (grey, a byte a pixel, `SCROLL_TAKE.width` wide) to `file`, scrolled by `at` for `seconds`. */
+export async function writeScrollTake(file: string, page: { height: number; data: Uint8Array }, at = scrolledAt, seconds = SCROLL_TAKE.seconds): Promise<void> {
+  const { width, height, header, rate } = SCROLL_TAKE;
   const ffmpeg = spawn(ffmpegPath(), ['-v', 'error', '-f', 'rawvideo', '-pix_fmt', 'gray', '-s', `${width}x${height}`, '-r', String(rate), '-i', '-', '-vf', 'scale=out_color_matrix=bt709:out_range=tv,format=yuv420p', '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '18', '-force_key_frames', 'expr:gte(t,n_forced*2)', '-colorspace', 'bt709', '-color_primaries', 'bt709', '-color_trc', 'bt709', '-y', file], { stdio: ['pipe', 'ignore', 'pipe'] });
   let errors = '';
   ffmpeg.stderr.on('data', (chunk: Buffer) => (errors += chunk.toString()));
   const done = new Promise<void>((resolve, reject) => ffmpeg.on('close', (code) => (code === 0 ? resolve() : reject(new Error(`ffmpeg failed: ${errors}`)))));
   for (let n = 0; n < seconds * rate; n++) {
-    const top = scrolledAt(n / rate);
+    const top = at(n / rate);
     const frame = Buffer.alloc(width * height, 0x33);
     for (let y = header; y < height && y + top < page.height; y++) frame.set(page.data.subarray((y + top) * width, (y + top + 1) * width), y * width);
     if (!ffmpeg.stdin.write(frame)) await new Promise((resolve) => ffmpeg.stdin.once('drain', resolve));

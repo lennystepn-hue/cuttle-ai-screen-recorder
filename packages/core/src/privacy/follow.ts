@@ -444,7 +444,15 @@ async function followRange(screen: string, range: { from: number; to: number; st
       const agrees = here && Math.abs(here[0] - read[0]) <= rules.agree && Math.abs(here[1] - read[1]) <= rules.agree && Math.abs(here[1] + here[3] - read[1] - read[3]) <= rules.agree;
       if (agrees) {
         const follower = state.follower!;
-        const fresh = follower.coast === undefined ? followerOf(picture, union(here!, read)) : undefined;
+        const grown = union(here!, read);
+        // a read whose box holds more of it (Vision's boxes jitter around text that stands): where it
+        // stood since it last moved, it is that larger too, so its mask grows instead of moving
+        const same = (a: Rect, b: Rect) => a.every((value, i) => value === b[i]);
+        if (!same(grown, here!)) {
+          const { places } = stretchOf(state);
+          for (let k = places.length - 1; k >= 0 && same(places[k]!.rect, here!); k--) places[k] = { at: places[k]!.at, rect: grown };
+        }
+        const fresh = follower.coast === undefined ? followerOf(picture, grown) : undefined;
         if (fresh) state.follower = { ...fresh, step: follower.step };
         state.mode = 'on';
         state.read = t;

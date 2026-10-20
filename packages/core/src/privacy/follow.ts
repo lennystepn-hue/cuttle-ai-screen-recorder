@@ -13,6 +13,11 @@ export const FOLLOW_RULES = {
   /** Frames a second the things are followed in (a take's rate). */
   rate: 30,
   /**
+   * The frames are decoded from up to this long before a stretch to follow (s): a still screen has
+   * no new frame for a while (macOS's takes), so the picture on screen as the stretch begins is older.
+   */
+  lead: 3,
+  /**
    * The frames are compared at this share of the screen's width and at its whole height: text that
    * scrolls moves a row at a time, and at half the height every other place reads half a row off.
    */
@@ -257,6 +262,9 @@ const union = (a: Rect, b: Rect): Rect => {
 };
 const round1 = (value: number) => Math.round(value * 10) / 10;
 const time = (value: number) => Math.round(value * 1000) / 1000;
+/** A mask's start and end to the millisecond, rounded outward: never after the frames found, never before. */
+const timeDown = (value: number) => Math.floor(value * 1000 + 1e-6) / 1000;
+const timeUp = (value: number) => Math.ceil(value * 1000 - 1e-6) / 1000;
 
 interface Geometry {
   width: number;
@@ -338,11 +346,13 @@ export async function followTracks(screen: string, tracks: readonly Track[], rea
   const height = size.height;
   const geometry: Geometry = { width, height, sx: width / size.width, sy: 1, reach: Math.round(rules.reach * height), side: Math.round(rules.side * width) };
   const sorted = [...reads].sort((a, b) => a - b);
-  // the stretches of time to compare: each track's, from `back` before its first read; those that overlap, one
+  // the stretches of time to compare: each track's, from `back` before its first read (on the take's
+  // grid of frames, a 30th of a second from 0); those that overlap, one
   const wanted = tracks
     .map((track) => {
       const span = spanOf(track, sorted, end);
-      return { track, span, from: Math.max(0, track.sightings[0]!.t - rules.back), to: Math.min(span.to + rules.beyond, Number.isFinite(end) ? end : Infinity) };
+      const from = Math.floor(Math.max(0, track.sightings[0]!.t - rules.back) * rules.rate + 1e-6) / rules.rate;
+      return { track, span, from, to: Math.min(span.to + rules.beyond, Number.isFinite(end) ? end : Infinity) };
     })
     .sort((a, b) => a.from - b.from);
   const ranges: { from: number; to: number; states: State[] }[] = [];
@@ -381,7 +391,7 @@ async function followRange(screen: string, range: { from: number; to: number; st
     state.last = t;
   };
   const end = (state: State, to: number) => {
-    stretchOf(state).to = time(to);
+    stretchOf(state).to = timeUp(to);
     state.mode = 'out';
   };
   /** A follower from what a read found at `rect` (screen px), in `picture`: its part on screen. */
@@ -474,7 +484,7 @@ async function followRange(screen: string, range: { from: number; to: number; st
         // it came in (from off screen or from under something) or was there at once as the page
         // moved: from then; else from half a second before the read, as before
         const came = back.came === 'out' || back.came === 'gone';
-        state.stretches.push({ from: time(Math.max(0, came ? first - frame : Math.min(first, t - MASK_RULES.margin))), to: state.span.to, places: [] });
+        state.stretches.push({ from: timeDown(Math.max(0, came ? first - frame : Math.min(first, t - MASK_RULES.margin))), to: state.span.to, places: [] });
       }
       stretchOf(state).places.push(...back.places);
       state.read = t;
@@ -492,13 +502,21 @@ async function followRange(screen: string, range: { from: number; to: number; st
   };
   let pending: Buffer = Buffer.alloc(0);
   let index = 0;
-  await runFfmpeg(['-ss', range.from.toFixed(3), '-t', (range.to - range.from + frame).toFixed(3), '-i', screen, '-map', '0:v:0', '-vf', `fps=${rules.rate},scale=${width}:${height}:flags=area,format=gray`, '-f', 'rawvideo', '-'], (chunk) => {
+  // On the take's grid from `before` frames ahead of the range (`lead`, or from 0, where the take's
+  // first frame is): each 30th of a second shows the newest frame up to then (round=up; ffmpeg's
+  // default puts a frame at the nearest, up to half a frame before it shows) and the first comes at
+  // the seek (start_time=0, which fills a still stretch the seek falls in with the frame after it),
+  // so a frame's index is its time; else a mask ended a frame early, over the last that showed it.
+  const before = Math.round(Math.min(rules.lead, range.from) * rules.rate);
+  const seek = Math.max(0, range.from - before * frame);
+  await runFfmpeg(['-ss', seek.toFixed(6), '-t', (range.to - seek + frame).toFixed(6), '-i', screen, '-map', '0:v:0', '-vf', `fps=${rules.rate}:start_time=0:round=up,scale=${width}:${height}:flags=area,format=gray`, '-f', 'rawvideo', '-'], (chunk) => {
     pending = pending.length === 0 ? chunk : Buffer.concat([pending, chunk]);
     while (pending.length >= area) {
       const picture: Picture = { width, height, data: new Uint8Array(pending.subarray(0, area)) };
       pending = pending.subarray(area);
-      onFrame(index, picture);
-      kept.push({ t: range.from + index * frame, picture });
+      const k = index - before;
+      if (k >= 0) onFrame(k, picture);
+      kept.push({ t: range.from + k * frame, picture });
       if (kept.length > keep) kept.shift();
       index++;
     }

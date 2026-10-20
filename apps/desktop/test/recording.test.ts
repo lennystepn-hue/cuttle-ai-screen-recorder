@@ -127,6 +127,7 @@ describe('from a pick to the recorder', () => {
   it('says what went wrong in a few plain words, with the details apart', () => {
     expect(hudWarning('the microphone "Headset (Jabra)" records silence: it may be muted, or blocked').text).toBe('Mic is silent: muted?');
     expect(hudWarning('the webcam had not started when the recording was stopped; it is left out of the take').text).toBe('No camera in this take');
+    expect(hudWarning('the keyboard is not logged, and recent macOS sends no clicks either (no typing activity, no hotkeys, no zooms on clicks): allow …').text).toBe('No clicks or keys logged');
     const failed = recordingFailure('the webcam capture stopped unexpectedly (ffmpeg exit code 0): Side data:\n[libx264 @ 0x1] kb/s:374.97\n(what was recorded is in takes/1)');
     expect(failed.text).toBe('The camera stopped sending video (unplugged, or taken by another app).');
     expect(failed.detail).toContain('kb/s:374.97');

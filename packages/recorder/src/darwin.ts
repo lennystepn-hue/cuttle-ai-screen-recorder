@@ -42,7 +42,8 @@ export interface Darwin {
   /**
    * Watches the mouse and, with `keys`, the keyboard: a listen-only event tap, serviced from this
    * thread every few milliseconds (libuiohook's tap needs the process's main dispatch queue, which
-   * Node does not run). Undefined when macOS does not allow a tap.
+   * Node does not run). Undefined when macOS does not allow a tap. Without Input Monitoring recent
+   * macOS (27) makes the tap and sends it nothing, not even the mouse's events.
    */
   watchInput(keys: boolean, onEvent: (event: TapEvent) => void): { stop(): void } | undefined;
   /** Camera or microphone access: AVAuthorizationStatus. */

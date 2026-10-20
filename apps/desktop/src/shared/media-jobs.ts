@@ -125,6 +125,10 @@ export function proxyArgs(input: string, output: string): string[] {
     '-copyts', '-fps_mode', 'passthrough',
     '-vf', `scale=-2:'min(${PROXY_HEIGHT},ih)':flags=bilinear,format=yuv420p`,
     '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '24',
+    // macOS's takes come at irregular microseconds (frames only when the screen changes), so ffmpeg
+    // guesses 1000000 fps and x264 makes timestamps the mp4 muxer refuses past a still second
+    // ("Not yet implemented"); a time base of its own keeps the take's times
+    '-enc_time_base', '1/90000',
     '-force_key_frames', `expr:gte(t,n_forced*${PROXY_KEY_SECONDS})`,
     '-movflags', '+faststart',
     '-f', 'mp4', output,

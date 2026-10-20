@@ -239,6 +239,7 @@ export function hudWarning(message: string): { text: string; detail: string } {
     [/^markers\.json could not be written/i, () => 'Markers not saved yet'],
     [/^events\.jsonl could not be written/i, () => 'Input log stopped'],
     [/^the (\w+) had not started/i, (match) => `No ${match[1] === 'webcam' ? 'camera' : match[1]} in this take`],
+    [/no clicks|clicks and the keyboard are not logged/i, () => 'No clicks or keys logged'],
   ];
   for (const [pattern, text] of rules) {
     const match = pattern.exec(message);

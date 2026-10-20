@@ -7,7 +7,7 @@ import { basename, dirname, join, relative, resolve, sep } from 'node:path';
 import { BrowserWindow, desktopCapturer, dialog, globalShortcut, screen, session, shell, systemPreferences, type Rectangle } from 'electron';
 import { PROJECT_FILE, newProjectFile, projectExists, readProjectFile, recoverTake, useTake, writeProjectFile } from '@cuttle/core';
 import { usedIds } from '@cuttle/project';
-import { focusWindow, recentClaudeFolders, type Devices, type RecorderEvent, type Take } from '@cuttle/recorder';
+import { focusWindow, inputAllowed, recentClaudeFolders, type Devices, type RecorderEvent, type Take } from '@cuttle/recorder';
 import type { HudState, PickedTarget, PickerSetup, RecordChoices } from '../shared/ipc';
 import { captureSourceFor, hudPosition, hudWarning, recordingFailure, scriptForTake, stopOptionsFor, type PickerDisplay, type PickerWindow, type ScriptStep } from '../shared/recording';
 import { displayPixels, monitorOf, setMonitors, toDesktopPixels, toDip } from './desktop-pixels';
@@ -241,7 +241,8 @@ export async function startPicking(projectDir?: string, options: { fromPill?: bo
     pickBase = saved;
     pickScript = draft && draft.base === saved ? draft.steps : (JSON.parse(saved) as ScriptStep[]);
     const free = await freeBytes(projectDir ?? (await loadSettings()).projectsFolder);
-    const warning = free !== undefined && free < tenMinutes(displays) ? `Only ${gigabytes(free)} free on this drive: a take longer than a few minutes may not fit.` : undefined;
+    const short = free !== undefined && free < tenMinutes(displays) ? `Only ${gigabytes(free)} free on this drive: a take longer than a few minutes may not fit.` : undefined;
+    const warning = [short, await inputWarning()].filter(Boolean).join(' ') || undefined;
     const countdown = await countdownSeconds();
     const cursor = screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
     for (const picker of pickers) if (!picker.window.isDestroyed()) picker.window.destroy();
@@ -1002,6 +1003,16 @@ async function screenAllowed(): Promise<boolean> {
   });
   if (response === 0) void shell.openExternal('x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture');
   return false;
+}
+
+/**
+ * macOS: what a take misses without Input Monitoring, for the pickers; undefined when Cuttle has it.
+ * The first look shows macOS's prompt, before the take rather than in it.
+ */
+async function inputWarning(): Promise<string | undefined> {
+  if (process.platform !== 'darwin' || TEST_BACKEND || CHECK) return undefined;
+  if (await inputAllowed().catch(() => true)) return undefined;
+  return 'Cuttle does not see your clicks and keys (no zooms on clicks, no typing, no recording hotkeys): turn Cuttle on under System Settings > Privacy & Security > Input Monitoring, then quit and reopen Cuttle.';
 }
 
 /** macOS: asks for the camera and the mic a take uses, the first time (the recorder's ffmpeg runs as Cuttle). */

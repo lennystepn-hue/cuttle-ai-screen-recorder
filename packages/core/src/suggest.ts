@@ -11,7 +11,7 @@ import { SCREEN_TEXT_FILE, framesToRead, keepRedacted, readFrames, writeScreenTe
 import { cachedAnalysis, grabGray, grayFrames, screenBands } from './suggest/media';
 import { withLengthFit } from './suggest/length';
 import { suggestClips } from './suggest/plan';
-import { changedRegion, zoomRect } from './suggest/region';
+import { changedRegion, changedRegions, zoomRect } from './suggest/region';
 import { union } from './suggest/spans';
 import { screenStretches, typingZooms, type ScreenChange } from './suggest/typing';
 import { withStepTitles, type StepTitles } from './suggest/steps';
@@ -491,7 +491,7 @@ function alike(a: Rect, b: Rect): boolean {
   return inter / (a[2] * a[3] + b[2] * b[3] - inter) >= 0.5;
 }
 
-/** What the screen changed in each stretch, frame by frame (`TYPING_RATE` a second), in screen pixels. */
+/** Where the screen changed in each stretch, frame by frame (`TYPING_RATE` a second): each place apart, in screen pixels. */
 async function typingChanges(screen: string, stretches: readonly { from: number; to: number }[], size: { width: number; height: number; duration: number }): Promise<ScreenChange[]> {
   const height = 2 * Math.round((TYPING_WIDTH * size.height) / size.width / 2);
   const scale = size.width / TYPING_WIDTH;
@@ -502,8 +502,9 @@ async function typingChanges(screen: string, stretches: readonly { from: number;
     if (!(to > from)) continue;
     const frames = await grayFrames(screen, from, to, TYPING_RATE, TYPING_WIDTH, height);
     for (let k = 1; k < frames.length; k++) {
-      const box = changedRegion(frames[k - 1]!, frames[k]!, TYPING_MIN_PIXELS);
-      if (box) changes.push({ t: frames[k]!.t, box: { x: box.x * scale, y: box.y * scale, width: box.width * scale, height: box.height * scale } });
+      for (const box of changedRegions(frames[k - 1]!, frames[k]!, TYPING_MIN_PIXELS)) {
+        changes.push({ t: frames[k]!.t, box: { x: box.x * scale, y: box.y * scale, width: box.width * scale, height: box.height * scale } });
+      }
     }
   }
   return changes;

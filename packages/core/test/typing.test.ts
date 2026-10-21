@@ -37,14 +37,13 @@ describe('keyBursts', () => {
 });
 
 describe('typingZooms', () => {
-  it('follows the caret: lead room to the right, and a move once the text leaves the middle', () => {
+  it('follows the caret: lead room to the right, then glides along as the text runs past 70 % of the view', () => {
     // typing from 10 to 15 s; the caret's middle goes from x 101 to 551 on the line at y 250
     const events = [...keys(10, 15), ...typedLine(10.2, 10, 100, 240)];
-    // the first second (x 101 to 201, middle 151) sits 35 % into the view: x 151 − 157.5 → 0 (the screen's edge)
-    // at 13.2 s the caret (401) has left the middle (225 ± 135): the view moves so it is 35 % in again
-    expect(typingZooms(input({ events }))).toEqual([
-      { at: 9.3, duration: 7.7, rect: [0, 138, 450, 225], moves: [{ at: 13.2, rect: [244, 138, 450, 225] }], follows: 'caret' },
-    ]);
+    // the first second (x 101 to 201, middle 151) sits 35 % into the view: x 151 − 157.5 → 0 (the screen's edge);
+    // from 12.7 s the caret (351) is past 70 % of the view (315): the view moves with it, 50 px a look
+    const glide = [12.7, 13.2, 13.7, 14.2, 14.7].map((at, k) => ({ at, rect: [36 + 50 * k, 138, 450, 225] }));
+    expect(typingZooms(input({ events }))).toEqual([{ at: 9.3, duration: 7.7, rect: [0, 138, 450, 225], moves: glide, follows: 'caret' }]);
   });
 
   it('shows as much of the interface on a scaled display: 860 points across at least, but 1.5× deep', () => {
@@ -58,13 +57,15 @@ describe('typingZooms', () => {
     expect(zoom?.rect.slice(2)).toEqual([1720, 860]);
   });
 
-  it('goes back left and down for the next line, at most one move in 0.8 s', () => {
-    const events = [...keys(10, 17), ...typedLine(10.2, 10, 100, 240), { t: 15.1, type: 'caret', rect: [100, 290, 2, 20] }, { t: 15.4, type: 'caret', rect: [150, 290, 2, 20] }] as InputEvent[];
+  it('goes back left for the next line, down only when it leaves the middle, and moves at most every 0.2 s', () => {
+    const next = (t: number, x: number, y: number) => ({ t, type: 'caret', rect: [x, y, 2, 20] }) as InputEvent;
+    const events = [...keys(10, 18), ...typedLine(10.2, 10, 100, 240), next(15.1, 100, 290), next(15.2, 110, 290), next(15.4, 150, 290), next(16, 120, 390)];
     const [zoom] = typingZooms(input({ events }));
-    expect(zoom?.moves).toEqual([
-      { at: 13.2, rect: [244, 138, 450, 225] },
-      // x 101 is left of the middle: the view goes back to the screen's edge, and centres on y 300
-      { at: 15.1, rect: [0, 188, 450, 225] },
+    expect(zoom?.moves?.slice(-2)).toEqual([
+      // x 101 is left of 15 % of the view: back so it is 15 % in; y 300 is still in the middle
+      { at: 15.1, rect: [34, 138, 450, 225] },
+      // (15.2 s is too soon after; 15.4 s needs no move) y 400 is below the middle: the view centres on it
+      { at: 16, rect: [34, 275, 450, 225] },
     ]);
   });
 
@@ -75,8 +76,20 @@ describe('typingZooms', () => {
     ];
     const [zoom] = typingZooms(input({ events: keys(10, 15), changes }));
     expect(zoom).toMatchObject({ at: 9.3, follows: 'screen', rect: [0, 138, 450, 225] });
-    // the change's middle (x 100 + 50 k) leaves the middle at 13.5 s (x 400)
-    expect(zoom?.moves).toEqual([{ at: 13.5, rect: [243, 138, 450, 225] }]);
+    // the change's middle (x 100 + 50 k) passes 70 % of the view at 13 s (x 350): the view glides along
+    expect(zoom?.moves).toEqual([13, 13.5, 14, 14.5, 15].map((at, k) => ({ at, rect: [35 + 50 * k, 138, 450, 225] })));
+  });
+
+  it('follows the letters on from the field clicked into, not a change elsewhere on the screen', () => {
+    // clicked into a field at (300, 250); the letters run right from there, while an answer streams
+    // in at the top right, a change as big as theirs and nearer the view's middle at first
+    const letters = Array.from({ length: 8 }, (_, k) => ({ t: 10.5 + 0.5 * k, box: { x: 290 + 30 * k, y: 240, width: 30, height: 20 } }));
+    const answer = Array.from({ length: 8 }, (_, k) => ({ t: 10.5 + 0.5 * k, box: { x: 560, y: 60 + 10 * k, width: 300, height: 60 } }));
+    const events = [{ t: 9.5, type: 'click', x: 300, y: 250, button: 'left' } as InputEvent, ...keys(10, 14)];
+    const [zoom] = typingZooms(input({ events, changes: [...answer, ...letters] }));
+    // the view stays on the line at y 250: never up to the answer
+    for (const rect of [zoom!.rect, ...zoom!.moves.map((move) => move.rect)]) expect(rect[1]).toBe(138);
+    expect(zoom!.moves.map((move) => move.rect[0])).toEqual([...zoom!.moves.map((move) => move.rect[0])].sort((a, b) => a - b));
   });
 
   it('makes none without anything to follow, over another zoom, near another zoom start, or in sped-up waiting', () => {

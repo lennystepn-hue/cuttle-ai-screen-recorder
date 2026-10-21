@@ -242,7 +242,7 @@ export async function startPicking(projectDir?: string, options: { fromPill?: bo
     pickScript = draft && draft.base === saved ? draft.steps : (JSON.parse(saved) as ScriptStep[]);
     const free = await freeBytes(projectDir ?? (await loadSettings()).projectsFolder);
     const short = free !== undefined && free < tenMinutes(displays) ? `Only ${gigabytes(free)} free on this drive: a take longer than a few minutes may not fit.` : undefined;
-    const warning = [short, await inputWarning()].filter(Boolean).join(' ') || undefined;
+    const warning = [short, await inputWarning(), accessibilityWarning()].filter(Boolean).join(' ') || undefined;
     const countdown = await countdownSeconds();
     const cursor = screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
     for (const picker of pickers) if (!picker.window.isDestroyed()) picker.window.destroy();
@@ -1013,6 +1013,24 @@ async function inputWarning(): Promise<string | undefined> {
   if (process.platform !== 'darwin' || TEST_BACKEND || CHECK) return undefined;
   if (await inputAllowed().catch(() => true)) return undefined;
   return 'Cuttle does not see your clicks and keys (no zooms on clicks, no typing, no recording hotkeys): turn Cuttle on under System Settings > Privacy & Security > Input Monitoring, then quit and reopen Cuttle.';
+}
+
+/** Whether macOS's prompt for the Accessibility permission was shown in this run (once is enough). */
+let accessibilityAsked = false;
+
+/**
+ * macOS: without the Accessibility permission a take has no caret (zooms on typing follow what the
+ * screen changes), no browser page to crop to, and notifications masked wide. The first time,
+ * macOS's own prompt opens over the picker.
+ */
+function accessibilityWarning(): string | undefined {
+  if (process.platform !== 'darwin' || TEST_BACKEND || CHECK) return undefined;
+  if (systemPreferences.isTrustedAccessibilityClient(false)) return undefined;
+  if (!accessibilityAsked) {
+    accessibilityAsked = true;
+    systemPreferences.isTrustedAccessibilityClient(true);
+  }
+  return 'Cuttle does not see where you type (zooms on typing follow what the screen changes instead): turn Cuttle on under System Settings > Privacy & Security > Accessibility.';
 }
 
 /** macOS: asks for the camera and the mic a take uses, the first time (the recorder's ffmpeg runs as Cuttle). */

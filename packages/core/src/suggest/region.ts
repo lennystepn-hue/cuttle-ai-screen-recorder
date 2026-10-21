@@ -39,6 +39,61 @@ export function changedRegion(before: Gray, after: Gray, minPixels = MIN_SHARE *
   return { x: x0, y: y0, width: x1 - x0 + 1, height: y1 - y0 + 1 };
 }
 
+/** Changes are gathered in cells this many grey pixels square… */
+const CELL = 8;
+/** …and cells this many apart across (a word's letters, the gap between words) or up and down (one line) are one region. */
+const JOIN_ACROSS = 2;
+const JOIN_DOWN = 1;
+
+/**
+ * The separate places (in the grey pictures' pixels) where the screen changed between `before` and
+ * `after`, biggest first: changed cells near each other are one region, so the letters being typed
+ * are one, apart from an answer streaming in elsewhere or a clock. Regions of fewer than
+ * `minPixels` changed pixels are left out.
+ */
+export function changedRegions(before: Gray, after: Gray, minPixels: number): { x: number; y: number; width: number; height: number; pixels: number }[] {
+  if (before.width !== after.width || before.height !== after.height) return [];
+  const columns = Math.ceil(before.width / CELL);
+  const rows = Math.ceil(before.height / CELL);
+  const counts = new Uint32Array(columns * rows);
+  for (let y = 0; y < before.height; y++) {
+    for (let x = 0; x < before.width; x++) {
+      const i = y * before.width + x;
+      if (Math.abs(before.data[i]! - after.data[i]!) > THRESHOLD) counts[Math.floor(y / CELL) * columns + Math.floor(x / CELL)]!++;
+    }
+  }
+  const seen = new Uint8Array(columns * rows);
+  const regions: { x: number; y: number; width: number; height: number; pixels: number }[] = [];
+  for (let start = 0; start < counts.length; start++) {
+    if (counts[start] === 0 || seen[start]) continue;
+    // the cells reachable from this one
+    const stack = [start];
+    seen[start] = 1;
+    let [left, top, right, bottom, pixels] = [columns, rows, -1, -1, 0];
+    while (stack.length > 0) {
+      const cell = stack.pop()!;
+      const [cx, cy] = [cell % columns, Math.floor(cell / columns)];
+      [left, top, right, bottom] = [Math.min(left, cx), Math.min(top, cy), Math.max(right, cx), Math.max(bottom, cy)];
+      pixels += counts[cell]!;
+      for (let dy = -JOIN_DOWN; dy <= JOIN_DOWN; dy++) {
+        for (let dx = -JOIN_ACROSS; dx <= JOIN_ACROSS; dx++) {
+          const [nx, ny] = [cx + dx, cy + dy];
+          if (nx < 0 || ny < 0 || nx >= columns || ny >= rows) continue;
+          const next = ny * columns + nx;
+          if (counts[next] === 0 || seen[next]) continue;
+          seen[next] = 1;
+          stack.push(next);
+        }
+      }
+    }
+    if (pixels < minPixels) continue;
+    const x = left * CELL;
+    const y = top * CELL;
+    regions.push({ x, y, width: Math.min(before.width, (right + 1) * CELL) - x, height: Math.min(before.height, (bottom + 1) * CELL) - y, pixels });
+  }
+  return regions.sort((a, b) => b.pixels - a.pixels);
+}
+
 /** Padding around the changed box, as a share of the screen's width. */
 const PADDING = 0.06;
 /** A zoom shows at least this share of the screen's width (as many points on a scaled display: `minZoomWidth`). */

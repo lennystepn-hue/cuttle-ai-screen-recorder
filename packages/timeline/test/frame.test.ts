@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { parseProject, type CuttleProject } from '@cuttle/project';
-import { createCursorTrack, createTimeline } from '../src/index';
+import { ZOOM_RAMP_SECONDS, createCursorTrack, createTimeline, settle } from '../src/index';
 
 const screenSize = { width: 2560, height: 1440 };
+/** How deep a view of the 2560-pixel screen zooms, on the even (logarithmic) scale: 0 none, 1 for 2×. */
+const depth = (zoom: readonly number[] | undefined): number => Math.log2(2560 / (zoom?.[2] ?? NaN));
 
 function project(
   look: Record<string, unknown> = { transition: { enabled: false } },
@@ -42,9 +44,10 @@ describe('createTimeline', () => {
   });
 
   it('eases the zoom and fades the text in output time', () => {
+    // 0.3 s into the ramp: the settling curve's share of the way, on the even scale
     const zoom = timeline.frameAt(2.3).layers[0]?.zoom;
-    expect(zoom?.[2]).toBeCloseTo(1920, 6);
-    expect(zoom?.[3]).toBeCloseTo(1080, 6);
+    expect(depth(zoom)).toBeCloseTo(settle(0.3 / ZOOM_RAMP_SECONDS), 6);
+    expect(zoom?.[3]).toBeCloseTo((zoom?.[2] ?? NaN) * (9 / 16), 6);
     expect(timeline.frameAt(1.125).layers[0]?.texts[0]?.opacity).toBe(0.5);
     expect(timeline.frameAt(6).layers[0]?.masks).toEqual([]);
   });
@@ -323,14 +326,15 @@ describe('overlay ramps in output time', () => {
   const width = (timeline: ReturnType<typeof createTimeline>, t: number): number => timeline.frameAt(t).layers[0]?.zoom?.[2] ?? NaN;
 
   it('runs a zoom across a speed change without a jump', () => {
-    // source 4.7–8.7 shows at output 4.7–5.925: one occurrence, ramps of 0.6 output seconds
+    // source 4.7–8.7 shows at output 4.7–5.925: one occurrence, its ramps shrunk to half of it each
     const timeline = createTimeline(project(look, { scenes, zooms: [{ at: 4.7, duration: 4, rect: zoomRect }], masks: [], texts: [] }), { screenSize });
-    expect(width(timeline, 5)).toBeCloseTo(1920, 6);
-    const widths = Array.from({ length: 19 }, (_, i) => width(timeline, 4.7 + i / 30));
-    for (let i = 1; i < widths.length; i++) {
-      expect(widths[i], `frame ${i}`).toBeLessThanOrEqual(widths[i - 1]!);
-      // no step is bigger than the ease's steepest (slope 3, halfway) over one frame of the 0.6 s ramp
-      expect(widths[i - 1]! - widths[i]!, `frame ${i}`).toBeLessThanOrEqual((1280 * 3) / (30 * 0.6) + 1e-6);
+    const ramp = (5.925 - 4.7) / 2;
+    expect(depth(timeline.frameAt(5).layers[0]?.zoom)).toBeCloseTo(settle(0.3 / ramp), 6);
+    const depths = Array.from({ length: 19 }, (_, i) => depth(timeline.frameAt(4.7 + i / 30).layers[0]?.zoom));
+    for (let i = 1; i < depths.length; i++) {
+      expect(depths[i], `frame ${i}`).toBeGreaterThanOrEqual(depths[i - 1]!);
+      // no step is bigger than the settling curve's steepest (2.6 a ramp) over one frame
+      expect(depths[i]! - depths[i - 1]!, `frame ${i}`).toBeLessThanOrEqual(2.6 / (30 * ramp));
     }
   });
 
@@ -339,7 +343,9 @@ describe('overlay ramps in output time', () => {
     const zooms = [{ at: 2, duration: 8, rect: zoomRect, moves: [{ at: 6, rect: [1280, 720, 1280, 720] }] }];
     const timeline = createTimeline(project(look, { scenes, zooms, masks: [], texts: [] }), { screenSize });
     expect(timeline.frameAt(5.5).layers[0]?.zoom).toEqual(zoomRect);
-    expect(timeline.frameAt(6).layers[0]?.zoom?.map((value) => Math.round(value * 1e6) / 1e6)).toEqual([640, 360, 1280, 720]);
+    // the move sets off 0.3 s before its time and is three quarters there at it
+    const there = 1280 * settle(0.3 / 0.8);
+    expect(timeline.frameAt(6).layers[0]?.zoom?.map((value) => Math.round(value * 1e6) / 1e6)).toEqual([there, (there * 9) / 16, 1280, 720].map((value) => Math.round(value * 1e6) / 1e6));
     expect(timeline.frameAt(6.5).layers[0]?.zoom).toEqual([1280, 720, 1280, 720]);
   });
 
@@ -351,8 +357,8 @@ describe('overlay ramps in output time', () => {
     );
     expect(timeline.frameAt(5).layers[1]?.zoom).toEqual(zoomRect);
     expect(width(timeline, 5.3)).toBe(1280);
-    // and ramps out where its end shows: output 9, 0.3 s before it halfway
-    expect(width(timeline, 8.7)).toBeCloseTo(1920, 6);
+    // and ramps out where its end shows (output 9): half a second into the ramp, nearly out
+    expect(depth(timeline.frameAt(8.7).layers[0]?.zoom)).toBeCloseTo(1 - settle(0.5 / ZOOM_RAMP_SECONDS), 6);
   });
 
   it('fades a text in output seconds across a speed change', () => {

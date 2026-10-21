@@ -27,9 +27,9 @@ export const TYPING_RULES = {
   maxChange: 0.9,
   /** The zoom eases in this long before the first key… */
   before: 0.7,
-  /** …and lasts until this long after the last one, at least `min` (output s). */
-  after: 1.2,
-  min: 1.8,
+  /** …and lasts until this long after the last one, at least `min` (output s), as a click zoom does. */
+  after: 2,
+  min: 2.4,
   /** Typing in clips faster than this is not zoomed (waiting sped up). */
   maxSpeed: 2,
   /** No zoom starts or ends this close to its clip's edge (output s). */

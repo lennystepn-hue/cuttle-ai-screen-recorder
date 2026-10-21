@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Scene } from '@cuttle/project';
+import { settle } from '../src/easing';
 import { occurrences, rampAmount, type Occurrence } from '../src/occurrences';
 import { sceneSpans } from '../src/time';
 
@@ -57,6 +58,13 @@ describe('rampAmount', () => {
     expect(rampAmount({ start: 0, end: 0.4, rampIn: true, rampOut: true }, 0.1, 0.6, 'linear')).toBeCloseTo(0.5, 9);
     // 0.4 s with only a ramp in: all of it
     expect(rampAmount({ start: 0, end: 0.4, rampIn: true, rampOut: false }, 0.2, 0.6, 'linear')).toBeCloseTo(0.5, 9);
+  });
+
+  it('runs a settling ramp forwards in time both ways: it sets off at once and comes to rest', () => {
+    // a quarter into each ramp: past half in, and past half out
+    expect(rampAmount(both, 10.15, 0.6, 'settle')).toBeCloseTo(settle(0.25), 9);
+    expect(rampAmount(both, 13.55, 0.6, 'settle')).toBeCloseTo(1 - settle(0.25), 9);
+    expect(rampAmount(both, 13.55, 0.6, 'settle')).toBeLessThan(0.5);
   });
 
   it('is fully in where the occurrence has no ramp', () => {

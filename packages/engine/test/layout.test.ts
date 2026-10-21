@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest';
+import { parseProject } from '@cuttle/project';
+import { createTimeline } from '@cuttle/timeline';
 import {
   cursorSizePx,
   maskRectToOutput,
@@ -137,6 +139,30 @@ describe('source to output mapping', () => {
     expect(maskRectToOutput([10, 10, 10, 10], zoom, square)).toEqual([76, 76, 88, 88]);
     // fractional edges hide every texel they touch
     expect(maskRectToOutput([10.5, 10.2, 9, 9.5], zoom, square)).toEqual([76, 76, 88, 88]);
+  });
+
+  it('keeps a mask over what it hides at every frame of a zoom that comes in, moves and leaves', () => {
+    // an address on the right of a 2560 × 1440 screen, masked; a 2× zoom on it that moves down to it
+    const text: [number, number, number, number] = [1900, 900, 300, 30];
+    const parsed = parseProject({
+      version: 1,
+      sources: { screen: 's.mp4' },
+      scenes: [{ type: 'clip', from: 0, to: 10 }],
+      zooms: [{ at: 2, duration: 5, rect: [1280, 0, 1280, 720], moves: [{ at: 4, rect: [1280, 720, 1280, 720] }] }],
+      masks: [{ from: 0, to: 10, rect: text }],
+    });
+    if (!parsed.ok) throw new Error(JSON.stringify(parsed.issues));
+    const timeline = createTimeline(parsed.project, { screenSize: { width: 2560, height: 1440 } });
+    const layout = windowLayout(HD, 16 / 9, { titleBar: 36, radius: 14 });
+    for (let frame = 0; frame <= 300; frame++) {
+      const [layer] = timeline.frameAt(frame / 30).layers;
+      const zoom = layer!.zoom!;
+      // the mask is the same rect of the screen, mapped by the very zoom the screen is drawn with
+      expect(layer!.masks.map((mask) => mask.rect)).toEqual([text]);
+      const [mx, my, mw, mh] = maskRectToOutput(layer!.masks[0]!.rect, zoom, layout.content);
+      const [tx, ty, tw, th] = sourceRectToOutput(text, zoom, layout.content);
+      expect(mx <= tx && my <= ty && mx + mw >= tx + tw && my + mh >= ty + th, `frame ${frame}`).toBe(true);
+    }
   });
 
   it('turns image px into texture coordinates', () => {

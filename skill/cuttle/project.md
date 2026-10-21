@@ -133,13 +133,15 @@ there are not two cursors.
 | `motion` | `src` (an HTML page in the project, e.g. `motion/intro/index.html`), `duration` (output seconds), `params` (`{ "name": value }`: text, numbers, `true`/`false` or `null`, for the page), `network` (`false`; `true` lets the page load from https), `motionBlur` (`{ "samples": 8, "shutter": 0.5 }`: each frame the average of that many moments while a camera's shutter would be open, half a frame here; off without it): a page drawn frame by frame over the whole output, over the background where it is clear (see "Motion pages" and [motion.md](motion.md)) |
 
 `zooms`: `at` and `duration` (source seconds), `rect`, `ease` (`smooth`, `linear`) and `enabled`
-(`true`). The rect is widened to the screen's aspect and kept inside the screen. The zoom eases in
-and out over 0.6 output seconds each where it starts and ends on screen (a cut into its middle
-lands zoomed), so give it 2 output seconds or more (`2 × speed` source seconds over a sped-up
-clip). A zoom that follows (a typing zoom from `suggest`) has `moves`: `[{ "at", "rect" }]`, each
+(`true`). The rect is widened to the screen's aspect and kept inside the screen. The zoom comes in
+and goes out over 0.8 output seconds each where it starts and ends on screen, as a camera settles
+(`smooth`: it sets off at once and slows into place, 95 % there after half a second; a cut into
+its middle lands zoomed), so give it 2.5 output seconds or more (`2.5 × speed` source seconds over
+a sped-up clip). A zoom that follows (a typing zoom from `suggest`) has `moves`: `[{ "at", "rect" }]`, each
 `at` (source seconds) after the one before and inside the zoom. It starts on `rect` and goes to each
-move's rect in turn, eased over 0.6 output seconds centred on the move's `at`. To move the whole
-path, change every rect by the same amount; without `moves` it holds still.
+move's rect in turn, settling over 0.8 output seconds from 0.3 s before the move's `at` (three
+quarters there at it). To move the whole path, change every rect by the same amount; without
+`moves` it holds still.
 
 `masks` hide private things: `from` and `to` (source seconds), `rect`, `style` (`fill`: the colour
 around it, safest for tokens and keys; `blur`) and `enabled` (`true`). Make the rect generous: a

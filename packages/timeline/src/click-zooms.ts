@@ -1,11 +1,14 @@
 // Zooms that follow the clicks of a take: clicks close in time and place make one zoom that eases
 // in as the first click happens, stays while the work goes on there, and leaves. When the work moves
 // on soon after, elsewhere, the zoom moves along to it (`moves`) instead of leaving the clicks there
-// outside the view. Fewer, better zooms: never in waiting that is sped up, never one that would
-// barely zoom, never two at once, and at most one starting in any 5 output seconds (counting the
-// zooms that are there). Times are as people see them: output seconds, turned into source seconds at
-// the clip's speed. Pure; `suggest` and the editor share it.
+// outside the view: it follows the pointer, setting off as it does, and holds still while the
+// pointer stays well in view. Fewer, better zooms: never in
+// waiting that is sped up, never one that would barely zoom, never two at once, and at most one
+// starting in any 5 output seconds (counting the zooms that are there). Times are as people see
+// them: output seconds, turned into source seconds at the clip's speed. Pure; `suggest` and the
+// editor share it.
 import type { InputEvent, Rect } from '@cuttle/project';
+import { ZOOM_MOVE_LEAD, ZOOM_RAMP_SECONDS } from './zoom';
 
 /** A click joins the zoom being formed when it comes this soon after its last click (output s)… */
 export const CLUSTER_GAP_SECONDS = 3;
@@ -18,9 +21,14 @@ export const MIN_WIDTH = 0.45;
 /**
  * …and on a display that says its scale, at least this many of its points across (its pixels over
  * its scale): as much of the interface as MIN_WIDTH shows of a 1920-pixel screen at 100 %, so a
- * Retina Mac (1440 points across) or a laptop at 150 % is not zoomed deeper than that.
+ * Retina Mac (1440 points across) or a laptop at 150 % is not zoomed deeper than that…
  */
 export const MIN_POINTS = 860;
+/**
+ * …but never less deep than this: a window taken on a Retina display is often narrower than
+ * MIN_POINTS allows to zoom, and a zoom of 1.1 or 1.3× looks like the picture slipping.
+ */
+export const MIN_DEPTH = 1.5;
 
 /** The screen a zoom is made for: its size in pixels, and its pixels per point when the take says so. */
 export interface ZoomScreen {
@@ -31,19 +39,22 @@ export interface ZoomScreen {
 
 /**
  * The narrowest view a zoom may have (px): `share` of the screen's width, and on a display with a
- * scale at least as many points as MIN_POINTS is to MIN_WIDTH; never more than the screen.
+ * scale at least as many points as MIN_POINTS is to MIN_WIDTH; never wider than MIN_DEPTH allows.
  */
 export function minZoomWidth(screen: ZoomScreen, share = MIN_WIDTH): number {
   const points = screen.scale ? ((MIN_POINTS * share) / MIN_WIDTH) * screen.scale : 0;
-  return Math.min(screen.width, Math.max(share * screen.width, points));
+  return Math.min(screen.width / MIN_DEPTH, Math.max(share * screen.width, points));
 }
 /** A zoom that would show more than this share of the screen's area barely zooms: none. */
 export const MAX_AREA = 0.8;
-/** The zoom starts this long before the first click (it eases in for 0.6 s; output s)… */
+/** The zoom starts this long before the first click (it is in by then: `ZOOM_RAMP_SECONDS`; output s)… */
 export const LEAD_SECONDS = 0.7;
-/** …and lasts until this long after the last one, at least `MIN_SECONDS` (output s). */
-export const TAIL_SECONDS = 1.2;
-export const MIN_SECONDS = 1.8;
+/**
+ * …and lasts until this long after the last one, at least `MIN_SECONDS` (output s): over a
+ * second fully in after the click before it leaves, in 0.8 s.
+ */
+export const TAIL_SECONDS = 2;
+export const MIN_SECONDS = 2.4;
 /** Clicks in clips faster than this are not zoomed (waiting sped up). */
 export const MAX_SPEED = 2;
 /**
@@ -56,11 +67,28 @@ export const MERGE_GAP_SECONDS = 1.5;
 export const MIN_OUTPUT_GAP = 5;
 /**
  * Clicks elsewhere whose zoom would start this soon after the zoom before ends (output s) are
- * followed by it: it moves there, 0.6 s before the first of them, instead of a zoom of their own
- * (which `MIN_OUTPUT_GAP` would not allow). With `LEAD_SECONDS` and `TAIL_SECONDS` it leaves no
- * click between following and a zoom of its own.
+ * followed by it: it moves there, before the first of them, instead of a zoom of their own (which
+ * `MIN_OUTPUT_GAP` would not allow). With `LEAD_SECONDS` and `TAIL_SECONDS` it leaves no click
+ * between following and a zoom of its own: clicks up to 5.1 s apart are followed.
  */
-export const FOLLOW_GAP_SECONDS = 3.2;
+export const FOLLOW_GAP_SECONDS = 2.4;
+/**
+ * A zoom follows the pointer once it leaves the middle of the view (this share of it each way) for
+ * a place where it rests or clicks, and only by at least `MIN_MOVE` of the view (against the
+ * screen's edge it cannot go further): where the pointer stays well in view, it holds still.
+ */
+export const FOLLOW_MIDDLE = 0.7;
+export const MIN_MOVE = 0.05;
+/** The pointer rests where it stays this long within `REST_RADIUS` of the view's width (output s); an outing that comes back before is no reason to move. */
+export const REST_SECONDS = 0.4;
+export const REST_RADIUS = 0.1;
+/**
+ * The view sets off this long before the pointer leaves the middle (output s): with it, not as it
+ * drifts about inside (the view would leave it behind)…
+ */
+export const FOLLOW_LEAD = 0.15;
+/** …and at the latest so that it is there (95 %) by the click it goes to (output s). */
+export const ARRIVE_SECONDS = 0.55;
 /** No zoom starts or ends this close to its clip's cut (a cut and a zoom at once is too much; output s). */
 export const EDGE_SECONDS = 1;
 
@@ -170,7 +198,7 @@ export function clickZooms(events: readonly InputEvent[], clips: readonly ClipSp
     const next = Math.min(...avoid.filter((other) => other.at > cluster.at(-1)!.t).map((other) => other.at));
     const end = Math.min(Math.max(cluster.at(-1)!.t + TAIL_SECONDS * s, at + MIN_SECONDS * s), clip.to - EDGE_SECONDS * s, next);
     if ((end - at) / s < MIN_SECONDS - 1e-9) return [];
-    return [{ at, end, clip: cluster[0]!.clip, points: cluster.map(({ x, y }) => ({ x, y })), clicks: cluster.length }];
+    return [{ at, end, clip: cluster[0]!.clip, first: cluster[0]!.t, points: cluster.map(({ x, y }) => ({ x, y })), clicks: cluster.length }];
   });
 
   // neighbours that show nearly the same spot become one, while their clicks fit one zoom's box
@@ -195,20 +223,25 @@ export function clickZooms(events: readonly InputEvent[], clips: readonly ClipSp
   zooms = merged.sort((a, b) => outputAt(a.at, a.clip) - outputAt(b.at, b.clip));
 
   // work that moves on soon after, elsewhere in the same clip: the zoom before moves along to it
-  type Station = { at: number; points: { x: number; y: number }[] };
+  type Station = { at: number; first: number; points: { x: number; y: number }[] };
   const chains: ((typeof zooms)[number] & { stations: Station[] })[] = [];
   for (const zoom of zooms) {
     const previous = chains.at(-1);
     const s = clips[zoom.clip]!.speed;
     if (previous && previous.clip === zoom.clip && zoom.at > previous.at && (zoom.at - previous.end) / s <= FOLLOW_GAP_SECONDS) {
       const last = previous.stations.at(-1)!;
-      previous.stations.push({ at: Math.max(zoom.at, last.at + 0.1 * s), points: zoom.points });
+      previous.stations.push({ at: Math.max(zoom.at, last.at + 0.1 * s), first: zoom.first, points: zoom.points });
       previous.end = Math.max(previous.end, zoom.end);
       previous.clicks += zoom.clicks;
       continue;
     }
-    chains.push({ ...zoom, stations: [{ at: zoom.at, points: zoom.points }] });
+    chains.push({ ...zoom, stations: [{ at: zoom.at, first: zoom.first, points: zoom.points }] });
   }
+
+  // where the pointer is, for the zooms to follow it: its moves and clicks
+  const pointer: Sample[] = events
+    .flatMap((event) => (event.type === 'move' || event.type === 'click' ? [{ t: event.t, x: event.x, y: event.y, click: isLeftClick(event) }] : []))
+    .sort((a, b) => a.t - b.t || Number(a.click) - Number(b.click));
 
   // where the zooms already there start, in output seconds
   const starts = avoid.map((other) => shownAt(other.at)).filter((t): t is number => t !== undefined);
@@ -228,7 +261,7 @@ export function clickZooms(events: readonly InputEvent[], clips: readonly ClipSp
       // one at a time, and not too often (the zooms already there count)
       const start = outputAt(at, zoom.clip);
       if (start < lastEnd || starts.some((other) => Math.abs(start - other) < MIN_OUTPUT_GAP)) continue;
-      const moves = stations.slice(1).map((station) => ({ at: round(station.at), rect: zoomRectFor(boxOf(station.points), screen) }));
+      const moves = followMoves({ rect, from: stations[0]!.first, to: zoom.end, speed: s }, pointer, screen);
       result.push({ at: round(at), duration: round(zoom.end - at), rect, ...(moves.length > 0 && { moves }), clicks: stations.reduce((sum, station) => sum + station.points.length, 0) });
       starts.push(start);
       lastEnd = outputAt(zoom.end, zoom.clip);
@@ -236,6 +269,81 @@ export function clickZooms(events: readonly InputEvent[], clips: readonly ClipSp
     }
   }
   return result;
+}
+
+type Sample = { t: number; x: number; y: number; click: boolean };
+
+/**
+ * Where a zoom that shows `rect` from its first click (`from`) to its end (`to`, source seconds at
+ * the clip's `speed`) moves as the pointer goes on: whenever the pointer leaves the middle of the
+ * view (`FOLLOW_MIDDLE`) for a place where it rests or clicks, the view goes there, centred on it
+ * the way it left (across, up or down, or both), setting off `FOLLOW_LEAD` before the pointer left
+ * and there by its click (`ARRIVE_SECONDS`).
+ */
+function followMoves(zoom: { rect: Rect; from: number; to: number; speed: number }, pointer: readonly Sample[], screen: ZoomScreen): { at: number; rect: Rect }[] {
+  const { from, to, speed } = zoom;
+  const moves: { at: number; rect: Rect }[] = [];
+  let view = zoom.rect;
+  // outside the middle across, and up or down
+  const outX = (point: Sample) => Math.abs(point.x - (view[0] + view[2] / 2)) > (FOLLOW_MIDDLE / 2) * view[2];
+  const outY = (point: Sample) => Math.abs(point.y - (view[1] + view[3] / 2)) > (FOLLOW_MIDDLE / 2) * view[3];
+  const middle = (point: Sample) => !outX(point) && !outY(point);
+  // a move sets off after the one before did, and none once the zoom is about to leave
+  let earliest = from;
+  const last = to - ZOOM_RAMP_SECONDS * speed;
+  for (let k = pointer.findIndex((sample) => sample.t >= from); k >= 0 && k < pointer.length && pointer[k]!.t < last; k++) {
+    if (middle(pointer[k]!)) continue;
+    const j = restOf(pointer, k, speed, REST_RADIUS * view[2]);
+    const there = pointer[j]!;
+    if (there.t >= to) break;
+    // centred on it along the way it left the middle (the other way holds still); none for an
+    // outing that comes back into the middle, or a place the view cannot go nearer to
+    const [, , width, height] = view;
+    const next: Rect = [
+      outX(there) ? Math.round(Math.min(Math.max(there.x - width / 2, 0), screen.width - width)) : view[0],
+      outY(there) ? Math.round(Math.min(Math.max(there.y - height / 2, 0), screen.height - height)) : view[1],
+      width,
+      height,
+    ];
+    if (middle(there) || (Math.abs(next[0] - view[0]) < MIN_MOVE * width && Math.abs(next[1] - view[1]) < MIN_MOVE * height)) {
+      k = j;
+      continue;
+    }
+    // set off as the pointer leaves the middle for that place (after it was last there on its way),
+    // and be there by the click it goes to
+    let leaves = j;
+    while (leaves > k && !middle(pointer[leaves - 1]!)) leaves--;
+    let start = pointer[leaves]!.t - FOLLOW_LEAD * speed;
+    if (there.click) start = Math.min(start, there.t - ARRIVE_SECONDS * speed);
+    start = Math.max(start, earliest);
+    moves.push({ at: round(start + ZOOM_MOVE_LEAD * speed), rect: next });
+    earliest = start + 0.05 * speed;
+    view = next;
+    k = j;
+  }
+  return moves;
+}
+
+/**
+ * Where the pointer comes to rest from sample `k` on: the first click, or the first time it stays
+ * within `radius` for `REST_SECONDS` (the last sample of that stay: where it settled); the last
+ * sample when it never does.
+ */
+function restOf(pointer: readonly Sample[], k: number, speed: number, radius: number): number {
+  for (let j = k; j < pointer.length; j++) {
+    if (pointer[j]!.click) return j;
+    const here = pointer[j]!;
+    let settled = j;
+    for (let i = j + 1; i < pointer.length && pointer[i]!.t < here.t + REST_SECONDS * speed; i++) {
+      if (pointer[i]!.click || Math.hypot(pointer[i]!.x - here.x, pointer[i]!.y - here.y) > radius) {
+        settled = -1;
+        break;
+      }
+      settled = i;
+    }
+    if (settled >= 0) return settled;
+  }
+  return pointer.length - 1;
 }
 
 const round = (value: number) => Math.round(value * 1000) / 1000;

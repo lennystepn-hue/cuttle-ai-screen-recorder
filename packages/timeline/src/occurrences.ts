@@ -1,5 +1,4 @@
-import type { Ease } from '@cuttle/project';
-import { ease } from './easing';
+import { ease, type Curve } from './easing';
 import { CONTINUOUS_CUT_SECONDS, isContinuousCut, type SceneSpan } from './time';
 
 /**
@@ -53,14 +52,15 @@ export function occurrences(spans: readonly SceneSpan[], start: number, end: num
 /**
  * How far an overlay is in (0 to 1) at output time `t` of its occurrence: it ramps in over `ramp`
  * output seconds from the occurrence's start and out over `ramp` before its end, where it has those
- * ends; the ramps shrink to fit a short occurrence.
+ * ends; the ramps shrink to fit a short occurrence. Both run `curve` forwards in time: a settling
+ * zoom sets off at once and comes to rest, in and out.
  */
-export function rampAmount(occurrence: Occurrence, t: number, ramp: number, curve: Ease): number {
+export function rampAmount(occurrence: Occurrence, t: number, ramp: number, curve: Curve): number {
   const ramps = Number(occurrence.rampIn) + Number(occurrence.rampOut);
   if (ramps === 0) return 1;
   const length = Math.min(ramp, (occurrence.end - occurrence.start) / ramps);
   if (!(length > 0)) return 0;
   const rampIn = occurrence.rampIn ? ease(curve, (t - occurrence.start) / length) : 1;
-  const rampOut = occurrence.rampOut ? ease(curve, (occurrence.end - t) / length) : 1;
+  const rampOut = occurrence.rampOut ? 1 - ease(curve, 1 - (occurrence.end - t) / length) : 1;
   return Math.min(rampIn, rampOut);
 }

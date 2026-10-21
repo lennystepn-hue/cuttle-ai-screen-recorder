@@ -258,7 +258,7 @@ export const SCENARIOS: Scenario[] = [
 
   // A speed change inside one piece of footage (1× up to 5 s, then 4×) is a continuous cut: one
   // layer, no crossfade. The zoom (source 4.7–8.7) and the caption (4–5.4) ramp in output seconds
-  // across it: the zoom is halfway in at the cut, the caption 40 % into its fade-out.
+  // across it: the zoom is most of the way in at the cut (it settles), the caption 40 % into its fade-out.
   {
     name: 'speed-change-zoom',
     project: project({ frame: { title: TITLE } }, { scenes: SPEED_CHANGE, zooms: [{ at: 4.7, duration: 4, rect: [800, 450, 480, 300] }] }),

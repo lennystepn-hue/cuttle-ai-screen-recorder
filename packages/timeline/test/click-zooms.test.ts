@@ -1,16 +1,28 @@
 import { describe, expect, it } from 'vitest';
 import type { InputEvent } from '@cuttle/project';
 import { clickZooms, minZoomWidth, shownClicks, zoomRectFor } from '../src/click-zooms';
+import { zoomTargetAt } from '../src/zoom';
 
 const screen = { width: 1920, height: 1080 };
 const click = (t: number, x: number, y: number, button: 'left' | 'right' = 'left'): InputEvent => ({ t, type: 'click', x, y, button });
 const whole = [{ from: 0, to: 60, speed: 1, start: 0 }];
+/** The pointer gliding from one place to another between two times, 60 samples a second. */
+const glide = (from: [number, number], to: [number, number], t0: number, t1: number): InputEvent[] =>
+  Array.from({ length: Math.round((t1 - t0) * 60) + 1 }, (_, i) => {
+    const k = i / Math.round((t1 - t0) * 60);
+    return { t: t0 + (t1 - t0) * k, type: 'move', x: from[0] + (to[0] - from[0]) * k, y: from[1] + (to[1] - from[1]) * k };
+  });
+/** Whether the view a zoom aims at, at `t`, holds the point. */
+const holds = (zoom: { rect: [number, number, number, number]; moves?: { at: number; rect: [number, number, number, number] }[] }, t: number, x: number, y: number) => {
+  const [left, top, width, height] = zoomTargetAt(zoom, t);
+  return x >= left && x <= left + width && y >= top && y <= top + height;
+};
 
 describe('zooms on clicks', () => {
   it('zooms in on one click: from just before it, around it, in the screen’s shape', () => {
     const [zoom, ...rest] = clickZooms([click(10, 960, 540)], whole, screen);
     expect(rest).toEqual([]);
-    expect(zoom).toMatchObject({ at: 9.3, duration: 1.9, clicks: 1 });
+    expect(zoom).toMatchObject({ at: 9.3, duration: 2.7, clicks: 1 });
     // at least 45 % of the width, centred on the click, 16:9
     expect(zoom!.rect).toEqual([528, 297, 864, 486]);
   });
@@ -18,7 +30,7 @@ describe('zooms on clicks', () => {
   it('follows a burst of clicks in one spot with one zoom that lasts until the last', () => {
     const zooms = clickZooms([click(10, 400, 300), click(11, 450, 320), click(12.5, 520, 360), click(14, 480, 340)], whole, screen);
     expect(zooms).toHaveLength(1);
-    expect(zooms[0]).toMatchObject({ at: 9.3, duration: 5.9, clicks: 4 });
+    expect(zooms[0]).toMatchObject({ at: 9.3, duration: 6.7, clicks: 4 });
     const [x, y, width, height] = zooms[0]!.rect;
     for (const [cx, cy] of [[400, 300], [520, 360]]) {
       expect(cx! >= x && cx! <= x + width && cy! >= y && cy! <= y + height).toBe(true);
@@ -27,10 +39,11 @@ describe('zooms on clicks', () => {
 
   it('moves along to clicks elsewhere soon after, and starts another zoom once the work rests a while', () => {
     const zooms = clickZooms([click(10, 200, 200), click(11, 1700, 900), click(20, 1700, 900)], whole, screen);
-    // the click at 11 s is elsewhere: the first zoom moves there in time for it; the one at 20 s gets its own
+    // the click at 11 s is elsewhere: the first zoom moves there in time for it (with no pointer
+    // moves logged, setting off 0.55 s before it); the one at 20 s gets its own
     expect(zooms.map((zoom) => zoom.at)).toEqual([9.3, 19.3]);
     expect(zooms[0]!.moves).toHaveLength(1);
-    expect(zooms[0]!.moves![0]!.at).toBe(10.3);
+    expect(zooms[0]!.moves![0]!.at).toBe(10.75);
     expect(zooms[0]!.clicks).toBe(2);
     expect(zooms[1]!.moves).toBeUndefined();
   });
@@ -40,14 +53,10 @@ describe('zooms on clicks', () => {
     const clicks = [click(10, 960, 540), click(14, 1750, 300), click(17, 300, 900)];
     const [zoom, ...rest] = clickZooms(clicks, whole, screen);
     expect(rest).toEqual([]);
-    expect(zoom!.moves!.map((move) => move.at)).toEqual([13.3, 16.3]);
-    expect(zoom!.at + zoom!.duration).toBeCloseTo(18.2, 6);
-    // the view the zoom shows at each click holds it (each move ends 0.1 s before its click)
-    const views = [zoom!.rect, ...zoom!.moves!.map((move) => move.rect)];
-    clicks.forEach((each, index) => {
-      const [x, y, width, height] = views[index]!;
-      expect(each.type === 'click' && each.x >= x && each.x <= x + width && each.y >= y && each.y <= y + height).toBe(true);
-    });
+    expect(zoom!.moves!.map((move) => move.at)).toEqual([13.75, 16.75]);
+    expect(zoom!.at + zoom!.duration).toBeCloseTo(19, 6);
+    // the view the zoom shows at each click holds it (each move is 95 % there by its click)
+    for (const each of clicks) expect(each.type === 'click' && holds(zoom!, each.t, each.x, each.y)).toBe(true);
   });
 
   it('keeps zooms out of waiting that is sped up, away from cuts, and off right clicks', () => {
@@ -64,11 +73,11 @@ describe('zooms on clicks', () => {
   });
 
   it('makes one zoom of neighbours that show nearly the same spot', () => {
-    // 3.2 s apart (not one cluster), the same spot: the second zoom would start 1.3 s after the first ends
+    // 3.2 s apart (not one cluster), the same spot: the second zoom would start 0.5 s after the first ends
     const zooms = clickZooms([click(10, 800, 500), click(13.2, 820, 510)], whole, screen);
     expect(zooms).toHaveLength(1);
     expect(zooms[0]).toMatchObject({ at: 9.3, clicks: 2 });
-    expect(zooms[0]!.duration).toBeCloseTo(5.1, 6);
+    expect(zooms[0]!.duration).toBeCloseTo(5.9, 6);
   });
 
   it('follows two clicks far apart at once with one zoom that moves, and never zooms over another zoom', () => {
@@ -92,7 +101,7 @@ describe('zooms on clicks', () => {
 
   it('times a zoom in output seconds: at 2× it covers twice the source', () => {
     const [zoom] = clickZooms([click(20, 960, 540)], [{ from: 0, to: 60, speed: 2, start: 0 }], screen);
-    expect(zoom).toMatchObject({ at: 18.6, duration: 3.8 });
+    expect(zoom).toMatchObject({ at: 18.6, duration: 5.4 });
   });
 
   it('leaves clicks under a zoom there to it, and ends the zoom before it the moment that one starts', () => {
@@ -133,10 +142,66 @@ describe('zooms on clicks', () => {
     const retina = { width: 2880, height: 1800, scale: 2 };
     expect(minZoomWidth(retina)).toBe(1720);
     expect(zoomRectFor({ left: 1400, top: 900, right: 1410, bottom: 905 }, retina)).toEqual([545, 365, 1720, 1075]);
-    // a laptop at 150 % (1280 points across); a share of it scales the points along (the answer's 35 %)
-    expect(minZoomWidth({ width: 1920, height: 1080, scale: 1.5 })).toBe(1290);
+    // a laptop at 150 % (1280 points across): 860 points would be 1290 pixels, a zoom of 1.49×, so
+    // 1.5× instead; a share of it scales the points along (the answer's 35 %)
+    expect(minZoomWidth({ width: 1920, height: 1080, scale: 1.5 })).toBe(1280);
     expect(minZoomWidth({ width: 1920, height: 1080, scale: 1.5 }, 0.35)).toBeCloseTo(1003.3, 1);
-    // never more than the screen: a small window on a Retina display gets no deeper view than all of it
-    expect(minZoomWidth({ width: 1200, height: 800, scale: 2 })).toBe(1200);
+    // a window on a Retina display narrower than 860 points × 1.5: still 1.5× deep
+    expect(minZoomWidth({ width: 1968, height: 1332, scale: 2 })).toBe(1312);
+    expect(minZoomWidth({ width: 1200, height: 800, scale: 2 })).toBe(800);
+  });
+
+  it('sets off with the pointer, not just before the click it goes to, and keeps it in view', () => {
+    // a click, then the pointer goes far right from 11 to 11.4 s and clicks there at 13 s
+    const events = [click(10, 600, 400), ...glide([600, 400], [1500, 800], 11, 11.4), click(13, 1500, 800)];
+    const [zoom, ...rest] = clickZooms(events, whole, screen);
+    expect(rest).toEqual([]);
+    // the pointer leaves the middle of the view at 11.15 s, the view sets off 0.15 s before (its
+    // move's time is 0.3 s into the settling), not 0.55 s before the click at 13 s
+    expect(zoom!.moves).toEqual([{ at: 11.3, rect: [1056, 557, 864, 486] }]);
+    for (const each of events) {
+      if (each.type === 'move' || each.type === 'click') expect(holds(zoom!, each.t, each.x, each.y), `at ${each.t.toFixed(2)} s`).toBe(true);
+    }
+  });
+
+  it('follows the pointer to where it rests, even without a click there, but not on an outing', () => {
+    const events = [
+      click(10, 600, 400),
+      // out and straight back: no move
+      ...glide([600, 400], [1500, 800], 11, 11.2),
+      ...glide([1500, 800], [620, 410], 11.2, 11.4),
+      // out to rest top right for a second, then back to click near the start
+      ...glide([620, 410], [1500, 300], 12, 12.3),
+      ...glide([1500, 300], [650, 420], 13.5, 13.8),
+      click(14.5, 650, 420),
+    ];
+    const [zoom] = clickZooms(events, whole, screen);
+    // the pointer leaves the middle at 12.1 s and, on its way back, at 13.617 s
+    expect(zoom!.moves!.map((move) => move.at)).toEqual([12.25, 13.767]);
+    expect(holds(zoom!, 13, 1500, 300)).toBe(true);
+    expect(holds(zoom!, 14.5, 650, 420)).toBe(true);
+  });
+
+  it('follows only the way the pointer left the middle: across, without nodding up or down', () => {
+    // far right and 100 px lower, still in the middle up and down: the view goes across only
+    const [zoom] = clickZooms([click(10, 600, 400), ...glide([600, 400], [1500, 500], 11, 11.4), click(13, 1500, 500)], whole, screen);
+    expect(zoom!.moves!.map((move) => move.rect)).toEqual([[1056, zoom!.rect[1], 864, 486]]);
+  });
+
+  it('holds still while the clicks it follows stay in the middle of its view', () => {
+    // 4.5 s apart: a zoom each, too far apart to merge, near enough to follow; the second click is
+    // 150 px below the first, well inside the view: no move (it used to nod down and up)
+    const [zoom, ...rest] = clickZooms([click(10, 960, 300), click(14.5, 1000, 450), click(19, 940, 320)], whole, screen);
+    expect(rest).toEqual([]);
+    expect(zoom).toMatchObject({ at: 9.3, clicks: 3, rect: zoomRectFor({ left: 960, top: 300, right: 960, bottom: 300 }, screen) });
+    expect(zoom).not.toHaveProperty('moves');
+    expect(zoom!.at + zoom!.duration).toBeCloseTo(21, 6);
+  });
+
+  it('moves for a click near the edge of its view, but not where the screen ends', () => {
+    // 350 px right of the first click: outside the middle 70 % of the 864-pixel view
+    expect(clickZooms([click(10, 960, 540), click(14.5, 1310, 540)], whole, screen)[0]!.moves).toHaveLength(1);
+    // at the right edge the view cannot go further right: no move
+    expect(clickZooms([click(10, 1850, 540), click(14.5, 1912, 540)], whole, screen)[0]).not.toHaveProperty('moves');
   });
 });

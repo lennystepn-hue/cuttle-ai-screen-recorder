@@ -88,6 +88,16 @@ export function TranscriptPanel() {
   }, [spoken]);
 
   if (!project) return null;
+  if (!transcript && !project.sources.mic) {
+    return (
+      <div className="transcript-empty" data-testid="transcript-empty">
+        <p>
+          <b>No words in this take.</b>
+        </p>
+        <p className="hint">It was recorded without a mic. With one, what you say shows here: a click on a word goes there, deleting words cuts them, and the video gets subtitles.</p>
+      </div>
+    );
+  }
   if (!transcript) return <SpeechNote />;
   if (words.length === 0) return <p className="hint">The mic was transcribed, but no words were heard.</p>;
 

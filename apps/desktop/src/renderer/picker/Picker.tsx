@@ -4,7 +4,7 @@
 // The bar, the label and the camera bubble keep clear of what is about to be recorded where there is room.
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import type { PickedTarget, PickerSetup, Rect, RecordChoices, ScriptStep } from '../../shared/ipc';
-import { barPlacement, bubblePlacement, bubbleSize, dragRect, labelPlacement, matchMediaDevice, windowsAt } from '../../shared/recording';
+import { barPlacement, bubblePlacement, bubbleSize, dragRect, labelPlacement, matchMediaDevice, noticePlacement, windowsAt } from '../../shared/recording';
 import { bridge } from '../bridge';
 import { FolderIcon, MicIcon, WarningIcon } from '../icons';
 import { Select } from '../Select';
@@ -19,6 +19,7 @@ const STOPS: RecordChoices['stop'][] = ['none', 'claude', 'idle'];
 const STOP_NAMES: Record<RecordChoices['stop'], string> = { none: 'When I stop', claude: "Claude's answer", idle: 'Screen still for 10 s' };
 /** A display narrower than this gets the bar's compact form (mode icons only). */
 const COMPACT_BELOW = 1200;
+const MAC = navigator.userAgent.includes('Macintosh');
 
 function Camera({ size }: { size?: number }) {
   return (
@@ -83,6 +84,7 @@ export function Picker() {
   const [barRef, barSize] = useSize<HTMLDivElement>({ width: 1000, height: 52 });
   const [labelRef, labelSize] = useSize<HTMLDivElement>({ width: 260, height: 28 });
   const [hintRef, hintSize] = useSize<HTMLDivElement>({ width: 560, height: 30 });
+  const [noticesRef, noticesSize] = useSize<HTMLDivElement>({ width: 480, height: 44 });
 
   useEffect(() => {
     const offOpen = bridge.on('picker:open', (next) => {
@@ -281,7 +283,11 @@ export function Picker() {
   const atEdge = rect !== undefined && (rect.x <= 0 || rect.y <= 0 || rect.x + rect.width >= full.width || rect.y + rect.height >= full.height);
   const kindName = shown?.kind === 'screen' ? 'Screen' : shown?.kind === 'window' ? 'Window' : 'Region';
   const effective = shown?.kind ?? (mode === 'auto' ? 'screen' : mode);
-  const notice = blocked ?? setup.warning;
+  // what to know before recording: why it cannot start, else what is missing to start, then what a take will miss
+  const reason = !blocked && recordReason && !needsFolder ? recordReason : undefined;
+  const permissions = setup.permissions ?? [];
+  const noticed = blocked !== undefined || reason !== undefined || setup.warning !== undefined || permissions.length > 0;
+  const noticesAt = noticePlacement({ y: barAt.y, height: barSize.height, where: barAt.where }, noticesSize, work);
   const steps = writtenSteps(script);
 
   return (
@@ -298,7 +304,7 @@ export function Picker() {
             </b>
             <span>
               {shown!.pixels.width} × {shown!.pixels.height} px
-              {shown!.kind === 'window' ? ' · records this area' : ''}
+              {shown!.kind === 'window' ? (MAC ? ' · records this window' : ' · records this area') : ''}
               {shown!.of ? ` · ${shown!.of[0]} of ${shown!.of[1]} here (Tab)` : ''}
             </span>
           </div>
@@ -328,20 +334,46 @@ export function Picker() {
             </span>
           </div>
           {choices.camera && bubbleAt && <CameraBubble name={choices.camera} size={bubble} left={bubbleAt.left} top={bubbleAt.top} />}
-          {notice && (
+          {noticed && (
             <div
-              className={`problem${blocked ? ' blocking' : ''}`}
-              style={{ left: barAt.x, top: barAt.where === 'above' ? barAt.y - 52 : barAt.y + barSize.height + 10, maxWidth: Math.max(320, barSize.width) }}
-              role="alert"
+              className="notices"
+              ref={noticesRef}
+              style={{ left: barAt.x, top: noticesAt.y, width: Math.max(360, barSize.width) }}
               onPointerDown={(event) => event.stopPropagation()}
+              onPointerUp={(event) => event.stopPropagation()}
+              data-testid="picker-notices"
             >
-              <WarningIcon size={15} />
-              <span>{notice}</span>
-              {blocked && /ffmpeg|did not answer|cannot record/i.test(blocked) && (
-                <button type="button" className="retry" onClick={() => void bridge.invoke('picker:retry')}>
-                  Try again
-                </button>
+              {blocked && (
+                <div className="problem blocking" role="alert">
+                  <WarningIcon size={15} />
+                  <span>{blocked}</span>
+                  {/ffmpeg|did not answer|cannot record/i.test(blocked) && (
+                    <button type="button" className="retry" onClick={() => void bridge.invoke('picker:retry')}>
+                      Try again
+                    </button>
+                  )}
+                </div>
               )}
+              {reason && (
+                <div className="problem quiet" data-testid="record-reason">
+                  <span>{reason}</span>
+                </div>
+              )}
+              {setup.warning && (
+                <div className="problem" role="alert">
+                  <WarningIcon size={15} />
+                  <span>{setup.warning}</span>
+                </div>
+              )}
+              {permissions.map((note) => (
+                <div key={note.permission} className="problem" data-testid={`permission-${note.permission}`}>
+                  <WarningIcon size={15} />
+                  <span>{note.text}</span>
+                  <button type="button" className="retry" onClick={() => void bridge.invoke('picker:permission', note.permission)}>
+                    {MAC ? 'Open System Settings' : 'Open Settings'}
+                  </button>
+                </div>
+              ))}
             </div>
           )}
           <div

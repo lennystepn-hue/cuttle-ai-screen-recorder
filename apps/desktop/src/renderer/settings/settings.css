@@ -81,14 +81,25 @@
 .settings-nav button[aria-current='page'] svg {
   color: var(--accent);
 }
-.settings-nav .version {
-  margin: auto 10px 0;
-}
 .settings-page {
   flex: 1;
   min-width: 0;
   overflow-y: auto;
   padding: 20px 28px 28px;
+}
+/* a page's title and what it is about, over its cards */
+.page-head {
+  margin: 4px 2px 20px;
+}
+.page-head h1 {
+  margin: 0;
+  font-size: var(--size-xl);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+.page-head p {
+  margin: 4px 0 0;
+  color: var(--muted);
 }
 .settings section + section {
   margin-top: 24px;
@@ -461,11 +472,6 @@ progress.download::-webkit-progress-value {
   padding: 16px;
   color: var(--muted);
 }
-.version {
-  margin: 20px 2px 0;
-  color: var(--faint);
-  font-size: var(--size-xs);
-}
 
 /* the first run */
 .welcome-head {
@@ -551,4 +557,42 @@ progress.download::-webkit-progress-value {
 /* the box around the words shows the focus */
 .words .word-input:focus-visible {
   box-shadow: none;
+}
+
+/* the recording hotkeys: what each does, its keys on the right */
+.hotkeys {
+  list-style: none;
+  margin: 0;
+  padding: 6px 0;
+}
+.hotkeys li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 36px;
+  padding: 0 16px;
+}
+.hotkeys li span:first-child {
+  min-width: 0;
+  color: var(--text-2);
+}
+/* the welcome's first recording: the recording dot, as on the pill */
+.welcome-foot .primary.record {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.welcome-foot .primary.record i {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: currentColor;
+}
+/* a hotkey's chips: no type under 11 px */
+.keys kbd {
+  min-width: 20px;
+  padding: 2px 5px;
+  font-size: var(--size-xs);
+  text-align: center;
 }

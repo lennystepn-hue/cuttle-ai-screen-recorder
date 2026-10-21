@@ -1,7 +1,7 @@
 // The settings window, and the first run in the same window (#welcome): ffmpeg, the cuttle command
 // and the Claude skill, then the pill. Every change is kept at once; there is no Save.
 import { useEffect, useLayoutEffect, useRef, useState, type ComponentType, type KeyboardEvent, type ReactNode } from 'react';
-import type { Motion, RequestArgument, SettingsPage, SettingsView, SpeechLanguage, SpeechModelName, SpeechStatus, ToolsStatus, UpdateStatus } from '../../shared/ipc';
+import type { Motion, Permission, PermissionView, RequestArgument, SettingsPage, SettingsView, SpeechLanguage, SpeechModelName, SpeechStatus, ToolsStatus, UpdateStatus } from '../../shared/ipc';
 import { bridge } from '../bridge';
 import { CheckIcon, CloseIcon, CopyIcon, FolderIcon, GearIcon, Mark, MaskIcon, MicIcon, RecordIcon, TerminalIcon, WarningIcon } from '../icons';
 import { hotkeyKeys } from '../keys';
@@ -50,15 +50,35 @@ const Keys = ({ keys }: { keys: string }) => (
 /** Where Cuttle waits when its windows are closed. */
 const TRAY = MAC ? 'menu bar' : 'tray';
 
-/** The settings' pages, in the sidebar's order. */
-const PAGES: { id: SettingsPage; title: string; icon: ComponentType<{ size?: number }> }[] = [
-  { id: 'recording', title: 'Recording', icon: RecordIcon },
-  { id: 'speech', title: 'Speech', icon: MicIcon },
-  { id: 'privacy', title: 'Privacy', icon: MaskIcon },
-  { id: 'claude', title: 'Claude Code', icon: TerminalIcon },
-  { id: 'projects', title: 'Projects', icon: FolderIcon },
-  { id: 'general', title: 'General', icon: GearIcon },
+/** The settings' pages, in the sidebar's order, each with what it is about under its title. */
+const PAGES: { id: SettingsPage; title: string; lead: string; icon: ComponentType<{ size?: number }> }[] = [
+  { id: 'recording', title: 'Recording', lead: 'Where takes go, what they record, and the keys that run a take.', icon: RecordIcon },
+  { id: 'speech', title: 'Speech', lead: 'What is said in a take, written down on this computer: nothing is uploaded.', icon: MicIcon },
+  { id: 'privacy', title: 'Privacy', lead: 'What Cuttle masks in a take before anyone sees it.', icon: MaskIcon },
+  { id: 'claude', title: 'Claude Code', lead: 'Claude Code records and cuts with Cuttle through the cuttle command and its skill.', icon: TerminalIcon },
+  { id: 'projects', title: 'Projects', lead: 'The projects you opened or recorded lately.', icon: FolderIcon },
+  { id: 'general', title: 'General', lead: 'How Cuttle starts, moves and stays up to date.', icon: GearIcon },
 ];
+
+/** The recording hotkeys (HOTKEYS in @cuttle/recorder's input.ts, and the one that starts a take). */
+const HOTKEY_LIST: [string, string][] = [
+  ['Start a recording', 'Ctrl+Shift+Alt+R'],
+  ['Stop', 'Ctrl+Shift+Alt+S'],
+  ['Pause and resume', 'Ctrl+Shift+Alt+P'],
+  ['A slip: cut back to the pause before', 'Ctrl+Shift+Alt+X'],
+  ['Set a marker', 'Ctrl+Shift+Alt+M'],
+  ['The script’s next step', 'Ctrl+Shift+Alt+N'],
+  ['The step before', 'Ctrl+Shift+Alt+B'],
+];
+
+/** Each permission as System Settings names it, and what a take has from it. */
+const PERMISSION_NAMES: Record<Permission, { name: string; what: string; asked?: string }> = {
+  screen: { name: 'Screen & System Audio Recording', what: 'Records the screen and its windows.', asked: 'macOS asks the first time you record.' },
+  input: { name: 'Input Monitoring', what: 'Sees clicks and keys: zooms on clicks, zooms while typing, the recording hotkeys.' },
+  accessibility: { name: 'Accessibility', what: 'Sees where you type and the page in a browser: zooms follow the letters.' },
+  camera: { name: 'Camera', what: 'The webcam bubble, when a take has one.', asked: 'macOS asks the first time a take uses it.' },
+  microphone: { name: 'Microphone', what: 'Your voice, when a take records the mic.', asked: 'macOS asks the first time a take uses it.' },
+};
 
 export function Settings() {
   const welcome = location.hash === '#welcome';
@@ -92,6 +112,7 @@ export function Settings() {
   }, []);
 
   const change = (next: RequestArgument<'settings:set'>) => void bridge.invoke('settings:set', next).then(setView);
+  const current = PAGES.find(({ id }) => id === page)!;
 
   return (
     <div className="settings" data-mode={welcome ? 'welcome' : 'settings'} data-testid="settings">
@@ -111,12 +132,15 @@ export function Settings() {
                   {title}
                 </button>
               ))}
-              <p className="version">Cuttle {view?.version}</p>
             </nav>
             <div className="settings-page" data-page={page}>
+              <div className="page-head">
+                <h1>{current.title}</h1>
+                <p>{current.lead}</p>
+              </div>
               {page === 'recording' && (
                 <>
-                  <Section title="Recording">
+                  <Section title="Takes">
                     <Row label="Projects folder" hint="Every new recording gets a folder here, named by its date and time." stacked>
                       <div className="path-row">
                         <span className="path" title={view?.projectsFolder} data-testid="projects-folder">
@@ -147,6 +171,17 @@ export function Settings() {
                       <DeviceSelect kind="mic" value={view?.mic} devices={devices?.mics} onChange={(mic) => change({ mic })} />
                     </Row>
                   </Section>
+                  <Permissions />
+                  <Section title="Hotkeys">
+                    <ul className="hotkeys" data-testid="hotkeys">
+                      {HOTKEY_LIST.map(([what, keys]) => (
+                        <li key={keys}>
+                          <span>{what}</span>
+                          <Keys keys={keys} />
+                        </li>
+                      ))}
+                    </ul>
+                  </Section>
                   <Section title="To record">
                     <FfmpegLine tools={tools} setTools={setTools} />
                   </Section>
@@ -155,7 +190,7 @@ export function Settings() {
 
               {page === 'speech' && (
                 <>
-                  <Section title="Speech">
+                  <Section title="Transcription">
                     <SpeechSettings view={view} change={change} />
                   </Section>
                 </>
@@ -163,7 +198,7 @@ export function Settings() {
 
               {page === 'privacy' && (
                 <>
-                  <Section title="Privacy">
+                  <Section title="Masks">
                     <PrivacySettings view={view} change={change} />
                   </Section>
                 </>
@@ -171,7 +206,7 @@ export function Settings() {
 
               {page === 'claude' && (
                 <>
-                  <Section title="For Claude Code">
+                  <Section title="Tools">
                     <ClaudeTools tools={tools} setTools={setTools} />
                   </Section>
                 </>
@@ -214,7 +249,7 @@ export function Settings() {
 
               {page === 'projects' && (
                 <>
-                  <Section title="Recent projects">
+                  <Section title="Recent">
                     <Recent view={view} />
                   </Section>
                 </>
@@ -288,6 +323,45 @@ function DeviceSelect({ kind, value, devices, onChange }: { kind: 'camera' | 'mi
       className="device"
       testId={`${kind}-select`}
     />
+  );
+}
+
+/**
+ * macOS: each permission a take needs, allowed or not, with the way to its pane of System Settings;
+ * looked at again when the window comes back to the front (after System Settings). None elsewhere.
+ */
+function Permissions() {
+  const [permissions, setPermissions] = useState<PermissionView[]>();
+  useEffect(() => {
+    const look = () => void bridge.invoke('settings:permissions').then(setPermissions);
+    look();
+    window.addEventListener('focus', look);
+    return () => window.removeEventListener('focus', look);
+  }, []);
+  if (!permissions || permissions.length === 0) return null;
+  return (
+    <Section title="Permissions">
+      {permissions.map(({ permission, granted }) => {
+        const { name, what, asked } = PERMISSION_NAMES[permission];
+        const waits = granted === undefined && asked !== undefined;
+        return (
+          <ToolLine
+            key={permission}
+            state={granted ? 'ok' : waits ? 'off' : 'warn'}
+            name={name}
+            detail={granted ? what : waits ? `${what} ${asked}` : `Not allowed. ${what}`}
+            testid={`permission-${permission}`}
+            plain
+          >
+            {!granted && !waits && (
+              <button className="ghost" onClick={() => void bridge.invoke('settings:permission', permission)}>
+                Open System Settings
+              </button>
+            )}
+          </ToolLine>
+        );
+      })}
+    </Section>
   );
 }
 
@@ -779,9 +853,9 @@ function RenameField({ initial, onDone }: { initial: string; onDone: (name: stri
   );
 }
 
-/** The first run: what recording needs, what Claude Code can use, then Done (the pill). */
+/** The first run: what recording needs, what Claude Code can use, then Done (the pill) or a first recording. */
 function Welcome({ tools, setTools }: { tools: ToolsStatus | undefined; setTools: (tools: ToolsStatus) => void }) {
-  // one accent: Install while Claude Code's part is missing, Done once all is there
+  // one accent: Install while Claude Code's part is missing, Start recording once all is there
   const ready = tools !== undefined && tools.ffmpeg !== undefined && tools.command !== undefined && tools.skill.state !== 'missing';
   return (
     <div className="welcome">
@@ -802,9 +876,15 @@ function Welcome({ tools, setTools }: { tools: ToolsStatus | undefined; setTools
         <span className="row-hint">
           Cuttle waits at the top of your screen and in the {TRAY}. <Keys keys="Ctrl+Shift+Alt+R" /> starts a recording from anywhere.
         </span>
-        <button className={ready ? 'primary' : 'ghost'} onClick={() => void bridge.invoke('settings:welcomed')} data-testid="welcome-done">
+        <button className="ghost" onClick={() => void bridge.invoke('settings:welcomed')} data-testid="welcome-done">
           Done
         </button>
+        {ready && (
+          <button className="primary record" onClick={() => void bridge.invoke('settings:welcomed', { record: true })} data-testid="welcome-record">
+            <i />
+            Start recording
+          </button>
+        )}
       </div>
     </div>
   );

@@ -19,7 +19,7 @@ export function Pill() {
         <Mark size={36} />
         <button className="main" onClick={() => void bridge.invoke('pill:record')} title={`Pick a screen, a window or a region (${hotkey('Ctrl+Shift+Alt+R')})`} data-testid="new-recording">
           <i />
-          New recording <kbd>Ctrl Shift Alt R</kbd>
+          New recording <kbd>{hotkey('Ctrl+Shift+Alt+R')}</kbd>
         </button>
         <button onClick={() => void bridge.invoke('pill:open')} title="Open a project folder">
           <FolderIcon size={15} />

@@ -98,36 +98,39 @@ body.transparent #root {
   z-index: 2;
 }
 .hint kbd {
-  font: 600 10.5px var(--font);
+  font: 600 var(--size-xs) var(--font);
   background: rgba(255, 255, 255, 0.14);
   padding: 2px 7px;
   border-radius: 4px;
   color: #fff;
 }
+/* the bar on the HUD's grid: 48 px tall, 6 px round 36 px options, the HUD's shadow */
 .bar-rec {
   position: absolute;
   max-width: calc(100% - 32px);
+  height: 48px;
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
   padding: 6px;
   border-radius: 16px;
   background: var(--overlay);
-  box-shadow: var(--shadow-float);
+  box-shadow: var(--shadow-bar);
   cursor: default;
   white-space: nowrap;
 }
 .modes {
   display: flex;
+  height: 36px;
   background: var(--raised);
-  border-radius: 11px;
+  border-radius: 10px;
   padding: 3px;
   gap: 2px;
 }
 .modes button {
-  height: 34px;
+  height: 30px;
   padding: 0 11px;
-  border-radius: 8px;
+  border-radius: 7px;
   display: flex;
   align-items: center;
   gap: 7px;
@@ -147,8 +150,8 @@ body.transparent #root {
   max-width: 90px;
 }
 .opt {
-  height: 40px;
-  border-radius: 11px;
+  height: 36px;
+  border-radius: 10px;
   padding: 0 10px 0 12px;
   display: flex;
   align-items: center;
@@ -177,7 +180,7 @@ body.transparent #root {
 }
 .opt small {
   color: var(--faint);
-  font-size: 10.5px;
+  font-size: var(--size-xs);
   max-width: 140px;
   white-space: nowrap;
   overflow: hidden;
@@ -185,7 +188,7 @@ body.transparent #root {
 }
 /* "Stop on": the choice in small text with a chevron (Select.tsx, `bare`) */
 .opt .select-trigger.stop {
-  font-size: 10.5px;
+  font-size: var(--size-xs);
   max-width: 150px;
   gap: 3px;
 }
@@ -251,14 +254,14 @@ body.transparent #root {
 }
 .divider {
   width: 1px;
-  height: 26px;
+  height: 24px;
   background: var(--line-strong);
   margin: 0 2px;
 }
 .rec {
-  height: 40px;
-  padding: 0 16px 0 12px;
-  border-radius: 11px;
+  height: 36px;
+  padding: 0 14px 0 12px;
+  border-radius: 10px;
   background: var(--recording);
   color: #fff;
   font-weight: 600;
@@ -277,7 +280,7 @@ body.transparent #root {
   display: block;
 }
 .rec kbd {
-  font: 600 10px var(--font);
+  font: 600 var(--size-xs) var(--font);
   opacity: 0.8;
   background: none;
   color: #fff;
@@ -302,26 +305,46 @@ body.transparent #root {
   object-fit: cover;
   transform: scaleX(-1);
 }
-.problem {
+/* what to know before recording, by the bar: a line each, as wide as the bar */
+.notices {
   position: absolute;
+  max-width: calc(100% - 32px);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  cursor: default;
+}
+.problem {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 8px 12px;
-  border-radius: 10px;
+  gap: 10px;
+  padding: 8px 8px 8px 12px;
+  min-height: 40px;
+  border-radius: 12px;
   background: var(--overlay);
-  color: var(--card);
-  box-shadow: var(--shadow-float);
+  color: var(--text-2);
+  box-shadow: var(--shadow-bar);
   white-space: normal;
-  cursor: default;
+  line-height: 1.4;
+}
+.problem > svg {
+  flex: none;
+  color: var(--warn);
+}
+.problem > span {
+  flex: 1;
+  min-width: 0;
 }
 .problem.blocking {
   color: var(--text);
-  box-shadow: var(--shadow-float), inset 0 0 0 1px var(--card);
+  box-shadow: var(--shadow-bar), inset 0 0 0 1px var(--warn);
+}
+.problem.quiet {
+  color: var(--muted);
 }
 .problem .retry {
-  margin-left: 6px;
-  height: 26px;
+  flex: none;
+  height: 28px;
   padding: 0 10px;
   border-radius: 7px;
   background: var(--raised);

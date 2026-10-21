@@ -15,7 +15,7 @@ body.transparent #root {
   padding: 6px;
   border-radius: 16px;
   background: var(--overlay);
-  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45), 0 0 0 1px rgba(255, 255, 255, 0.07);
+  box-shadow: var(--shadow-bar);
   -webkit-app-region: drag;
 }
 .pill .mark {
@@ -54,9 +54,13 @@ body.transparent #root {
   background: var(--recording);
   display: block;
 }
+/* the hotkey in quiet type after the words: ⌃⌥⇧R on a Mac, Ctrl+Shift+Alt+R on Windows */
 .pill kbd {
   background: none;
   padding: 0;
+  color: var(--faint);
+  font: 500 var(--size-xs) var(--font);
+  letter-spacing: 0.02em;
 }
 .pill .icon-only {
   width: 32px;

@@ -4,7 +4,7 @@ import type { EngineAssets } from './assets';
 import { CAPTION_LOOKS, drawCaption } from './captions';
 import { createRenderTarget, deleteRenderTarget, type RenderTarget } from './gl/target';
 import { createTexture, sourceSize, uploadPixels, uploadTexture } from './gl/texture';
-import { placeBadge, placeOverlay, stillCrop, unitFor, uvRect, watermarkRect, webcamRect, type Size, type WindowLayout } from './layout';
+import { blurSamples, placeBadge, placeOverlay, stillCrop, unitFor, uvRect, watermarkRect, webcamRect, type Size, type WindowLayout } from './layout';
 import { BackgroundPass } from './passes/background';
 import { ContentPass } from './passes/content';
 import { CursorPass } from './passes/cursor';
@@ -206,9 +206,13 @@ export function createRenderer(canvas: HTMLCanvasElement | OffscreenCanvas, proj
     if (!hasPixels(screen)) throw new Error(`render: the screen frame of scene ${layer.index} is empty (not decoded yet, or closed)`);
     uploadTexture(gl, screenTexture, screen, true);
     const zoom = layer.zoom ?? full;
-    content.draw(screenTexture, uvRect(zoom, screenSize), layout);
-    masks.draw(layer.masks, screenTexture, screenSize, zoom, layout);
-    if (layer.cursor) cursor.draw(layer.cursor, look.cursor, screenSize, zoom, layout);
+    // motion blur: the screen smears along the zoom's way while the shutter was open, the masks
+    // cover every place they had meanwhile, the pointer smears along its own way
+    const from = layer.motion?.zoom;
+    const samples = from ? blurSamples(from, zoom, layout.content) : 1;
+    content.draw(screenTexture, uvRect(zoom, screenSize), layout, undefined, samples > 1 && from ? { from: uvRect(from, screenSize), samples } : undefined);
+    masks.draw(layer.masks, screenTexture, screenSize, zoom, layout, samples > 1 ? from : undefined);
+    if (layer.cursor) cursor.draw(layer.cursor, look.cursor, screenSize, zoom, layout, layer.motion);
     // a device's camera over its screen
     if (chrome) windowPass.drawOver(layout, chrome);
     // An empty webcam frame counts as missing: no bubble, as when the webcam track is shorter.

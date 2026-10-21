@@ -471,3 +471,42 @@ describe('motion', () => {
     expect(off.frameAt(3).layers[0]!.overlays).toEqual([]);
   });
 });
+
+describe('motion blur', () => {
+  const look = { transition: { enabled: false } };
+  const zooms = [{ at: 2, duration: 6, rect: [0, 0, 1280, 720], moves: [{ at: 5, rect: [1280, 720, 1280, 720] }] }];
+  const events = [
+    { t: 0, type: 'move', x: 100, y: 100 },
+    { t: 5, type: 'move', x: 100, y: 100 },
+    { t: 6, type: 'move', x: 2000, y: 1200 },
+  ] as const;
+  const timeline = (overrides: Record<string, unknown> = {}, cursor = false) =>
+    createTimeline(project({ ...look, ...overrides }, { scenes: [{ type: 'clip', from: 0, to: 10 }, { type: 'clip', from: 10, to: 30, speed: 4 }], zooms, masks: [], texts: [] }), {
+      screenSize,
+      ...(cursor && { cursor: createCursorTrack([...events]) }),
+    });
+
+  it('gives a frame the zoom from when its shutter opened: a quarter of a frame before, by default', () => {
+    const layer = timeline().frameAt(5).layers[0]!;
+    const opened = timeline().frameAt(5 - 0.25 / 30).layers[0]!;
+    expect(layer.motion?.zoom).toEqual(opened.zoom);
+    expect(layer.motion?.zoom).not.toEqual(layer.zoom);
+  });
+
+  it('opens the shutter as long as `look.motionBlur` says, and not at all when it is 0', () => {
+    expect(timeline({ motionBlur: 1 }).frameAt(5).layers[0]!.motion?.zoom).toEqual(timeline().frameAt(5 - 1 / 30).layers[0]!.zoom);
+    expect(timeline({ motionBlur: 0 }).frameAt(5).layers[0]!.motion).toBeUndefined();
+  });
+
+  it('opens it no earlier than the clip starts, and not in waiting that is sped up', () => {
+    expect(timeline().frameAt(0).layers[0]!.motion).toBeUndefined();
+    expect(timeline().frameAt(15).layers[0]!.motion).toBeUndefined();
+  });
+
+  it('gives the pointer from when the shutter opened, where the take has one', () => {
+    const layer = timeline({}, true).frameAt(5.5).layers[0]!;
+    const opened = timeline({}, true).frameAt(5.5 - 0.25 / 30).layers[0]!;
+    expect(layer.motion?.cursor).toEqual({ x: opened.cursor!.x, y: opened.cursor!.y });
+    expect(timeline().frameAt(5.5).layers[0]!.motion?.cursor).toBeUndefined();
+  });
+});

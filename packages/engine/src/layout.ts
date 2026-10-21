@@ -107,6 +107,40 @@ export function maskRectToOutput(rect: Rect, zoom: Rect, content: Rect): Rect {
   return [left, top, Math.ceil(x + w + spreadX) + 1 - left, Math.ceil(y + h + spreadY) + 1 - top];
 }
 
+/**
+ * A mask under motion blur: over every place it had while the shutter was open (`from`: the zoom
+ * then), so no smear of what it hides shows beside it. Without `from`, `maskRectToOutput`.
+ */
+export function blurredMaskRect(rect: Rect, zoom: Rect, content: Rect, from?: Rect): Rect {
+  const now = maskRectToOutput(rect, zoom, content);
+  if (!from) return now;
+  const then = maskRectToOutput(rect, from, content);
+  const left = Math.min(now[0], then[0]);
+  const top = Math.min(now[1], then[1]);
+  return [left, top, Math.max(now[0] + now[2], then[0] + then[2]) - left, Math.max(now[1] + now[3], then[1] + then[3]) - top];
+}
+
+/** Motion blur's moments are at most this far apart (output px)… */
+export const BLUR_STEP = 1.5;
+/** …and at most this many. */
+export const BLUR_SAMPLES = 32;
+
+/**
+ * How many moments a frame of the screen averages for its motion blur: enough that each lies at most
+ * `BLUR_STEP` output px from the next along the way the screen moved from `from` (the zoom when the
+ * shutter opened) to `zoom`, at most `BLUR_SAMPLES`; 1 while it stands still.
+ */
+export function blurSamples(from: Rect, zoom: Rect, content: Rect): number {
+  let far = 0;
+  // how far the screen under each corner of the content moved, in output px
+  for (const [cx, cy] of [[0, 0], [1, 0], [0, 1], [1, 1]] as const) {
+    const dx = ((from[0] + cx * from[2] - (zoom[0] + cx * zoom[2])) / zoom[2]) * content[2];
+    const dy = ((from[1] + cy * from[3] - (zoom[1] + cy * zoom[3])) / zoom[3]) * content[3];
+    far = Math.max(far, Math.hypot(dx, dy));
+  }
+  return far < 0.5 ? 1 : Math.min(BLUR_SAMPLES, Math.ceil(far / BLUR_STEP) + 1);
+}
+
 /** A rect in image px as texture coordinates `[u, v, w, h]`, with v = 0 at the image's top row. */
 export function uvRect(rect: Rect, image: Size): Rect {
   return [rect[0] / image.width, rect[1] / image.height, rect[2] / image.width, rect[3] / image.height];

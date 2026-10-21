@@ -177,6 +177,11 @@ const LookSchema = z.strictObject({
   audio: AudioSchema.prefault({}),
   transition: TransitionSchema.prefault({}),
   watermark: WatermarkSchema.prefault({}),
+  /**
+   * Motion blur: how long a frame's shutter is open, as a share of the frame (0 off, 0.25 light,
+   * 0.5 a film camera's). The screen smears along the zoom's moves and the pointer along its path.
+   */
+  motionBlur: z.number().min(0).max(1).default(0.25),
 });
 
 // Scenes and overlays may carry an id (for editors: selection, undo; unique in the project) and a

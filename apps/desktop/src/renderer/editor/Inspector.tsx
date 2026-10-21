@@ -267,6 +267,27 @@ const SMOOTHING: { value: number; name: string }[] = [
   { value: 1, name: 'Very smooth' },
 ];
 
+/** How much the picture smears as the zoom and the pointer move: a camera's shutter, open this share of a frame. */
+const MOTION_BLUR: { value: number; name: string }[] = [
+  { value: 0, name: 'Off' },
+  { value: 0.25, name: 'Light (default)' },
+  { value: 0.5, name: 'Film' },
+  { value: 1, name: 'Strong' },
+];
+
+function MotionBlurSelect({ value }: { value: number }) {
+  const known = MOTION_BLUR.some((step) => step.value === value);
+  return (
+    <StyledSelect
+      value={String(value)}
+      options={[...(known ? [] : [{ value: String(value), label: `${value} (from cuttle.json)` }]), ...MOTION_BLUR.map((step) => ({ value: String(step.value), label: step.name }))]}
+      onChange={(chosen) => look(['motionBlur'], Number(chosen), 'Motion blur')}
+      label="Motion blur"
+      testId="motion-blur"
+    />
+  );
+}
+
 function SmoothingSelect({ value }: { value: number }) {
   const known = SMOOTHING.some((step) => step.value === value);
   return (
@@ -1779,7 +1800,7 @@ function LookPanel() {
     sound: current.audio.enabled
       ? [sources.cleanMic && current.audio.cleanup ? 'Mic · clean voice' : 'Mic', current.audio.typing && 'key clicks', project.music?.enabled && 'music', current.audio.effects && project.sounds.length > 0 && 'sounds'].filter(Boolean).join(' · ')
       : 'Muted',
-    video: `${size?.name ?? `${output.width} × ${output.height}`} · ${output.fps} fps${current.transition.enabled ? ' · crossfades' : ''}`,
+    video: `${size?.name ?? `${output.width} × ${output.height}`} · ${output.fps} fps${current.transition.enabled ? ' · crossfades' : ''}${current.motionBlur > 0 ? ' · motion blur' : ''}`,
   };
   return (
     <div className="look-parts">
@@ -2042,6 +2063,9 @@ function LookPanel() {
           >
             {size ? `${size.name} · ${size.width} × ${size.height}` : `${output.width} × ${output.height}`}
           </StyledSelect>
+        </Row>
+        <Row label="Motion blur" note="as zooms and the pointer move">
+          <MotionBlurSelect value={current.motionBlur} />
         </Row>
         <Row label="Crossfade" inline>
           <Toggle checked={current.transition.enabled} label="Crossfade at cuts" onChange={(on) => look(['transition', 'enabled'], on, on ? 'Crossfade on' : 'Crossfade off')} />

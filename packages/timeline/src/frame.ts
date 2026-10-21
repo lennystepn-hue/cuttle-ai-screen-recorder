@@ -7,6 +7,9 @@ import { TEXT_FADE_SECONDS, activeMasks, activeTexts, badgeFor, type ActiveText 
 import { crossfadeHalf, isContinuousCut, pageTransition, sceneSpans, sourceTimeAt, spanAt, totalDuration, type SceneSpan } from './time';
 import { ZOOM_RAMP_SECONDS, zoomRectAt } from './zoom';
 
+/** No motion blur in clips faster than this (waiting sped up: the pointer would streak across the screen). */
+export const BLUR_MAX_SPEED = 2;
+
 /** A motion overlay on a clip's frame: which one, and where its own clock is. */
 export interface ActiveOverlay {
   /** Its place in the project's `overlays`. */
@@ -32,6 +35,12 @@ export interface SceneFrame {
   sourceTime?: number;
   /** Clip scenes: the part of the screen shown (source px), the crop or the zoom inside it. */
   zoom?: Rect;
+  /**
+   * Clip scenes with motion blur (`look.motionBlur`): where the zoom and the pointer were when the
+   * frame's shutter opened, never before the clip's start; the frame smears from there to `zoom`
+   * and `cursor`. None in waiting that is sped up, and none while the frame is held.
+   */
+  motion?: { zoom: Rect; cursor?: { x: number; y: number } };
   /** Clip scenes: the width / height the window shows, the crop's or else the screen's. */
   aspect?: number;
   masks: Mask[];
@@ -110,6 +119,8 @@ export function createTimeline(project: CuttleProject, opts: TimelineOptions): T
   const textShown = new Map(project.texts.map((text) => [text, occurrences(spans, text.at, text.at + text.duration)]));
   const overlayShown = project.overlays.map((overlay) => occurrences(spans, overlay.at, overlay.at + overlay.duration));
   const round = (seconds: number) => Math.round(seconds * 1e6) / 1e6;
+  /** How long a frame's shutter is open (output seconds): the motion blur's share of a frame. */
+  const shutter = project.look.motionBlur / project.output.fps;
 
   const halfBetween = (a: SceneSpan, b: SceneSpan): number => crossfadeHalf(a, b, project.look.transition);
 
@@ -143,18 +154,25 @@ export function createTimeline(project: CuttleProject, opts: TimelineOptions): T
     if (cursor && project.look.cursor.clickEffect === 'none') cursor = { ...cursor, clicks: [] };
     // The output time this source frame belongs to (a held or frozen frame's, during a crossfade).
     const shownAt = span.start + (sourceTime - scene.from) / scene.speed;
-    const amount = (shown: (Occurrence | undefined)[] | undefined, ramp: number, curve: Curve): number => {
+    const amount = (shown: (Occurrence | undefined)[] | undefined, ramp: number, curve: Curve, at = shownAt): number => {
       const occurrence = shown?.[span.index];
-      return occurrence ? rampAmount(occurrence, shownAt, ramp, curve) : 1;
+      return occurrence ? rampAmount(occurrence, at, ramp, curve) : 1;
     };
     // the crop is the screen for this clip: zooms fit inside it, the window takes its shape
     const screen = scene.crop?.enabled ? scene.crop.rect : full;
+    // a smooth zoom moves as a camera does: it settles
+    const zoomAt = (source: number, at: number) =>
+      zoomRectAt(project.zooms, source, (zoom) => amount(zoomShown.get(zoom), ZOOM_RAMP_SECONDS, zoom.ease === 'smooth' ? 'settle' : zoom.ease, at), screen, scene.speed);
+    // where the camera and the pointer were when the shutter opened, within this clip
+    const open = Math.max(scene.from, sourceTime - shutter * scene.speed);
+    const blurred = shutter > 0 && !pastEnd && scene.speed <= BLUR_MAX_SPEED && open < sourceTime;
+    const before = blurred && cursor && opts.cursor ? cursorAt(opts.cursor, open, scene.speed, project.look.cursor.smoothing, cuts) : undefined;
     return {
       ...base,
       kind: 'clip',
       sourceTime,
-      // a smooth zoom moves as a camera does: it settles
-      zoom: zoomRectAt(project.zooms, sourceTime, (zoom) => amount(zoomShown.get(zoom), ZOOM_RAMP_SECONDS, zoom.ease === 'smooth' ? 'settle' : zoom.ease), screen, scene.speed),
+      zoom: zoomAt(sourceTime, shownAt),
+      ...(blurred && { motion: { zoom: zoomAt(open, shownAt - (sourceTime - open) / scene.speed), ...(before && { cursor: { x: before.x, y: before.y } }) } }),
       aspect: screen[2] / screen[3],
       masks: activeMasks(project.masks, sourceTime),
       texts: activeTexts(project.texts, sourceTime, (text) => amount(textShown.get(text), TEXT_FADE_SECONDS, 'linear')),

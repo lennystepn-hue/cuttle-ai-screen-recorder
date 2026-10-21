@@ -42,6 +42,18 @@ describe('framesToRead', () => {
     expect(await framesToRead(still, [{ from: 0, to: 11 }], size)).toEqual([0, 5, 10]);
   });
 
+  it("reads the frame a change came in, at its start, in a take with a frame only when the screen changes (macOS's)", async () => {
+    // white frames at 0 and 1.21 s, a box (a menu) from the frame at 1.2412 s, white again at 2.0687:
+    // the box comes just after a 10th of a second, with a frame without it in between
+    const dir = mkdtempSync(join(tmpdir(), 'cuttle-read-'));
+    dirs.push(dir);
+    const file = join(dir, 'screen.mp4');
+    const at = [0, 1.21, 1.2412, 2.0687, 3].map((t) => Math.round(t * 1e6));
+    const pts = at.slice(0, -1).reduceRight((rest, t, k) => `if(eq(N\\,${k})\\,${t}\\,${rest})`, String(at.at(-1)));
+    await runFfmpeg(['-f', 'lavfi', '-i', 'color=c=white:s=640x360:r=30:d=0.1667', '-vf', `drawbox=x=40:y=150:w=200:h=40:color=black:t=fill:enable='eq(n\\,2)',settb=1/1000000,setpts='${pts}',format=yuv420p`, '-fps_mode', 'passthrough', '-c:v', 'libx264', '-preset', 'ultrafast', '-enc_time_base', '1/1000000', '-video_track_timescale', '1000000', '-y', file]);
+    expect(await framesToRead(file, [{ from: 0, to: 3 }], size)).toEqual([0, 1.2412, 2.0687]);
+  });
+
   it('reads each span from its first frame, in source seconds', async () => {
     const file = await screen(4, [{ from: 2.45, to: 4, x: 40 }]);
     expect(await framesToRead(file, [{ from: 0.5, to: 1.5 }, { from: 2, to: 4 }], size)).toEqual([0.5, 2, 2.5]);

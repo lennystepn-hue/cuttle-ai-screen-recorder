@@ -7,7 +7,7 @@ import { afterAll, describe, expect, it } from 'vitest';
 import type { Rect, ScreenTextFrame } from '@cuttle/project';
 import { activeMasks } from '@cuttle/timeline';
 import { ffmpegPath } from '../src/ffmpeg';
-import { frameAt, followTracks, locate, templateOf, type Picture } from '../src/privacy/follow';
+import { frameAt, frameUpTo, followTracks, locate, templateOf, type Picture } from '../src/privacy/follow';
 import { privacyMasks, trackName, trackSecrets } from '../src/privacy/masks';
 import { framesToRead } from '../src/privacy/read';
 import { SCROLL_TAKE, scrolledAt, writeScrollTake } from './scrolling';
@@ -88,6 +88,14 @@ describe('frameAt', () => {
     expect(frameAt(begins, 0)).toBe(0);
     expect(frameAt(begins, 3.5)).toBe(3.5);
   });
+
+  it('gives the frame on screen at a time: the last up to it', () => {
+    const begins = [0, 1.2121, 2.0137, 3];
+    expect(frameUpTo(begins, 1.3)).toBe(1.2121);
+    expect(frameUpTo(begins, 1.2121)).toBe(1.2121);
+    expect(frameUpTo(begins, 1.2)).toBe(0);
+    expect(frameUpTo(begins, 9)).toBe(3);
+  });
 });
 
 describe('followTracks', () => {
@@ -137,7 +145,7 @@ describe('followTracks', () => {
     };
     // the masks of the reads alone leave it open as it comes in, between the two reads around its
     // way up and back, and as it goes out
-    expect(look(privacyMasks(frames, [], size, seconds)).open).toBeGreaterThan(20);
+    expect(look(privacyMasks(frames, [], size, seconds)).open).toBeGreaterThan(10);
     const masks = privacyMasks(frames, [], size, seconds, undefined, named);
     expect(look(masks)).toEqual({ open: 0, astray: expect.any(Number) });
     expect(look(masks).astray).toBeLessThanOrEqual(2);

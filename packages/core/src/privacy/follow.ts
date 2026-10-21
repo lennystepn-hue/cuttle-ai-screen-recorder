@@ -269,6 +269,18 @@ export function frameAt(begins: readonly number[], t: number): number {
   return begins[low] ?? t;
 }
 
+/** The start of the frame on screen at `t`: the last of `begins` (in order) up to it, else the first. Pure. */
+export function frameUpTo(begins: readonly number[], t: number): number {
+  let low = 0;
+  let high = begins.length;
+  while (low < high) {
+    const middle = (low + high) >> 1;
+    if (begins[middle]! <= t + 1e-6) low = middle + 1;
+    else high = middle;
+  }
+  return begins[Math.max(0, low - 1)] ?? t;
+}
+
 /** A track's time: from half a second before its first read to the read after its last (masks.ts's rule). */
 export function spanOf(track: Track, reads: readonly number[], end: number, rules = MASK_RULES): { from: number; to: number } {
   const first = track.sightings[0]!.t;

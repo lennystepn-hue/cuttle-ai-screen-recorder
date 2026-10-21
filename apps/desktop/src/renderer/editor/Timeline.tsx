@@ -57,8 +57,11 @@ const TICKS = [0.1, 0.2, 0.5, 1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 1800];
 const MAX_PPS = 400;
 /** A pointer that moves less than this between down and up clicked (selects); more drags. */
 const DRAG_PX = 3;
-/** Labels hide on blocks narrower than this. */
+/** A block this wide shows its whole label (cut short with an ellipsis); a narrower one its first letter, down to INITIAL_MIN_PX. */
 const LABEL_MIN_PX = 48;
+const INITIAL_MIN_PX = 16;
+/** A label's first letter or digit, for a block too narrow for the label. */
+const initialOf = (title: string) => /[\p{L}\p{N}]/u.exec(title)?.[0]?.toUpperCase() ?? '';
 /** How near (px) a dragged edge comes to a target before it snaps. */
 const SNAP_PX = 6;
 
@@ -545,7 +548,15 @@ export function Timeline() {
                           onKeyDown={(event) => event.key === 'Enter' && select({ kind: lane.kind, id: block.id, start: block.start, end: block.end })}
                         >
                           {blockWidth >= 14 && lane.kind !== 'sound' && <i className="edge start" data-edge="start" />}
-                          {blockWidth >= LABEL_MIN_PX && <span style={{ marginLeft: inset }}>{block.title}</span>}
+                          {blockWidth >= LABEL_MIN_PX ? (
+                            <span style={{ marginLeft: inset }}>{block.title}</span>
+                          ) : (
+                            blockWidth >= INITIAL_MIN_PX && (
+                              <span className="initial" aria-hidden>
+                                {initialOf(block.title)}
+                              </span>
+                            )
+                          )}
                           {/* a zoom that follows: where it moves on */}
                           {block.marks?.map((mark) => <i key={mark} className="move-mark" style={{ left: (mark - block.start) * pps }} />)}
                           {blockWidth >= 14 && lane.kind !== 'sound' && <i className="edge end" data-edge="end" />}
@@ -712,9 +723,9 @@ function TimelineBar({ status, duration, fit, zoomValue, onScale }: { status: st
   void t;
   return (
     <div className="tl-bar" role="toolbar" aria-label="Edit">
-      <button className="act" onClick={split} disabled={!clip || broken} title="Split the clip at the playhead (S)" data-testid="split">
+      <button className="act split" onClick={split} disabled={!clip || broken} title="Split the clip at the playhead (S)" data-testid="split">
         <SplitGlyph />
-        Split
+        <span className="act-name">Split</span>
       </button>
       <label className="act speed" title="The clip's speed (R faster, Shift+R slower)">
         <span>Speed</span>
@@ -732,25 +743,25 @@ function TimelineBar({ status, duration, fit, zoomValue, onScale }: { status: st
         />
       </label>
       <span className="tl-sep" />
-      <button className="act" onClick={() => addZoom()} disabled={!!blocked} title={blocked ?? 'A zoom at the playhead (Z draws one)'}>
+      <button className="act add" onClick={() => addZoom()} disabled={!!blocked} title={blocked ?? 'A zoom at the playhead (Z draws one)'}>
         <i className="dot zoom" aria-hidden="true" />
-        Zoom
+        <span className="act-name">Zoom</span>
       </button>
-      <button className="act" onClick={() => addMask()} disabled={!!blocked} title={blocked ?? 'A mask at the playhead (M draws one)'}>
+      <button className="act add" onClick={() => addMask()} disabled={!!blocked} title={blocked ?? 'A mask at the playhead (M draws one)'}>
         <i className="dot mask" aria-hidden="true" />
-        Mask
+        <span className="act-name">Mask</span>
       </button>
-      <button className="act" onClick={() => setTool('caption')} disabled={!!blocked} title={blocked ?? 'A caption at the playhead: type it on the video (T)'}>
+      <button className="act add" onClick={() => setTool('caption')} disabled={!!blocked} title={blocked ?? 'A caption at the playhead: type it on the video (T)'}>
         <i className="dot caption" aria-hidden="true" />
-        Caption
+        <span className="act-name">Caption</span>
       </button>
-      <button className="act" onClick={addCard} disabled={broken} title="A title card after the scene under the playhead">
+      <button className="act add" onClick={addCard} disabled={broken} title="A title card after the scene under the playhead">
         <i className="dot card" aria-hidden="true" />
-        Card
+        <span className="act-name">Card</span>
       </button>
-      <button className="act" onClick={() => void addPage()} disabled={broken} title="A page (an image, scrolled through) after the scene under the playhead">
+      <button className="act add" onClick={() => void addPage()} disabled={broken} title="A page (an image, scrolled through) after the scene under the playhead">
         <i className="dot still" aria-hidden="true" />
-        Page
+        <span className="act-name">Page</span>
       </button>
       <Select
         value={undefined}
@@ -759,12 +770,12 @@ function TimelineBar({ status, duration, fit, zoomValue, onScale }: { status: st
         label="Add a motion template"
         variant="bare"
         disabled={broken}
-        className="act motion-add"
+        className="act add motion-add"
         testId="add-motion"
         title="Motion from the kit's templates: a scene after the scene under the playhead, or an overlay on the video. Claude can change its page, or write one of its own."
       >
         <i className="dot motion" aria-hidden="true" />
-        Motion
+        <span className="act-name">Motion</span>
       </Select>
       <Select
         value={undefined}
@@ -773,12 +784,12 @@ function TimelineBar({ status, duration, fit, zoomValue, onScale }: { status: st
         label="Add music from a template"
         variant="bare"
         disabled={broken}
-        className="act music-add"
+        className="act add music-add"
         testId="add-music"
         title="Music written for this video from a template (it follows the scenes and cuts and goes down under speech). Claude can change it or write the video's own."
       >
         <i className="dot music" aria-hidden="true" />
-        Music
+        <span className="act-name">Music</span>
       </Select>
       <Select
         value={undefined}
@@ -787,12 +798,12 @@ function TimelineBar({ status, duration, fit, zoomValue, onScale }: { status: st
         label="Add a sound at the playhead"
         variant="bare"
         disabled={broken}
-        className="act sound-add"
+        className="act add sound-add"
         testId="add-sound"
         title="A sound at the playhead: a whoosh, a pop, a ding (it moves with what the video shows there)"
       >
         <i className="dot sound" aria-hidden="true" />
-        Sound
+        <span className="act-name">Sound</span>
       </Select>
       <span className="tl-sep" />
       <span className="tl-status">{status}</span>
@@ -801,9 +812,9 @@ function TimelineBar({ status, duration, fit, zoomValue, onScale }: { status: st
       <button className="act" aria-pressed={snap} onClick={() => store.set({ snap: !snap })} title="Snap to the playhead, scene edges, markers and other overlays (Ctrl while dragging: frames only)">
         Snap
       </button>
-      <button className="act" onClick={fit} title="Fit the whole video (Shift+Z)">
+      <button className="act fit" onClick={fit} title="Fit the whole video (Shift+Z)">
         <FitIcon size={14} />
-        Fit
+        <span className="act-name">Fit</span>
       </button>
       <input type="range" min={0} max={1} step={0.001} value={Math.max(0, Math.min(1, zoomValue))} aria-label="Timeline scale" title="Timeline scale (Ctrl + wheel)" onChange={(event) => onScale(Number(event.target.value))} />
     </div>

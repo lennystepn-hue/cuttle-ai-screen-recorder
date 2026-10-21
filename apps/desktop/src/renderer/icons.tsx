@@ -121,3 +121,5 @@ export function Mark({ size = 22 }: { size?: number }) {
     </span>
   );
 }
+/** A window with a panel on its right: the inspector shown or hidden. */
+export const SidebarIcon = icon(<path d="M2 3h12v10H2zM10 3v10M11.8 5.5h.6M11.8 7.5h.6" />);

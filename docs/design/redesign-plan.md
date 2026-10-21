@@ -15,9 +15,10 @@ editor taken from this checkout.
 
 ## Where it stands
 
-Phases 1–4 are in (#97–#100); the inspector's second pass is #101, the other windows #102, the
-polish #103. Left for later: a resizable and hideable inspector and timeline (phase 2), labels that
-shrink with their item and a toolbar that folds on a narrow window (phase 3).
+Every phase is in: 1–4 (#97–#100), the inspector's second pass (#101), the other windows (#102),
+the polish (#103), and what phases 2 and 3 had left: the inspector resizable (320–440 px) and
+hideable (Ctrl+I), the timeline's height set by a handle (both kept in `layout.tsx`), blocks too
+narrow for their label showing its first letter, and the timeline's bar folding on a narrow window.
 
 ## Principles
 

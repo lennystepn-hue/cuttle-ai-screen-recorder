@@ -40,6 +40,8 @@ export interface EditorState {
   lookSection?: LookSection;
   /** The inspector's Advanced fields are open (they stay so from one selection to the next). */
   advancedOpen: boolean;
+  /** The inspector is hidden (the video and the timeline take its room); kept by layout.tsx. */
+  inspectorHidden: boolean;
   /** Ctrl+F asked for the Transcript tab's find field (a new number each time). */
   findRequest?: number;
   /** Snapping on the timeline (Ctrl while dragging turns it off for that drag). */
@@ -76,6 +78,7 @@ export const store = createStore<EditorState>({
   tab: 'selection',
   lookSection: 'background',
   advancedOpen: false,
+  inspectorHidden: false,
   snap: true,
   mediaState: { seq: -1, proxy: { state: 'none' }, thumbnails: { state: 'none' }, peaks: { state: 'none' } },
   exportOpen: false,

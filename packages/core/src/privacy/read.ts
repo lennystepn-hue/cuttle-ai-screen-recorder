@@ -11,6 +11,7 @@ import type { ScreenTextFrame } from '@cuttle/project';
 import { CoreError } from '../errors';
 import { runFfmpeg } from '../ffmpeg';
 import type { Span } from '../suggest/spans';
+import { frameTimes, frameUpTo } from './follow';
 import { ScreenReader } from './ocr';
 import { redactFrames } from './redact';
 
@@ -36,7 +37,10 @@ export const SCREEN_TEXT_FILE = 'screen-text.jsonl';
  * The source seconds to read inside `spans`: each span's first frame; a frame that changed since the
  * last one read, `rate` a second at most; one at least every `every` seconds. A change that came
  * too soon after a read and went before the next read was due (a token that flashed) is read as
- * well. The frames are compared `detect` times a second.
+ * well. The frames are compared `detect` times a second, each time the newest frame up to it; each
+ * time to read is the start of that frame (to the microsecond, down), so the read takes that frame
+ * (`readFrames`) and the masks follow it from there (follow.ts). Else a frame that changed just
+ * before a time of the grid was read as the one before it: a menu opened and closed again unread.
  */
 export async function framesToRead(screen: string, spans: readonly Span[], size: { width: number; height: number }, rules = READ_RULES): Promise<number[]> {
   const width = rules.width;
@@ -54,7 +58,7 @@ export async function framesToRead(screen: string, spans: readonly Span[], size:
     };
     let pending: Buffer = Buffer.alloc(0);
     let index = 0;
-    await runFfmpeg(['-ss', span.from.toFixed(3), '-t', (span.to - span.from).toFixed(3), '-i', screen, '-map', '0:v:0', '-vf', `fps=${rules.detect},scale=${width}:${height},format=gray`, '-f', 'rawvideo', '-'], (chunk) => {
+    await runFfmpeg(['-ss', span.from.toFixed(3), '-t', (span.to - span.from).toFixed(3), '-i', screen, '-map', '0:v:0', '-vf', `fps=${rules.detect}:start_time=0:round=up,scale=${width}:${height},format=gray`, '-f', 'rawvideo', '-'], (chunk) => {
       pending = pending.length === 0 ? chunk : Buffer.concat([pending, chunk]);
       while (pending.length >= area) {
         const data = pending.subarray(0, area);
@@ -80,7 +84,10 @@ export async function framesToRead(screen: string, spans: readonly Span[], size:
     });
     if (waiting !== undefined) times.push(waiting);
   }
-  return times;
+  const begins = await frameTimes(screen);
+  // down to the microsecond (a nanosecond's slack for the float of a whole microsecond)
+  const starts = times.map((t) => Math.floor(frameUpTo(begins, t) * 1e6 + 1e-3) / 1e6);
+  return starts.filter((t, k) => starts.indexOf(t) === k);
 }
 
 /**
@@ -120,7 +127,7 @@ export async function readFrames(
   const folder = mkdtempSync(join(tmpdir(), 'cuttle-screen-'));
   const extract = async (k: number) => {
     const path = join(folder, `${k}.png`);
-    await runFfmpeg(['-ss', times[k]!.toFixed(3), '-i', screen, '-map', '0:v:0', '-frames:v', '1', '-y', path]);
+    await runFfmpeg(['-ss', times[k]!.toFixed(6), '-i', screen, '-map', '0:v:0', '-frames:v', '1', '-y', path]);
     return path;
   };
   const frames: ScreenTextFrame[] = [];

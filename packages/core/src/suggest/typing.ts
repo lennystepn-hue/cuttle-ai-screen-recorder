@@ -1,8 +1,9 @@
-// Zooms while typing: a burst of keys gets a zoom on where the text goes, and the zoom follows the
-// text (`moves`) once it leaves the middle of the view, as a camera operator would. Where the app
-// keeps a system caret (`caret` events), the zoom follows the caret; elsewhere it follows what the
-// screen changes during the burst. Times are as people see them: output seconds, turned into source
-// seconds at the clip's speed. Pure: `suggest` reads the screen's changes for it.
+// Zooms while typing: a burst of keys gets a zoom on where the text goes, and the zoom glides along
+// with the text (`moves`) as it runs on, as a camera operator would. Where the app tells the caret
+// (`caret` events), the zoom follows the caret; elsewhere it follows where the screen changes as
+// the letters come, from the field clicked into before. Times are as people see them: output
+// seconds, turned into source seconds at the clip's speed. Pure: `suggest` reads the screen's
+// changes for it.
 import type { InputEvent, Rect, ZoomMove } from '@cuttle/project';
 import { MAX_AREA, minZoomWidth, type ClipSpan, type ZoomScreen } from '@cuttle/timeline';
 
@@ -15,14 +16,24 @@ export const TYPING_RULES = {
   joinGap: 3,
   /** The view shows this share of the screen's width (about 2.2×). */
   width: 0.45,
-  /** The camera moves once what is typed leaves the middle this share of the view… */
-  middle: 0.6,
-  /** …so that it sits this far into the view from the left, with room for what comes next. */
+  /** The view starts with what is typed this far into it from the left, with room for what comes… */
   lead: 0.35,
+  /** …and glides along to keep it between these shares of its width (the text runs on, a line starts over)… */
+  behind: 0.15,
+  ahead: 0.7,
+  /** …and in the middle this share of its height. */
+  middle: 0.6,
   /** No move shorter than this share of the view… */
-  minMove: 0.05,
-  /** …and at most one in this many output seconds. */
-  moveGap: 0.8,
+  minMove: 0.02,
+  /** …and at most one in this many output seconds: close moves blend into one glide. */
+  moveGap: 0.2,
+  /** Where no caret tells: the letters are where the screen changes on from the last place, at most this share of the view away across and up or down… */
+  jumpAcross: 0.5,
+  jumpDown: 0.15,
+  /** …unless they change nowhere near for this many looks in a row (the text moved on). */
+  skips: 4,
+  /** The field clicked into this long before the keys (output s) is where the letters start. */
+  clickBefore: 10,
   /** A change bigger than this share of the view either way is no typing (a scroll, a new page). */
   maxChange: 0.9,
   /** The zoom eases in this long before the first key… */
@@ -135,47 +146,70 @@ export function screenStretches(events: readonly InputEvent[], clips: readonly C
 }
 
 /**
- * Where the text goes during a burst: the caret's middle where the app keeps one on the screen, else
- * what the screen changed (the newest end of a wide change: a shell draws the whole line anew).
+ * Where the text goes during a burst: the caret's middle where the app tells it, else where the
+ * screen changes on from the last place (the newest end of a change: a shell draws the whole line
+ * anew), starting at the field clicked into before the keys (else where the pointer is). A change
+ * elsewhere, an answer streaming in or a clock, is left out.
  */
-function focusOf(burst: Burst, input: TypingInput, rules: typeof TYPING_RULES): { points: Focus[]; follows: TypingZoom['follows'] } {
+function focusOf(burst: Burst, input: TypingInput, speed: number, rules: typeof TYPING_RULES): { points: Focus[]; follows: TypingZoom['follows'] } {
   const { screen } = input;
   const view = viewOf(screen, rules);
   const carets = caretsOf(burst, input.events, screen);
   if (carets.length > 0) return { points: carets, follows: 'caret' };
   const around = aroundOf(burst);
   const during = (t: number) => t > around.from && t <= around.to;
-  const points = input.changes
-    .filter((change) => during(change.t) && change.box.width <= rules.maxChange * view.width && change.box.height <= rules.maxChange * view.height)
-    .map(({ t, box }) => ({ t, x: Math.max(box.x + box.width / 2, box.x + box.width - 0.1 * view.width), y: box.y + box.height / 2 }))
-    .sort((a, b) => a.t - b.t);
+  const looks = new Map<number, Focus[]>();
+  for (const { t, box } of input.changes) {
+    if (!during(t) || box.width > rules.maxChange * view.width || box.height > rules.maxChange * view.height) continue;
+    looks.set(t, [...(looks.get(t) ?? []), { t, x: Math.max(box.x + box.width / 2, box.x + box.width - 0.1 * view.width), y: box.y + box.height / 2 }]);
+  }
+  // the field clicked into before the keys, else the pointer there
+  const before = input.events.filter((event) => event.t <= burst.from && event.t >= burst.from - rules.clickBefore * speed);
+  const start = before.filter((event) => event.type === 'click').at(-1) ?? before.filter((event) => event.type === 'move').at(-1);
+  let last: { x: number; y: number } | undefined = start && (start.type === 'click' || start.type === 'move') ? { x: start.x, y: start.y } : undefined;
+  const points: Focus[] = [];
+  let skipped = 0;
+  for (const t of [...looks.keys()].sort((a, b) => a - b)) {
+    const here = looks.get(t)!;
+    const from = last;
+    const near = from ? here.reduce((best, point) => (Math.hypot(point.x - from.x, point.y - from.y) < Math.hypot(best.x - from.x, best.y - from.y) ? point : best)) : here[here.length - 1]!;
+    const close = !from || (Math.abs(near.x - from.x) <= rules.jumpAcross * view.width && Math.abs(near.y - from.y) <= rules.jumpDown * view.height);
+    if (!close && skipped < rules.skips) {
+      skipped++;
+      continue;
+    }
+    points.push(near);
+    last = near;
+    skipped = 0;
+  }
   return { points, follows: 'screen' };
 }
 
 /**
  * The camera's path over the focus points: it starts with the first second's points `lead` into the
- * view, and moves (so the point is `lead` in again) whenever a point leaves the view's middle.
+ * view, then glides along so each point stays between `behind` and `ahead` of the view's width
+ * (the text running on to the right, a new line starting at the left) and in its `middle` up and
+ * down: a small move every `moveGap` while the text runs on, which the timeline's settling blends
+ * into one glide.
  */
 function pathOf(points: readonly Focus[], speed: number, screen: ZoomScreen, rules: typeof TYPING_RULES): { rect: Rect; moves: ZoomMove[] } {
   const view = viewOf(screen, rules);
-  const place = (x: number, y: number): Rect => [
-    Math.round(Math.min(Math.max(x - rules.lead * view.width, 0), screen.width - view.width)),
-    Math.round(Math.min(Math.max(y - view.height / 2, 0), screen.height - view.height)),
-    Math.round(view.width),
-    Math.round(view.height),
-  ];
+  const across = (x: number) => Math.round(Math.min(Math.max(x, 0), screen.width - view.width));
+  const down = (y: number) => Math.round(Math.min(Math.max(y, 0), screen.height - view.height));
   const opening = points.filter((point) => point.t <= points[0]!.t + speed);
   const middleOf = (values: number[]) => (Math.min(...values) + Math.max(...values)) / 2;
-  const first = place(middleOf(opening.map((point) => point.x)), middleOf(opening.map((point) => point.y)));
+  const first: Rect = [across(middleOf(opening.map((point) => point.x)) - rules.lead * view.width), down(middleOf(opening.map((point) => point.y)) - view.height / 2), Math.round(view.width), Math.round(view.height)];
   let rect = first;
   const moves: ZoomMove[] = [];
   let movedAt = -Infinity;
   for (const point of points) {
-    const outside = Math.abs(point.x - (rect[0] + view.width / 2)) > (rules.middle / 2) * view.width || Math.abs(point.y - (rect[1] + view.height / 2)) > (rules.middle / 2) * view.height;
-    if (!outside || (point.t - movedAt) / speed < rules.moveGap) continue;
-    const next = place(point.x, point.y);
+    if ((point.t - movedAt) / speed < rules.moveGap) continue;
+    const left = point.x - rect[0];
+    const x = left > rules.ahead * view.width ? across(point.x - rules.ahead * view.width) : left < rules.behind * view.width ? across(point.x - rules.behind * view.width) : rect[0];
+    const y = Math.abs(point.y - (rect[1] + view.height / 2)) > (rules.middle / 2) * view.height ? down(point.y - view.height / 2) : rect[1];
     // against the screen's edge the view cannot follow further
-    if (Math.abs(next[0] - rect[0]) < rules.minMove * view.width && Math.abs(next[1] - rect[1]) < rules.minMove * view.height) continue;
+    if (Math.abs(x - rect[0]) < rules.minMove * view.width && Math.abs(y - rect[1]) < rules.minMove * view.height) continue;
+    const next: Rect = [x, y, rect[2], rect[3]];
     moves.push({ at: round(point.t), rect: next });
     rect = next;
     movedAt = point.t;
@@ -211,7 +245,7 @@ export function typingZooms(input: TypingInput, rules = TYPING_RULES): TypingZoo
     if (avoid.some((other) => at < other.at + other.duration && other.at < end)) continue;
     const start = outputAt(at, burst.clip);
     if (start < lastEnd || starts.some((other) => Math.abs(start - other) < rules.gap)) continue;
-    const { points, follows } = focusOf(burst, input, rules);
+    const { points, follows } = focusOf(burst, input, s, rules);
     if (points.length === 0) continue;
     const { rect, moves } = pathOf(points, s, input.screen, rules);
     result.push({ at: round(at), duration: round(end - at), rect, moves: moves.filter((move) => move.at > at && move.at < end), follows });

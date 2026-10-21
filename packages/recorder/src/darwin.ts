@@ -37,9 +37,17 @@ export interface Darwin {
    * Where text is typed in the front app, in desktop pixels, through the Accessibility API: the
    * selection's bounds, or the right edge of the character before the insertion point (macOS gives
    * an empty range no bounds). Undefined without the Accessibility permission or where an app does
-   * not tell (most browsers and Electron apps).
+   * not tell (an Electron app or a Chromium browser until `askForText` asked it).
    */
   caret(): { x: number; y: number; width: number; height: number } | undefined;
+  /**
+   * Asks the front app, once, to show the Accessibility API its text: Electron apps and Chromium
+   * browsers build their accessibility tree (their text fields, so the caret, and a page's web
+   * area) only for an assistive app that asks, which takes them a second or two.
+   */
+  askForText(): void;
+  /** Turns back what `askForText` turned on (an app keeps it otherwise, at a cost). */
+  restoreText(): void;
   /**
    * Watches the mouse and, with `keys`, the keyboard: a listen-only event tap, serviced from this
    * thread every few milliseconds (libuiohook's tap needs the process's main dispatch queue, which
@@ -358,6 +366,9 @@ async function create(): Promise<Darwin> {
   const AXUIElementCreateApplication = services.func('AXUIElementCreateApplication', 'void *', ['int32']);
   const AXUIElementSetMessagingTimeout = services.func('AXUIElementSetMessagingTimeout', 'int32', ['void *', 'float']);
   const AXUIElementCopyAttributeValue = services.func('AXUIElementCopyAttributeValue', 'int32', ['void *', 'void *', koffi.out(koffi.pointer('void *'))]);
+  const AXUIElementSetAttributeValue = services.func('AXUIElementSetAttributeValue', 'int32', ['void *', 'void *', 'void *']);
+  /** What Chromium answers a set it acted on (its application object passes it on to NSApplication's). */
+  const AX_NOT_IMPLEMENTED = -25208;
   const AXUIElementCopyParameterizedAttributeValue = services.func('AXUIElementCopyParameterizedAttributeValue', 'int32', ['void *', 'void *', 'void *', koffi.out(koffi.pointer('void *'))]);
   const AXValueCreate = services.func('AXValueCreate', 'void *', ['uint32', koffi.pointer(CFRange)]);
   const AXValueGetRect = services.func('AXValueGetValue', 'bool', ['void *', 'uint32', koffi.out(koffi.pointer(CGRect))]);
@@ -377,6 +388,9 @@ async function create(): Promise<Darwin> {
   const CFStringGetLength = cf.func('CFStringGetLength', 'long', ['void *']);
   const CFStringGetCString = cf.func('CFStringGetCString', 'bool', ['void *', 'void *', 'long', 'uint32']);
   const CFNumberGetValue = cf.func('CFNumberGetValue', 'bool', ['void *', 'long', 'void *']);
+  const CFBooleanGetValue = cf.func('CFBooleanGetValue', 'bool', ['void *']);
+  const kCFBooleanTrue = koffi.decode(cf.symbol('kCFBooleanTrue', 'void *'), 'void *') as unknown;
+  const kCFBooleanFalse = koffi.decode(cf.symbol('kCFBooleanFalse', 'void *'), 'void *') as unknown;
 
   const objc_getClass = objc.func('objc_getClass', 'void *', ['str']);
   const sel_registerName = objc.func('sel_registerName', 'void *', ['str']);
@@ -704,6 +718,32 @@ async function create(): Promise<Darwin> {
     return app;
   };
 
+  // Electron apps build their accessibility tree when asked through AXManualAccessibility, Chromium
+  // browsers through AXEnhancedUserInterface (what VoiceOver sets); each app's turned on once, and
+  // only what was off, so `restoreText` leaves an assistive app's own setting alone.
+  const TREE = { manual: cfString('AXManualAccessibility'), enhanced: cfString('AXEnhancedUserInterface') };
+  /** The apps asked (pid → the attributes turned on for it). */
+  const asked = new Map<number, unknown[]>();
+  const askTree = (pid: number, bundle: string) => {
+    if (asked.has(pid) || !AXIsProcessTrusted()) return;
+    const app = appElement(pid, 0.1);
+    if (!app) return;
+    const turned: unknown[] = [];
+    try {
+      for (const name of CHROMIUM_BROWSERS.has(bundle) ? [TREE.manual, TREE.enhanced] : [TREE.manual]) {
+        const was = copied(app, name);
+        const on = was ? CFBooleanGetValue(was) : false;
+        if (was) CFRelease(was);
+        if (on) continue;
+        const code = AXUIElementSetAttributeValue(app, name, kCFBooleanTrue);
+        if (code === 0 || code === AX_NOT_IMPLEMENTED) turned.push(name);
+      }
+    } finally {
+      CFRelease(app);
+    }
+    asked.set(pid, turned);
+  };
+
   /**
    * Where the Notification Center (`pid`) shows banners now, in points: its elements whose subrole
    * says so (AXNotificationCenterBanner, …), not what is inside them. Undefined without the
@@ -935,6 +975,20 @@ async function create(): Promise<Darwin> {
       return { ...topLeft, width: Math.max(1, bottomRight.x - topLeft.x), height: Math.max(1, bottomRight.y - topLeft.y) };
     },
     watchInput,
+    askForText() {
+      const front = frontWindow(listed().filter((window) => window.layer === LEVEL.normal));
+      if (front) askTree(front.pid, front.bundle);
+    },
+    restoreText() {
+      for (const [pid, turned] of asked) {
+        const app = turned.length > 0 ? appElement(pid, 0.1) : undefined;
+        if (!app) continue;
+        // an app that quit meanwhile answers nothing
+        for (const name of turned) AXUIElementSetAttributeValue(app, name, kCFBooleanFalse);
+        CFRelease(app);
+      }
+      asked.clear();
+    },
     mediaAccess(kind) {
       const status = Number(sendWithObject(objc_getClass('AVCaptureDevice'), sel_registerName('authorizationStatusForMediaType:'), mediaTypes[kind]));
       return AUTHORIZATION[status] ?? 'not-determined';

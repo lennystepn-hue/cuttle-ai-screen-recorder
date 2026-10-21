@@ -18,7 +18,9 @@ Cuttle runs on **Windows and macOS**. A change made on one has to keep working o
   hotkeys are Ctrl+Shift+Alt+letter on both (Option on a Mac; macOS virtual key codes in `input.ts`).
 - **Input**: uiohook-napi on Windows only; on macOS it deadlocks Node at the first key press, so
   macOS uses the event tap in `darwin.ts`, each event at its own timestamp. The caret: Win32's
-  system caret on Windows, the Accessibility API on macOS (the character before the insertion point).
+  system caret on Windows, the Accessibility API on macOS (the character before the insertion point;
+  Electron apps and Chromium browsers show it only once asked, `askForText`). Where neither tells,
+  typing zooms follow where the screen changes on from the field clicked into (`typing.ts`).
 - **Cuttle's windows in a take**: Windows leaves out content-protected windows; macOS leaves out
   the windows of `hideWindowsOf` (the app's process) through the ScreenCaptureKit helper. A new
   window that must not show in takes needs content protection and to belong to the app's process.

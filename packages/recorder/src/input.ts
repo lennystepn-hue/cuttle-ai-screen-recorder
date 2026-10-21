@@ -85,6 +85,8 @@ const WINDOWS_EVERY = 8;
 const AREA_EVERY = 30;
 /** A content area that moved less than this (px) has not moved. */
 const AREA_SLACK = 2;
+/** macOS: the front app is asked to show its text every this many shape reads (`askForText`, twice a second). */
+const TEXT_EVERY = 15;
 
 /** What both platforms tell of the windows (win32.ts, darwin.ts). */
 type Watched = Pick<import('./win32').Win32, 'foreground' | 'contentArea' | 'popups'> & Pick<import('./darwin').Darwin, 'foreground' | 'contentArea' | 'popups'>;
@@ -266,7 +268,19 @@ async function startMacInput(onInput: InputSink, onHotkey: HotkeySink): Promise<
   const windows = windowWatch(mac, onInput);
   let shape = mac.cursorShape();
   let pointer = mac.cursorPosition();
+  // Electron apps and Chromium browsers show their text (the caret) only when asked: each app asked
+  // as it comes to the front, a second or two before it is typed in
+  let polls = 0;
+  const askForText = () => {
+    try {
+      mac.askForText();
+    } catch {
+      // the next look asks again
+    }
+  };
+  askForText();
   const poll = setInterval(() => {
+    if (++polls % TEXT_EVERY === 0) askForText();
     // an answer the system could not give must not end the recording: the next look tries again
     try {
       if (!tapped) {
@@ -290,6 +304,11 @@ async function startMacInput(onInput: InputSink, onHotkey: HotkeySink): Promise<
     stop: () => {
       clearInterval(poll);
       tap?.stop();
+      try {
+        mac.restoreText();
+      } catch {
+        // an app that cannot answer keeps its tree
+      }
     },
     ...(warning && { warning }),
   };

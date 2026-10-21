@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { InputEvent, Marker } from '@cuttle/project';
 import { parseAnalysis } from '../src/suggest/media';
 import { suggestClips } from '../src/suggest/plan';
-import { changedRegion, zoomRect } from '../src/suggest/region';
+import { changedRegion, changedRegions, zoomRect } from '../src/suggest/region';
 import { gaps, union } from '../src/suggest/spans';
 
 describe('spans', () => {
@@ -144,6 +144,22 @@ describe('changedRegion and zoomRect', () => {
     // 2 % of the changed pixels are trimmed on each side, so stray ones cannot stretch the box.
     expect(changedRegion(before, after)).toEqual({ x: 102, y: 151, width: 116, height: 58 });
     expect(changedRegion(before, gray(480, 270))).toBeUndefined();
+  });
+
+  it('keeps places that changed apart: the letters of a line together, an answer elsewhere on its own', () => {
+    const before = gray(640, 400);
+    const after = gray(640, 400, { x: 100, y: 300, w: 12, h: 14 });
+    // the next letter 6 px on (one word), and an answer streaming in at the top right
+    for (const box of [{ x: 118, y: 300, w: 12, h: 14 }, { x: 400, y: 40, w: 200, h: 60 }]) {
+      for (let y = box.y; y < box.y + box.h; y++) after.data.fill(220, y * 640 + box.x, y * 640 + box.x + box.w);
+    }
+    // in cells of 8 px: the answer first (most changed pixels), then the two letters as one
+    expect(changedRegions(before, after, 8)).toEqual([
+      { x: 400, y: 40, width: 200, height: 64, pixels: 12000 },
+      { x: 96, y: 296, width: 40, height: 24, pixels: 336 },
+    ]);
+    // fewer changed pixels than asked: none
+    expect(changedRegions(before, after, 20000)).toEqual([]);
   });
 
   it('pads the box, keeps a minimum width and refuses a box that covers most of the screen', () => {

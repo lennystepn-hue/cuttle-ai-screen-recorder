@@ -2891,26 +2891,31 @@ button.chip-status:hover {
 .auto-intro {
   margin: 0 0 4px;
 }
+/* a kind of automatic edit: a card as a part of the Look tab, its switch before its chevron */
 .auto-group {
   border-radius: 10px;
   background: var(--raised);
+  border: 1px solid var(--line);
 }
 .auto-head {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 5px 10px 5px 5px;
+  position: relative;
 }
 .auto-toggle {
-  flex: 1;
+  width: 100%;
   min-width: 0;
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 2px;
-  border-radius: 8px;
+  padding: 7px 12px 7px 7px;
+  border-radius: inherit;
   text-align: left;
   background: none;
+}
+.auto-head > .toggle {
+  position: absolute;
+  top: 50%;
+  right: 35px;
+  transform: translateY(-50%);
 }
 .auto-group .kind-icon {
   width: 28px;
@@ -2926,6 +2931,7 @@ button.chip-status:hover {
 .auto-text {
   flex: 1;
   min-width: 0;
+  margin-right: 44px;
   display: flex;
   flex-direction: column;
   line-height: 1.3;
@@ -2993,12 +2999,14 @@ button.chip-status:hover {
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.auto-empty {
+.auto-empty,
+.transcript-empty {
   display: flex;
   flex-direction: column;
   gap: 6px;
 }
-.auto-empty p {
+.auto-empty p,
+.transcript-empty p {
   margin: 0;
 }
 /* the subtitles over the mic's waveform on the timeline */
@@ -3549,4 +3557,21 @@ button.chip-status:hover {
 }
 .range:focus-visible::-webkit-slider-thumb {
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 45%, transparent);
+}
+/* what opens comes in: a look part's fields, the Advanced fields */
+.look-body,
+.advanced[open] > .advanced-body {
+  animation: rise var(--normal) var(--ease-out);
+}
+/* a quiet button on a raised card (a look part) is a step brighter than the card, with an edge */
+.look-body .ghost {
+  background: var(--raised-hover);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+.look-body .ghost:hover:not(:disabled) {
+  background: var(--raised-active);
+}
+.look-body .seg {
+  background: var(--bg);
+  box-shadow: inset 0 0 0 1px var(--line);
 }

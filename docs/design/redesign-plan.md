@@ -13,6 +13,12 @@ It rests on four audits (the editor and its timeline, the inspector, the other w
 Cap, Screen Studio, Tella, Descript, Linear and Figma do it) and on screenshots of the current
 editor taken from this checkout.
 
+## Where it stands
+
+Phases 1–4 are in (#97–#100); the inspector's second pass is #101, the other windows #102, the
+polish #103. Left for later: a resizable and hideable inspector and timeline (phase 2), labels that
+shrink with their item and a toolbar that folds on a narrow window (phase 3).
+
 ## Principles
 
 1. **The video leads.** The stage gets the space: the timeline and the inspector are tools around it.

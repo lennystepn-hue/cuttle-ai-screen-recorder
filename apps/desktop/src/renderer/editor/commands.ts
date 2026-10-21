@@ -1,5 +1,6 @@
 // Everything the editor can do by name, with its keys: the command menu (Ctrl+K) lists these, and
 // the keyboard runs them. Keys are written as the menu shows them.
+import { EXPORT_FORMATS } from '@cuttle/export/formats';
 import { BUILT_IN_SOUNDS, MOTION_TEMPLATES, MUSIC_TEMPLATES } from '@cuttle/motion-kit';
 import { bridge } from '../bridge';
 import {
@@ -22,7 +23,7 @@ import {
   templateLabel,
 } from './actions';
 import { redo, undo } from './doc';
-import { currentPlayer, openExport, select, setTool, store } from './session';
+import { currentPlayer, openExport, select, setFormat, setTool, store } from './session';
 
 export interface EditorCommand {
   id: string;
@@ -92,6 +93,7 @@ export function editorCommands(): EditorCommand[] {
     { id: 'tool-zoom', name: 'Zoom tool: draw a zoom on the video', keys: 'Z', group: 'Tools', run: () => setTool('zoom'), blocked: () => overlayBlocked() },
     { id: 'tool-mask', name: 'Mask tool: draw a mask on the video', keys: 'M', group: 'Tools', run: () => setTool('mask'), blocked: () => overlayBlocked() },
     { id: 'tool-caption', name: 'Caption tool: type a caption on the video', keys: 'T', group: 'Tools', run: () => setTool('caption'), blocked: () => overlayBlocked() },
+    { id: 'tool-crop', name: 'Crop tool: draw the part of the screen a clip shows', keywords: 'crop trim tabs taskbar', keys: 'C', group: 'Tools', run: () => setTool('crop'), blocked: () => overlayBlocked() },
     { id: 'play', name: 'Play or pause', keys: 'Space', group: 'Play', run: () => player?.toggle() },
     { id: 'back', name: 'A second back', keys: 'J', group: 'Play', run: () => void player?.seek(player.current().t - 1) },
     { id: 'frame-back', name: 'A frame back (Shift: a second)', keys: '←', group: 'Play', run: () => void player?.seek(player.current().t - 1 / player.fps) },
@@ -102,7 +104,16 @@ export function editorCommands(): EditorCommand[] {
     { id: 'snap', name: store.get().snap ? 'Turn snapping off' : 'Turn snapping on', group: 'View', run: () => store.set({ snap: !store.get().snap }) },
     { id: 'deselect', name: 'Clear the selection', keys: 'Esc', group: 'View', run: () => select(undefined) },
     { id: 'look', name: 'Show the look (background, frame, cursor…)', group: 'View', run: () => store.set({ tab: 'look' }) },
+    { id: 'auto', name: 'Show what Cuttle did on its own', keywords: 'automatic zooms cuts masks fillers pauses', group: 'View', run: () => store.set({ tab: 'auto' }) },
+    { id: 'transcript', name: 'Show the transcript', keywords: 'words speech subtitles', group: 'View', run: () => store.set({ tab: 'transcript' }) },
+    { id: 'format-own', name: 'Preview at the project’s own size', keywords: 'format aspect output', group: 'View', run: () => setFormat(undefined) },
+    ...Object.keys(EXPORT_FORMATS).map(
+      (name): EditorCommand => ({ id: `format-${name}`, name: `Preview as ${name}`, keywords: 'format aspect output vertical square', group: 'View', run: () => setFormat(name as keyof typeof EXPORT_FORMATS) }),
+    ),
     { id: 'export', name: 'Export…', keys: 'Ctrl+E', group: 'Project', run: openExport },
+    { id: 'record', name: 'Record a new take for this project', keywords: 'record again retake', group: 'Project', run: () => void bridge.invoke('project:record') },
+    { id: 'takes', name: 'Earlier takes of this project…', keywords: 'takes restore history', group: 'Project', run: () => void bridge.invoke('project:takes') },
+    { id: 'reveal', name: 'Show the project’s folder', keywords: 'finder explorer files open', group: 'Project', run: () => void bridge.invoke('project:reveal') },
     { id: 'settings', name: 'Settings…', keywords: 'preferences ffmpeg countdown camera microphone motion', keys: 'Ctrl+,', group: 'Project', run: () => void bridge.invoke('app:settings') },
   ];
 }

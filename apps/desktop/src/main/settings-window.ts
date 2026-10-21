@@ -10,7 +10,8 @@ import type { Motion, SettingsPage, SettingsView } from '../shared/ipc';
 import { CHECK, HIDDEN } from './check';
 import { bindRequests, send } from './ipc';
 import { APP_ORIGIN, assetPath, bundlePath, serveApp } from './protocols';
-import { keyOf, listCamerasAndMics, recordingRuns } from './recording';
+import { openPermission, permissionStates } from './permissions';
+import { keyOf, listCamerasAndMics, recordingRuns, startPicking } from './recording';
 import { loadSettings, sameDir, settingsView, updateSettings } from './settings';
 import { cancelSpeechDownload, downloadSpeechModel, onSpeechStatus, removeSpeechModel, speechStatus } from './speech';
 import { installTools, skillFolder, toolsStatus } from './tools';
@@ -122,13 +123,16 @@ export async function openSettings(options: { welcome?: boolean; page?: Settings
       return changed(await viewNow());
     },
     'settings:devices': () => listCamerasAndMics(),
-    'settings:welcomed': async () => {
+    'settings:welcomed': async (options) => {
       await updateSettings((settings) => {
         settings.welcomed = true;
       });
       window.close();
       await showPill();
+      if (options?.record) void startPicking(undefined, { fromPill: true });
     },
+    'settings:permissions': () => permissionStates(),
+    'settings:permission': (permission) => openPermission(permission),
     'tools:status': () => toolsStatus(),
     'tools:check': () => toolsStatus(),
     'tools:install': () => installTools(),

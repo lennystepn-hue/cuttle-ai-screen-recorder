@@ -4,11 +4,11 @@
 import { existsSync, realpathSync } from 'node:fs';
 import { copyFile, mkdir, readdir, rename, rmdir, statfs } from 'node:fs/promises';
 import { basename, dirname, join, relative, resolve, sep } from 'node:path';
-import { BrowserWindow, desktopCapturer, dialog, globalShortcut, screen, session, shell, systemPreferences, type Rectangle } from 'electron';
+import { BrowserWindow, desktopCapturer, dialog, globalShortcut, screen, session, systemPreferences, type Rectangle } from 'electron';
 import { PROJECT_FILE, newProjectFile, projectExists, readProjectFile, recoverTake, useTake, writeProjectFile } from '@cuttle/core';
 import { usedIds } from '@cuttle/project';
 import { focusWindow, inputAllowed, recentClaudeFolders, type Devices, type RecorderEvent, type Take } from '@cuttle/recorder';
-import type { HudState, PickedTarget, PickerSetup, RecordChoices } from '../shared/ipc';
+import type { HudState, PermissionNote, PickedTarget, PickerSetup, RecordChoices } from '../shared/ipc';
 import { captureSourceFor, hudPosition, hudWarning, recordingFailure, scriptForTake, stopOptionsFor, type PickerDisplay, type PickerWindow, type ScriptStep } from '../shared/recording';
 import { displayPixels, monitorOf, setMonitors, toDesktopPixels, toDip } from './desktop-pixels';
 import { CHECK, COUNTDOWN, HIDDEN, TEST_BACKEND } from './check';
@@ -19,6 +19,7 @@ import { recorderHost, RecordingError, type LiveNews } from './recorder-host';
 import { findFfmpeg } from './tools';
 import { loadSettings, updateSettings } from './settings';
 import { maskPrivacy } from './privacy';
+import { openPermission } from './permissions';
 import { openPrompter, type Prompter } from './prompter';
 import { liveRequest, transcribeProject } from './speech';
 import { editorWindowOf, expectSuggest, guard, hidePill, reopenEditor, sendToEditor, setEditorStatus, showPill, webPreferences } from './windows';
@@ -242,11 +243,11 @@ export async function startPicking(projectDir?: string, options: { fromPill?: bo
     pickScript = draft && draft.base === saved ? draft.steps : (JSON.parse(saved) as ScriptStep[]);
     const free = await freeBytes(projectDir ?? (await loadSettings()).projectsFolder);
     const short = free !== undefined && free < tenMinutes(displays) ? `Only ${gigabytes(free)} free on this drive: a take longer than a few minutes may not fit.` : undefined;
-    const warning = [short, await inputWarning(), accessibilityWarning()].filter(Boolean).join(' ') || undefined;
+    const permissions = [await inputNote(), accessibilityNote()].filter((note) => note !== undefined);
     const countdown = await countdownSeconds();
     const cursor = screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
     for (const picker of pickers) if (!picker.window.isDestroyed()) picker.window.destroy();
-    pickers = displays.map((display) => openPicker(display, displays, devices, choices, countdown, cursor.id, problem, warning));
+    pickers = displays.map((display) => openPicker(display, displays, devices, choices, countdown, cursor.id, problem, short, permissions));
     if (!problem) void listMedia();
   } catch (error) {
     endPicking(true);
@@ -254,7 +255,17 @@ export async function startPicking(projectDir?: string, options: { fromPill?: bo
   }
 }
 
-function openPicker(display: PickerDisplay, displays: PickerDisplay[], devices: Devices, choices: RecordChoices, countdown: number, active: number, problem: string | undefined, warning: string | undefined): Picker {
+function openPicker(
+  display: PickerDisplay,
+  displays: PickerDisplay[],
+  devices: Devices,
+  choices: RecordChoices,
+  countdown: number,
+  active: number,
+  problem: string | undefined,
+  warning: string | undefined,
+  permissions: PermissionNote[],
+): Picker {
   const window = overlay(display.bounds, 'picker.cjs', { focusable: true });
   const picker: Picker = { window, display: display.id };
   const unknown = display.monitor === undefined ? 'The recorder does not know this display; pick another one.' : undefined;
@@ -269,6 +280,7 @@ function openPicker(display: PickerDisplay, displays: PickerDisplay[], devices: 
     listingDevices: !problem,
     ...((problem ?? unknown) && { problem: problem ?? unknown }),
     ...(warning && { warning }),
+    ...(permissions.length > 0 && { permissions }),
     script: pickScript,
   };
   bindRequests(window.webContents, 'picker', {
@@ -304,6 +316,7 @@ function openPicker(display: PickerDisplay, displays: PickerDisplay[], devices: 
       await findFfmpeg().catch(() => undefined);
       void startPicking(project, { fromPill });
     },
+    'picker:permission': (permission) => openPermission(permission),
     'picker:claude-folder': async () => {
       const result = await dialog.showOpenDialog(window, { title: 'The folder Claude Code runs in', properties: ['openDirectory'] });
       return result.canceled ? undefined : result.filePaths[0];
@@ -1001,7 +1014,7 @@ async function screenAllowed(): Promise<boolean> {
     defaultId: 0,
     cancelId: 1,
   });
-  if (response === 0) void shell.openExternal('x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture');
+  if (response === 0) openPermission('screen');
   return false;
 }
 
@@ -1009,10 +1022,13 @@ async function screenAllowed(): Promise<boolean> {
  * macOS: what a take misses without Input Monitoring, for the pickers; undefined when Cuttle has it.
  * The first look shows macOS's prompt, before the take rather than in it.
  */
-async function inputWarning(): Promise<string | undefined> {
+async function inputNote(): Promise<PermissionNote | undefined> {
   if (process.platform !== 'darwin' || TEST_BACKEND || CHECK) return undefined;
   if (await inputAllowed().catch(() => true)) return undefined;
-  return 'Cuttle does not see your clicks and keys (no zooms on clicks, no typing, no recording hotkeys): turn Cuttle on under System Settings > Privacy & Security > Input Monitoring, then quit and reopen Cuttle.';
+  return {
+    permission: 'input',
+    text: 'Cuttle does not see your clicks and keys: no zooms on clicks, no typing, no recording hotkeys. Turn Cuttle on under Input Monitoring, then quit and reopen Cuttle.',
+  };
 }
 
 /** Whether macOS's prompt for the Accessibility permission was shown in this run (once is enough). */
@@ -1023,14 +1039,14 @@ let accessibilityAsked = false;
  * screen changes), no browser page to crop to, and notifications masked wide. The first time,
  * macOS's own prompt opens over the picker.
  */
-function accessibilityWarning(): string | undefined {
+function accessibilityNote(): PermissionNote | undefined {
   if (process.platform !== 'darwin' || TEST_BACKEND || CHECK) return undefined;
   if (systemPreferences.isTrustedAccessibilityClient(false)) return undefined;
   if (!accessibilityAsked) {
     accessibilityAsked = true;
     systemPreferences.isTrustedAccessibilityClient(true);
   }
-  return 'Cuttle does not see where you type (zooms on typing follow what the screen changes instead): turn Cuttle on under System Settings > Privacy & Security > Accessibility.';
+  return { permission: 'accessibility', text: 'Cuttle does not see where you type: zooms on typing follow what the screen changes instead. Turn Cuttle on under Accessibility.' };
 }
 
 /** macOS: asks for the camera and the mic a take uses, the first time (the recorder's ffmpeg runs as Cuttle). */

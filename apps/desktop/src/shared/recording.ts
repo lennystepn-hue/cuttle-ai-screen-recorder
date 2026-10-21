@@ -296,6 +296,21 @@ export function barPlacement(target: Rect, area: Rect, bar: { width: number; hei
   return { x, y: Math.min(Math.max(top + (labelAbove ? 16 : 52), area.y + 8), area.y + area.height - 8 - bar.height), where: 'inside' };
 }
 
+/**
+ * Where the picker's notices go (a problem, what a take will miss, why it cannot start): on the side
+ * of the bar away from the target when there is room there, else on the other side; in the work area.
+ */
+export function noticePlacement(bar: { y: number; height: number; where: 'below' | 'above' | 'inside' }, notice: { height: number }, area: Rect): { y: number } {
+  const gap = 8;
+  const under = bar.y + bar.height + gap;
+  const over = bar.y - gap - notice.height;
+  const fitsUnder = under + notice.height <= area.y + area.height - 8;
+  const fitsOver = over >= area.y + 8;
+  const y = bar.where === 'above' ? (fitsOver || !fitsUnder ? over : under) : fitsUnder || !fitsOver ? under : over;
+  // one taller than the display starts at its top
+  return { y: Math.max(Math.min(y, area.y + area.height - 8 - notice.height), area.y + 8) };
+}
+
 /** Where the target's label goes: above the target when there is room, else inside its top; never off the display. */
 export function labelPlacement(target: Rect, area: Rect, label: { width: number }): { x: number; y: number; above: boolean } {
   const above = target.y - 36 >= area.y;

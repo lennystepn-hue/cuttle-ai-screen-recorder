@@ -3,6 +3,7 @@ import {
   captureSourceFor,
   dragRect,
   barPlacement,
+  noticePlacement,
   bubblePlacement,
   bubbleSize,
   hudPosition,
@@ -179,6 +180,22 @@ describe('the picker’s layout', () => {
     expect(bubblePlacement({ x: 100, y: 500, width: 800, height: 604 }, 108, { y: 900, where: 'inside' }, 508)).toEqual({ left: 116, top: 776 });
     // a bar below or above leaves the bubble alone; a short target keeps it under the label inside
     expect(bubblePlacement({ x: 0, y: 0, width: 300, height: 90 }, 48, { y: 106, where: 'below' }, 44)).toEqual({ left: 16, top: 44 });
+  });
+});
+
+describe('the picker’s notices', () => {
+  const area = { x: 0, y: 0, width: 2048, height: 1104 };
+  it('go on the side of the bar away from the target, else where there is room', () => {
+    // the bar under the target: the notices under the bar
+    expect(noticePlacement({ y: 516, height: 48, where: 'below' }, { height: 80 }, area)).toEqual({ y: 572 });
+    // the bar under the target near the bottom: over the bar
+    expect(noticePlacement({ y: 1000, height: 48, where: 'below' }, { height: 80 }, area)).toEqual({ y: 912 });
+    // the bar over the target: over the bar
+    expect(noticePlacement({ y: 396, height: 48, where: 'above' }, { height: 80 }, area)).toEqual({ y: 308 });
+    // the bar over the target at the top: under the bar
+    expect(noticePlacement({ y: 40, height: 48, where: 'above' }, { height: 80 }, area)).toEqual({ y: 96 });
+    // no room either side: kept on the display
+    expect(noticePlacement({ y: 52, height: 48, where: 'inside' }, { height: 1100 }, area)).toEqual({ y: 8 });
   });
 });
 

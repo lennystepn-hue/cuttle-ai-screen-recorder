@@ -79,6 +79,22 @@ export type ExportEnd =
   | { state: 'cancelled'; files: ExportFile[] }
   | { state: 'failed'; files: ExportFile[]; format: ExportTarget; code: string; message: string };
 
+/** The permissions a take needs on macOS, each with its pane of System Settings (Windows: the camera and the mic only). */
+export const PERMISSIONS = ['screen', 'input', 'accessibility', 'camera', 'microphone'] as const;
+export type Permission = (typeof PERMISSIONS)[number];
+
+/** A permission as the settings show it: granted, refused, or not asked for yet (undefined). */
+export interface PermissionView {
+  permission: Permission;
+  granted: boolean | undefined;
+}
+
+/** What a take misses without a permission, said for people; the picker offers its pane. */
+export interface PermissionNote {
+  permission: Permission;
+  text: string;
+}
+
 /** What a picker shows: its display, the windows on it, the devices and the bar's choices. */
 export interface PickerSetup {
   display: PickerDisplay;
@@ -93,6 +109,8 @@ export interface PickerSetup {
   problem?: string;
   /** What is worth knowing first (little disk space), said for people: Record stays on. */
   warning?: string;
+  /** macOS: the permissions Cuttle lacks, a line each with the way to System Settings. Record stays on. */
+  permissions?: PermissionNote[];
   /** Cameras and mics are still being listed (DirectShow takes a moment): the bar says so. */
   listingDevices?: boolean;
   /** The script the take records with: the project's (`script` in cuttle.json), or what was typed for it since. */
@@ -381,6 +399,8 @@ export const REQUESTS = {
   'picker:cancel': z.undefined(),
   'picker:claude-folder': z.undefined(),
   'picker:retry': z.undefined(),
+  /** Opens the pane of System Settings (Windows' Settings) where a permission is given. */
+  'picker:permission': z.enum(PERMISSIONS),
   /** The script as typed so far (a step being written may have no title yet). */
   'picker:script': z
     .array(
@@ -455,8 +475,11 @@ export const REQUESTS = {
   /** Asks for the projects folder (a folder dialog) and keeps it. */
   'settings:choose-folder': z.undefined(),
   'settings:devices': z.undefined(),
-  /** The first run is done: the window closes and the pill shows. */
-  'settings:welcomed': z.undefined(),
+  /** The first run is done: the window closes and the pill shows; `record`: the picker opens too. */
+  'settings:welcomed': z.strictObject({ record: z.boolean().optional() }).optional(),
+  /** macOS: each permission a take needs, granted or not (none elsewhere). */
+  'settings:permissions': z.undefined(),
+  'settings:permission': z.enum(PERMISSIONS),
   'tools:status': z.undefined(),
   /** Looks for ffmpeg again (after `winget install`): found, the app uses it at once. */
   'tools:check': z.undefined(),
@@ -569,6 +592,7 @@ export interface Responses {
   'picker:cancel': void;
   'picker:claude-folder': string | undefined;
   'picker:retry': void;
+  'picker:permission': void;
   'picker:script': void;
   'prompter:next': void;
   'prompter:previous': void;
@@ -603,6 +627,8 @@ export interface Responses {
   /** The cameras and mics this machine has, or why they could not be listed. */
   'settings:devices': { cameras: string[]; mics: string[]; problem?: string };
   'settings:welcomed': void;
+  'settings:permissions': PermissionView[];
+  'settings:permission': void;
   'tools:status': ToolsStatus;
   'tools:check': ToolsStatus;
   /** What is installed now, and in `problems` what could not be. */

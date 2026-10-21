@@ -65,7 +65,7 @@ export const WINDOW_CHANNELS = {
     events: ['pill:recent', 'app:motion'],
   },
   picker: {
-    requests: ['picker:setup', 'picker:hover', 'picker:choices', 'picker:record', 'picker:cancel', 'picker:claude-folder', 'picker:retry', 'picker:script'],
+    requests: ['picker:setup', 'picker:hover', 'picker:choices', 'picker:record', 'picker:cancel', 'picker:claude-folder', 'picker:retry', 'picker:script', 'picker:permission'],
     events: ['picker:open', 'picker:active', 'picker:choices', 'picker:devices', 'picker:script', 'app:motion'],
   },
   hud: {
@@ -87,6 +87,8 @@ export const WINDOW_CHANNELS = {
       'settings:choose-folder',
       'settings:devices',
       'settings:welcomed',
+      'settings:permissions',
+      'settings:permission',
       'tools:status',
       'tools:check',
       'tools:install',

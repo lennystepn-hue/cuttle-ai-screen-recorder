@@ -1,4 +1,4 @@
-export { clamp, clamp01, ease, easeInOutCubic, lerp, lerpRect, type EaseKind } from './easing';
+export { clamp, clamp01, ease, easeInOutCubic, lerp, lerpRect, settle, type Curve, type EaseKind } from './easing';
 export {
   CONTINUOUS_CUT_SECONDS,
   MASK_EDGE_SECONDS,
@@ -21,7 +21,7 @@ export {
 export { occurrences, rampAmount, type Occurrence } from './occurrences';
 export { YOUTUBE_CHAPTERS, chapterTime, stepChapters, youtubeChapters, type Chapter } from './chapters';
 export { STEP_SLIP_SECONDS, STEP_ZOOM, shownFrom, stepMoves, stepZooms, type StepMove, type StepZoom } from './steps';
-export { ZOOM_MOVE_SECONDS, ZOOM_RAMP_SECONDS, fitZoomRect, zoomRectAt, zoomTargetAt } from './zoom';
+export { ZOOM_MOVE_LEAD, ZOOM_MOVE_SECONDS, ZOOM_RAMP_SECONDS, fitZoomRect, zoomBetween, zoomRectAt, zoomTargetAt } from './zoom';
 export { TEXT_FADE_SECONDS, activeMasks, activeTexts, badgeFor, maskRectAt, type ActiveText } from './overlays';
 export { CLICK_EFFECT_SECONDS, createCursorTrack, cursorAt, smoothedPath, type CursorFrame, type CursorTrack } from './cursor';
 export { createTimeline, type ActiveOverlay, type ActiveTransition, type RenderState, type SceneFrame, type Timeline, type TimelineOptions } from './frame';

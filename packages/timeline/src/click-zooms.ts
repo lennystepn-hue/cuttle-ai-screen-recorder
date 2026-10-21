@@ -1,10 +1,11 @@
 // Zooms that follow the clicks of a take: clicks close in time and place make one zoom that eases
 // in as the first click happens, stays while the work goes on there, and leaves. When the work moves
 // on soon after, elsewhere, the zoom moves along to it (`moves`) instead of leaving the clicks there
-// outside the view. Fewer, better zooms: never in waiting that is sped up, never one that would
-// barely zoom, never two at once, and at most one starting in any 5 output seconds (counting the
-// zooms that are there). Times are as people see them: output seconds, turned into source seconds at
-// the clip's speed. Pure; `suggest` and the editor share it.
+// outside the view; while the clicks stay well in view, it holds still. Fewer, better zooms: never in
+// waiting that is sped up, never one that would barely zoom, never two at once, and at most one
+// starting in any 5 output seconds (counting the zooms that are there). Times are as people see
+// them: output seconds, turned into source seconds at the clip's speed. Pure; `suggest` and the
+// editor share it.
 import type { InputEvent, Rect } from '@cuttle/project';
 
 /** A click joins the zoom being formed when it comes this soon after its last click (output s)… */
@@ -18,9 +19,14 @@ export const MIN_WIDTH = 0.45;
 /**
  * …and on a display that says its scale, at least this many of its points across (its pixels over
  * its scale): as much of the interface as MIN_WIDTH shows of a 1920-pixel screen at 100 %, so a
- * Retina Mac (1440 points across) or a laptop at 150 % is not zoomed deeper than that.
+ * Retina Mac (1440 points across) or a laptop at 150 % is not zoomed deeper than that…
  */
 export const MIN_POINTS = 860;
+/**
+ * …but never less deep than this: a window taken on a Retina display is often narrower than
+ * MIN_POINTS allows to zoom, and a zoom of 1.1 or 1.3× looks like the picture slipping.
+ */
+export const MIN_DEPTH = 1.5;
 
 /** The screen a zoom is made for: its size in pixels, and its pixels per point when the take says so. */
 export interface ZoomScreen {
@@ -31,19 +37,22 @@ export interface ZoomScreen {
 
 /**
  * The narrowest view a zoom may have (px): `share` of the screen's width, and on a display with a
- * scale at least as many points as MIN_POINTS is to MIN_WIDTH; never more than the screen.
+ * scale at least as many points as MIN_POINTS is to MIN_WIDTH; never wider than MIN_DEPTH allows.
  */
 export function minZoomWidth(screen: ZoomScreen, share = MIN_WIDTH): number {
   const points = screen.scale ? ((MIN_POINTS * share) / MIN_WIDTH) * screen.scale : 0;
-  return Math.min(screen.width, Math.max(share * screen.width, points));
+  return Math.min(screen.width / MIN_DEPTH, Math.max(share * screen.width, points));
 }
 /** A zoom that would show more than this share of the screen's area barely zooms: none. */
 export const MAX_AREA = 0.8;
-/** The zoom starts this long before the first click (it eases in for 0.6 s; output s)… */
+/** The zoom starts this long before the first click (it is in by then: `ZOOM_RAMP_SECONDS`; output s)… */
 export const LEAD_SECONDS = 0.7;
-/** …and lasts until this long after the last one, at least `MIN_SECONDS` (output s). */
-export const TAIL_SECONDS = 1.2;
-export const MIN_SECONDS = 1.8;
+/**
+ * …and lasts until this long after the last one, at least `MIN_SECONDS` (output s): over a
+ * second fully in after the click before it leaves, in 0.8 s.
+ */
+export const TAIL_SECONDS = 2;
+export const MIN_SECONDS = 2.4;
 /** Clicks in clips faster than this are not zoomed (waiting sped up). */
 export const MAX_SPEED = 2;
 /**
@@ -56,11 +65,18 @@ export const MERGE_GAP_SECONDS = 1.5;
 export const MIN_OUTPUT_GAP = 5;
 /**
  * Clicks elsewhere whose zoom would start this soon after the zoom before ends (output s) are
- * followed by it: it moves there, 0.6 s before the first of them, instead of a zoom of their own
- * (which `MIN_OUTPUT_GAP` would not allow). With `LEAD_SECONDS` and `TAIL_SECONDS` it leaves no
- * click between following and a zoom of its own.
+ * followed by it: it moves there, before the first of them, instead of a zoom of their own (which
+ * `MIN_OUTPUT_GAP` would not allow). With `LEAD_SECONDS` and `TAIL_SECONDS` it leaves no click
+ * between following and a zoom of its own: clicks up to 5.1 s apart are followed.
  */
-export const FOLLOW_GAP_SECONDS = 3.2;
+export const FOLLOW_GAP_SECONDS = 2.4;
+/**
+ * A zoom that follows moves only for clicks outside the middle of its view (this share of it each
+ * way), and only by at least `MIN_MOVE` of it (against the screen's edge it cannot go further):
+ * clicks it shows well are no reason to move.
+ */
+export const FOLLOW_MIDDLE = 0.7;
+export const MIN_MOVE = 0.05;
 /** No zoom starts or ends this close to its clip's cut (a cut and a zoom at once is too much; output s). */
 export const EDGE_SECONDS = 1;
 
@@ -228,7 +244,7 @@ export function clickZooms(events: readonly InputEvent[], clips: readonly ClipSp
       // one at a time, and not too often (the zooms already there count)
       const start = outputAt(at, zoom.clip);
       if (start < lastEnd || starts.some((other) => Math.abs(start - other) < MIN_OUTPUT_GAP)) continue;
-      const moves = stations.slice(1).map((station) => ({ at: round(station.at), rect: zoomRectFor(boxOf(station.points), screen) }));
+      const moves = movesOf(rect, stations.slice(1), screen);
       result.push({ at: round(at), duration: round(zoom.end - at), rect, ...(moves.length > 0 && { moves }), clicks: stations.reduce((sum, station) => sum + station.points.length, 0) });
       starts.push(start);
       lastEnd = outputAt(zoom.end, zoom.clip);
@@ -236,6 +252,22 @@ export function clickZooms(events: readonly InputEvent[], clips: readonly ClipSp
     }
   }
   return result;
+}
+
+/** Where a zoom that starts on `rect` moves for the stations after its first: only for clicks it does not show well (`FOLLOW_MIDDLE`). */
+function movesOf(rect: Rect, stations: readonly { at: number; points: readonly { x: number; y: number }[] }[], screen: ZoomScreen): { at: number; rect: Rect }[] {
+  const moves: { at: number; rect: Rect }[] = [];
+  let view = rect;
+  const shown = (point: { x: number; y: number }) =>
+    Math.abs(point.x - (view[0] + view[2] / 2)) <= (FOLLOW_MIDDLE / 2) * view[2] && Math.abs(point.y - (view[1] + view[3] / 2)) <= (FOLLOW_MIDDLE / 2) * view[3];
+  for (const station of stations) {
+    if (station.points.every(shown)) continue;
+    const next = zoomRectFor(boxOf(station.points), screen);
+    if (Math.abs(next[0] - view[0]) < MIN_MOVE * view[2] && Math.abs(next[1] - view[1]) < MIN_MOVE * view[3] && Math.abs(next[2] - view[2]) < MIN_MOVE * view[2]) continue;
+    moves.push({ at: round(station.at), rect: next });
+    view = next;
+  }
+  return moves;
 }
 
 const round = (value: number) => Math.round(value * 1000) / 1000;

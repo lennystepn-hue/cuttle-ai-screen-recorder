@@ -10,7 +10,7 @@ describe('zooms on clicks', () => {
   it('zooms in on one click: from just before it, around it, in the screen’s shape', () => {
     const [zoom, ...rest] = clickZooms([click(10, 960, 540)], whole, screen);
     expect(rest).toEqual([]);
-    expect(zoom).toMatchObject({ at: 9.3, duration: 1.9, clicks: 1 });
+    expect(zoom).toMatchObject({ at: 9.3, duration: 2.7, clicks: 1 });
     // at least 45 % of the width, centred on the click, 16:9
     expect(zoom!.rect).toEqual([528, 297, 864, 486]);
   });
@@ -18,7 +18,7 @@ describe('zooms on clicks', () => {
   it('follows a burst of clicks in one spot with one zoom that lasts until the last', () => {
     const zooms = clickZooms([click(10, 400, 300), click(11, 450, 320), click(12.5, 520, 360), click(14, 480, 340)], whole, screen);
     expect(zooms).toHaveLength(1);
-    expect(zooms[0]).toMatchObject({ at: 9.3, duration: 5.9, clicks: 4 });
+    expect(zooms[0]).toMatchObject({ at: 9.3, duration: 6.7, clicks: 4 });
     const [x, y, width, height] = zooms[0]!.rect;
     for (const [cx, cy] of [[400, 300], [520, 360]]) {
       expect(cx! >= x && cx! <= x + width && cy! >= y && cy! <= y + height).toBe(true);
@@ -41,8 +41,8 @@ describe('zooms on clicks', () => {
     const [zoom, ...rest] = clickZooms(clicks, whole, screen);
     expect(rest).toEqual([]);
     expect(zoom!.moves!.map((move) => move.at)).toEqual([13.3, 16.3]);
-    expect(zoom!.at + zoom!.duration).toBeCloseTo(18.2, 6);
-    // the view the zoom shows at each click holds it (each move ends 0.1 s before its click)
+    expect(zoom!.at + zoom!.duration).toBeCloseTo(19, 6);
+    // the view the zoom shows at each click holds it (each move is there 0.2 s before its click)
     const views = [zoom!.rect, ...zoom!.moves!.map((move) => move.rect)];
     clicks.forEach((each, index) => {
       const [x, y, width, height] = views[index]!;
@@ -64,11 +64,11 @@ describe('zooms on clicks', () => {
   });
 
   it('makes one zoom of neighbours that show nearly the same spot', () => {
-    // 3.2 s apart (not one cluster), the same spot: the second zoom would start 1.3 s after the first ends
+    // 3.2 s apart (not one cluster), the same spot: the second zoom would start 0.5 s after the first ends
     const zooms = clickZooms([click(10, 800, 500), click(13.2, 820, 510)], whole, screen);
     expect(zooms).toHaveLength(1);
     expect(zooms[0]).toMatchObject({ at: 9.3, clicks: 2 });
-    expect(zooms[0]!.duration).toBeCloseTo(5.1, 6);
+    expect(zooms[0]!.duration).toBeCloseTo(5.9, 6);
   });
 
   it('follows two clicks far apart at once with one zoom that moves, and never zooms over another zoom', () => {
@@ -92,7 +92,7 @@ describe('zooms on clicks', () => {
 
   it('times a zoom in output seconds: at 2× it covers twice the source', () => {
     const [zoom] = clickZooms([click(20, 960, 540)], [{ from: 0, to: 60, speed: 2, start: 0 }], screen);
-    expect(zoom).toMatchObject({ at: 18.6, duration: 3.8 });
+    expect(zoom).toMatchObject({ at: 18.6, duration: 5.4 });
   });
 
   it('leaves clicks under a zoom there to it, and ends the zoom before it the moment that one starts', () => {
@@ -133,10 +133,29 @@ describe('zooms on clicks', () => {
     const retina = { width: 2880, height: 1800, scale: 2 };
     expect(minZoomWidth(retina)).toBe(1720);
     expect(zoomRectFor({ left: 1400, top: 900, right: 1410, bottom: 905 }, retina)).toEqual([545, 365, 1720, 1075]);
-    // a laptop at 150 % (1280 points across); a share of it scales the points along (the answer's 35 %)
-    expect(minZoomWidth({ width: 1920, height: 1080, scale: 1.5 })).toBe(1290);
+    // a laptop at 150 % (1280 points across): 860 points would be 1290 pixels, a zoom of 1.49×, so
+    // 1.5× instead; a share of it scales the points along (the answer's 35 %)
+    expect(minZoomWidth({ width: 1920, height: 1080, scale: 1.5 })).toBe(1280);
     expect(minZoomWidth({ width: 1920, height: 1080, scale: 1.5 }, 0.35)).toBeCloseTo(1003.3, 1);
-    // never more than the screen: a small window on a Retina display gets no deeper view than all of it
-    expect(minZoomWidth({ width: 1200, height: 800, scale: 2 })).toBe(1200);
+    // a window on a Retina display narrower than 860 points × 1.5: still 1.5× deep
+    expect(minZoomWidth({ width: 1968, height: 1332, scale: 2 })).toBe(1312);
+    expect(minZoomWidth({ width: 1200, height: 800, scale: 2 })).toBe(800);
+  });
+
+  it('holds still while the clicks it follows stay in the middle of its view', () => {
+    // 4.5 s apart: a zoom each, too far apart to merge, near enough to follow; the second click is
+    // 150 px below the first, well inside the view: no move (it used to nod down and up)
+    const [zoom, ...rest] = clickZooms([click(10, 960, 300), click(14.5, 1000, 450), click(19, 940, 320)], whole, screen);
+    expect(rest).toEqual([]);
+    expect(zoom).toMatchObject({ at: 9.3, clicks: 3, rect: zoomRectFor({ left: 960, top: 300, right: 960, bottom: 300 }, screen) });
+    expect(zoom).not.toHaveProperty('moves');
+    expect(zoom!.at + zoom!.duration).toBeCloseTo(21, 6);
+  });
+
+  it('moves for a click near the edge of its view, but not where the screen ends', () => {
+    // 350 px right of the first click: outside the middle 70 % of the 864-pixel view
+    expect(clickZooms([click(10, 960, 540), click(14.5, 1310, 540)], whole, screen)[0]!.moves).toHaveLength(1);
+    // at the right edge the view cannot go further right: no move
+    expect(clickZooms([click(10, 1850, 540), click(14.5, 1912, 540)], whole, screen)[0]).not.toHaveProperty('moves');
   });
 });

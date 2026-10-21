@@ -1,7 +1,7 @@
-import type { CuttleProject, Ease, Mask, Rect } from '@cuttle/project';
+import type { CuttleProject, Mask, Rect } from '@cuttle/project';
 import { applyCaptionFixes, captionAt, captionCues, captionWords, type ActiveCaption, type CaptionCue, type SpokenWord } from './captions';
 import { cursorAt, type CursorFrame, type CursorTrack } from './cursor';
-import { clamp } from './easing';
+import { clamp, type Curve } from './easing';
 import { occurrences, rampAmount, type Occurrence } from './occurrences';
 import { TEXT_FADE_SECONDS, activeMasks, activeTexts, badgeFor, type ActiveText } from './overlays';
 import { crossfadeHalf, isContinuousCut, pageTransition, sceneSpans, sourceTimeAt, spanAt, totalDuration, type SceneSpan } from './time';
@@ -143,7 +143,7 @@ export function createTimeline(project: CuttleProject, opts: TimelineOptions): T
     if (cursor && project.look.cursor.clickEffect === 'none') cursor = { ...cursor, clicks: [] };
     // The output time this source frame belongs to (a held or frozen frame's, during a crossfade).
     const shownAt = span.start + (sourceTime - scene.from) / scene.speed;
-    const amount = (shown: (Occurrence | undefined)[] | undefined, ramp: number, curve: Ease): number => {
+    const amount = (shown: (Occurrence | undefined)[] | undefined, ramp: number, curve: Curve): number => {
       const occurrence = shown?.[span.index];
       return occurrence ? rampAmount(occurrence, shownAt, ramp, curve) : 1;
     };
@@ -153,7 +153,8 @@ export function createTimeline(project: CuttleProject, opts: TimelineOptions): T
       ...base,
       kind: 'clip',
       sourceTime,
-      zoom: zoomRectAt(project.zooms, sourceTime, (zoom) => amount(zoomShown.get(zoom), ZOOM_RAMP_SECONDS, zoom.ease), screen, scene.speed),
+      // a smooth zoom moves as a camera does: it settles
+      zoom: zoomRectAt(project.zooms, sourceTime, (zoom) => amount(zoomShown.get(zoom), ZOOM_RAMP_SECONDS, zoom.ease === 'smooth' ? 'settle' : zoom.ease), screen, scene.speed),
       aspect: screen[2] / screen[3],
       masks: activeMasks(project.masks, sourceTime),
       texts: activeTexts(project.texts, sourceTime, (text) => amount(textShown.get(text), TEXT_FADE_SECONDS, 'linear')),

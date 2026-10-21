@@ -43,14 +43,15 @@ describe('typingZooms', () => {
     // the first second (x 101 to 201, middle 151) sits 35 % into the view: x 151 − 157.5 → 0 (the screen's edge)
     // at 13.2 s the caret (401) has left the middle (225 ± 135): the view moves so it is 35 % in again
     expect(typingZooms(input({ events }))).toEqual([
-      { at: 9.3, duration: 6.9, rect: [0, 138, 450, 225], moves: [{ at: 13.2, rect: [244, 138, 450, 225] }], follows: 'caret' },
+      { at: 9.3, duration: 7.7, rect: [0, 138, 450, 225], moves: [{ at: 13.2, rect: [244, 138, 450, 225] }], follows: 'caret' },
     ]);
   });
 
-  it('shows as much of the interface on a scaled display: 860 points across at least, else none', () => {
+  it('shows as much of the interface on a scaled display: 860 points across at least, but 1.5× deep', () => {
     const events = [...keys(10, 15), ...typedLine(10.2, 10, 100, 240)];
-    // at 2 pixels a point the 1000-pixel screen is 500 points across: a view of all of it is no zoom
-    expect(typingZooms(input({ events, screen: { ...screen, scale: 2 } }))).toEqual([]);
+    // at 2 pixels a point the 1000-pixel screen is 500 points across, less than 860: a view of two
+    // thirds of it (1.5×), where a view of all of it would be no zoom
+    expect(typingZooms(input({ events, screen: { ...screen, scale: 2 } }))[0]?.rect.slice(2)).toEqual([667, 333]);
     // a 3000-pixel screen at 2 (1500 points): 1720 pixels, not 45 % of 3000
     const wide = { width: 3000, height: 1500, scale: 2 };
     const [zoom] = typingZooms(input({ events, screen: wide }));

@@ -385,7 +385,8 @@ function Stage({ canvas }: { canvas: React.RefObject<HTMLCanvasElement | null> }
   const warning = error ?? media?.warnings[0];
   const more = error ? 0 : Math.max(0, (media?.warnings.length ?? 0) - 1);
   return (
-    <main className="stage">
+    // the transport lines up with the video (`--frame-width`)
+    <main className="stage" style={size.width > 0 ? ({ '--frame-width': `${size.width}px` } as React.CSSProperties) : undefined}>
       {issues ? (
         <IssuesBanner issues={issues} />
       ) : (

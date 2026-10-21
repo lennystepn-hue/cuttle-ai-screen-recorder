@@ -36,8 +36,10 @@ export interface EditorState {
   selection?: Selection;
   tool: Tool;
   tab: 'selection' | 'auto' | 'transcript' | 'look';
-  /** The part of the look that is open (one at a time). */
-  lookSection: LookSection;
+  /** The part of the look that is open (one at a time; none once it is closed). */
+  lookSection?: LookSection;
+  /** The inspector's Advanced fields are open (they stay so from one selection to the next). */
+  advancedOpen: boolean;
   /** Ctrl+F asked for the Transcript tab's find field (a new number each time). */
   findRequest?: number;
   /** Snapping on the timeline (Ctrl while dragging turns it off for that drag). */
@@ -73,6 +75,7 @@ export const store = createStore<EditorState>({
   tool: 'select',
   tab: 'selection',
   lookSection: 'background',
+  advancedOpen: false,
   snap: true,
   mediaState: { seq: -1, proxy: { state: 'none' }, thumbnails: { state: 'none' }, peaks: { state: 'none' } },
   exportOpen: false,

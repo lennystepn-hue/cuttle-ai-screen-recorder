@@ -143,11 +143,43 @@ export function Inspector() {
  * A labelled field. The label is a <label> (a click on it reaches the field) unless `plain`: a row
  * with a button that is not its field (Replace…) must not press it from its label.
  */
-function Row({ label, children, note, wide, plain, inline }: { label: string; children: ReactNode; note?: ReactNode; wide?: boolean; plain?: boolean; inline?: boolean }) {
+function Row({
+  label,
+  children,
+  note,
+  wide,
+  plain,
+  inline: beside,
+  readout,
+  compact,
+}: {
+  label: string;
+  children: ReactNode;
+  note?: ReactNode;
+  wide?: boolean;
+  plain?: boolean;
+  inline?: boolean;
+  readout?: boolean;
+  /** A short number: its field beside its name, as wide as the number needs. */
+  compact?: boolean;
+}) {
   const Tag = plain ? 'div' : 'label';
+  const inline = beside || compact;
   const said = note !== undefined && <em title={typeof note === 'string' ? note : undefined}>{note}</em>;
+  if (readout) {
+    // a value to read, not to change: its name and the value on one line, a note under the value
+    return (
+      <div className="field readout">
+        <span className="field-label">{label}</span>
+        <span className="field-value">
+          <span>{children}</span>
+          {said}
+        </span>
+      </div>
+    );
+  }
   return (
-    <Tag className={`field${wide ? ' wide' : ''}${inline ? ' inline' : ''}`}>
+    <Tag className={`field${wide ? ' wide' : ''}${inline ? ' inline' : ''}${compact ? ' compact' : ''}`}>
       {inline && said ? (
         // beside a switch the note goes under the name: the switches line up, and a long note wraps
         <span className="field-text">
@@ -162,6 +194,48 @@ function Row({ label, children, note, wide, plain, inline }: { label: string; ch
         {!inline && said}
       </span>
     </Tag>
+  );
+}
+
+/** A part of the selection's settings under its title. */
+function Section({ title, children, testId }: { title: string; children: ReactNode; testId?: string }) {
+  return (
+    <section className="insp-section" aria-label={title} data-testid={testId}>
+      <h3 className="section-title">{title}</h3>
+      {children}
+    </section>
+  );
+}
+
+/**
+ * What few need (seconds into the take, pixels of the screen, a page's file): closed at first; once
+ * opened it stays open from one selection to the next, until it is closed.
+ */
+function Advanced({ children, note }: { children: ReactNode; note?: string }) {
+  const open = useStore(store, (state) => state.advancedOpen);
+  return (
+    <details className="advanced" open={open} onToggle={(event) => event.currentTarget.open !== open && store.set({ advancedOpen: event.currentTarget.open })} data-testid="advanced">
+      <summary>
+        <ChevronIcon size={13} />
+        Advanced
+      </summary>
+      <div className="advanced-body">
+        {note && <p className="hint">{note}</p>}
+        {children}
+      </div>
+    </details>
+  );
+}
+
+/** "Draw on the video" with the tool's picture and key: the tool that draws this kind of area. */
+function DrawOn({ tool }: { tool: 'zoom' | 'mask' | 'crop' }) {
+  const { Icon, keys, name } = START_TOOLS.find((item) => item.tool === tool)!;
+  return (
+    <button type="button" className="ghost small draw-on" onClick={() => setTool(tool)} title={`${name} tool (${keys}): drag on the screen`}>
+      <Icon size={14} />
+      Draw on the video
+      <kbd>{keys}</kbd>
+    </button>
   );
 }
 
@@ -211,9 +285,29 @@ function TextInput({ value, onCommit, multiline, placeholder, testId }: { value:
 /**
  * A number that saves when left or on Enter, clamped to [min, max]. It reads with a point whatever
  * the system's language (as every time in the app does); ↑ and ↓ step it (Shift: ten steps); Esc
- * puts it back and leaves the field.
+ * puts it back and leaves the field. Its unit (s, ×, px…) shows inside it, after the number.
  */
-function NumberInput({ value, onCommit, step = 0.1, min, max, digits = 2, testId }: { value: number; onCommit: (value: number) => void; step?: number; min?: number; max?: number; digits?: number; testId?: string }) {
+function NumberInput({ unit, ...props }: NumberProps & { unit?: string }) {
+  if (!unit) return <NumberField {...props} />;
+  return (
+    <span className="unit-input">
+      <NumberField {...props} />
+      <i aria-hidden>{unit}</i>
+    </span>
+  );
+}
+
+interface NumberProps {
+  value: number;
+  onCommit: (value: number) => void;
+  step?: number;
+  min?: number;
+  max?: number;
+  digits?: number;
+  testId?: string;
+}
+
+function NumberField({ value, onCommit, step = 0.1, min, max, digits = 2, testId }: NumberProps) {
   const shown = String(Math.round(value * 10 ** digits) / 10 ** digits);
   const [draft, setDraft] = useState(shown);
   useEffect(() => setDraft(shown), [shown]);
@@ -387,21 +481,46 @@ function CutDetails({ project, id }: { project: CuttleProject; id: string }) {
       <Row label="Label">
         <TextInput value={cut.label ?? ''} placeholder="Cut" onCommit={(value) => set('cuts', id, { label: value.trim() || undefined }, 'Rename cut')} />
       </Row>
-      <Row label="In the video">{at === undefined ? 'Nowhere: no clip plays this stretch' : `${cut.enabled ? 'jumps at' : 'would jump at'} ${formatTime(at)}`}</Row>
-      <div className="grid2">
-        <Row label="From (take s)">
-          <NumberInput value={cut.from} min={0} onCommit={(from) => set('cuts', id, { from, to: Math.max(cut.to, from + 0.05) }, 'Change cut')} testId="cut-from" />
+      <Section title="Timing">
+        <Row label="In the video" readout>
+          {at === undefined ? 'Nowhere: no clip plays this stretch' : `${cut.enabled ? 'jumps at' : 'would jump at'} ${formatTime(at)}`}
         </Row>
-        <Row label="To (take s)">
-          <NumberInput value={cut.to} min={0} onCommit={(to) => set('cuts', id, { to }, 'Change cut')} testId="cut-to" />
+        <Row label="Takes out" readout>
+          {formatDuration(cut.to - cut.from)} of the take
         </Row>
-      </div>
-      <Row label="Takes out">{formatDuration(cut.to - cut.from)} of the take</Row>
+      </Section>
+      <Section title="In the take">
+        <div className="grid2">
+          <Row label="From">
+            <NumberInput unit="s" value={cut.from} min={0} onCommit={(from) => set('cuts', id, { from, to: Math.max(cut.to, from + 0.05) }, 'Change cut')} testId="cut-from" />
+          </Row>
+          <Row label="To">
+            <NumberInput unit="s" value={cut.to} min={0} onCommit={(to) => set('cuts', id, { to }, 'Change cut')} testId="cut-to" />
+          </Row>
+        </div>
+      </Section>
       <Row label="Cut" inline>
         <em>{cut.enabled ? 'On: the video jumps over it' : 'Off: the video plays it'}</em>
         <Toggle checked={cut.enabled} label="Cut this stretch" onChange={(on) => set('cuts', id, { enabled: on ? undefined : false }, on ? 'Cut on' : 'Cut off')} testId="cut-enabled" />
       </Row>
     </>
+  );
+}
+
+/** An area's x, y, width and height in pixels of the screen, each after its letter. */
+function AreaFields({ rect, onCommit }: { rect: Rect; onCommit: (rect: Rect) => void }) {
+  return (
+    <div className="field">
+      <span className="field-label">Area, in pixels of the screen</span>
+      <div className="grid4">
+        {(['x', 'y', 'w', 'h'] as const).map((name, i) => (
+          <label key={name} className="field-input">
+            <em>{name}</em>
+            <NumberInput value={rect[i]!} digits={0} step={1} min={i < 2 ? 0 : 8} onCommit={(value) => onCommit(rect.map((old, j) => (j === i ? value : old)) as Rect)} />
+          </label>
+        ))}
+      </div>
+    </div>
   );
 }
 
@@ -416,22 +535,26 @@ function TransitionInto({ project, index }: { project: CuttleProject; index: num
   const id = scene.id;
   const change = (fields: Partial<typeof transition>, label: string) => set('scenes', id, { transition: { ...transition, ...fields } }, label);
   return (
-    <div className="transition-in" data-testid="transition-in">
-      <Row label="Into this scene">{motionName(transition.src)}</Row>
+    <Section title="Transition in" testId="transition-in">
+      <Row label="Page" readout>
+        {motionName(transition.src)}
+      </Row>
       {status && <MotionState status={status} />}
-      <p className="hint">Its page draws the frames between the two scenes from them. The player shows them once they are made, a moment after you stop on the timeline; until then, a crossfade.</p>
+      <p className="hint" title="Its page draws the frames between the two scenes from them. The player shows them once they are made, a moment after you stop on the timeline; until then, a crossfade.">
+        The player crossfades until its frames are made.
+      </p>
       <div className="grid2">
-        <Row label="Length (s)">
-          <NumberInput value={transition.duration} min={0.1} max={4} step={0.1} onCommit={(duration) => change({ duration }, 'Transition length')} testId="transition-duration" />
+        <Row label="Length">
+          <NumberInput unit="s" value={transition.duration} min={0.1} max={4} step={0.1} onCommit={(duration) => change({ duration }, 'Transition length')} testId="transition-duration" />
         </Row>
         <Row label="Transition" inline>
           <Toggle checked={transition.enabled} label="The transition into this scene" onChange={(on) => change({ enabled: on }, on ? 'Transition on' : 'Transition off')} testId="transition-on" />
         </Row>
       </div>
-      <button type="button" className="ghost small" onClick={() => set('scenes', id, { transition: undefined }, 'Remove transition')} data-testid="transition-remove">
+      <button type="button" className="ghost small start" onClick={() => set('scenes', id, { transition: undefined }, 'Remove transition')} data-testid="transition-remove">
         Remove the transition
       </button>
-    </div>
+    </Section>
   );
 }
 
@@ -450,26 +573,19 @@ function CropDetails({ project, id }: { project: CuttleProject; id: string }) {
     <>
       <Head icon={<CropIcon />} color="var(--text)" name={`Crop of ${clip.label ?? 'the clip'}`} copies={false} />
       <AutoNote kind={crop.auto} />
-      <div className="field">
-        <span className="field-label">
-          Area, in source pixels
-          <button type="button" className="link" onClick={() => setTool('crop')}>
-            Draw on the video
-          </button>
-        </span>
-        <div className="grid4">
-          {(['x', 'y', 'w', 'h'] as const).map((name, i) => (
-            <label key={name} className="field-input">
-              <em>{name}</em>
-              <NumberInput value={crop.rect[i]!} digits={0} step={1} min={i < 2 ? 0 : 8} onCommit={(value) => setCrop({ rect: crop.rect.map((old, j) => (j === i ? value : old)) as Rect }, 'Change the crop')} />
-            </label>
-          ))}
-        </div>
-      </div>
+      <Section title="Area">
+        <Row label="Shows" readout>
+          {Math.round(crop.rect[2])} × {Math.round(crop.rect[3])} px of the screen
+        </Row>
+        <DrawOn tool="crop" />
+      </Section>
       <Row label="Crop" inline>
         <em>{crop.enabled ? 'On: the clip shows this part' : 'Off: the whole screen shows'}</em>
         <Toggle checked={crop.enabled} label="Crop the clip" onChange={(on) => setCrop({ enabled: on }, on ? 'Crop on' : 'Crop off')} testId="crop-enabled" />
       </Row>
+      <Advanced>
+        <AreaFields rect={crop.rect} onCommit={(rect) => setCrop({ rect }, 'Change the crop')} />
+      </Advanced>
     </>
   );
 }
@@ -736,8 +852,8 @@ const AUTO_REASONS: Record<AutoKind, string> = {
 function AutoNote({ kind }: { kind?: AutoKind }) {
   if (!kind) return null;
   return (
-    <p className="auto-note" data-testid="auto-note">
-      <b>Made by Cuttle</b> for {AUTO_REASONS[kind]}. Change it and it is yours: Cuttle leaves it alone when it edits again.
+    <p className="auto-note" data-testid="auto-note" title="Change it and it is yours: Cuttle leaves it alone when it edits again.">
+      <b>Made by Cuttle</b> · for {AUTO_REASONS[kind]}
     </p>
   );
 }
@@ -769,9 +885,18 @@ function Details({ project, selection }: { project: CuttleProject; selection: Se
     const sceneIndex = project.scenes.findIndex((item) => item.id === id);
     const scene = project.scenes[sceneIndex]!;
     const stretch = sceneStretch(sceneSpans(project.scenes, project.cuts), sceneIndex);
-    const inVideo = (
+    const inVideo = stretch && (
+      <Row label="In the video" readout>
+        {span(stretch.start, stretch.end)}
+      </Row>
+    );
+    /** A page, a card or a motion scene: where it shows and how long, the transition into it. */
+    const sceneTiming = (length: ReactNode) => (
       <>
-        {stretch && <Row label="In the video">{span(stretch.start, stretch.end)}</Row>}
+        <Section title="Timing">
+          {inVideo}
+          {length}
+        </Section>
         <TransitionInto project={project} index={sceneIndex} />
       </>
     );
@@ -783,52 +908,59 @@ function Details({ project, selection }: { project: CuttleProject; selection: Se
           <Row label="Label">
             <TextInput value={scene.label ?? ''} placeholder="Clip" onCommit={(value) => set('scenes', id, { label: value.trim() || undefined }, 'Rename clip')} testId="clip-label" />
           </Row>
-          <div className="field">
-            <span className="field-label">Speed</span>
-            <div className="chips" role="group" aria-label="Speed">
+          <Section title="Speed">
+            <div className="seg full" role="group" aria-label="Speed">
               {SPEEDS.map((speed) => (
                 <button key={speed} type="button" aria-pressed={scene.speed === speed} onClick={() => setSpeed(speed, id)}>
                   {speed}×
                 </button>
               ))}
             </div>
-            <span className="field-input narrow">
-              <NumberInput value={scene.speed} min={0.25} max={64} step={0.5} onCommit={(speed) => setSpeed(speed, id)} testId="clip-speed" />
-              <em>× · {stretch ? formatDuration(stretch.end - stretch.start) : ''} in the video</em>
-            </span>
-          </div>
-          {inVideo}
-          <div className="grid2">
-            <Row label="From (take s)">
-              <NumberInput value={scene.from} min={0} onCommit={(from) => edit([{ type: 'trim', id, from }], 'Trim clip')} testId="clip-from" />
+            <div className="field">
+              <label className="field-input narrow">
+                <NumberInput unit="×" value={scene.speed} min={0.25} max={64} step={0.5} onCommit={(speed) => setSpeed(speed, id)} testId="clip-speed" />
+                <em>{stretch ? `${formatDuration(stretch.end - stretch.start)} in the video` : 'not in the video'}</em>
+              </label>
+            </div>
+          </Section>
+          {inVideo && <Section title="Timing">{inVideo}</Section>}
+          <TransitionInto project={project} index={sceneIndex} />
+          <Section title="Picture">
+            <Row label="Badge" note={scene.badge === undefined ? 'shows the speed when sped up' : undefined}>
+              <TextInput value={scene.badge ?? ''} placeholder={scene.speed > 1 ? `${formatSpeed(scene.speed)} speed` : 'none'} onCommit={(value) => set('scenes', id, { badge: value === '' ? undefined : value }, 'Change badge')} />
             </Row>
-            <Row label="To (take s)">
-              <NumberInput value={scene.to} min={0} onCommit={(to) => edit([{ type: 'trim', id, to }], 'Trim clip')} testId="clip-to" />
+            <Row label="Crop" plain inline note={scene.crop ? (scene.crop.auto ? 'Cuttle’s: the content of the window' : undefined) : 'the whole screen shows'}>
+              {scene.crop ? (
+                <button type="button" className="ghost small" onClick={() => select({ kind: 'crop', id })} data-testid="clip-crop">
+                  {`${Math.round(scene.crop.rect[2])} × ${Math.round(scene.crop.rect[3])}${scene.crop.enabled ? '' : ' · off'}`}
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className="ghost small"
+                  onClick={() => {
+                    // the crop tool works on the clip at the playhead: bring the playhead onto this one
+                    if (playheadPlace()?.index !== sceneIndex && stretch) void currentPlayer()?.seek(stretch.start);
+                    setTool('crop');
+                  }}
+                  data-testid="clip-crop"
+                >
+                  <CropIcon size={14} />
+                  Crop…
+                </button>
+              )}
             </Row>
-          </div>
-          <Row label="Badge" note={scene.badge === undefined ? 'shows the speed when sped up' : undefined}>
-            <TextInput value={scene.badge ?? ''} placeholder={scene.speed > 1 ? `${formatSpeed(scene.speed)} speed` : 'none'} onCommit={(value) => set('scenes', id, { badge: value === '' ? undefined : value }, 'Change badge')} />
-          </Row>
-          <Row label="Crop" plain note={scene.crop ? (scene.crop.auto ? 'Cuttle’s: the content of the window' : undefined) : 'the whole screen shows'}>
-            {scene.crop ? (
-              <button type="button" className="ghost small" onClick={() => select({ kind: 'crop', id })} data-testid="clip-crop">
-                {`${Math.round(scene.crop.rect[2])} × ${Math.round(scene.crop.rect[3])}${scene.crop.enabled ? '' : ' · off'}`}
-              </button>
-            ) : (
-              <button
-                type="button"
-                className="ghost small"
-                onClick={() => {
-                  // the crop tool works on the clip at the playhead: bring the playhead onto this one
-                  if (playheadPlace()?.index !== sceneIndex && stretch) void currentPlayer()?.seek(stretch.start);
-                  setTool('crop');
-                }}
-                data-testid="clip-crop"
-              >
-                Crop…
-              </button>
-            )}
-          </Row>
+          </Section>
+          <Advanced note="Seconds into the take, as cuttle.json has them.">
+            <div className="grid2">
+              <Row label="From">
+                <NumberInput unit="s" value={scene.from} min={0} onCommit={(from) => edit([{ type: 'trim', id, from }], 'Trim clip')} testId="clip-from" />
+              </Row>
+              <Row label="To">
+                <NumberInput unit="s" value={scene.to} min={0} onCommit={(to) => edit([{ type: 'trim', id, to }], 'Trim clip')} testId="clip-to" />
+              </Row>
+            </div>
+          </Advanced>
         </>
       );
     }
@@ -839,26 +971,29 @@ function Details({ project, selection }: { project: CuttleProject; selection: Se
           <Row label="Label">
             <TextInput value={scene.label ?? ''} placeholder="Page" onCommit={(value) => set('scenes', id, { label: value.trim() || undefined }, 'Rename page')} />
           </Row>
-          <Row label="Image" plain>
-            <span className="path" title={scene.image}>
-              {scene.image}
-            </span>
-            <button type="button" className="ghost small" onClick={() => void chooseImage('still', id)}>
-              Replace…
-            </button>
-          </Row>
-          {inVideo}
-          <div className="grid2">
-            <Row label="Length (s)">
-              <NumberInput value={scene.duration} min={0.1} onCommit={(duration) => edit([{ type: 'trim', id, duration }], 'Change the length of the page')} />
+          <Section title="Picture">
+            <Row label="Image" plain>
+              <span className="path" title={scene.image}>
+                {scene.image}
+              </span>
+              <button type="button" className="ghost small" onClick={() => void chooseImage('still', id)}>
+                Replace…
+              </button>
             </Row>
-            <Row label="Motion">
-              <Select value={scene.motion} options={STILL_MOTIONS} names={MOTION_NAMES} onChange={(motion) => set('scenes', id, { motion }, 'Change motion')} />
-            </Row>
-          </div>
-          <Row label="Frame">
-            <Select value={scene.frame} options={FRAME_STYLES} names={FRAME_NAMES} onChange={(frame) => set('scenes', id, { frame }, 'Change frame')} />
-          </Row>
+            <div className="grid2">
+              <Row label="Motion">
+                <Select value={scene.motion} options={STILL_MOTIONS} names={MOTION_NAMES} onChange={(motion) => set('scenes', id, { motion }, 'Change motion')} />
+              </Row>
+              <Row label="Frame">
+                <Select value={scene.frame} options={FRAME_STYLES} names={FRAME_NAMES} onChange={(frame) => set('scenes', id, { frame }, 'Change frame')} />
+              </Row>
+            </div>
+          </Section>
+          {sceneTiming(
+            <Row label="Length" compact>
+              <NumberInput unit="s" value={scene.duration} min={0.1} onCommit={(duration) => edit([{ type: 'trim', id, duration }], 'Change the length of the page')} />
+            </Row>,
+          )}
         </>
       );
     }
@@ -868,95 +1003,97 @@ function Details({ project, selection }: { project: CuttleProject; selection: Se
           list="scenes"
           index={sceneIndex}
           item={scene}
-          placement={
-            <>
-              {inVideo}
-              <Row label="Length (s)">
-                <NumberInput value={scene.duration} min={0.1} onCommit={(duration) => edit([{ type: 'trim', id, duration }], 'Change the length of the motion scene')} testId="motion-length" />
-              </Row>
-            </>
-          }
+          placement={sceneTiming(
+            <Row label="Length" compact>
+              <NumberInput unit="s" value={scene.duration} min={0.1} onCommit={(duration) => edit([{ type: 'trim', id, duration }], 'Change the length of the motion scene')} testId="motion-length" />
+            </Row>,
+          )}
         />
       );
     }
     return (
       <>
         <Head icon={<CardIcon />} color="var(--card)" name={scene.label ?? 'Card'} />
-        <Row label="Title">
-          <TextInput value={scene.title} onCommit={(value) => value.trim() && set('scenes', id, { title: value.trim() }, 'Change title')} testId="card-title" />
-        </Row>
-        <Row label="Subtitle">
-          <TextInput value={scene.subtitle ?? ''} placeholder="none" onCommit={(value) => set('scenes', id, { subtitle: value.trim() || undefined }, 'Change subtitle')} />
-        </Row>
-        {inVideo}
-        <Row label="Length (s)">
-          <NumberInput value={scene.duration} min={0.1} onCommit={(duration) => edit([{ type: 'trim', id, duration }], 'Change the length of the card')} />
-        </Row>
+        <Section title="Text">
+          <Row label="Title">
+            <TextInput value={scene.title} onCommit={(value) => value.trim() && set('scenes', id, { title: value.trim() }, 'Change title')} testId="card-title" />
+          </Row>
+          <Row label="Subtitle">
+            <TextInput value={scene.subtitle ?? ''} placeholder="none" onCommit={(value) => set('scenes', id, { subtitle: value.trim() || undefined }, 'Change subtitle')} />
+          </Row>
+        </Section>
+        {sceneTiming(
+          <Row label="Length" compact>
+            <NumberInput unit="s" value={scene.duration} min={0.1} onCommit={(duration) => edit([{ type: 'trim', id, duration }], 'Change the length of the card')} />
+          </Row>,
+        )}
       </>
     );
   }
 
-  /** An overlay's place: in the video (read), its start in source seconds, its length in the video. */
+  /** An overlay's place: where the video shows it (read) and its length there. */
   const timing = (list: 'zooms' | 'texts' | 'masks' | 'overlays', from: number, to: number) => {
     const stretch = stretchOf(project, selection, from, to);
-    const label = list === 'masks' ? 'mask' : list === 'zooms' ? 'zoom' : list === 'overlays' ? 'motion overlay' : 'caption';
-    const testId = list === 'overlays' ? 'motion' : label;
+    const speed = stretch?.speed ?? 1;
+    const label = NOUNS[list];
     return (
-      <>
-        <Row label="Shows at" note={formatSource(from)}>
+      <Section title="Timing">
+        <Row label="Shows at" readout note={formatSource(from)}>
           {stretch ? span(stretch.start, stretch.end) : 'Nowhere: no clip shows it'}
         </Row>
-        {list === 'masks' ? (
-          <div className="grid2">
-            <Row label="From (take s)">
-              <NumberInput value={from} min={0} onCommit={(value) => set('masks', id, { from: value, to: Math.max(to, value + 0.05) }, 'Move mask')} />
-            </Row>
-            <Row label="To (take s)">
-              <NumberInput value={to} min={0} onCommit={(value) => set('masks', id, { to: value }, 'Change the length of the mask')} />
-            </Row>
-          </div>
-        ) : (
-          <div className="grid2">
-            <Row label="Start (take s)">
-              <NumberInput value={from} min={0} onCommit={(at) => set(list, id, { at }, `Move ${label}`)} testId={`${testId}-at`} />
-            </Row>
-            <Row label="Length (s)" note={stretch && stretch.speed !== 1 ? `${formatDuration(to - from)} src` : undefined}>
-              <NumberInput
-                value={stretch ? (to - from) / stretch.speed : to - from}
-                min={0.05}
-                onCommit={(length) => set(list, id, { duration: length * (stretch?.speed ?? 1) }, `Change the length of the ${label}`)}
-                testId={`${testId}-length`}
-              />
-            </Row>
-          </div>
-        )}
-      </>
+        <Row label="Length" compact note={speed !== 1 ? `${formatDuration(to - from)} of the take, at ${formatSpeed(speed)}` : undefined}>
+          <NumberInput
+            unit="s"
+            value={(to - from) / speed}
+            min={0.05}
+            onCommit={(length) => set(list, id, list === 'masks' ? { to: from + length * speed } : { duration: length * speed }, `Change the length of the ${label}`)}
+            testId={`${list === 'overlays' ? 'motion' : label}-length`}
+          />
+        </Row>
+      </Section>
     );
   };
 
-  const area = (list: 'zooms' | 'masks', rect: Rect, label: string, title = 'Area, in source pixels') => (
-    <div className="field">
-      <span className="field-label">
-        {title}
-        <button type="button" className="link" onClick={() => setTool(list === 'zooms' ? 'zoom' : 'mask')}>
-          Draw on the video
-        </button>
-      </span>
-      <div className="grid4">
-        {(['x', 'y', 'w', 'h'] as const).map((name, i) => (
-          <label key={name} className="field-input">
-            <em>{name}</em>
-            <NumberInput value={rect[i]!} digits={0} step={1} min={i < 2 ? 0 : 8} onCommit={(value) => set(list, id, { rect: rect.map((old, j) => (j === i ? value : old)) }, `Change the ${label} area`)} />
-          </label>
-        ))}
+  /** Where an overlay starts in the take (a mask: where it starts and ends), for Advanced. */
+  const inTake = (list: 'zooms' | 'texts' | 'masks' | 'overlays', from: number, to: number) =>
+    list === 'masks' ? (
+      <div className="grid2">
+        <Row label="From">
+          <NumberInput unit="s" value={from} min={0} onCommit={(value) => set('masks', id, { from: value, to: Math.max(to, value + 0.05) }, 'Move mask')} />
+        </Row>
+        <Row label="To">
+          <NumberInput unit="s" value={to} min={0} onCommit={(value) => set('masks', id, { to: value }, 'Change the length of the mask')} />
+        </Row>
       </div>
-    </div>
+    ) : (
+      <Row label="Start" compact>
+        <NumberInput unit="s" value={from} min={0} onCommit={(at) => set(list, id, { at }, `Move ${NOUNS[list]}`)} testId={`${list === 'overlays' ? 'motion' : NOUNS[list]}-at`} />
+      </Row>
+    );
+
+  /** A zoom's or a mask's area: its size, the tool that draws it again, and the way back from following. */
+  const area = (list: 'zooms' | 'masks', rect: Rect, moves = 0) => (
+    <Section title="Area">
+      <Row label={moves > 0 ? 'Size at the start' : 'Size'} readout>
+        {Math.round(rect[2])} × {Math.round(rect[3])} px
+      </Row>
+      <DrawOn tool={list === 'zooms' ? 'zoom' : 'mask'} />
+      {moves > 0 && (
+        <Row label="Follows the screen" note={`${moves} move${moves === 1 ? '' : 's'}`} plain inline>
+          <button type="button" className="ghost small" onClick={() => set(list, id, { moves: undefined }, `Hold the ${NOUNS[list]} still`)} data-testid={`${NOUNS[list]}-hold`}>
+            Hold still
+          </button>
+        </Row>
+      )}
+    </Section>
   );
 
-  const enabled = (list: 'zooms' | 'masks' | 'texts' | 'overlays', on: boolean, label: string) => (
+  const pixels = (list: 'zooms' | 'masks', rect: Rect) => <AreaFields rect={rect} onCommit={(next) => set(list, id, { rect: next }, `Change the ${NOUNS[list]} area`)} />;
+
+  const enabled = (list: 'zooms' | 'masks' | 'texts' | 'overlays', on: boolean) => (
     <Row label="Show" inline>
       <em>{on ? 'On' : 'Off: kept, not in the video'}</em>
-      <Toggle checked={on} label={`Show the ${label}`} onChange={(value) => set(list, id, { enabled: value ? undefined : false }, value ? `Turn ${label} on` : `Turn ${label} off`)} />
+      <Toggle checked={on} label={`Show the ${NOUNS[list]}`} onChange={(value) => set(list, id, { enabled: value ? undefined : false }, value ? `Turn ${NOUNS[list]} on` : `Turn ${NOUNS[list]} off`)} />
     </Row>
   );
 
@@ -970,18 +1107,17 @@ function Details({ project, selection }: { project: CuttleProject; selection: Se
           <TextInput value={zoom.label ?? ''} placeholder="Zoom" onCommit={(value) => set('zooms', id, { label: value.trim() || undefined }, 'Rename zoom')} />
         </Row>
         {timing('zooms', zoom.at, zoom.at + zoom.duration)}
-        {area('zooms', zoom.rect, 'zoom', zoom.moves?.length ? 'Start, in source pixels' : undefined)}
-        {zoom.moves && zoom.moves.length > 0 && (
-          <Row label="Follows" note={`${zoom.moves.length} move${zoom.moves.length === 1 ? '' : 's'}`} plain>
-            <button type="button" className="ghost small" onClick={() => set('zooms', id, { moves: undefined }, 'Hold the zoom still')} data-testid="zoom-hold">
-              Hold still
-            </button>
+        {area('zooms', zoom.rect, zoom.moves?.length)}
+        <Section title="Movement">
+          <Row label="Easing">
+            <Select value={zoom.ease} options={EASES} names={EASE_NAMES} onChange={(ease) => set('zooms', id, { ease }, 'Change easing')} />
           </Row>
-        )}
-        <Row label="Easing">
-          <Select value={zoom.ease} options={EASES} names={EASE_NAMES} onChange={(ease) => set('zooms', id, { ease }, 'Change easing')} />
-        </Row>
-        {enabled('zooms', zoom.enabled, 'zoom')}
+        </Section>
+        {enabled('zooms', zoom.enabled)}
+        <Advanced note={ADVANCED_NOTE}>
+          {inTake('zooms', zoom.at, zoom.at + zoom.duration)}
+          {pixels('zooms', zoom.rect)}
+        </Advanced>
       </>
     );
   }
@@ -995,18 +1131,17 @@ function Details({ project, selection }: { project: CuttleProject; selection: Se
           <TextInput value={mask.label ?? ''} placeholder="Mask" onCommit={(value) => set('masks', id, { label: value.trim() || undefined }, 'Rename mask')} />
         </Row>
         {timing('masks', mask.from, mask.to)}
-        {area('masks', mask.rect, 'mask', mask.moves?.length ? 'Start, in source pixels' : undefined)}
-        {mask.moves && mask.moves.length > 0 && (
-          <Row label="Follows" note={`${mask.moves.length} move${mask.moves.length === 1 ? '' : 's'}`} plain>
-            <button type="button" className="ghost small" onClick={() => set('masks', id, { moves: undefined }, 'Hold the mask still')} data-testid="mask-hold">
-              Hold still
-            </button>
+        {area('masks', mask.rect, mask.moves?.length)}
+        <Section title="Cover">
+          <Row label="Style">
+            <Select value={mask.style} options={MASK_STYLES} names={MASK_STYLE_NAMES} onChange={(style) => set('masks', id, { style }, 'Change mask style')} />
           </Row>
-        )}
-        <Row label="Style">
-          <Select value={mask.style} options={MASK_STYLES} names={MASK_STYLE_NAMES} onChange={(style) => set('masks', id, { style }, 'Change mask style')} />
-        </Row>
-        {enabled('masks', mask.enabled, 'mask')}
+        </Section>
+        {enabled('masks', mask.enabled)}
+        <Advanced note={ADVANCED_NOTE}>
+          {inTake('masks', mask.from, mask.to)}
+          {pixels('masks', mask.rect)}
+        </Advanced>
       </>
     );
   }
@@ -1021,9 +1156,10 @@ function Details({ project, selection }: { project: CuttleProject; selection: Se
         placement={
           <>
             {timing('overlays', overlay.at, overlay.at + overlay.duration)}
-            {enabled('overlays', overlay.enabled, 'motion overlay')}
+            {enabled('overlays', overlay.enabled)}
           </>
         }
+        advanced={inTake('overlays', overlay.at, overlay.at + overlay.duration)}
       />
     );
   }
@@ -1037,21 +1173,31 @@ function Details({ project, selection }: { project: CuttleProject; selection: Se
         <TextInput value={text.text} multiline onCommit={(value) => value.trim() && set('texts', id, { text: value }, 'Edit caption')} testId="caption-text" />
       </Row>
       {timing('texts', text.at, text.at + text.duration)}
-      <div className="grid2">
-        <Row label="Style">
-          <Select value={text.style} options={TEXT_STYLES} names={TEXT_STYLE_NAMES} onChange={(style) => set('texts', id, { style }, 'Change caption style')} />
+      <Section title="Look">
+        <div className="grid2">
+          <Row label="Style">
+            <Select value={text.style} options={TEXT_STYLES} names={TEXT_STYLE_NAMES} onChange={(style) => set('texts', id, { style }, 'Change caption style')} />
+          </Row>
+          <Row label="Position">
+            <Select value={text.position} options={TEXT_POSITIONS} names={POSITION_NAMES} onChange={(position) => set('texts', id, { position }, 'Move caption')} />
+          </Row>
+        </div>
+      </Section>
+      {enabled('texts', text.enabled)}
+      <Advanced note="Seconds into the take, as cuttle.json has them.">
+        {inTake('texts', text.at, text.at + text.duration)}
+        <Row label="Label" note="its name on the timeline">
+          <TextInput value={text.label ?? ''} placeholder="Caption" onCommit={(value) => set('texts', id, { label: value.trim() || undefined }, 'Rename caption')} />
         </Row>
-        <Row label="Position">
-          <Select value={text.position} options={TEXT_POSITIONS} names={POSITION_NAMES} onChange={(position) => set('texts', id, { position }, 'Move caption')} />
-        </Row>
-      </div>
-      <Row label="Label">
-        <TextInput value={text.label ?? ''} placeholder="Caption" onCommit={(value) => set('texts', id, { label: value.trim() || undefined }, 'Rename caption')} />
-      </Row>
-      {enabled('texts', text.enabled, 'caption')}
+      </Advanced>
     </>
   );
 }
+
+/** What each list's items are called in the names of their changes. */
+const NOUNS = { zooms: 'zoom', masks: 'mask', texts: 'caption', overlays: 'motion overlay' } as const;
+
+const ADVANCED_NOTE = 'Seconds into the take and pixels of the screen, as cuttle.json has them.';
 
 // ---- music and sounds ----------------------------------------------------------------------------
 
@@ -1094,38 +1240,25 @@ function MusicDetails({ music }: { music: Music }) {
     <>
       <Head icon={<SoundIcon />} color="var(--music)" name={`Music · ${motionName(music.src)}`} copies={false} />
       <MusicState status={status} />
-      <div className="field">
-        <span className="field-label">
-          Page
-          <span className="links">
-            <button type="button" className="link" onClick={() => void bridge.invoke('project:reveal', music.src)} title="Show the page's file in its folder">
-              Show file
-            </button>
-            <button type="button" className="link" onClick={() => void bridge.invoke('sound:reload')} title="Render the music again" data-testid="music-reload">
-              Reload
-            </button>
-          </span>
-        </span>
-        <span className="field-input">
-          <span className="path" title={music.src}>
-            {music.src}
-          </span>
-        </span>
-      </div>
-      {summary && <Row label="Made">{summary}</Row>}
-      <Row label="Music" inline>
-        <em>{music.enabled ? 'On' : 'Off'}</em>
-        <Toggle checked={music.enabled} label="Play the music" onChange={(on) => edit([musicEdit({ enabled: on ? undefined : false })], on ? 'Music on' : 'Music off')} testId="music-enabled" />
-      </Row>
-      <Row label={`Volume · ${Math.round(music.volume * 100)} %`}>
-        <RangeInput value={Math.round(music.volume * 100)} min={0} max={100} label="Music volume" toCommand={(value) => musicEdit({ volume: value / 100 })} commitLabel="Music volume" testId="music-volume" />
-      </Row>
-      <Row label={`Under speech · ${music.duck > 0 ? `${music.duck} dB down` : 'stays as it is'}`}>
-        <RangeInput value={music.duck} min={0} max={30} label="How far the music goes down under speech (dB)" toCommand={(value) => musicEdit({ duck: value })} commitLabel="Music under speech" testId="music-duck" />
-      </Row>
+      {summary && (
+        <Row label="Made" readout>
+          {summary}
+        </Row>
+      )}
+      <Section title="Sound">
+        <Row label="Music" inline>
+          <em>{music.enabled ? 'On' : 'Off'}</em>
+          <Toggle checked={music.enabled} label="Play the music" onChange={(on) => edit([musicEdit({ enabled: on ? undefined : false })], on ? 'Music on' : 'Music off')} testId="music-enabled" />
+        </Row>
+        <Row label="Volume">
+          <RangeInput value={Math.round(music.volume * 100)} min={0} max={100} label="Music volume" toCommand={(value) => musicEdit({ volume: value / 100 })} commitLabel="Music volume" testId="music-volume" />
+        </Row>
+        <Row label="Under speech">
+          <RangeInput value={music.duck} min={0} max={30} label="How far the music goes down under speech (dB)" toCommand={(value) => musicEdit({ duck: value })} commitLabel="Music under speech" format={(value) => (value > 0 ? `−${value} dB` : 'as is')} testId="music-duck" />
+        </Row>
+      </Section>
       {declared && (declared.params.length > 0 || declared.issues.length > 0) && (
-        <div className="motion-params" data-testid="music-params">
-          <span className="section-title">Params</span>
+        <Section title="Params" testId="music-params">
           {declared.issues.map((issue) => (
             <p key={issue} className="note warning">
               {issue}
@@ -1134,9 +1267,12 @@ function MusicDetails({ music }: { music: Music }) {
           {declared.params.map((declaration) => (
             <ParamField key={declaration.name} param={declaration} value={declaration.name in values ? values[declaration.name] : declaration.default} set={declaration.name in values} toCommand={(value) => param(declaration.name, value)} />
           ))}
-        </div>
+        </Section>
       )}
       <MotionLog status={{ item: 'music', src: music.src, state: status.state === 'failed' ? 'failed' : 'ready', errors: [...status.errors, ...status.skipped], console: status.console }} />
+      <Advanced>
+        <PageFile src={music.src} reload={() => void bridge.invoke('sound:reload')} testId="music-reload" />
+      </Advanced>
       <p className="hint motion-hint">Claude writes this music for the video: ask it in Claude Code for another mood, tempo or sound. A saved change plays here a moment later.</p>
     </>
   );
@@ -1172,18 +1308,22 @@ function SoundDetails({ project, id }: { project: CuttleProject; id: string }) {
   return (
     <>
       <Head icon={<SoundIcon />} color="var(--sound)" name={sound.label ?? soundName(sound.sound)} />
-      <Row label="Sound" note={BUILT_IN_SOUNDS.find(([name]) => name === sound.sound)?.[1] ?? 'a file of the project'}>
-        <StyledSelect value={sound.sound} options={options.map((name) => ({ value: name, label: soundName(name) }))} onChange={(name) => set('sounds', id, { sound: name }, 'Change sound')} label="Sound" />
-      </Row>
-      <Row label={scene ? `Into ${scene.label ?? 'its scene'} (s)` : 'At (take s)'} note={scene ? undefined : formatSource(sound.at)}>
-        <NumberInput value={sound.at} min={0} step={0.05} onCommit={(at) => set('sounds', id, { at }, 'Move sound')} testId="sound-at" />
-      </Row>
-      <Row label={`Volume · ${Math.round(sound.volume * 100)} %`}>
-        <RangeInput value={Math.round(sound.volume * 100)} min={0} max={100} label="Sound volume" toCommand={(value) => ({ type: 'set', list: 'sounds', id, fields: { volume: value / 100 } })} commitLabel="Sound volume" testId="sound-volume" />
-      </Row>
       <Row label="Label">
         <TextInput value={sound.label ?? ''} placeholder={soundName(sound.sound)} onCommit={(value) => set('sounds', id, { label: value.trim() || undefined }, 'Rename sound')} />
       </Row>
+      <Section title="Sound">
+        <Row label="Sound" note={BUILT_IN_SOUNDS.find(([name]) => name === sound.sound)?.[1] ?? 'a file of the project'}>
+          <StyledSelect value={sound.sound} options={options.map((name) => ({ value: name, label: soundName(name) }))} onChange={(name) => set('sounds', id, { sound: name }, 'Change sound')} label="Sound" />
+        </Row>
+        <Row label="Volume">
+          <RangeInput value={Math.round(sound.volume * 100)} min={0} max={100} label="Sound volume" toCommand={(value) => ({ type: 'set', list: 'sounds', id, fields: { volume: value / 100 } })} commitLabel="Sound volume" testId="sound-volume" />
+        </Row>
+      </Section>
+      <Section title="Timing">
+        <Row label={scene ? `Into ${scene.label ?? 'its scene'}` : 'At, in the take'} compact note={scene ? undefined : formatSource(sound.at)}>
+          <NumberInput unit="s" value={sound.at} min={0} step={0.05} onCommit={(at) => set('sounds', id, { at }, 'Move sound')} testId="sound-at" />
+        </Row>
+      </Section>
       <Row label="In the video" inline>
         <em>{sound.enabled ? 'On' : 'Off'}</em>
         <Toggle checked={sound.enabled} label="Play the sound" onChange={(on) => set('sounds', id, { enabled: on ? undefined : false }, on ? 'Sound on' : 'Sound off')} testId="sound-enabled" />
@@ -1217,7 +1357,7 @@ const BLUR_SAMPLES = ['4', '8', '16', '32'] as const;
  * A motion scene or overlay: its page and how it is doing in the preview (what it threw, its
  * console), its place (`placement`), the params its page declares, the internet and motion blur.
  */
-function MotionDetails({ list, index, item, placement }: { list: 'scenes' | 'overlays'; index: number; item: MotionScene | MotionOverlay; placement: ReactNode }) {
+function MotionDetails({ list, index, item, placement, advanced }: { list: 'scenes' | 'overlays'; index: number; item: MotionScene | MotionOverlay; placement: ReactNode; advanced?: ReactNode }) {
   const id = item.id!;
   const name = `${list}[${index}]`;
   const status = useStore(store, (state) => state.motionStatus.find((entry) => entry.item === name && entry.src === item.src));
@@ -1232,52 +1372,60 @@ function MotionDetails({ list, index, item, placement }: { list: 'scenes' | 'ove
       <Row label="Label">
         <TextInput value={item.label ?? ''} placeholder={motionName(item.src)} onCommit={(value) => set(list, id, { label: value.trim() || undefined }, `Rename ${noun}`)} testId="motion-label" />
       </Row>
-      <div className="field">
-        <span className="field-label">
-          Page
-          <span className="links">
-            <button type="button" className="link" onClick={() => void bridge.invoke('project:reveal', item.src)} title="Show the page's file in its folder">
-              Show file
-            </button>
-            <button type="button" className="link" onClick={() => void bridge.invoke('motion:reload', name)} title="Load the page again" data-testid="motion-reload">
-              Reload
-            </button>
-          </span>
-        </span>
-        <span className="field-input">
-          <span className="path" title={item.src}>
-            {item.src}
-          </span>
-        </span>
-      </div>
       {placement}
       {declared && <MotionParamFields list={list} id={id} item={item} declared={declared} />}
-      <Row label="Internet" inline>
-        <em title={item.network ? 'The page may load fonts, images and data from https: addresses' : 'The page reaches only the project folder and the motion kit'}>{item.network ? 'On' : 'Off'}</em>
-        <Toggle checked={item.network} label="Let the page load from the internet" onChange={(on) => set(list, id, { network: on || undefined }, on ? 'Let the page load from the internet' : 'Keep the page offline')} testId="motion-network" />
-      </Row>
-      <Row label="Motion blur" inline>
-        <em title="Each frame is the average of moments while a shutter would be open: smooth fast motion, drawn that many times (slower)">{blur ? 'On' : 'Off'}</em>
-        <Toggle checked={!!blur} label="Motion blur" onChange={(on) => set(list, id, { motionBlur: on ? { samples: 8, shutter: 0.5 } : undefined }, on ? 'Motion blur on' : 'Motion blur off')} testId="motion-blur" />
-      </Row>
-      {blur && (
-        <div className="grid2">
-          <Row label="Samples">
-            <StyledSelect
-              value={String(blur.samples)}
-              options={[...new Set([...BLUR_SAMPLES, String(blur.samples)])].map((samples) => ({ value: samples, label: samples }))}
-              onChange={(samples) => set(list, id, { motionBlur: { ...blur, samples: Number(samples) } }, 'Change motion blur')}
-              label="Samples"
-            />
-          </Row>
-          <Row label="Shutter" note="of a frame">
-            <NumberInput value={blur.shutter} min={0.05} max={1} step={0.05} onCommit={(shutter) => set(list, id, { motionBlur: { ...blur, shutter } }, 'Change motion blur')} />
-          </Row>
-        </div>
-      )}
       <MotionLog status={status} />
+      <Advanced>
+        {advanced}
+        <PageFile src={item.src} reload={() => void bridge.invoke('motion:reload', name)} testId="motion-reload" />
+        <Row label="Internet" inline note={item.network ? 'the page may load fonts, images and data from https: addresses' : 'the page reaches only the project folder and the motion kit'}>
+          <Toggle checked={item.network} label="Let the page load from the internet" onChange={(on) => set(list, id, { network: on || undefined }, on ? 'Let the page load from the internet' : 'Keep the page offline')} testId="motion-network" />
+        </Row>
+        <Row label="Motion blur" inline note="each frame the average of moments while a shutter is open: smoother fast motion, slower to draw">
+          <Toggle checked={!!blur} label="Motion blur" onChange={(on) => set(list, id, { motionBlur: on ? { samples: 8, shutter: 0.5 } : undefined }, on ? 'Motion blur on' : 'Motion blur off')} testId="motion-blur" />
+        </Row>
+        {blur && (
+          <div className="grid2">
+            <Row label="Samples">
+              <StyledSelect
+                value={String(blur.samples)}
+                options={[...new Set([...BLUR_SAMPLES, String(blur.samples)])].map((samples) => ({ value: samples, label: samples }))}
+                onChange={(samples) => set(list, id, { motionBlur: { ...blur, samples: Number(samples) } }, 'Change motion blur')}
+                label="Samples"
+              />
+            </Row>
+            <Row label="Shutter" note="of a frame">
+              <NumberInput value={blur.shutter} min={0.05} max={1} step={0.05} onCommit={(shutter) => set(list, id, { motionBlur: { ...blur, shutter } }, 'Change motion blur')} />
+            </Row>
+          </div>
+        )}
+      </Advanced>
       <p className="hint motion-hint">Claude can change this page or write a new one: ask it in Claude Code. Each saved change shows here at once.</p>
     </>
+  );
+}
+
+/** A page's file (a motion item's or the music's): its path, the folder it is in, and loading it again. */
+function PageFile({ src, reload, testId }: { src: string; reload: () => void; testId: string }) {
+  return (
+    <div className="field">
+      <span className="field-label">
+        Page
+        <span className="links">
+          <button type="button" className="link" onClick={() => void bridge.invoke('project:reveal', src)} title="Show the page's file in its folder">
+            Show file
+          </button>
+          <button type="button" className="link" onClick={reload} title="Load the page again" data-testid={testId}>
+            Reload
+          </button>
+        </span>
+      </span>
+      <span className="field-input">
+        <span className="path" title={src}>
+          {src}
+        </span>
+      </span>
+    </div>
   );
 }
 
@@ -1334,8 +1482,7 @@ function MotionParamFields({ list, id, item, declared }: { list: 'scenes' | 'ove
   const others = Object.keys(values).filter((name) => !declared.params.some((param) => param.name === name));
   if (declared.params.length === 0 && others.length === 0 && declared.issues.length === 0) return null;
   return (
-    <div className="motion-params" data-testid="motion-params">
-      <span className="section-title">Params</span>
+    <Section title="Params" testId="motion-params">
       {declared.issues.map((issue) => (
         <p key={issue} className="note warning">
           {issue}
@@ -1360,7 +1507,7 @@ function MotionParamFields({ list, id, item, declared }: { list: 'scenes' | 'ove
           />
         </Row>
       ))}
-    </div>
+    </Section>
   );
 }
 
@@ -1394,12 +1541,17 @@ function ParamField({ param, value, set: isSet, toCommand }: { param: ParamDecla
               key={number}
               type="range"
               className="range"
+              style={fill(number, min, max)}
               min={min}
               max={max}
               step={(max - min) / 200}
               defaultValue={number}
               aria-label={param.label}
-              onInput={(event) => preview([toCommand(Number((event.target as HTMLInputElement).value))])}
+              onInput={(event) => {
+                const target = event.target as HTMLInputElement;
+                target.style.setProperty('--fill', fillOf(Number(target.value), min, max));
+                preview([toCommand(Number(target.value))]);
+              }}
               onChange={(event) => {
                 preview(undefined);
                 commit(Number(event.target.value));
@@ -1476,9 +1628,9 @@ const caption = (field: 'enabled' | 'style' | 'position' | 'size' | 'color', val
  * once the picker closes (its native change), not one per move. It sets `look.<path>`, or what
  * `toCommand` makes of the colour.
  */
-function ColorInput({ value, path = [], label, upper, toCommand }: { value: string; path?: string[]; label: string; upper?: boolean; toCommand?: (colour: string) => Command }) {
+function ColorInput({ value, path = [], label, upper, toCommand, hex }: { value: string; path?: string[]; label: string; upper?: boolean; toCommand?: (colour: string) => Command; hex?: boolean }) {
   const input = useRef<HTMLInputElement>(null);
-  const shape = (colour: string) => (upper ? colour.toUpperCase() : colour);
+  const shape = (colour: string) => (upper ? colour.toUpperCase() : colour.toLowerCase());
   const command = (colour: string): Command => toCommand?.(colour) ?? ({ type: 'look', path, value: colour } as Command);
   useEffect(() => {
     const element = input.current;
@@ -1491,7 +1643,7 @@ function ColorInput({ value, path = [], label, upper, toCommand }: { value: stri
     return () => element.removeEventListener('change', commit);
   }, [path.join('.'), label, upper]);
   // uncontrolled while it is picked: a new version of the look resets it (`key`)
-  return (
+  const well = (
     <input
       key={value}
       ref={input}
@@ -1499,6 +1651,46 @@ function ColorInput({ value, path = [], label, upper, toCommand }: { value: stri
       defaultValue={value.toLowerCase()}
       onInput={(event) => preview([command(shape((event.target as HTMLInputElement).value))])}
       aria-label={label}
+    />
+  );
+  if (!hex) return well;
+  return (
+    <span className="color-field">
+      {well}
+      <HexInput value={value} label={label} onCommit={(colour) => edit([command(shape(colour))], label)} />
+    </span>
+  );
+}
+
+/** A colour typed as hex (#RRGGBB, or #RGB): saved when left or on Enter if it is one, else put back. */
+function HexInput({ value, label, onCommit }: { value: string; label: string; onCommit: (colour: string) => void }) {
+  const shown = value.toUpperCase();
+  const [draft, setDraft] = useState(shown);
+  useEffect(() => setDraft(shown), [shown]);
+  const commit = () => {
+    const digits = draft.trim().replace(/^#/, '');
+    const full = /^[0-9a-f]{3}$/i.test(digits) ? [...digits].map((digit) => digit + digit).join('') : digits;
+    if (/^[0-9a-f]{6}$/i.test(full) && `#${full}`.toLowerCase() !== value.toLowerCase()) onCommit(`#${full}`);
+    else setDraft(shown);
+  };
+  return (
+    <input
+      type="text"
+      className="hex"
+      value={draft}
+      maxLength={7}
+      spellCheck={false}
+      aria-label={`${label} (hex)`}
+      onChange={(event) => setDraft(event.target.value)}
+      onBlur={commit}
+      onKeyDown={(event) => {
+        event.stopPropagation();
+        if (event.key === 'Enter') commit();
+        if (event.key === 'Escape') {
+          setDraft(shown);
+          (event.target as HTMLInputElement).blur();
+        }
+      }}
     />
   );
 }
@@ -1523,23 +1715,40 @@ const LOOK_PARTS: { id: LookSection; title: string; icon: ComponentType<{ size?:
 ];
 
 /**
- * One part of the look: a line with its name and what it is now; a click opens it (one part at a
- * time), so the whole look reads at a glance and only one part's fields show.
+ * One part of the look: its name and, under it, what it is now; a click opens it (one part at a
+ * time) and closes it again, so the whole look reads at a glance and only one part's fields show.
+ * A part that can be off has its switch in its head: switched on, it opens.
  */
-function LookPart({ id, summary, children }: { id: LookSection; summary: string; children: ReactNode }) {
+function LookPart({ id, summary, children, on }: { id: LookSection; summary: string; children: ReactNode; on?: { checked: boolean; label: string; onChange: (on: boolean) => void; testId?: string; disabled?: boolean } }) {
   const open = useStore(store, (state) => state.lookSection === id);
   const part = LOOK_PARTS.find((item) => item.id === id)!;
   const Icon = part.icon;
   return (
-    <section className={`look-part${open ? ' open' : ''}`} data-testid={`look-${id}`}>
-      <button type="button" className="look-head" aria-expanded={open} onClick={() => store.set({ lookSection: id })} data-testid={`look-open-${id}`}>
-        <Icon size={16} />
-        <b>{part.title}</b>
-        <span className="look-summary" title={summary}>
-          {summary}
-        </span>
-        <ChevronIcon size={13} />
-      </button>
+    <section className={`look-part${open ? ' open' : ''}${on && !on.checked ? ' off' : ''}`} data-testid={`look-${id}`}>
+      <div className="look-top">
+        <button type="button" className="look-head" aria-expanded={open} onClick={() => store.set({ lookSection: open ? undefined : id })} data-testid={`look-open-${id}`}>
+          <Icon size={16} />
+          <span className="look-text">
+            <b>{part.title}</b>
+            <span className="look-summary" title={summary}>
+              {summary}
+            </span>
+          </span>
+          <ChevronIcon size={13} />
+        </button>
+        {on && (
+          <Toggle
+            checked={on.checked}
+            label={on.label}
+            disabled={on.disabled}
+            testId={on.testId}
+            onChange={(checked) => {
+              on.onChange(checked);
+              if (checked) store.set({ lookSection: id });
+            }}
+          />
+        )}
+      </div>
       {open && <div className="look-body">{children}</div>}
     </section>
   );
@@ -1646,17 +1855,17 @@ function BrandFields({ project }: { project: CuttleProject }) {
       </Row>
       <div className="grid2">
         <Row label="Accent" note={theme.accent ? undefined : 'the cursor’s colour'}>
-          <ColorInput value={theme.accent ?? current.cursor.color} label="Accent colour" upper toCommand={(accent) => ({ type: 'theme', fields: { accent } })} />
+          <ColorInput value={theme.accent ?? current.cursor.color} label="Accent colour" upper hex toCommand={(accent) => ({ type: 'theme', fields: { accent } })} />
         </Row>
         <Row label="Text">
-          <ColorInput value={theme.foreground} label="Text colour" upper toCommand={(foreground) => ({ type: 'theme', fields: { foreground } })} />
+          <ColorInput value={theme.foreground} label="Text colour" upper hex toCommand={(foreground) => ({ type: 'theme', fields: { foreground } })} />
         </Row>
       </div>
       <Row label="Headings">
         <StyledSelect value={theme.font} options={THEME_FONTS.map((font) => ({ value: font, label: font, note: FONT_NOTES[font] }))} onChange={(font) => setTheme({ font }, `Headings: ${font}`)} label="Heading font" testId="brand-font" />
       </Row>
       <Row label="Pages’ background" note={theme.background ? undefined : 'a dark tone of the background'}>
-        <ColorInput value={theme.background ?? backgroundTone(current.background)} label="Pages’ background" upper toCommand={(background) => ({ type: 'theme', fields: { background } })} />
+        <ColorInput value={theme.background ?? backgroundTone(current.background)} label="Pages’ background" upper hex toCommand={(background) => ({ type: 'theme', fields: { background } })} />
         {theme.background && (
           <button type="button" className="ghost small" onClick={() => setTheme({ background: undefined }, 'Pages’ background from the background')}>
             Reset
@@ -1735,12 +1944,10 @@ function WatermarkFields({ project }: { project: CuttleProject }) {
   const { watermark } = project.look;
   const { theme } = project;
   const image = watermark.image ?? theme.logo;
+  if (!watermark.enabled) return <p className="hint">Off. Switched on, the logo or the brand’s name shows in a corner of the whole video.</p>;
   return (
     <>
-      <Row label="Watermark" inline note="over the whole video">
-        <Toggle checked={watermark.enabled} label="Watermark" onChange={(on) => look(['watermark', 'enabled'], on, on ? 'Watermark on' : 'Watermark off')} testId="watermark-enabled" />
-      </Row>
-      {watermark.enabled && (
+      {(
         <>
           <Row label="Image" plain>
             {image ? (
@@ -1767,18 +1974,14 @@ function WatermarkFields({ project }: { project: CuttleProject }) {
               <TextInput value={watermark.text ?? ''} placeholder={theme.name || 'the brand’s name'} onCommit={(text) => look(['watermark', 'text'], text.trim() || undefined, 'Watermark text')} testId="watermark-text" />
             </Row>
           )}
-          <div className="chips" role="group" aria-label="Watermark corner">
-            {WEBCAM_CORNERS.map((corner) => (
-              <button key={corner} type="button" className="chip" aria-pressed={watermark.corner === corner} onClick={() => look(['watermark', 'corner'], corner, `Watermark: ${CORNER_NAMES[corner].toLowerCase()}`)} data-testid={`watermark-${corner}`}>
-                {CORNER_NAMES[corner]}
-              </button>
-            ))}
-          </div>
+          <Row label="Corner" plain inline note={CORNER_NAMES[watermark.corner]}>
+            <CornerPicker label="Watermark corner" value={watermark.corner} onPick={(corner) => look(['watermark', 'corner'], corner, `Watermark: ${CORNER_NAMES[corner].toLowerCase()}`)} testId="watermark" />
+          </Row>
           <div className="grid2">
-            <Row label={`Size · ${Math.round(watermark.size * 100)} %`}>
+            <Row label="Size">
               <RangeInput value={Math.round(watermark.size * 100)} min={2} max={30} label="Watermark size" toCommand={(value) => ({ type: 'look', path: ['watermark', 'size'], value: value / 100 }) as Command} commitLabel="Watermark size" testId="watermark-size" />
             </Row>
-            <Row label={`Opacity · ${Math.round(watermark.opacity * 100)} %`}>
+            <Row label="Opacity">
               <RangeInput value={Math.round(watermark.opacity * 100)} min={10} max={100} label="Watermark opacity" toCommand={(value) => ({ type: 'look', path: ['watermark', 'opacity'], value: value / 100 }) as Command} commitLabel="Watermark opacity" testId="watermark-opacity" />
             </Row>
           </div>
@@ -1838,7 +2041,7 @@ function LookPanel() {
         <BrandFields project={project} />
       </LookPart>
 
-      <LookPart id="watermark" summary={summaries.watermark}>
+      <LookPart id="watermark" summary={summaries.watermark} on={{ checked: current.watermark.enabled, label: 'Watermark', onChange: (on) => look(['watermark', 'enabled'], on, on ? 'Watermark on' : 'Watermark off'), testId: 'watermark-enabled' }}>
         <WatermarkFields project={project} />
       </LookPart>
 
@@ -1861,7 +2064,7 @@ function LookPanel() {
         </div>
         {current.background.preset === 'solid' && (
           <Row label="Colour">
-            <ColorInput value={current.background.color ?? SOLID_DEFAULT} path={['background', 'color']} label="Background colour" />
+            <ColorInput value={current.background.color ?? SOLID_DEFAULT} path={['background', 'color']} label="Background colour" hex />
           </Row>
         )}
         {current.background.preset === 'image' && current.background.image && (
@@ -1875,7 +2078,7 @@ function LookPanel() {
               </button>
             </Row>
             <div className="grid2">
-              <Row label={`Soft · ${Math.round((current.background.blur ?? 0) * 100)} %`}>
+              <Row label="Soft">
                 <RangeInput
                   value={Math.round((current.background.blur ?? 0) * 100)}
                   min={0}
@@ -1886,7 +2089,7 @@ function LookPanel() {
                   testId="bg-blur"
                 />
               </Row>
-              <Row label={`Darker · ${Math.round((current.background.dim ?? 0) * 100)} %`}>
+              <Row label="Darker">
                 <RangeInput
                   value={Math.round((current.background.dim ?? 0) * 100)}
                   min={0}
@@ -1903,8 +2106,8 @@ function LookPanel() {
         {isColouredBackground(current.background.preset) && <BackgroundColors background={current.background} logo={Boolean(project.theme.logo)} />}
         {current.background.preset === 'gradient' && (
           <div className="grid2">
-            <Row label="Angle (°)" note={current.background.kind === 'radial' ? 'radial: none' : undefined}>
-              <NumberInput value={current.background.angle ?? 135} min={0} max={360} step={15} digits={0} onCommit={(angle) => look(['background', 'angle'], angle, 'Gradient angle')} testId="bg-angle" />
+            <Row label="Angle" note={current.background.kind === 'radial' ? 'radial: none' : undefined}>
+              <NumberInput unit="°" value={current.background.angle ?? 135} min={0} max={360} step={15} digits={0} onCommit={(angle) => look(['background', 'angle'], angle, 'Gradient angle')} testId="bg-angle" />
             </Row>
             <Row label="Shape" plain>
               <div className="seg" role="group" aria-label="Gradient shape">
@@ -1925,10 +2128,8 @@ function LookPanel() {
         </Row>
       </LookPart>
 
-      <LookPart id="window" summary={summaries.window}>
-        <Row label="Frame" inline>
-          <Toggle checked={current.frame.enabled} label="Window frame" onChange={(on) => look(['frame', 'enabled'], on, on ? 'Window frame on' : 'Window frame off')} />
-        </Row>
+      <LookPart id="window" summary={summaries.window} on={{ checked: current.frame.enabled, label: 'Window frame', onChange: (on) => look(['frame', 'enabled'], on, on ? 'Window frame on' : 'Window frame off') }}>
+        {!current.frame.enabled && <p className="hint">No frame: the take shows as it was recorded. Switched on, it gets a window around it.</p>}
         {current.frame.enabled && (
           <>
             <PictureSwatches
@@ -1944,8 +2145,8 @@ function LookPanel() {
               <TextInput value={current.frame.title} placeholder="none" onCommit={(title) => look(['frame', 'title'], title, 'Frame title')} />
             </Row>
             <div className="grid2">
-              <Row label="Corners (px)">
-                <NumberInput value={current.frame.radius} min={0} max={48} step={1} digits={0} onCommit={(radius) => look(['frame', 'radius'], radius, 'Frame corners')} />
+              <Row label="Corners">
+                <NumberInput unit="px" value={current.frame.radius} min={0} max={48} step={1} digits={0} onCommit={(radius) => look(['frame', 'radius'], radius, 'Frame corners')} />
               </Row>
               <Row label="Shadow" inline>
                 <Toggle checked={current.frame.shadow} label="Shadow" onChange={(on) => look(['frame', 'shadow'], on, on ? 'Shadow on' : 'Shadow off')} />
@@ -1955,10 +2156,8 @@ function LookPanel() {
         )}
       </LookPart>
 
-      <LookPart id="cursor" summary={summaries.cursor}>
-        <Row label="Cursor" inline>
-          <Toggle checked={current.cursor.enabled} label="Cursor" onChange={(on) => look(['cursor', 'enabled'], on, on ? 'Cursor on' : 'Cursor off')} />
-        </Row>
+      <LookPart id="cursor" summary={summaries.cursor} on={{ checked: current.cursor.enabled, label: 'Cursor', onChange: (on) => look(['cursor', 'enabled'], on, on ? 'Cursor on' : 'Cursor off') }}>
+        {!current.cursor.enabled && <p className="hint">Hidden: the video shows no pointer.</p>}
         {current.cursor.enabled && (
           <>
             <PictureSwatches
@@ -1973,10 +2172,10 @@ function LookPanel() {
             />
             <div className="grid2">
               <Row label="Size">
-                <NumberInput value={current.cursor.size} min={0.5} max={4} step={0.25} onCommit={(value) => look(['cursor', 'size'], value, 'Cursor size')} />
+                <NumberInput unit="×" value={current.cursor.size} min={0.5} max={4} step={0.25} onCommit={(value) => look(['cursor', 'size'], value, 'Cursor size')} />
               </Row>
               <Row label="Colour">
-                <ColorInput value={current.cursor.color} path={['cursor', 'color']} label="Cursor colour" upper />
+                <ColorInput value={current.cursor.color} path={['cursor', 'color']} label="Cursor colour" upper hex />
               </Row>
             </div>
             <Row label="Clicks">
@@ -1989,17 +2188,22 @@ function LookPanel() {
         )}
       </LookPart>
 
-      <LookPart id="camera" summary={summaries.camera}>
-        <Row label="Bubble" inline note={sources.webcam ? undefined : 'no webcam in this take'}>
-          <Toggle checked={webcam.enabled} disabled={!sources.webcam} label="Webcam bubble" onChange={(on) => look(['webcam', 'enabled'], on, on ? 'Webcam on' : 'Webcam off')} testId="webcam-enabled" />
-        </Row>
-        {webcam.enabled && sources.webcam && <CameraFields webcam={webcam} />}
+      <LookPart
+        id="camera"
+        summary={summaries.camera}
+        on={{ checked: webcam.enabled && Boolean(sources.webcam), disabled: !sources.webcam, label: 'Webcam bubble', onChange: (on) => look(['webcam', 'enabled'], on, on ? 'Webcam on' : 'Webcam off'), testId: 'webcam-enabled' }}
+      >
+        {!sources.webcam ? (
+          <p className="hint">No webcam in this take: choose a camera before recording the next one.</p>
+        ) : webcam.enabled ? (
+          <CameraFields webcam={webcam} />
+        ) : (
+          <p className="hint">Off. Switched on, the webcam shows as a bubble over the video.</p>
+        )}
       </LookPart>
 
-      <LookPart id="subtitles" summary={summaries.subtitles}>
-        <Row label="Subtitles" inline note={sources.transcript ? undefined : 'the take is not transcribed yet'}>
-          <Toggle checked={captions.enabled} label="Subtitles" onChange={(on) => caption('enabled', on, on ? 'Subtitles on' : 'Subtitles off')} testId="captions-enabled" />
-        </Row>
+      <LookPart id="subtitles" summary={summaries.subtitles} on={{ checked: captions.enabled, label: 'Subtitles', onChange: (on) => caption('enabled', on, on ? 'Subtitles on' : 'Subtitles off'), testId: 'captions-enabled' }}>
+        {!captions.enabled && <p className="hint">{sources.transcript ? 'Off. Switched on, what is said shows under the video, word by word.' : 'The take is not transcribed yet: the Transcript tab makes the words the subtitles show.'}</p>}
         {captions.enabled && (
           <>
             <div className="grid2">
@@ -2012,11 +2216,11 @@ function LookPanel() {
             </div>
             <div className="grid2">
               <Row label="Size">
-                <NumberInput value={captions.size} min={0.5} max={2} step={0.1} onCommit={(size) => caption('size', size, 'Subtitles size')} testId="captions-size" />
+                <NumberInput unit="×" value={captions.size} min={0.5} max={2} step={0.1} onCommit={(size) => caption('size', size, 'Subtitles size')} testId="captions-size" />
               </Row>
               {captions.style !== 'subtitle' && (
                 <Row label="Spoken word">
-                  <ColorInput value={captions.color} label="Spoken word colour" upper toCommand={(color) => ({ type: 'captions', field: 'color', value: color })} />
+                  <ColorInput value={captions.color} label="Spoken word colour" upper hex toCommand={(color) => ({ type: 'captions', field: 'color', value: color })} />
                 </Row>
               )}
             </div>
@@ -2024,10 +2228,8 @@ function LookPanel() {
         )}
       </LookPart>
 
-      <LookPart id="sound" summary={summaries.sound}>
-        <Row label="Sound" inline note="the mic, the music and the sounds">
-          <Toggle checked={current.audio.enabled} label="Sound" onChange={(on) => look(['audio', 'enabled'], on, on ? 'Sound on' : 'Sound off')} />
-        </Row>
+      <LookPart id="sound" summary={summaries.sound} on={{ checked: current.audio.enabled, label: 'Sound', onChange: (on) => look(['audio', 'enabled'], on, on ? 'Sound on' : 'Sound off') }}>
+        {!current.audio.enabled && <p className="hint">Muted: the video has no sound, neither the mic nor the music nor the sounds.</p>}
         {current.audio.enabled && sources.cleanMic && (
           <Row label="Clean voice" inline note="less noise">
             <Toggle checked={current.audio.cleanup} label="Clean voice" onChange={(on) => look(['audio', 'cleanup'], on, on ? 'Clean voice on' : 'Clean voice off')} testId="audio-cleanup" />
@@ -2039,7 +2241,7 @@ function LookPanel() {
           </Row>
         )}
         {current.audio.enabled && current.audio.typing && (
-          <Row label={`Typing volume · ${Math.round(current.audio.typingVolume * 100)} %`}>
+          <Row label="Typing volume">
             <RangeInput
               value={Math.round(current.audio.typingVolume * 100)}
               min={0}
@@ -2057,7 +2259,7 @@ function LookPanel() {
           </Row>
         )}
         {current.audio.enabled && current.audio.effects && (
-          <Row label={`Sounds volume · ${Math.round(current.audio.effectsVolume * 100)} %`}>
+          <Row label="Sounds volume">
             <RangeInput
               value={Math.round(current.audio.effectsVolume * 100)}
               min={0}
@@ -2101,8 +2303,8 @@ function LookPanel() {
           <Toggle checked={current.transition.enabled} label="Crossfade at cuts" onChange={(on) => look(['transition', 'enabled'], on, on ? 'Crossfade on' : 'Crossfade off')} />
         </Row>
         {current.transition.enabled && (
-          <Row label="Length (s)">
-            <NumberInput value={current.transition.duration} min={0} max={2} step={0.1} onCommit={(value) => look(['transition', 'duration'], value, 'Crossfade length')} />
+          <Row label="Length" compact>
+            <NumberInput unit="s" value={current.transition.duration} min={0} max={2} step={0.1} onCommit={(value) => look(['transition', 'duration'], value, 'Crossfade length')} />
           </Row>
         )}
       </LookPart>
@@ -2126,25 +2328,15 @@ function CameraFields({ webcam }: { webcam: CuttleProject['look']['webcam'] }) {
           </button>
         ))}
       </div>
-      <Row label="Place" plain note={webcam.position ? 'moved; a corner puts it back' : 'or drag it on the video'}>
-        <div className="corner-picker" role="group" aria-label="Camera corner">
-          {WEBCAM_CORNERS.map((corner) => (
-            <button
-              key={corner}
-              type="button"
-              className={corner}
-              aria-pressed={!webcam.position && webcam.corner === corner}
-              title={CORNER_NAMES[corner]}
-              aria-label={CORNER_NAMES[corner]}
-              onClick={() => edit([{ type: 'look', path: ['webcam', 'corner'], value: corner } as Command, { type: 'look', path: ['webcam', 'position'], value: undefined } as Command], `Camera: ${CORNER_NAMES[corner].toLowerCase()}`)}
-              data-testid={`webcam-corner-${corner}`}
-            >
-              <i />
-            </button>
-          ))}
-        </div>
+      <Row label="Place" plain inline note={webcam.position ? 'moved; a corner puts it back' : `${CORNER_NAMES[webcam.corner]}, or drag it on the video`}>
+        <CornerPicker
+          label="Camera corner"
+          value={webcam.position ? undefined : webcam.corner}
+          onPick={(corner) => edit([{ type: 'look', path: ['webcam', 'corner'], value: corner } as Command, { type: 'look', path: ['webcam', 'position'], value: undefined } as Command], `Camera: ${CORNER_NAMES[corner].toLowerCase()}`)}
+          testId="webcam-corner"
+        />
       </Row>
-      <Row label={`Size · ${Math.round(webcam.size * 100)} %`}>
+      <Row label="Size">
         <RangeInput value={Math.round(webcam.size * 100)} min={8} max={50} label="Camera size" toCommand={(value) => ({ type: 'look', path: ['webcam', 'size'], value: value / 100 }) as Command} commitLabel="Camera size" testId="webcam-size" />
       </Row>
       <div className="chips" role="group" aria-label="Camera details">
@@ -2165,24 +2357,72 @@ function CameraFields({ webcam }: { webcam: CuttleProject['look']['webcam'] }) {
   );
 }
 
-/** A slider: the video follows it while it is dragged (a preview), one edit when it is let go. */
-function RangeInput({ value, min, max, label, toCommand, commitLabel, testId }: { value: number; min: number; max: number; label: string; toCommand: (value: number) => Command; commitLabel: string; testId?: string }) {
+/** How far a slider's track is filled (its `--fill`). */
+const fillOf = (value: number, min: number, max: number) => `${max > min ? ((value - min) / (max - min)) * 100 : 0}%`;
+const fill = (value: number, min: number, max: number) => ({ '--fill': fillOf(value, min, max) }) as CSSProperties;
+
+/** The four corners as a small picture of the video, the chosen one lit; each button's test id is `testId-corner`. */
+function CornerPicker({ label, value, onPick, testId }: { label: string; value?: (typeof WEBCAM_CORNERS)[number]; onPick: (corner: (typeof WEBCAM_CORNERS)[number]) => void; testId: string }) {
   return (
-    <input
-      key={value}
-      type="range"
-      className="range"
-      min={min}
-      max={max}
-      step={1}
-      defaultValue={value}
-      aria-label={label}
-      onInput={(event) => preview([toCommand(Number((event.target as HTMLInputElement).value))])}
-      onChange={(event) => {
-        preview(undefined);
-        edit([toCommand(Number(event.target.value))], commitLabel);
-      }}
-      data-testid={testId}
-    />
+    <div className="corner-picker" role="group" aria-label={label}>
+      {WEBCAM_CORNERS.map((corner) => (
+        <button key={corner} type="button" className={corner} aria-pressed={value === corner} title={CORNER_NAMES[corner]} aria-label={CORNER_NAMES[corner]} onClick={() => onPick(corner)} data-testid={`${testId}-${corner}`}>
+          <i />
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * A slider with its value beside it: the video and the value follow it while it is dragged (a
+ * preview), one edit when it is let go.
+ */
+function RangeInput({
+  value,
+  min,
+  max,
+  label,
+  toCommand,
+  commitLabel,
+  testId,
+  format = (shown) => `${shown} %`,
+}: {
+  value: number;
+  min: number;
+  max: number;
+  label: string;
+  toCommand: (value: number) => Command;
+  commitLabel: string;
+  testId?: string;
+  format?: (value: number) => string;
+}) {
+  const [shown, setShown] = useState(value);
+  useEffect(() => setShown(value), [value]);
+  return (
+    <span className="range-field">
+      <input
+        key={value}
+        type="range"
+        className="range"
+        style={fill(shown, min, max)}
+        min={min}
+        max={max}
+        step={1}
+        defaultValue={value}
+        aria-label={label}
+        onInput={(event) => {
+          const next = Number((event.target as HTMLInputElement).value);
+          setShown(next);
+          preview([toCommand(next)]);
+        }}
+        onChange={(event) => {
+          preview(undefined);
+          edit([toCommand(Number(event.target.value))], commitLabel);
+        }}
+        data-testid={testId}
+      />
+      <output>{format(shown)}</output>
+    </span>
   );
 }

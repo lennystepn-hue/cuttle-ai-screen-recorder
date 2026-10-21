@@ -355,20 +355,6 @@ button.chip-status:hover {
   grid-template-columns: 1fr 1fr;
   gap: 8px 12px;
 }
-/* the transition a scene is gone into with: a part of its panel */
-.transition-in {
-  display: grid;
-  gap: 10px;
-  padding-top: 12px;
-  border-top: 1px solid var(--line);
-  justify-items: start;
-}
-.transition-in > * {
-  justify-self: stretch;
-}
-.transition-in > button {
-  justify-self: start;
-}
 .hint {
   color: var(--muted);
   font-size: var(--size-s);
@@ -387,29 +373,58 @@ button.chip-status:hover {
 .look-part.open {
   border-color: var(--line-strong);
 }
+/* its head: the part's name, what it is now under it, the chevron; a switch, when it can be off, sits
+   over the head's right end, before the chevron */
+.look-top {
+  position: relative;
+}
 .look-head {
   width: 100%;
   display: grid;
-  grid-template-columns: 16px auto minmax(0, 1fr) 13px;
+  grid-template-columns: 16px minmax(0, 1fr) 13px;
   align-items: center;
-  gap: 8px;
-  padding: 10px 10px 10px 12px;
+  gap: 10px;
+  padding: 9px 12px;
   color: var(--muted);
   text-align: left;
+  border-radius: inherit;
+}
+.look-top:has(.toggle) .look-head {
+  padding-right: 12px;
+  grid-template-columns: 16px minmax(0, 1fr) 34px 13px;
+}
+.look-top:has(.toggle) .look-head > svg:last-child {
+  grid-column: 4;
+}
+.look-top > .toggle {
+  position: absolute;
+  top: 50%;
+  right: 35px;
+  transform: translateY(-50%);
 }
 .look-head:hover {
   color: var(--text);
 }
+.look-text {
+  display: grid;
+  min-width: 0;
+  gap: 1px;
+}
 .look-head b {
   color: var(--text);
   font-weight: 600;
+  line-height: 18px;
 }
 .look-summary {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: var(--size-s);
-  text-align: right;
+  line-height: 16px;
+}
+.look-part.off .look-head b,
+.look-part.off .look-head > svg:first-child {
+  color: var(--muted);
 }
 .look-head > svg:last-child {
   transition: transform 120ms ease;
@@ -615,12 +630,12 @@ button.chip-status:hover {
   accent-color: var(--accent);
 }
 .section-title {
+  margin: 0;
   color: var(--faint);
   font-size: var(--size-xs);
   text-transform: uppercase;
   letter-spacing: 0.06em;
   font-weight: 600;
-  margin-top: 4px;
 }
 
 /* timeline */
@@ -2209,8 +2224,12 @@ button.chip-status:hover {
 .field-text {
   display: flex;
   flex-direction: column;
+  flex: 1 1 0;
   gap: 2px;
   min-width: 0;
+}
+.field.inline > .field-text + .field-input {
+  flex: none;
 }
 .field-text em {
   color: var(--faint);
@@ -3222,12 +3241,6 @@ button.chip-status:hover {
   display: flex;
   gap: 10px;
 }
-.motion-params {
-  display: grid;
-  gap: 12px;
-  padding-top: 12px;
-  border-top: 1px solid var(--line);
-}
 .motion-params .note.warning {
   margin: 0;
   color: var(--card);
@@ -3344,4 +3357,196 @@ button.chip-status:hover {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* the selection's settings in sections, each under its title: 12 px between rows, 20 between sections */
+.insp-section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 4px;
+  min-width: 0;
+}
+.insp-section > .section-title {
+  margin-bottom: -4px;
+}
+.insp-section > button,
+.advanced-body > button {
+  align-self: flex-start;
+}
+/* a value to read: its name and the value on one line */
+.field.readout {
+  flex-direction: row;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+.field.readout > .field-label {
+  flex: none;
+}
+.field-value {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  min-width: 0;
+  color: var(--text);
+  font-size: var(--size-m);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.field-value em {
+  color: var(--faint);
+  font-size: var(--size-xs);
+  font-style: normal;
+}
+/* a number with its unit inside its field, after it */
+.unit-input {
+  position: relative;
+  display: flex;
+  flex: 1;
+  min-width: 0;
+}
+.field .unit-input input[type='text'] {
+  padding-right: 28px;
+}
+.unit-input > i {
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--faint);
+  font-size: var(--size-s);
+  font-style: normal;
+  pointer-events: none;
+}
+.field input[type='text'] {
+  font-variant-numeric: tabular-nums;
+}
+.field-input.narrow > .unit-input {
+  flex: 0 0 84px;
+}
+/* a segmented control across the panel (a clip's speed) */
+.inspector .seg.full {
+  width: 100%;
+  background: var(--bg);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+.inspector .seg.full button {
+  flex: 1;
+  height: 26px;
+  padding: 0 4px;
+  font-variant-numeric: tabular-nums;
+}
+/* "Draw on the video" with the tool's picture and key */
+.draw-on kbd {
+  margin-left: 2px;
+}
+.ghost.small svg {
+  flex: none;
+}
+/* what few need, closed until it is opened */
+.advanced {
+  margin-top: 4px;
+  border-top: 1px solid var(--line);
+  padding-top: 12px;
+}
+.advanced > summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: max-content;
+  list-style: none;
+  cursor: pointer;
+  color: var(--muted);
+  font-size: var(--size-s);
+  font-weight: 500;
+  transition: color var(--fast);
+}
+.advanced > summary::-webkit-details-marker {
+  display: none;
+}
+.advanced > summary:hover {
+  color: var(--text);
+}
+.advanced > summary svg {
+  transform: rotate(-90deg);
+  transition: transform 120ms ease;
+}
+.advanced[open] > summary svg {
+  transform: none;
+}
+.advanced-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding-top: 12px;
+}
+/* a slider with its value beside it */
+.range-field {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+  min-width: 0;
+}
+.range-field output {
+  flex: none;
+  min-width: 36px;
+  color: var(--text-2);
+  font-size: var(--size-s);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+/* a colour: its well and its hex */
+.color-field {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+}
+.field .color-field input.hex {
+  flex: 1;
+  min-width: 0;
+  max-width: 96px;
+  font-family: var(--mono);
+  font-size: var(--size-s);
+  text-transform: uppercase;
+}
+/* a short number beside its name */
+.field.compact .field-input {
+  flex: 0 0 112px;
+}
+/* sliders: a thin track filled up to the thumb (`--fill`), a round thumb */
+.range {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 18px;
+  background: transparent;
+  cursor: pointer;
+}
+.range::-webkit-slider-runnable-track {
+  height: 3px;
+  border-radius: 2px;
+  background: linear-gradient(to right, var(--text-2) var(--fill, 0%), var(--raised-active) var(--fill, 0%));
+}
+.range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 14px;
+  height: 14px;
+  margin-top: -5.5px;
+  border-radius: 50%;
+  background: var(--text);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.45);
+  transition: transform var(--fast);
+}
+.range:hover::-webkit-slider-thumb {
+  transform: scale(1.1);
+}
+.range:focus-visible {
+  outline: none;
+}
+.range:focus-visible::-webkit-slider-thumb {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 45%, transparent);
 }

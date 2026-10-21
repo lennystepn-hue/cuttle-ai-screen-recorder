@@ -94,6 +94,12 @@ async function waitForPage(app: ElectronApplication, test: (page: Page) => Promi
 
 /** Clicks an element in a page without a real mouse (the window is never shown). */
 const click = (page: Page, selector: string) => page.evaluate((target) => (document.querySelector(target) as HTMLElement).click(), selector);
+/** Opens a part of the Look tab: its head opens it, or closes it when it is open already. */
+const openLook = (page: Page, part: string) =>
+  page.evaluate((part) => {
+    const head = document.querySelector(`[data-testid=look-open-${part}]`) as HTMLElement;
+    if (head.getAttribute('aria-expanded') !== 'true') head.click();
+  }, part);
 /**
  * What in the inspector reaches past the right edge of its box (a Look part's card, else the panel
  * inside its padding): a text or a control running out of its panel. Each as its tag, classes and
@@ -693,7 +699,7 @@ describe.runIf(enabled)('the Cuttle app', () => {
     await shot('08-mask');
     // the look: a background swatch (its part of the Look tab opened)
     await click(editor, '#tab-look');
-    await click(editor, '[data-testid=look-open-background]');
+    await openLook(editor, 'background');
     await click(editor, '.swatch-button.bg-mesh');
     await savedWhen((file) => (file as unknown as { look: { background: { preset: string } } }).look.background.preset === 'mesh');
     await shot('08-look');
@@ -749,18 +755,18 @@ describe.runIf(enabled)('the Cuttle app', () => {
     const original = readFileSync(projectFile(), 'utf8');
     await click(editor, '#tab-look');
     // the swatches are the engine's own pictures: the window's part, then the cursor's
-    await click(editor, '[data-testid=look-open-window]');
+    await openLook(editor, 'window');
     await editor.waitForSelector('[data-testid=frame-mac-light] img', { timeout: 20_000 });
     await shot('14-look-swatches');
-    await click(editor, '[data-testid=look-open-cursor]');
+    await openLook(editor, 'cursor');
     await editor.waitForSelector('[data-testid=cursor-ring] img', { timeout: 20_000 });
     await editor.waitForSelector('[data-testid=cursor-spotlight] img', { timeout: 20_000 });
     await editor.locator('[data-testid=cursor-spotlight]').scrollIntoViewIfNeeded();
     await shot('14b-look-cursors');
-    await click(editor, '[data-testid=look-open-window]');
+    await openLook(editor, 'window');
     await click(editor, '[data-testid=frame-mac-light]');
     await savedWhen((file) => (file as unknown as { look: { frame: { style?: string } } }).look.frame.style === 'mac-light');
-    await click(editor, '[data-testid=look-open-cursor]');
+    await openLook(editor, 'cursor');
     await choose('[data-testid=cursor-smoothing]', 'Very smooth');
     await savedWhen((file) => (file as unknown as { look: { cursor?: { smoothing?: number } } }).look.cursor?.smoothing === 1);
     await click(editor, '#tab-selection');
@@ -788,7 +794,7 @@ describe.runIf(enabled)('the Cuttle app', () => {
   it("uses Cuttle's own menus, none of the system's: the keys open, move, pick and close them", async () => {
     expect(await editor.evaluate(() => document.querySelectorAll('select').length)).toBe(0);
     await click(editor, '#tab-look');
-    await click(editor, '[data-testid=look-open-video]');
+    await openLook(editor, 'video');
     await editor.focus('[data-testid=output-size]');
     await editor.keyboard.press('ArrowDown');
     await editor.waitForSelector('[data-testid=output-size-list]');
@@ -1809,11 +1815,11 @@ describe.runIf(enabled)('the Cuttle app', () => {
     await shotOf('28-transcript', '/editor.html', 'subtitled · Cuttle');
     // the Look tab: the subtitles' style, and the clean voice
     await click(page, '#tab-look');
-    await click(page, '[data-testid=look-open-subtitles]');
+    await openLook(page, 'subtitles');
     await page.waitForSelector('[data-testid=captions-enabled][aria-checked=true]');
     await chooseIn(page, '[data-testid=captions-style]', 'Karaoke');
     await expect.poll(() => saved().captions?.style).toBe('karaoke');
-    await click(page, '[data-testid=look-open-sound]');
+    await openLook(page, 'sound');
     await click(page, '[data-testid=audio-cleanup]');
     await expect.poll(() => saved().look?.audio?.cleanup).toBe(false);
     // the typing sounds: their volume on a slider (let go at 30 %), and a switch
@@ -1830,7 +1836,7 @@ describe.runIf(enabled)('the Cuttle app', () => {
     await click(page, '[data-testid=audio-typing]');
     await expect.poll(() => saved().look?.audio?.typing).toBe(false);
     await page.waitForSelector('[data-testid=audio-typing-volume]', { state: 'detached' });
-    await click(page, '[data-testid=look-open-subtitles]');
+    await openLook(page, 'subtitles');
     await page.evaluate((t) => (window as unknown as Hooked).__cuttleCheck.seek(t), words[index('zooms')]!.t + 0.1);
     await page.locator('[data-testid=captions-style]').evaluate((element) => element.scrollIntoView({ block: 'center' }));
     await shotOf('29-subtitles-karaoke', '/editor.html', 'subtitled · Cuttle');
@@ -2255,7 +2261,7 @@ describe.runIf(enabled)('the Cuttle app', () => {
       await chooseIn(page, '[data-testid=add-motion]', 'End card');
       await expect.poll(() => saved(dir).scenes.map((scene) => scene.src ?? scene.type)).toEqual(['motion/intro/index.html', 'clip', 'motion/end-card/index.html']);
       await click(page, '#tab-look');
-      await click(page, '[data-testid=look-open-brand]');
+      await openLook(page, 'brand');
       await page.waitForSelector('[data-testid=brand-name]');
       return { dir, page, ...hooks(page) };
     };
@@ -2280,7 +2286,7 @@ describe.runIf(enabled)('the Cuttle app', () => {
       input.value = '#7c5cff';
       input.dispatchEvent(new Event('change'));
     });
-    await click(first.page, '[data-testid=look-open-background]');
+    await openLook(first.page, 'background');
     await click(first.page, '.swatch-button.bg-mesh');
     await expect.poll(() => saved(first.dir).theme).toEqual({ name: 'Nimbus', url: 'nimbus.app', logo: 'brand/nimbus.svg', font: 'Bebas Neue', accent: '#7C5CFF' });
     expect(readFileSync(join(first.dir, 'brand', 'nimbus.svg'), 'utf8')).toContain('<svg');
@@ -2301,7 +2307,7 @@ describe.runIf(enabled)('the Cuttle app', () => {
     expect(drawn.mean, 'the end card: mean difference').toBeLessThan(0.5);
     expect((await first.state()).motion.status.find((status) => status.src === 'motion/end-card/index.html')?.errors).toEqual([]);
     // saved as a kit, under the brand's name: its files beside it, and the project wears it
-    await click(first.page, '[data-testid=look-open-brand]');
+    await openLook(first.page, 'brand');
     await first.page.waitForSelector('[data-testid=brand-save]:not([disabled])');
     await click(first.page, '[data-testid=brand-save]');
     await expect.poll(() => existsSync(join(brands, 'nimbus', 'brand.json'))).toBe(true);
@@ -2362,7 +2368,7 @@ describe.runIf(enabled)('the Cuttle app', () => {
         input.dispatchEvent(new Event('change', { bubbles: true }));
       }, value);
     await click(page, '#tab-look');
-    await click(page, '[data-testid=look-open-background]');
+    await openLook(page, 'background');
 
     // a gradient: its own colours first, then the take's, a third stop, an angle, then radial
     await click(page, '[data-testid=bg-gradient]');
@@ -2425,7 +2431,7 @@ describe.runIf(enabled)('the Cuttle app', () => {
     await click(page, '#tab-look');
 
     // the frames: the engine's own pictures of each, then three of them on the take
-    await click(page, '[data-testid=look-open-window]');
+    await openLook(page, 'window');
     await page.waitForSelector('[data-testid=frame-iphone] img', { timeout: 20_000 });
     await page.locator('[data-testid=frame-iphone]').evaluate((element) => element.scrollIntoView({ block: 'center' }));
     await shotOf('44-frames', '/editor.html', 'frames · Cuttle');
@@ -2436,7 +2442,7 @@ describe.runIf(enabled)('the Cuttle app', () => {
     }
 
     // the watermark: on, its text (the project has no logo and no name), then an image, top left and larger
-    await click(page, '[data-testid=look-open-watermark]');
+    await openLook(page, 'watermark');
     await click(page, '[data-testid=watermark-enabled]');
     await expect.poll(() => saved().watermark?.enabled).toBe(true);
     await page.fill('[data-testid=watermark-text]', 'nimbus.app');
@@ -2481,14 +2487,14 @@ describe.runIf(enabled)('the Cuttle app', () => {
     };
     await look('closed');
     for (const part of parts) {
-      await click(page, `[data-testid=look-open-${part}]`);
+      await openLook(page, part);
       await page.waitForSelector(`[data-testid=look-${part}] .look-body`);
       // a moment for what a part loads (the frames' and cursors' pictures, the kits)
       await page.waitForTimeout(400);
       await look(part);
     }
     expect(outside).toEqual({});
-    await click(page, '[data-testid=look-open-sound]');
+    await openLook(page, 'sound');
     await shotOf('45-sound', '/editor.html', 'looks · Cuttle');
     await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find((window) => window.getTitle() === 'looks · Cuttle')?.close());
   }, 120_000);

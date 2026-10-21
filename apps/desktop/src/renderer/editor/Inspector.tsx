@@ -79,7 +79,7 @@ import {
 import { bridge } from '../bridge';
 import { Select as StyledSelect } from '../Select';
 import { shortcut } from '../keys';
-import { chooseImage, cutShownAt, deleteSelection, duplicateSelection, LIST_OF, playheadPlace, reveal, setSpeed, SPEEDS } from './actions';
+import { chooseImage, chooseTool, cutShownAt, deleteSelection, duplicateSelection, LIST_OF, playheadPlace, reveal, setSpeed, SPEEDS } from './actions';
 import { edit, preview } from './doc';
 import { currentPlayer, engineAssets, select, setTool, store, type LookSection, type Selection, type Tool } from './session';
 import { isColoured, swatch, type SwatchKey } from './swatches';
@@ -100,12 +100,14 @@ export function Inspector() {
   const tab = useStore(store, (state) => state.tab);
   const broken = useStore(store, (state) => state.doc?.issues !== undefined);
   const tabs = useRef<HTMLDivElement>(null);
-  // Arrow keys move between the tabs, as in any tab list.
+  // Arrow keys move between the tabs, Home and End to the first and the last, as in any tab list.
   const onKey = (event: KeyboardEvent) => {
-    if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+    const at = TABS.findIndex((item) => item.id === tab);
+    const to = { ArrowLeft: at - 1, ArrowRight: at + 1, Home: 0, End: TABS.length - 1 }[event.key];
+    if (to === undefined) return;
     event.preventDefault();
     event.stopPropagation();
-    const next = TABS[(TABS.findIndex((item) => item.id === tab) + 1) % TABS.length]!;
+    const next = TABS[(to + TABS.length) % TABS.length]!;
     store.set({ tab: next.id });
     tabs.current?.querySelector<HTMLButtonElement>(`#tab-${next.id}`)?.focus();
   };
@@ -666,19 +668,47 @@ function stretchOf(project: CuttleProject, selection: Selection, from: number, t
   return { start, end, speed: speedAt(start) };
 }
 
+/** The tools the empty inspector starts with: each draws on the video, as on the bar beside it. */
+const START_TOOLS: { tool: Tool; Icon: ComponentType<{ size?: number }>; name: string; keys: string; what: string }[] = [
+  { tool: 'zoom', Icon: ZoomIcon, name: 'Zoom', keys: 'Z', what: 'show a part close up' },
+  { tool: 'mask', Icon: MaskIcon, name: 'Mask', keys: 'M', what: 'hide a password, an address' },
+  { tool: 'caption', Icon: TextIcon, name: 'Caption', keys: 'T', what: 'type on the video' },
+  { tool: 'crop', Icon: CropIcon, name: 'Crop', keys: 'C', what: 'leave out tabs and bars' },
+];
+
+/** Nothing selected: what to select, the tools to start with, and the keys that edit. */
+function StartHere() {
+  return (
+    <div className="start-here">
+      <p className="start-lead">Click a scene, zoom, mask or caption on the timeline, or a caption on the video, to change it here.</p>
+      <div className="start-tools">
+        {START_TOOLS.map(({ tool, Icon, name, keys, what }) => (
+          <button key={tool} type="button" className={`start-tool ${tool}`} onClick={() => chooseTool(tool)} title={`${name} (${keys}): ${what}`} data-testid={`start-${tool}`}>
+            <span className="start-icon">
+              <Icon size={16} />
+            </span>
+            <span className="start-name">
+              {name} <kbd>{keys}</kbd>
+            </span>
+            <span className="start-what">{what}</span>
+          </button>
+        ))}
+      </div>
+      <ul className="hint-list">
+        <li>
+          <kbd>S</kbd> splits at the playhead, <kbd>R</kbd> speeds a clip up, <kbd>Del</kbd> deletes.
+        </li>
+        <li>
+          <kbd>{shortcut('Ctrl+K')}</kbd> finds any command.
+        </li>
+      </ul>
+    </div>
+  );
+}
+
 /** What the empty inspector says: how to start with the tool in hand. */
 const HINTS: Record<Tool, ReactNode> = {
-  select: (
-    <ul className="hint-list">
-      <li>Click a scene, zoom, mask or caption on the timeline, or a caption on the video, to change it here.</li>
-      <li>
-        <kbd>S</kbd> splits at the playhead, <kbd>R</kbd> speeds a clip up, <kbd>Del</kbd> deletes.
-      </li>
-      <li>
-        <kbd>Z</kbd> zoom, <kbd>M</kbd> mask, <kbd>T</kbd> caption; <kbd>{shortcut('Ctrl+K')}</kbd> finds any command.
-      </li>
-    </ul>
-  ),
+  select: <StartHere />,
   zoom: <p className="hint">Zoom tool: drag on the screen over what the video should show close up. It starts at the playhead and lasts 3 s. Esc goes back.</p>,
   mask: <p className="hint">Mask tool: drag on the screen over what the video must not show (a password, an address). It lasts from the playhead to the end of the clip. Esc goes back.</p>,
   caption: <p className="hint">Caption tool: type the caption in the bar and press Enter; it shows at the playhead for 3 s. Esc goes back.</p>,

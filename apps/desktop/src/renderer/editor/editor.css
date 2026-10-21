@@ -287,26 +287,36 @@ button.chip-status:hover {
   min-height: 0;
 }
 .tabs {
+  /* a segmented control: the open tab a raised card in a recessed track */
   display: flex;
-  gap: 4px;
-  padding: 10px 12px 0;
-  border-bottom: 1px solid var(--line);
+  gap: 2px;
+  margin: 12px 12px 0;
+  padding: 2px;
+  border-radius: var(--r-lg);
+  background: var(--bg);
+  box-shadow: inset 0 0 0 1px var(--line);
 }
 .tabs button {
-  padding: 8px 10px;
+  flex: 1;
+  height: 28px;
+  border-radius: var(--r-md);
   color: var(--muted);
+  font-size: 12.5px;
   font-weight: 500;
-  border-bottom: 2px solid transparent;
-  border-radius: 0;
+  transition: background var(--fast), color var(--fast);
+}
+.tabs button:hover {
+  color: var(--text);
 }
 .tabs button[aria-selected='true'] {
   color: var(--text);
-  border-bottom-color: var(--text);
+  background: var(--raised-active);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.35), inset 0 0 0 1px var(--line);
 }
 .panel-body {
   flex: 1;
   overflow: auto;
-  padding: 14px 16px 24px;
+  padding: 18px 16px 24px;
   display: flex;
   flex-direction: column;
   gap: 14px;
@@ -2165,7 +2175,10 @@ button.chip-status:hover {
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 16px;
+}
+.panel-fields p {
+  margin: 0;
 }
 .panel-fields:disabled {
   opacity: 0.5;
@@ -2173,7 +2186,7 @@ button.chip-status:hover {
 .field {
   display: flex;
   flex-direction: column;
-  gap: 5px;
+  gap: 6px;
   min-width: 0;
 }
 .field.inline {
@@ -2231,26 +2244,29 @@ button.chip-status:hover {
   justify-content: space-between;
   gap: 8px;
   margin: 0;
+  color: var(--text-2);
+  font-size: 12px;
+  font-weight: 500;
 }
 .field-input {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 8px;
+  gap: 6px 8px;
   min-width: 0;
-  min-height: 28px;
+  min-height: var(--control);
 }
 /* a menu next to a note keeps room for its value */
 .field-input > .select-trigger {
   min-width: 112px;
 }
 .field-input em {
-  color: var(--muted);
-  font-size: var(--size-s);
+  /* a note goes under its field, whole: the field keeps its width */
+  flex-basis: 100%;
+  color: var(--faint);
+  font-size: 11.5px;
   font-style: normal;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  /* a long note gives way (with an ellipsis) before the field it explains */
+  line-height: 1.4;
   min-width: 0;
 }
 .field input[type='text'],
@@ -2258,11 +2274,11 @@ button.chip-status:hover {
   flex: 1;
   min-width: 0;
   width: 100%;
-  height: 28px;
-  padding: 0 8px;
+  height: var(--control);
+  padding: 0 10px;
   border: 0;
-  border-radius: 7px;
-  background: var(--raised);
+  border-radius: var(--r-md);
+  background: var(--bg);
   box-shadow: inset 0 0 0 1px var(--line);
   color: var(--text);
   font: inherit;
@@ -2328,9 +2344,9 @@ button.chip-status:hover {
   gap: 4px;
 }
 .chips button {
-  height: 24px;
-  padding: 0 8px;
-  border-radius: 6px;
+  height: 28px;
+  padding: 0 10px;
+  border-radius: var(--r-md);
   background: var(--raised);
   color: var(--muted);
   font-size: var(--size-s);
@@ -2349,17 +2365,17 @@ button.chip-status:hover {
 }
 .toggle {
   position: relative;
-  width: 32px;
-  height: 18px;
-  border-radius: 9px;
+  width: 34px;
+  height: 20px;
+  border-radius: 10px;
   background: var(--raised-active);
   flex: none;
   transition: background var(--fast);
 }
 .toggle i {
   position: absolute;
-  left: 2px;
-  top: 2px;
+  left: 3px;
+  top: 3px;
   width: 14px;
   height: 14px;
   border-radius: 50%;
@@ -3250,4 +3266,82 @@ button.chip-status:hover {
 .motion-hint {
   margin: 0;
   font-size: var(--size-xs);
+}
+
+/* the inspector's menus as tall as its fields */
+.inspector .field-input > .select-trigger {
+  min-height: var(--control);
+}
+
+/* nothing selected: what to do first */
+.start-here {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.start-lead {
+  color: var(--text-2);
+  font-size: 13px;
+  line-height: 1.5;
+}
+.start-tools {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+.start-tool {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  grid-template-rows: auto auto;
+  column-gap: 10px;
+  align-items: center;
+  padding: 10px;
+  border-radius: var(--r-lg);
+  background: var(--raised);
+  box-shadow: inset 0 0 0 1px var(--line);
+  text-align: left;
+  transition: background var(--fast);
+}
+.start-tool:hover {
+  background: var(--raised-hover);
+}
+.start-icon {
+  grid-row: 1 / 3;
+  width: 32px;
+  height: 32px;
+  border-radius: 9px;
+  display: grid;
+  place-items: center;
+  color: var(--kind, var(--text-2));
+  background: color-mix(in srgb, var(--kind, var(--text-2)) 15%, transparent);
+}
+.start-tool.zoom { --kind: var(--zoom); }
+.start-tool.mask { --kind: var(--mask); }
+.start-tool.caption { --kind: var(--caption); }
+.start-name {
+  color: var(--text);
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.start-what {
+  color: var(--faint);
+  font-size: 11.5px;
+  line-height: 1.3;
+}
+
+/* a state word beside a switch, a unit beside a short number: they stay beside it */
+.field.inline .field-input,
+.field-input.narrow {
+  flex-wrap: nowrap;
+}
+.field.inline .field-input em,
+.field-input.narrow em {
+  flex-basis: auto;
+  color: var(--muted);
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }

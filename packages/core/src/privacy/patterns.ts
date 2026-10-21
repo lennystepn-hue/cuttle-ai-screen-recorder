@@ -277,8 +277,18 @@ export function findSecrets(text: string, words: readonly string[] = []): Match[
   for (const match of digits.matchAll(/\b[A-Z]{2}\d{2}(?:[ ]?[A-Z0-9]{4}){2,7}(?:[ ]?[A-Z0-9]{1,4})?\b/g)) {
     if (ibanValid(match[0])) add('iban', match.index, match.index + match[0].length);
   }
+  // a number written as a card's (4 4 4 4, up to 19 digits; American Express's 4 6 5) is one without
+  // the checks: a digit the OCR misread fails them, and so do the sample numbers on a card's picture;
+  // a group a digit longer or shorter is one the OCR read a digit too many or too few into
+  for (const match of digits.matchAll(/\b\d{3,5}([ -])\d{3,5}\1\d{3,5}\1\d{3,5}(?:\1\d{1,3})?\b|\b\d{4}([ -])\d{6}\2\d{5}\b/g)) {
+    const count = match[0].replace(/\D/g, '').length;
+    if (count >= 15 && count <= 19) add('card', match.index, match.index + match[0].length);
+  }
+  // other runs of 13 to 19 digits only with a card's checks (an order or a customer number is not one)
   for (const match of digits.matchAll(/\b\d(?:[ -]?\d){12,18}\b/g)) {
-    if (cardValid(match[0].replace(/[ -]/g, ''))) add('card', match.index, match.index + match[0].length);
+    const [from, to] = [match.index, match.index + match[0].length];
+    if (found.some((other) => other.kind === 'card' && other.from < to && from < other.to)) continue;
+    if (cardValid(match[0].replace(/[ -]/g, ''))) add('card', from, to);
   }
   for (const match of digits.matchAll(/(?:\+\d|\b0\d)[\d ()/-]{7,}\d/g)) {
     const count = match[0].replace(/\D/g, '').length;

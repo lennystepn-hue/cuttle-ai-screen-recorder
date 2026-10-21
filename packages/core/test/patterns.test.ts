@@ -147,6 +147,23 @@ describe('the checks', () => {
     expect(digitsOf('4l11 I111')).toBe('4111 1111');
   });
 
+  it('finds a number written as a card\'s without its checks, and other runs of digits only with them', () => {
+    // sample numbers of cards' pictures (no issuer, or a wrong check digit), and American Express's groups
+    expect(found('1234 5678 9100 4321')).toEqual([['card', '1234 5678 9100 4321']]);
+    expect(found('4152 9912 3456 7890')).toEqual([['card', '4152 9912 3456 7890']]);
+    expect(found('Amex 3782 822463 10005')).toEqual([['card', '3782 822463 10005']]);
+    // a digit read too many or too few into a group, and no card in groups that are too short
+    expect(found('00000 0000 0000 0000')).toEqual([['card', '00000 0000 0000 0000']]);
+    expect(found('4152 991 3456 7890')).toEqual([['card', '4152 991 3456 7890']]);
+    expect(found('Termin 2026 1021 1204')).toEqual([]);
+    expect(found('Tel. 030 123 456 789')).toEqual([['phone', '030 123 456 789']]);
+    // one card, not two, where the checks pass as well
+    expect(found('4111-1111-1111-1111')).toEqual([['card', '4111-1111-1111-1111']]);
+    // in one run: the checks decide
+    expect(found('4111111111111111')).toEqual([['card', '4111111111111111']]);
+    expect(found('Order 4152991234567890')).toEqual([]);
+  });
+
   it('checks IBANs (mod 97) and card numbers (Luhn, an issuer)', () => {
     expect([ibanValid('DE89 3704 0044 0532 0130 00'), ibanValid('DE88 3704 0044 0532 0130 00')]).toEqual([true, false]);
     expect([cardValid('4111111111111111'), cardValid('4111111111111112'), cardValid('2026101712345')]).toEqual([true, false, false]);

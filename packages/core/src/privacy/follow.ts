@@ -247,6 +247,28 @@ export function locate(picture: Picture, template: Template, from: Point, step: 
   return best ? found((best as { at: Point }).at) : { gone: true };
 }
 
+/** When each frame of `screen` begins (s), in order: from its packets, without decoding them. */
+export async function frameTimes(screen: string): Promise<number[]> {
+  const { stdout } = await runFfmpeg(['-i', screen, '-map', '0:v:0', '-c', 'copy', '-f', 'framemd5', '-']);
+  const text = stdout.toString('utf8');
+  const base = /^#tb 0: (\d+)\/(\d+)/m.exec(text);
+  const unit = base ? Number(base[1]) / Number(base[2]) : 1;
+  const times = text.split('\n').flatMap((line) => (line.startsWith('#') || !line.trim() ? [] : [Number(line.split(',')[2]) * unit]));
+  return times.filter(Number.isFinite).sort((a, b) => a - b);
+}
+
+/** The start of the first frame at or after `t`, of `begins` (in order); `t` past the last. Pure. */
+export function frameAt(begins: readonly number[], t: number): number {
+  let low = 0;
+  let high = begins.length;
+  while (low < high) {
+    const middle = (low + high) >> 1;
+    if (begins[middle]! < t - 1e-6) low = middle + 1;
+    else high = middle;
+  }
+  return begins[low] ?? t;
+}
+
 /** A track's time: from half a second before its first read to the read after its last (masks.ts's rule). */
 export function spanOf(track: Track, reads: readonly number[], end: number, rules = MASK_RULES): { from: number; to: number } {
   const first = track.sightings[0]!.t;
@@ -345,13 +367,19 @@ export async function followTracks(screen: string, tracks: readonly Track[], rea
   const width = 2 * Math.round((size.width * rules.scale) / 2);
   const height = size.height;
   const geometry: Geometry = { width, height, sx: width / size.width, sy: 1, reach: Math.round(rules.reach * height), side: Math.round(rules.side * width) };
-  const sorted = [...reads].sort((a, b) => a - b);
+  // a read saw the first frame at or after its time (readFrames takes it there), which the 10-a-second
+  // grid it was picked on can put up to a 20th of a second early: each read at that frame's start
+  const begins = await frameTimes(screen);
+  const seen = (t: number) => frameAt(begins, t);
+  const sorted = reads.map(seen).sort((a, b) => a - b);
   // the stretches of time to compare: each track's, from `back` before its first read (on the take's
   // grid of frames, a 30th of a second from 0); those that overlap, one
   const wanted = tracks
     .map((track) => {
-      const span = spanOf(track, sorted, end);
-      const from = Math.floor(Math.max(0, track.sightings[0]!.t - rules.back) * rules.rate + 1e-6) / rules.rate;
+      // its reads at the frames they saw (the track keeps its own times: they name it, `trackName`)
+      const sightings = track.sightings.map((sighting) => ({ ...sighting, t: seen(sighting.t) }));
+      const span = spanOf({ ...track, sightings }, sorted, end);
+      const from = Math.floor(Math.max(0, sightings[0]!.t - rules.back) * rules.rate + 1e-6) / rules.rate;
       return { track, span, from, to: Math.min(span.to + rules.beyond, Number.isFinite(end) ? end : Infinity) };
     })
     .sort((a, b) => a.from - b.from);
@@ -366,7 +394,8 @@ export async function followTracks(screen: string, tracks: readonly Track[], rea
   }
   for (const range of ranges) {
     for (const state of range.states) {
-      for (const sighting of state.track.sightings) state.reads.set(Math.round((sighting.t - range.from) * rules.rate), sighting.rect);
+      // the first point of the grid that shows the frame the read saw (each point the newest frame up to it)
+      for (const sighting of state.track.sightings) state.reads.set(Math.ceil((seen(sighting.t) - range.from) * rules.rate - 1e-6), sighting.rect);
     }
     await followRange(screen, range, geometry, rules);
     for (const state of range.states) result.set(state.track, state.stretches);

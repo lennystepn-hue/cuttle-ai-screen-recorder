@@ -7,7 +7,7 @@ import { afterAll, describe, expect, it } from 'vitest';
 import type { Rect, ScreenTextFrame } from '@cuttle/project';
 import { activeMasks } from '@cuttle/timeline';
 import { ffmpegPath } from '../src/ffmpeg';
-import { followTracks, locate, templateOf, type Picture } from '../src/privacy/follow';
+import { frameAt, followTracks, locate, templateOf, type Picture } from '../src/privacy/follow';
 import { privacyMasks, trackName, trackSecrets } from '../src/privacy/masks';
 import { framesToRead } from '../src/privacy/read';
 import { SCROLL_TAKE, scrolledAt, writeScrollTake } from './scrolling';
@@ -77,6 +77,16 @@ describe('locate', () => {
     const jumped = picture(400, 600);
     glyphs(jumped, 100, 560, 20, 7);
     expect(locate(jumped, template, from, { x: 0, y: 2 }, 150, 8)).toMatchObject({ at: { x: 96, y: 556 } });
+  });
+});
+
+describe('frameAt', () => {
+  it('gives the frame a read saw: the first at or after its time', () => {
+    const begins = [0, 1.2121, 2.0137, 3];
+    expect(frameAt(begins, 1.2)).toBe(1.2121);
+    expect(frameAt(begins, 1.2121)).toBe(1.2121);
+    expect(frameAt(begins, 0)).toBe(0);
+    expect(frameAt(begins, 3.5)).toBe(3.5);
   });
 });
 
@@ -152,7 +162,9 @@ describe('followTracks', () => {
     expect(made.status, made.stderr).toBe(0);
     const secret: Rect = [197, 300, 352, 12];
     const line = { text: 'export ghp_1234567890abcdefghijklmnop', rect: [48, 300, 501, 12] as Rect, words: [{ text: 'export', rect: [48, 300, 141, 12] as Rect }, { text: 'ghp_1234567890abcdefghijklmnop', rect: secret }] };
-    const frames: ScreenTextFrame[] = [{ t: 0, lines: [] }, { t: 1.25, lines: [line] }, { t: 1.75, lines: [line] }, { t: 2.05, lines: [] }];
+    // read where the picture changed, on the reader's grid of a 10th of a second: at 1.2 the frame of
+    // 1.2121 (the first at or after it), at 2.0 the frame of 2.0137; a read's time comes before its frame
+    const frames: ScreenTextFrame[] = [{ t: 0, lines: [] }, { t: 1.2, lines: [line] }, { t: 2.0, lines: [] }];
     const { tracks } = trackSecrets(frames, []);
     const followed = await followTracks(video, tracks, frames.map((frame) => frame.t), { width, height }, seconds);
     const [stretch] = [...followed.values()].flat();

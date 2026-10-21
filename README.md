@@ -6,7 +6,7 @@
 
 <p align="center">
   <b>Record your screen, or Claude Code at work. Cuttle cuts the waiting, zooms on what matters, masks your secrets and frames it into a demo you can post.</b><br />
-  On your computer, for macOS and Windows. A desktop app for people, a CLI and a skill for Claude.
+  On your computer, for macOS and Windows. A desktop app for people, a CLI and a skill for Claude, and videos written entirely in code.
 </p>
 
 <p align="center">
@@ -30,6 +30,10 @@ on what you type, hides API keys, email addresses and notifications, and puts th
 designed background with your webcam, subtitles and music. Then it exports an MP4 for X, YouTube,
 LinkedIn or Reels. You can change every edit afterwards, in the app or in one plain file
 (`cuttle.json`) that Claude Code edits as well.
+
+Or skip the recording altogether: every scene can be a web page you (or Claude) write, and Cuttle
+renders it frame by frame into the video, with music composed in code for it. The promo above was
+made that way: nine pages and a score, no camera, no editor. See [Motion videos, written in code](#motion-videos-written-in-code).
 
 ## What it does
 
@@ -70,11 +74,12 @@ LinkedIn or Reels. You can change every edit afterwards, in the app or in one pl
 
 ## The editor
 
-<p align="center"><img src="docs/media/app-editor.jpg" alt="Cuttle's editor with a Claude Code take: the framed video, the timeline with the prompt, 64× Claude at work, the answer, the result and the end card, zooms and a mask" /></p>
+<p align="center"><img src="docs/media/app-editor.jpg" alt="Cuttle's editor with a Claude Code take: the framed video, the timeline with the prompt, 64× Claude at work, the answer, the result and the end card, zooms and a mask, and the selected clip's speed, timing and picture in the inspector" /></p>
 
 Everything Cuttle did on its own is a normal edit you can change: drag a clip, trim it, set its
 speed, move a zoom, redraw a mask, switch a kind of edit off in the Auto tab. The look is a tab of
-its own, and the video you see is exactly what the export renders.
+its own, and the video you see is exactly what the export renders. Drag the inspector's edge or the
+timeline's to give the video the room you want, or hide the inspector with ⌘I (Ctrl+I).
 
 <table>
   <tr>
@@ -102,6 +107,74 @@ its own, and the video you see is exactly what the export renders.
     <td align="center"><sub>The prompter and the recording bar, never in the video</sub></td>
   </tr>
 </table>
+
+## Motion videos, written in code
+
+A Cuttle video does not need a recording: a promo, a launch reel, an explainer or a social clip can
+be made only of motion scenes. A scene is a web page: kinetic type, a chart that
+builds, a code editor that types itself, a laptop in 3D, particles, an After Effects animation
+(Lottie), anything HTML, CSS, canvas, SVG, WebGL or Three.js can draw. Cuttle renders the page frame
+by frame on the video's own clock, so a render is the same every time, and one page serves 16:9,
+1:1 and 9:16. The music is a page too: it composes the score in WebAudio for this
+video, from its scenes and cuts, and nothing is licensed or downloaded.
+
+A whole motion video from the command line, from an empty folder to an MP4 (this one renders in
+seconds):
+
+```bash
+cuttle init launch && cd launch
+cuttle motion templates                      # title, end-card, code-typing, device-3d, fold, lower-third, click-callouts, kinetic-captions
+cuttle motion new title                      # copies the page into motion/title/ and adds it as a scene
+cuttle motion new code-typing                # a file typing itself, with syntax colours and key clicks
+cuttle motion new end-card                   # your logo, a line, the URL typing itself
+cuttle music new pulse                       # a score for this video (pulse, drift, lofi, bright, cinematic)
+cuttle motion check motion/title/index.html  # its frames, a contact sheet, what the page threw
+cuttle music check                           # the music alone: a WAV, its levels, the hits on the cuts
+cuttle render --format 9:16                  # out/9x16.mp4; also 16:9 and 1:1
+```
+
+<p align="center"><img src="docs/media/motion-video.jpg" width="720" alt="Four frames of a 9:16 motion video made only from code: a kinetic title, a code editor typing, a page saying Ship it., an end card" /><br />
+<sub>Four frames of the 16-second 9:16 video these commands make, with the page below as its third scene</sub></p>
+
+The templates are starting points; a page of your own is a few lines. Everything follows the
+video's time, from 0 at the scene's start, so a page that draws from `t` is right on every frame:
+
+```html
+<!-- motion/hello/index.html, added to cuttle.json as
+     { "type": "motion", "id": "s9", "src": "motion/hello/index.html", "duration": 3 } -->
+<style>
+  body { margin: 0; height: 100vh; display: grid; place-items: center; font: 700 14vmin system-ui; color: white; }
+</style>
+<h1 id="title">Ship it.</h1>
+<script type="module">
+  import { at, ease } from 'cuttle';
+  const title = document.getElementById('title');
+  cuttle.onFrame((t) => {
+    const shown = at(t, 0.2, 0.8, ease.outExpo);
+    title.style.opacity = shown;
+    title.style.transform = `translateY(${(1 - shown) * 60}px)`;
+  });
+</script>
+```
+
+- **The page's world:** `performance.now`, timers, `requestAnimationFrame`, CSS animations and
+  `Math.random` (seeded) all follow the frame being drawn. `import … from 'cuttle'` gives easing,
+  keyframes, springs, staggering, text splitting, typing with a rhythm and syntax colours, as
+  functions of time; Three.js and Lottie come with the kit, offline.
+- **Your brand everywhere:** pages read the project's theme (name, URL, logo, colours, heading font)
+  as CSS variables, so one brand kit (`cuttle brand`) restyles every scene.
+- **Sounds and params:** a page asks Cuttle for sounds (a whoosh, a pop, key clicks) at its moments,
+  and declares params (a title, a colour, a side) that the editor shows as fields.
+- **With a recording too:** motion pages go between clips (an intro, a chapter card, an end card),
+  over them (a lower third, a ring on every click, captions word by word) and between scenes as
+  transitions (a page fold, a wipe). A page can draw the take itself, frame by frame (`cuttle.take`).
+- **Claude writes them:** with the skill installed, ask Claude Code for *"a 20-second launch video of
+  this app"*. It writes the pages and the score, checks them frame by frame (`motion check`, `music
+  check`), and renders. Open the project in the Cuttle app and every page Claude saves plays there
+  at once.
+
+The skill's [motion guide](skill/cuttle/motion.md) and [music guide](skill/cuttle/music.md) describe
+the whole page API.
 
 ## Get started
 
@@ -295,6 +368,8 @@ cuttle suggest                       # scenes: quiet start and end trimmed, idle
 cuttle preview                       # 12 stills and a contact sheet in preview/
 cuttle frame 42.5 --grid             # a source frame with a numbered pixel grid, for masks and zooms
 cuttle capture-page https://example.com --scroll --add
+cuttle motion new title --first      # a motion page as the intro (motion templates lists them)
+cuttle music new lofi                # music composed for the video, fitted to its scenes and cuts
 cuttle render --format 9:16          # out/9x16.mp4, with the script's steps as its chapters
 cuttle chapters                      # those chapters as lines for a YouTube description
 cuttle recover takes/2               # after a crash

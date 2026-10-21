@@ -2150,13 +2150,20 @@ button.chip-status:hover {
   color: var(--faint);
 }
 .command-name {
+  flex: 0 0 auto;
+  max-width: 72%;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* why a command cannot run: it gives way before the command's name does (the whole reason in its tooltip) */
 .command em {
-  flex: none;
+  flex: 0 100 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   color: var(--muted);
   font-size: var(--size-xs);
   font-style: normal;

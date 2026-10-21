@@ -140,7 +140,7 @@ function Menu() {
                     {command.name}
                     {command.detail && <span className="command-detail">{command.detail}</span>}
                   </span>
-                  {blocked ? <em>{blocked}</em> : command.keys && <kbd>{shortcut(command.keys)}</kbd>}
+                  {blocked ? <em title={blocked}>{blocked}</em> : command.keys && <kbd>{shortcut(command.keys)}</kbd>}
                 </div>
               </div>
             );

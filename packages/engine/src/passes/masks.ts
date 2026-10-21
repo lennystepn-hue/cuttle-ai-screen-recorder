@@ -1,7 +1,7 @@
 import type { Mask, Rect } from '@cuttle/project';
 import { FRAGMENT_PRELUDE, RECT_VERTEX, drawRect, withScissor } from '../gl/rect';
 import { Shader } from '../gl/shader';
-import { maskRectToOutput, uvRect, type Size, type WindowLayout } from '../layout';
+import { blurredMaskRect, uvRect, type Size, type WindowLayout } from '../layout';
 
 const FILL = `${FRAGMENT_PRELUDE}
 uniform sampler2D u_tex;
@@ -91,13 +91,16 @@ export class MaskPass {
     this.blur = new Shader(gl, 'mask blur', RECT_VERTEX, BLUR);
   }
 
-  /** `screen` must be the uploaded screen texture, with mipmaps. */
-  draw(masks: readonly Mask[], screen: WebGLTexture, screenSize: Size, zoom: Rect, layout: WindowLayout): void {
+  /**
+   * `screen` must be the uploaded screen texture, with mipmaps. `from`: the zoom when the shutter
+   * opened, under motion blur; each mask then covers every place it had meanwhile.
+   */
+  draw(masks: readonly Mask[], screen: WebGLTexture, screenSize: Size, zoom: Rect, layout: WindowLayout, from?: Rect): void {
     if (masks.length === 0) return;
     const texel: [number, number] = [1 / screenSize.width, 1 / screenSize.height];
     withScissor(this.gl, this.output, layout.content, () => {
       for (const mask of masks) {
-        const rect = maskRectToOutput(mask.rect, zoom, layout.content);
+        const rect = blurredMaskRect(mask.rect, zoom, layout.content, from);
         const shader = mask.style === 'fill' ? this.fill : this.blur;
         shader
           .use()

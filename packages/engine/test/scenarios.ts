@@ -146,6 +146,26 @@ export const SCENARIOS: Scenario[] = [
     t: 5,
   },
 
+  // Motion blur: a zoom panning left at its fastest (its move sets off at 4.7 s), a mask on the
+  // screen and the pointer flicking up and left; the screen and the pointer smear, the mask covers
+  // every place its text passed while the shutter was open
+  {
+    name: 'motion-blur',
+    project: project(
+      { frame: { title: TITLE } },
+      {
+        zooms: [{ at: 0, duration: 10, rect: [800, 450, 480, 300], moves: [{ at: 5, rect: [300, 300, 480, 300] }] }],
+        masks: [{ from: 0, to: 10, rect: [930, 620, 260, 54], style: 'fill' }],
+      },
+    ),
+    t: 4.82,
+    events: [
+      { t: 0, type: 'move', x: 1100, y: 700 },
+      { t: 4.75, type: 'move', x: 1100, y: 700 },
+      { t: 4.9, type: 'move', x: 700, y: 520 },
+    ],
+  },
+
   // A clip cropped to a wide band of the screen: the window takes its shape, the mask stays on its text
   {
     name: 'crop',

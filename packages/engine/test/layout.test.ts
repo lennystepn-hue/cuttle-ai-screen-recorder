@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { parseProject } from '@cuttle/project';
 import { createTimeline } from '@cuttle/timeline';
+import { pointerPath } from '../src/passes/cursor';
 import {
+  blurSamples,
+  blurredMaskRect,
   cursorSizePx,
   maskRectToOutput,
   placeBadge,
@@ -154,15 +157,57 @@ describe('source to output mapping', () => {
     if (!parsed.ok) throw new Error(JSON.stringify(parsed.issues));
     const timeline = createTimeline(parsed.project, { screenSize: { width: 2560, height: 1440 } });
     const layout = windowLayout(HD, 16 / 9, { titleBar: 36, radius: 14 });
+    let blurred = 0;
     for (let frame = 0; frame <= 300; frame++) {
       const [layer] = timeline.frameAt(frame / 30).layers;
       const zoom = layer!.zoom!;
       // the mask is the same rect of the screen, mapped by the very zoom the screen is drawn with
       expect(layer!.masks.map((mask) => mask.rect)).toEqual([text]);
-      const [mx, my, mw, mh] = maskRectToOutput(layer!.masks[0]!.rect, zoom, layout.content);
-      const [tx, ty, tw, th] = sourceRectToOutput(text, zoom, layout.content);
-      expect(mx <= tx && my <= ty && mx + mw >= tx + tw && my + mh >= ty + th, `frame ${frame}`).toBe(true);
+      // under motion blur the screen is averaged over the zooms while the shutter was open: the
+      // mask covers what it hides under each of them
+      const from = layer!.motion?.zoom;
+      const samples = from ? blurSamples(from, zoom, layout.content) : 1;
+      if (samples > 1) blurred++;
+      const [mx, my, mw, mh] = blurredMaskRect(layer!.masks[0]!.rect, zoom, layout.content, samples > 1 ? from : undefined);
+      for (let i = 0; i < samples; i++) {
+        const k = samples > 1 ? i / (samples - 1) : 1;
+        const at = from && samples > 1 ? (zoom.map((value, j) => from[j]! + (value - from[j]!) * k) as typeof zoom) : zoom;
+        const [tx, ty, tw, th] = sourceRectToOutput(text, at, layout.content);
+        expect(mx <= tx && my <= ty && mx + mw >= tx + tw && my + mh >= ty + th, `frame ${frame}, moment ${i}`).toBe(true);
+      }
     }
+    // the zoom's ramps and its move were blurred
+    expect(blurred).toBeGreaterThan(20);
+  });
+
+  it('averages enough moments for a blur without steps: one while the screen stands still', () => {
+    const content: [number, number, number, number] = [0, 0, 1600, 900];
+    expect(blurSamples([0, 0, 1280, 720], [0, 0, 1280, 720], content)).toBe(1);
+    // a pan of 8 source px is 10 output px at 1.25 output px a source px: 8 moments 1.43 px apart
+    expect(blurSamples([0, 0, 1280, 720], [8, 0, 1280, 720], content)).toBe(8);
+    // a long pan: at most 32
+    expect(blurSamples([0, 0, 1280, 720], [400, 0, 1280, 720], content)).toBe(32);
+  });
+
+  it('widens a mask under motion blur over every place it had while the shutter was open', () => {
+    const content: [number, number, number, number] = [0, 0, 1280, 720];
+    const now = maskRectToOutput([100, 100, 50, 20], [0, 0, 1280, 720], content);
+    const then = maskRectToOutput([100, 100, 50, 20], [20, 10, 1280, 720], content);
+    expect(blurredMaskRect([100, 100, 50, 20], [0, 0, 1280, 720], content)).toEqual(now);
+    expect(blurredMaskRect([100, 100, 50, 20], [0, 0, 1280, 720], content, [20, 10, 1280, 720])).toEqual([then[0], then[1], now[0] + now[2] - then[0], now[1] + now[3] - then[1]]);
+  });
+
+  it('draws the pointer at each moment of the shutter, but a jump sharp', () => {
+    const content: [number, number, number, number] = [0, 0, 1920, 1080];
+    const zoom: [number, number, number, number] = [0, 0, 1920, 1080];
+    expect(pointerPath({ x: 500, y: 500 }, zoom, content)).toHaveLength(1);
+    // 30 px in the shutter: 21 moments 1.5 px apart, the last where it is now
+    const path = pointerPath({ x: 530, y: 500 }, zoom, content, { zoom, cursor: { x: 500, y: 500 } });
+    expect(path).toHaveLength(21);
+    expect(path[0]!.out.map((value) => Math.round(value * 1e6) / 1e6)).toEqual([500, 500]);
+    expect(path.at(-1)!.out.map((value) => Math.round(value * 1e6) / 1e6)).toEqual([530, 500]);
+    // across half the screen within a shutter: a program moved it
+    expect(pointerPath({ x: 1500, y: 500 }, zoom, content, { zoom, cursor: { x: 500, y: 500 } })).toHaveLength(1);
   });
 
   it('turns image px into texture coordinates', () => {

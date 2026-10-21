@@ -823,16 +823,16 @@ button.chip-status:hover {
   color: #fff;
 }
 .scene.still {
-  background: linear-gradient(180deg, rgba(60, 198, 201, 0.28), rgba(60, 198, 201, 0.12));
-  box-shadow: inset 0 0 0 1px rgba(60, 198, 201, 0.45);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--still) 28%, transparent), color-mix(in srgb, var(--still) 12%, transparent));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--still) 45%, transparent);
 }
 .scene.card {
-  background: linear-gradient(180deg, rgba(242, 179, 74, 0.26), rgba(242, 179, 74, 0.1));
-  box-shadow: inset 0 0 0 1px rgba(242, 179, 74, 0.45);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--card) 26%, transparent), color-mix(in srgb, var(--card) 10%, transparent));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--card) 45%, transparent);
 }
 .scene.motion {
-  background: linear-gradient(180deg, rgba(236, 111, 207, 0.26), rgba(236, 111, 207, 0.1));
-  box-shadow: inset 0 0 0 1px rgba(236, 111, 207, 0.5);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--motion) 26%, transparent), color-mix(in srgb, var(--motion) 10%, transparent));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--motion) 50%, transparent);
 }
 .item {
   position: absolute;
@@ -855,28 +855,28 @@ button.chip-status:hover {
   text-overflow: ellipsis;
 }
 .item.zoom {
-  background: rgba(90, 162, 255, 0.16);
-  box-shadow: inset 0 0 0 1px rgba(90, 162, 255, 0.55);
+  background: color-mix(in srgb, var(--zoom) 16%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--zoom) 55%, transparent);
   color: var(--zoom);
 }
 .item.mask {
-  background: rgba(167, 123, 255, 0.15);
-  box-shadow: inset 0 0 0 1px rgba(167, 123, 255, 0.5);
+  background: color-mix(in srgb, var(--mask) 15%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--mask) 50%, transparent);
   color: var(--mask);
 }
 .item.caption {
-  background: rgba(79, 209, 161, 0.13);
-  box-shadow: inset 0 0 0 1px rgba(79, 209, 161, 0.5);
+  background: color-mix(in srgb, var(--caption) 13%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--caption) 50%, transparent);
   color: var(--caption);
 }
 .item.motion {
-  background: rgba(236, 111, 207, 0.14);
-  box-shadow: inset 0 0 0 1px rgba(236, 111, 207, 0.5);
+  background: color-mix(in srgb, var(--motion) 14%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--motion) 50%, transparent);
   color: var(--motion);
 }
 .item.sound {
-  background: rgba(181, 224, 90, 0.16);
-  box-shadow: inset 0 0 0 1px rgba(181, 224, 90, 0.55);
+  background: color-mix(in srgb, var(--sound) 16%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--sound) 55%, transparent);
   color: var(--sound);
   padding: 0 4px;
 }
@@ -889,29 +889,29 @@ button.chip-status:hover {
   margin: -4px 0 0 -4px;
   transform: rotate(45deg);
   border: 1.5px solid var(--sound);
-  background: rgba(181, 224, 90, 0.25);
+  background: color-mix(in srgb, var(--sound) 25%, transparent);
 }
 /* the music: one block over the video, its waveform and its parts */
 .item.music {
   height: auto;
-  background: rgba(232, 197, 71, 0.08);
-  box-shadow: inset 0 0 0 1px rgba(232, 197, 71, 0.4);
+  background: color-mix(in srgb, var(--music) 8%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--music) 40%, transparent);
   color: var(--music);
   align-items: flex-start;
   padding: 2px 8px;
 }
 .item.music.selected {
-  box-shadow: inset 0 0 0 1.5px var(--music), 0 0 0 1px rgba(232, 197, 71, 0.25);
+  box-shadow: inset 0 0 0 1.5px var(--music), 0 0 0 1px color-mix(in srgb, var(--music) 25%, transparent);
 }
 .music-part {
   position: absolute;
   top: 0;
   bottom: 0;
-  border-left: 1px dashed rgba(232, 197, 71, 0.45);
+  border-left: 1px dashed color-mix(in srgb, var(--music) 45%, transparent);
   font-size: 10px;
   font-weight: 600;
   padding: 1px 4px;
-  color: rgba(232, 197, 71, 0.85);
+  color: color-mix(in srgb, var(--music) 85%, transparent);
   pointer-events: none;
   white-space: nowrap;
 }
@@ -1324,15 +1324,15 @@ button.chip-status:hover {
   color: var(--text);
 }
 .tools [data-testid='tool-zoom'][aria-pressed='true'] {
-  background: rgba(90, 162, 255, 0.16);
+  background: color-mix(in srgb, var(--zoom) 16%, transparent);
   color: var(--zoom);
 }
 .tools [data-testid='tool-mask'][aria-pressed='true'] {
-  background: rgba(167, 123, 255, 0.16);
+  background: color-mix(in srgb, var(--mask) 16%, transparent);
   color: var(--mask);
 }
 .tools [data-testid='tool-caption'][aria-pressed='true'] {
-  background: rgba(79, 209, 161, 0.14);
+  background: color-mix(in srgb, var(--caption) 14%, transparent);
   color: var(--caption);
 }
 .tools kbd {
@@ -1366,7 +1366,7 @@ button.chip-status:hover {
 .caption-box {
   position: absolute;
   border-radius: 6px;
-  box-shadow: 0 0 0 1px rgba(79, 209, 161, 0.7);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--caption) 70%, transparent);
   pointer-events: none;
 }
 /* the webcam bubble on the video: dragged to move, its corners resize it */
@@ -1437,7 +1437,7 @@ button.chip-status:hover {
 .caption-box.selected {
   box-shadow:
     0 0 0 2px var(--caption),
-    0 0 0 5px rgba(79, 209, 161, 0.18);
+    0 0 0 5px color-mix(in srgb, var(--caption) 18%, transparent);
 }
 
 /* the caption tool: typed on the video, away from where the caption goes */
@@ -1454,7 +1454,6 @@ button.chip-status:hover {
   border-radius: 12px;
   background: var(--overlay);
   box-shadow: var(--shadow-float);
-  backdrop-filter: blur(10px);
   z-index: 2;
   animation: fade var(--normal) var(--ease-out);
 }
@@ -1537,21 +1536,21 @@ button.chip-status:hover {
 .source-box.zoom {
   box-shadow:
     0 0 0 1.5px var(--zoom),
-    0 0 0 4px rgba(90, 162, 255, 0.16);
+    0 0 0 4px color-mix(in srgb, var(--zoom) 16%, transparent);
 }
 .source-box.mask {
   box-shadow: 0 0 0 1.5px var(--mask);
-  background: repeating-linear-gradient(135deg, rgba(167, 123, 255, 0.26) 0 6px, rgba(167, 123, 255, 0.1) 6px 12px);
+  background: repeating-linear-gradient(135deg, color-mix(in srgb, var(--mask) 26%, transparent) 0 6px, color-mix(in srgb, var(--mask) 10%, transparent) 6px 12px);
 }
 .source-box.selected.zoom {
   box-shadow:
     0 0 0 2px var(--zoom),
-    0 0 0 6px rgba(90, 162, 255, 0.2);
+    0 0 0 6px color-mix(in srgb, var(--zoom) 20%, transparent);
 }
 .source-box.selected.mask {
   box-shadow:
     0 0 0 2px var(--mask),
-    0 0 0 6px rgba(167, 123, 255, 0.2);
+    0 0 0 6px color-mix(in srgb, var(--mask) 20%, transparent);
 }
 /* a selected item the playhead is not on: drawn faint */
 .source-box.elsewhere {
@@ -1712,7 +1711,7 @@ button.chip-status:hover {
   background: #261f14;
   box-shadow:
     var(--shadow-float),
-    inset 0 0 0 1px rgba(242, 179, 74, 0.35);
+    inset 0 0 0 1px color-mix(in srgb, var(--card) 35%, transparent);
 }
 .banner > svg {
   color: var(--card);
@@ -1872,7 +1871,7 @@ button.chip-status:hover {
   background: #261f14;
   box-shadow:
     var(--shadow-float),
-    inset 0 0 0 1px rgba(242, 179, 74, 0.35);
+    inset 0 0 0 1px color-mix(in srgb, var(--card) 35%, transparent);
   display: flex;
   align-items: center;
   gap: 10px;
@@ -1886,7 +1885,6 @@ button.chip-status:hover {
 .draft-note.restart {
   background: var(--overlay);
   box-shadow: var(--shadow-float);
-  backdrop-filter: blur(16px);
 }
 .draft-note span {
   min-width: 0;
@@ -1908,7 +1906,6 @@ button.chip-status:hover {
   border-radius: 10px;
   background: var(--overlay);
   box-shadow: var(--shadow-float);
-  backdrop-filter: blur(10px);
   display: flex;
   align-items: center;
   gap: 10px;
@@ -2717,7 +2714,6 @@ button.chip-status:hover {
   top: 0;
   border: 4px solid transparent;
   border-top: 6px solid #fff;
-  filter: drop-shadow(0 0 1px rgba(8, 8, 10, 0.9));
   transition: border-color var(--fast);
 }
 .cut-notch:focus-visible {

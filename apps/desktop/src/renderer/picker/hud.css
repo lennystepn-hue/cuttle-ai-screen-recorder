@@ -1,0 +1,249 @@
+/* The recording HUD and its live captions (hud.html): only this page loads it, so the picker's
+   look can change without moving the HUD. */
+body.transparent,
+body.transparent #root {
+  background: transparent;
+}
+
+/* HUD: never in the video, never takes the focus */
+.hud-wrap {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+}
+.hud {
+  width: 492px;
+  height: 48px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 6px 6px 8px;
+  border-radius: 16px;
+  background: var(--overlay);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45), 0 0 0 1px rgba(255, 255, 255, 0.07);
+  -webkit-app-region: drag;
+  color: var(--muted);
+}
+.hud button {
+  -webkit-app-region: no-drag;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+}
+.hud button:hover {
+  background: var(--raised);
+  color: var(--text);
+}
+.hud .mark {
+  margin-right: 8px;
+}
+.hud .dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--recording);
+  box-shadow: 0 0 0 4px rgba(255, 77, 79, 0.22);
+  animation: pulse 1.6s ease-in-out infinite;
+}
+.hud.stopping .dot,
+.hud.resuming .dot,
+.hud.countdown .dot {
+  background: var(--muted);
+  box-shadow: none;
+  animation: none;
+}
+/* paused: the dot stands still in amber, the time stands still too */
+.hud.paused .dot {
+  background: var(--card);
+  box-shadow: 0 0 0 4px rgba(242, 179, 74, 0.2);
+  animation: none;
+}
+.hud.paused .time {
+  color: var(--card);
+}
+.hud button.pause.paused {
+  color: var(--text);
+  background: var(--raised);
+}
+/* restart: a ring fills while it is held */
+.hud button.restart {
+  position: relative;
+}
+.hud button.restart .ring {
+  position: absolute;
+  inset: 3px;
+  border-radius: 50%;
+  pointer-events: none;
+  opacity: 0;
+}
+.hud button.restart.holding .ring {
+  opacity: 1;
+  background: conic-gradient(var(--text) calc(var(--held, 0) * 1turn), transparent 0);
+  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 2px), #000 calc(100% - 2px));
+  mask: radial-gradient(farthest-side, transparent calc(100% - 2px), #000 calc(100% - 2px));
+  animation: hold 600ms linear forwards;
+}
+@property --held {
+  syntax: '<number>';
+  inherits: false;
+  initial-value: 0;
+}
+@keyframes hold {
+  to {
+    --held: 1;
+  }
+}
+.hud .time {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  margin: 0 8px 0 6px;
+  min-width: 52px;
+  color: var(--text);
+}
+/* the mic's level: five bars by the time, rising as it hears something */
+.hud .level {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 14px;
+  margin: 0 10px 0 0;
+  flex: none;
+}
+.hud .level i {
+  width: 3px;
+  border-radius: 1px;
+  background: var(--raised-active);
+  transition: background 80ms linear;
+}
+.hud .level i.on {
+  background: var(--caption);
+}
+.hud .level i.clip {
+  background: var(--recording);
+}
+.hud .sep {
+  width: 1px;
+  height: 22px;
+  background: var(--line-strong);
+  margin: 0 2px;
+}
+.hud button.stop {
+  background: var(--raised);
+}
+.hud button.stop i {
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+  background: var(--recording);
+  display: block;
+}
+/* the warning takes the room between the time and the buttons: Stop stays where it is */
+.hud .note {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--size-s);
+  margin: 0 6px 0 0;
+  white-space: nowrap;
+}
+.hud .note span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.hud .note.warn {
+  color: var(--card);
+}
+.hud .note svg {
+  flex: none;
+}
+.hud button.marker {
+  position: relative;
+}
+.hud button.marker small {
+  position: absolute;
+  right: 3px;
+  bottom: 2px;
+  font: 600 9px var(--font);
+  color: var(--muted);
+}
+.hud button.marker.flash {
+  color: var(--ok);
+  background: rgba(79, 209, 161, 0.14);
+}
+
+/* the live captions under the bar: the newest words at the right, the older ones fading out at the left */
+.captions {
+  width: 492px;
+  height: 30px;
+  display: flex;
+  padding: 0 14px;
+  border-radius: 12px;
+  background: var(--overlay);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45), 0 0 0 1px rgba(255, 255, 255, 0.07);
+  color: var(--text);
+  font-size: var(--size-s);
+  -webkit-app-region: drag;
+}
+.captions .line {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  overflow: hidden;
+  -webkit-mask: linear-gradient(to right, transparent 0, #000 48px);
+  mask: linear-gradient(to right, transparent 0, #000 48px);
+}
+.captions .said {
+  flex: none;
+  white-space: nowrap;
+}
+.captions .said > span {
+  animation: heard 240ms ease-out;
+}
+.captions .waiting,
+.captions.resting {
+  color: var(--muted);
+}
+.captions.failed {
+  color: var(--card);
+}
+.captions.failed .line {
+  justify-content: flex-start;
+  -webkit-mask: none;
+  mask: none;
+}
+.captions.failed .said {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+@keyframes heard {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes pulse {
+  50% {
+    box-shadow: 0 0 0 7px rgba(255, 77, 79, 0.1);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  :root:not([data-motion='full']) .hud .dot,
+  :root:not([data-motion='full']) .captions .said > span {
+    animation: none;
+  }
+}
+:root[data-motion='reduce'] .hud .dot,
+:root[data-motion='reduce'] .captions .said > span {
+  animation: none;
+}

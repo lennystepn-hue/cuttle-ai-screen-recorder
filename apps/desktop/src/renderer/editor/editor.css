@@ -2224,8 +2224,12 @@ button.chip-status:hover {
 .field-text {
   display: flex;
   flex-direction: column;
+  flex: 1 1 0;
   gap: 2px;
   min-width: 0;
+}
+.field.inline > .field-text + .field-input {
+  flex: none;
 }
 .field-text em {
   color: var(--faint);

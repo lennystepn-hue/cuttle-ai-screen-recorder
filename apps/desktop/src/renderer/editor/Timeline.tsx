@@ -40,9 +40,11 @@ import { currentPlayer, select, setTool, shownProject, store, type Selection } f
 import { useStore } from './store';
 
 const END_SPACE = 40;
-/** A row of an overlay lane (lanes grow a row for overlays that overlap in time). */
-const ROW = 22;
-const BASE_ROWS = { markers: 26, ruler: 20, video: 52, music: 34, mic: 30, input: 26 } as const;
+/** A row of an overlay lane (lanes grow a row for overlays that overlap in time)… */
+const ROW = 30;
+/** …with this much room above its first row and below its last. */
+const LANE_PAD = 6;
+const BASE_ROWS = { markers: 26, ruler: 24, video: 64, music: 40, mic: 34, input: 28 } as const;
 const LANES: { kind: OverlayKind; name: string; list: OverlayList }[] = [
   { kind: 'zoom', name: 'Zoom', list: 'zooms' },
   { kind: 'mask', name: 'Mask', list: 'masks' },
@@ -51,14 +53,6 @@ const LANES: { kind: OverlayKind; name: string; list: OverlayList }[] = [
   { kind: 'sound', name: 'Sound', list: 'sounds' },
 ];
 const NOUN: Record<OverlayKind, string> = { zoom: 'zoom', mask: 'mask', caption: 'caption', motion: 'motion overlay', sound: 'sound' };
-/** What an empty lane says: its key, and how to fill it. */
-const LANE_HINTS: Record<OverlayKind, [string, string]> = {
-  zoom: ['Z', 'and draw on the video: the part to zoom in on'],
-  mask: ['M', 'and draw over what no one should see (a token, an address)'],
-  caption: ['T', 'and type on the video'],
-  motion: ['+ Motion', 'a lower third, rings on the clicks, word-by-word captions, or a page Claude writes'],
-  sound: ['+ Sound', 'a whoosh, a pop or a ding at the playhead'],
-};
 const TICKS = [0.1, 0.2, 0.5, 1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 1800];
 const MAX_PPS = 400;
 /** A pointer that moves less than this between down and up clicked (selects); more drags. */
@@ -82,23 +76,36 @@ interface Layout {
   total: number;
 }
 
-/** An overlay lane's height: a row per overlap; an empty lane is slimmer, room for its hint. */
-const laneHeight = (model: TimelineModel | undefined, kind: OverlayKind): number => {
+/**
+ * An overlay lane's height: a row per overlap; none while it is empty (its kind is added from the
+ * bar above, or drawn on the video), unless `more` it holds (the sounds motion pages ask for).
+ */
+const laneHeight = (model: TimelineModel | undefined, kind: OverlayKind, more = false): number => {
   const lane = model?.lanes[kind];
-  if (!lane) return 8 + ROW;
-  return lane.blocks.length === 0 && lane.cutOut === 0 ? EMPTY_LANE : 8 + ROW * lane.rows;
+  if (!lane || (lane.blocks.length === 0 && lane.cutOut === 0 && !more)) return 0;
+  return 2 * LANE_PAD + ROW * Math.max(1, lane.rows);
 };
-/** An empty lane's height. */
-const EMPTY_LANE = 24;
 
-function layoutOf(model: TimelineModel | undefined): Layout {
+/** What the take has besides the project's items: a row shows only for what is there. */
+interface Shown {
+  mic: boolean;
+  input: boolean;
+  pageSounds: boolean;
+}
+
+function layoutOf(model: TimelineModel | undefined, shown: Shown): Layout {
   const heights = {
-    ...BASE_ROWS,
+    markers: (model?.markers.length ?? 0) > 0 ? BASE_ROWS.markers : 0,
+    ruler: BASE_ROWS.ruler,
+    video: BASE_ROWS.video,
     zoom: laneHeight(model, 'zoom'),
     mask: laneHeight(model, 'mask'),
     caption: laneHeight(model, 'caption'),
     motion: laneHeight(model, 'motion'),
-    sound: laneHeight(model, 'sound'),
+    sound: laneHeight(model, 'sound', shown.pageSounds),
+    music: model?.music ? BASE_ROWS.music : 0,
+    mic: shown.mic ? BASE_ROWS.mic : 0,
+    input: shown.input ? BASE_ROWS.input : 0,
   };
   const order = ['markers', 'ruler', 'video', 'zoom', 'mask', 'caption', 'motion', 'sound', 'music', 'mic', 'input'] as const;
   const tops = {} as Layout['tops'];
@@ -152,7 +159,10 @@ export function Timeline() {
     () => (project && media?.transcript ? captionCues(captionWords(applyCaptionFixes(media.transcript.words, project.captions.fixes), spans), project.captions.style) : []),
     [project, spans, media],
   );
-  const layout = useMemo(() => layoutOf(model), [model]);
+  const hasMic = project?.sources.mic !== undefined;
+  const hasInput = project?.sources.events !== undefined;
+  const hasPageSounds = (pageSounds?.length ?? 0) > 0;
+  const layout = useMemo(() => layoutOf(model, { mic: hasMic, input: hasInput, pageSounds: hasPageSounds }), [model, hasMic, hasInput, hasPageSounds]);
 
   /** The whole video is in view: it stays so when the window changes size, until the person scales it. */
   const fitted = useRef(true);
@@ -444,7 +454,7 @@ export function Timeline() {
           <div style={{ height: heights.ruler }} />
           <div style={{ height: heights.video }}>Video</div>
           {LANES.map((lane) => (
-            <div key={lane.kind} style={{ height: heights[lane.kind] }} className="lane-name">
+            <div key={lane.kind} style={{ height: heights[lane.kind] }} className={`lane-name ${lane.kind}`}>
               {lane.name}
               {(model?.lanes[lane.kind].cutOut ?? 0) > 0 && (
                 <button
@@ -474,7 +484,9 @@ export function Timeline() {
               )}
             </div>
           ))}
-          <div style={{ height: heights.music }}>Music</div>
+          <div style={{ height: heights.music }} className="lane-name music">
+            Music
+          </div>
           <div style={{ height: heights.mic }}>Mic</div>
           <div style={{ height: heights.input }}>Input</div>
         </div>
@@ -487,7 +499,7 @@ export function Timeline() {
             )}
             {model && project && pps > 0 && (
               <>
-                <Markers model={model} pps={pps} />
+                {heights.markers > 0 && <Markers model={model} pps={pps} />}
                 <Ruler duration={duration} pps={pps} view={view} top={tops.ruler} />
                 <div className="tl-row" style={{ position: 'absolute', top: tops.video, height: heights.video, left: 0, right: 0 }}>
                   {model.scenes.map((scene) => (
@@ -512,23 +524,8 @@ export function Timeline() {
                     />
                   ))}
                 </div>
-                {!project.sources.mic && (
-                  <span className="lane-hint" style={{ top: tops.mic + heights.mic / 2, left: view.left + 10 }}>
-                    No mic in this take
-                  </span>
-                )}
-                {!project.sources.events && (
-                  <span className="lane-hint" style={{ top: tops.input + heights.input / 2, left: view.left + 10 }}>
-                    No clicks or keys recorded in this take
-                  </span>
-                )}
                 {LANES.map((lane) => (
-                  <div key={lane.kind} className="tl-row" style={{ position: 'absolute', top: tops[lane.kind], height: heights[lane.kind], left: 0, right: 0 }}>
-                    {model.lanes[lane.kind].blocks.length === 0 && model.lanes[lane.kind].cutOut === 0 && !(lane.kind === 'sound' && pageSounds?.length) && (
-                      <span className="lane-hint" style={{ top: '50%', left: view.left + 10 }}>
-                        <kbd>{LANE_HINTS[lane.kind][0]}</kbd> {LANE_HINTS[lane.kind][1]}
-                      </span>
-                    )}
+                  <div key={lane.kind} className={`tl-row lane ${lane.kind}`} hidden={heights[lane.kind] === 0} style={{ position: 'absolute', top: tops[lane.kind], height: heights[lane.kind], left: 0, right: 0 }}>
                     {model.lanes[lane.kind].blocks.map((block, index, blocks) => {
                       const failed = lane.kind === 'motion' && motionStatus.some((entry) => entry.item === `overlays[${block.item}]` && entry.state === 'failed');
                       const blockLeft = block.start * pps;
@@ -541,7 +538,7 @@ export function Timeline() {
                           className={`item ${lane.kind}${block.enabled ? '' : ' off'}${isSelected(selection, lane.kind, block.id) ? ' selected' : ''}${hovered === block.id ? ' linked' : ''}${failed ? ' failed' : ''}`}
                           onPointerEnter={() => setHovered(block.id)}
                           onPointerLeave={() => setHovered((id) => (id === block.id ? undefined : id))}
-                          style={{ left: blockLeft, width: blockWidth, top: 4 + block.row * ROW }}
+                          style={{ left: blockLeft, width: blockWidth, top: LANE_PAD + 2 + block.row * ROW }}
                           title={`${block.title}${block.enabled ? '' : ' (off: not in the video)'} · drag to move${lane.kind === 'sound' ? '' : ', edges to change the length'}, Alt to copy, Del to delete`}
                           data-id={block.id}
                           onPointerDown={(event) => pressOverlay(event, block, lane.list)}
@@ -619,7 +616,7 @@ export function Timeline() {
                 )}
                 {/* at either end of the timeline the mark stays whole */}
                 {drag.insertAt !== undefined && <div className="insert-mark" style={{ left: Math.min(Math.max(drag.insertAt * pps, 2), duration * pps - 2), top: tops.video, height: heights.video }} />}
-                <Playhead pps={pps} top={heights.markers - 8} scroller={scroller} />
+                <Playhead pps={pps} top={tops.ruler} scroller={scroller} />
               </>
             )}
           </div>
@@ -642,13 +639,8 @@ function MusicLane({ model, top, height, pps, view, duration, selected }: { mode
   const status = useStore(store, (state) => state.soundStatus);
   const track = useStore(store, (state) => state.soundtrack);
   const music = model.music;
-  if (!music) {
-    return (
-      <span className="lane-hint" style={{ top: top + height / 2, left: view.left + 10 }}>
-        <kbd>+ Music</kbd> a score written for this video: pulse, drift, lofi, bright or cinematic
-      </span>
-    );
-  }
+  // without music its row is not shown: + Music adds some
+  if (!music) return null;
   const sections = status.info?.sections ?? [];
   const problems = status.errors.length;
   const state = status.state === 'rendering' ? 'rendering …' : status.state === 'failed' ? 'could not render' : problems > 0 ? `${problems} error${problems === 1 ? '' : 's'}` : '';
@@ -741,19 +733,24 @@ function TimelineBar({ status, duration, fit, zoomValue, onScale }: { status: st
       </label>
       <span className="tl-sep" />
       <button className="act" onClick={() => addZoom()} disabled={!!blocked} title={blocked ?? 'A zoom at the playhead (Z draws one)'}>
-        + Zoom
+        <i className="dot zoom" aria-hidden="true" />
+        Zoom
       </button>
       <button className="act" onClick={() => addMask()} disabled={!!blocked} title={blocked ?? 'A mask at the playhead (M draws one)'}>
-        + Mask
+        <i className="dot mask" aria-hidden="true" />
+        Mask
       </button>
       <button className="act" onClick={() => setTool('caption')} disabled={!!blocked} title={blocked ?? 'A caption at the playhead: type it on the video (T)'}>
-        + Caption
+        <i className="dot caption" aria-hidden="true" />
+        Caption
       </button>
       <button className="act" onClick={addCard} disabled={broken} title="A title card after the scene under the playhead">
-        + Card
+        <i className="dot card" aria-hidden="true" />
+        Card
       </button>
       <button className="act" onClick={() => void addPage()} disabled={broken} title="A page (an image, scrolled through) after the scene under the playhead">
-        + Page
+        <i className="dot still" aria-hidden="true" />
+        Page
       </button>
       <Select
         value={undefined}
@@ -766,7 +763,8 @@ function TimelineBar({ status, duration, fit, zoomValue, onScale }: { status: st
         testId="add-motion"
         title="Motion from the kit's templates: a scene after the scene under the playhead, or an overlay on the video. Claude can change its page, or write one of its own."
       >
-        + Motion
+        <i className="dot motion" aria-hidden="true" />
+        Motion
       </Select>
       <Select
         value={undefined}
@@ -779,7 +777,8 @@ function TimelineBar({ status, duration, fit, zoomValue, onScale }: { status: st
         testId="add-music"
         title="Music written for this video from a template (it follows the scenes and cuts and goes down under speech). Claude can change it or write the video's own."
       >
-        + Music
+        <i className="dot music" aria-hidden="true" />
+        Music
       </Select>
       <Select
         value={undefined}
@@ -792,8 +791,10 @@ function TimelineBar({ status, duration, fit, zoomValue, onScale }: { status: st
         testId="add-sound"
         title="A sound at the playhead: a whoosh, a pop, a ding (it moves with what the video shows there)"
       >
-        + Sound
+        <i className="dot sound" aria-hidden="true" />
+        Sound
       </Select>
+      <span className="tl-sep" />
       <span className="tl-status">{status}</span>
       {duration !== undefined && <LengthControl duration={duration} />}
       <div className="grow" />
@@ -918,7 +919,8 @@ function Playhead({ pps, top, scroller }: { pps: number; top: number; scroller: 
     const x = t * pps;
     if (x < element.scrollLeft + (playing ? 0 : 40) || x > element.scrollLeft + element.clientWidth - 40) element.scrollLeft = Math.max(0, x - element.clientWidth / 3);
   }, [t, pps, playing, scroller]);
-  return <div className="playhead" style={{ left: t * pps, top }} />;
+  // moved with a transform: no layout each frame while it plays
+  return <div className="playhead" style={{ transform: `translateX(${t * pps}px)`, top }} />;
 }
 
 const Markers = memo(function Markers({ model, pps }: { model: TimelineModel; pps: number }) {
@@ -995,7 +997,7 @@ function Scene(props: { scene: SceneBlock; project: CuttleProject; pps: number; 
   const left = scene.start * pps;
   const width = (scene.end - scene.start) * pps;
   const clip = project.scenes[scene.index];
-  const tileHeight = BASE_ROWS.video - 10;
+  const tileHeight = BASE_ROWS.video - 12;
   const tiles: { x: number; index: number }[] = [];
   const ready = thumbState === 'ready' && thumbPath !== undefined && interval !== undefined;
   const tileWidth = Math.round((tileHeight * thumbWidth) / thumbHeight);

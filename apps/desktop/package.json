@@ -1,6 +1,6 @@
 {
   "name": "@cuttle/desktop",
-  "version": "0.1.9",
+  "version": "0.1.10",
   "private": true,
   "type": "module",
   "description": "Cuttle: screen recordings that edit themselves",

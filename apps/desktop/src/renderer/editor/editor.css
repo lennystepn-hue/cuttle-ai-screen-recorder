@@ -1,7 +1,7 @@
 .app {
   display: grid;
-  /* the video stays the largest part: the timeline takes about a third of a small window */
-  grid-template-rows: 44px minmax(0, 1fr) var(--timeline-height, clamp(220px, 36vh, 360px));
+  /* the video stays the largest part: the timeline is as tall as its rows, up to about 40 % of the window */
+  grid-template-rows: 44px minmax(0, 1fr) var(--timeline-height, auto);
   /* the stage (its tools float over its left edge) and the inspector on the right */
   grid-template-columns: minmax(0, 1fr) var(--inspector-width, 360px);
   /* panels are cards on the window, apart by a gutter: no line between them */
@@ -617,6 +617,8 @@ button.chip-status:hover {
 .timeline {
   grid-row: 3;
   grid-column: 1;
+  max-height: clamp(220px, 42vh, 420px);
+  padding-bottom: var(--sp-2);
   background: var(--panel);
   overflow: hidden;
   display: flex;
@@ -625,26 +627,42 @@ button.chip-status:hover {
   position: relative;
 }
 .tl-bar {
-  height: 38px;
+  height: 44px;
   flex: none;
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 0 12px;
-  border-bottom: 1px solid var(--line);
+  gap: 2px;
+  padding: 2px 10px 0;
   color: var(--muted);
-  font-size: var(--size-s);
+  font-size: 12.5px;
 }
 .tl-bar .act {
-  height: 26px;
-  padding: 0 8px;
-  border-radius: 7px;
+  height: 28px;
+  padding: 0 9px;
+  border-radius: var(--r-md);
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 7px;
   white-space: nowrap;
-  color: var(--muted);
+  color: var(--text-2);
+  font-weight: 500;
 }
+/* what each button adds, in its kind's colour */
+.tl-bar .dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 3px;
+  flex: none;
+  background: var(--kind, var(--muted));
+}
+.dot.zoom { --kind: var(--zoom); }
+.dot.mask { --kind: var(--mask); }
+.dot.caption { --kind: var(--caption); }
+.dot.card { --kind: var(--card); }
+.dot.still { --kind: var(--still); }
+.dot.motion { --kind: var(--motion); }
+.dot.music { --kind: var(--music); }
+.dot.sound { --kind: var(--sound); }
 .tl-bar .act:hover {
   background: var(--raised);
   color: var(--text);
@@ -691,14 +709,15 @@ button.chip-status:hover {
   overflow-y: auto;
 }
 .tl-names {
-  width: 96px;
+  width: 104px;
   flex: none;
-  border-right: 1px solid var(--line);
 }
 .tl-names div {
-  padding-left: 14px;
+  position: relative;
+  padding-left: 18px;
   color: var(--muted);
-  font-size: var(--size-s);
+  font-size: 12.5px;
+  font-weight: 500;
   display: flex;
   flex-direction: column;
   align-items: flex-start;
@@ -708,7 +727,7 @@ button.chip-status:hover {
 }
 .tl-names small {
   color: var(--faint);
-  font-size: 10px;
+  font-size: 11px;
   line-height: 1.2;
 }
 .tl-scroll {
@@ -723,6 +742,33 @@ button.chip-status:hover {
 }
 .tl-row {
   position: relative;
+}
+/* a lane's name with a bar of its kind's colour */
+.lane-name::before {
+  content: '';
+  position: absolute;
+  left: 9px;
+  top: 50%;
+  width: 3px;
+  height: 14px;
+  margin-top: -7px;
+  border-radius: 2px;
+  background: var(--kind, var(--muted));
+}
+.lane-name.zoom { --kind: var(--zoom); }
+.lane-name.mask { --kind: var(--mask); }
+.lane-name.caption { --kind: var(--caption); }
+.lane-name.motion { --kind: var(--motion); }
+.lane-name.sound { --kind: var(--sound); }
+.lane-name.music { --kind: var(--music); }
+/* a lane: a quiet strip its items sit on, apart from the next */
+.tl-row.lane::before {
+  content: '';
+  position: absolute;
+  inset: 3px 0;
+  border-radius: var(--r-md);
+  background: rgba(255, 255, 255, 0.018);
+  pointer-events: none;
 }
 .flag {
   position: absolute;
@@ -756,25 +802,24 @@ button.chip-status:hover {
   text-overflow: ellipsis;
 }
 .ruler {
-  border-bottom: 1px solid var(--line);
   color: var(--faint);
-  font-size: 10px;
+  font-size: 11px;
   font-variant-numeric: tabular-nums;
   cursor: default;
 }
 .ruler span {
   position: absolute;
-  top: 3px;
-  padding-left: 3px;
+  top: 5px;
+  padding-left: 4px;
   border-left: 1px solid var(--line-strong);
   height: 14px;
-  line-height: 12px;
+  line-height: 14px;
 }
 .scene {
   position: absolute;
-  top: 5px;
-  bottom: 5px;
-  border-radius: 7px;
+  top: 6px;
+  bottom: 6px;
+  border-radius: var(--r-md);
   overflow: hidden;
   background: var(--raised);
   display: flex;
@@ -853,16 +898,35 @@ button.chip-status:hover {
 }
 .item {
   position: absolute;
-  height: 18px;
-  border-radius: 6px;
-  font-size: 11px;
-  font-weight: 600;
+  height: 26px;
+  border-radius: 7px;
+  font-size: 12px;
+  font-weight: 500;
   display: flex;
   align-items: center;
-  padding: 0 8px;
+  padding: 0 10px 0 12px;
   white-space: nowrap;
   overflow: hidden;
   min-width: 6px;
+}
+/* a bar of its kind's colour on its left */
+.item::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background: currentColor;
+  opacity: 0.85;
+  pointer-events: none;
+}
+.item.sound::before,
+.item.music::before {
+  display: none;
+}
+.item span {
+  color: var(--text);
 }
 .item span {
   position: relative;
@@ -983,15 +1047,20 @@ button.chip-status:hover {
   pointer-events: none;
   z-index: 3;
 }
+.playhead {
+  left: 0;
+}
+/* a round head on the ruler */
 .playhead::before {
   content: '';
   position: absolute;
-  top: 0;
+  top: 6px;
   left: -5px;
   width: 12px;
-  height: 8px;
-  border-radius: 2px 2px 6px 6px;
+  height: 12px;
+  border-radius: 50%;
   background: var(--accent);
+  box-shadow: 0 0 0 2px var(--panel);
 }
 
 /* export sheet */
@@ -2597,8 +2666,8 @@ button.chip-status:hover {
 }
 .tl-sep {
   width: 1px;
-  height: 16px;
-  margin: 0 4px;
+  height: 18px;
+  margin: 0 8px;
   background: var(--line-strong);
   flex: none;
 }

@@ -23,6 +23,7 @@ import {
   templateLabel,
 } from './actions';
 import { redo, undo } from './doc';
+import { showInspector, toggleInspector } from './layout';
 import { currentPlayer, openExport, select, setFormat, setTool, store } from './session';
 
 export interface EditorCommand {
@@ -103,9 +104,17 @@ export function editorCommands(): EditorCommand[] {
     { id: 'fit', name: 'Fit the whole video in the timeline', keywords: 'zoom scale timeline', keys: 'Shift+Z', group: 'View', run: () => store.set({ pxPerSecond: 0 }) },
     { id: 'snap', name: store.get().snap ? 'Turn snapping off' : 'Turn snapping on', group: 'View', run: () => store.set({ snap: !store.get().snap }) },
     { id: 'deselect', name: 'Clear the selection', keys: 'Esc', group: 'View', run: () => select(undefined) },
-    { id: 'look', name: 'Show the look (background, frame, cursor…)', group: 'View', run: () => store.set({ tab: 'look' }) },
-    { id: 'auto', name: 'Show what Cuttle did on its own', keywords: 'automatic zooms cuts masks fillers pauses', group: 'View', run: () => store.set({ tab: 'auto' }) },
-    { id: 'transcript', name: 'Show the transcript', keywords: 'words speech subtitles', group: 'View', run: () => store.set({ tab: 'transcript' }) },
+    {
+      id: 'inspector',
+      name: store.get().inspectorHidden ? 'Show the inspector' : 'Hide the inspector (more room for the video)',
+      keywords: 'panel sidebar settings',
+      keys: 'Ctrl+I',
+      group: 'View',
+      run: toggleInspector,
+    },
+    { id: 'look', name: 'Show the look (background, frame, cursor…)', group: 'View', run: () => showInspector('look') },
+    { id: 'auto', name: 'Show what Cuttle did on its own', keywords: 'automatic zooms cuts masks fillers pauses', group: 'View', run: () => showInspector('auto') },
+    { id: 'transcript', name: 'Show the transcript', keywords: 'words speech subtitles', group: 'View', run: () => showInspector('transcript') },
     { id: 'format-own', name: 'Preview at the project’s own size', keywords: 'format aspect output', group: 'View', run: () => setFormat(undefined) },
     ...Object.keys(EXPORT_FORMATS).map(
       (name): EditorCommand => ({ id: `format-${name}`, name: `Preview as ${name}`, keywords: 'format aspect output vertical square', group: 'View', run: () => setFormat(name as keyof typeof EXPORT_FORMATS) }),

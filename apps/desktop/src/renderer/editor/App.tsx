@@ -20,6 +20,7 @@ import {
   RecordIcon,
   RedoIcon,
   SelectIcon,
+  SidebarIcon,
   TextIcon,
   UndoIcon,
   WarningIcon,
@@ -32,6 +33,7 @@ import { beginGesture, cancelGesture } from './gesture';
 import { dismissDraft, dismissRestart, dismissToast, edit, preview, redo, retrySave, undo, useDraft } from './doc';
 import { ExportSheet } from './ExportSheet';
 import { Inspector } from './Inspector';
+import { LayoutHandles, showInspector, toggleInspector } from './layout';
 import { SourceView } from './SourceView';
 import { currentPlayer, documentProject, openExport, openSession, retryMedia, select, setFormat, setTool, shownProject, sourceViewShown, store, type Tool } from './session';
 import { useStore } from './store';
@@ -42,6 +44,7 @@ export function App() {
   const canvas = useRef<HTMLCanvasElement>(null);
   const phase = useStore(store, (state) => state.phase);
   const tool = useStore(store, (state) => state.tool);
+  const inspectorHidden = useStore(store, (state) => state.inspectorHidden);
 
   useEffect(() => {
     if (canvas.current) void openSession(canvas.current);
@@ -51,12 +54,13 @@ export function App() {
 
   if (phase === 'failed') return <Failed />;
   return (
-    <div className="app" data-phase={phase} data-tool={tool}>
+    <div className="app" data-phase={phase} data-tool={tool} data-inspector={inspectorHidden ? 'hidden' : undefined}>
       <TitleBar />
       <Tools />
       <Stage canvas={canvas} />
       <Timeline />
       <Inspector />
+      <LayoutHandles />
       <ExportSheet />
       <CommandMenu />
       {phase === 'loading' && (
@@ -151,6 +155,7 @@ function TitleBar() {
               <ChevronIcon size={13} />
             </button>
           </div>
+          <InspectorToggle />
           <button className="primary" onClick={openExport} disabled={(store.get().doc?.project.scenes.length ?? 0) === 0} title={(store.get().doc?.project.scenes.length ?? 0) === 0 ? 'Nothing to export yet: the project has no scenes' : `Export (${shortcut('Ctrl+E')})`}>
             <ExportIcon size={14} />
             Export
@@ -158,6 +163,16 @@ function TitleBar() {
         </>
       )}
     </header>
+  );
+}
+
+/** Hides the inspector (the video and the timeline take its room) or shows it again. */
+function InspectorToggle() {
+  const hidden = useStore(store, (state) => state.inspectorHidden);
+  return (
+    <button className="inspector-toggle" aria-pressed={!hidden} onClick={toggleInspector} title={`${hidden ? 'Show' : 'Hide'} the inspector (${shortcut('Ctrl+I')})`} aria-label={hidden ? 'Show the inspector' : 'Hide the inspector'} data-testid="inspector-toggle">
+      <SidebarIcon size={16} />
+    </button>
   );
 }
 
@@ -546,7 +561,7 @@ function VideoFrame({ canvas, size, output }: { canvas: React.RefObject<HTMLCanv
             className={`webcam-box${dragging ? ' dragging' : ''}`}
             style={{ left: bubble[0] * scale, top: bubble[1] * scale, width: bubble[2] * scale, height: bubble[3] * scale, borderRadius: bubbleRadius }}
             onPointerDown={(event) => dragBubble(event)}
-            onDoubleClick={() => store.set({ tab: 'look', lookSection: 'camera' })}
+            onDoubleClick={() => (showInspector('look'), store.set({ lookSection: 'camera' }))}
             title="Drag the camera anywhere; drag a corner to resize it. A double click shows its look."
             data-testid="webcam-box"
           >
@@ -821,6 +836,7 @@ function useShortcuts(): void {
       // Ctrl+F finds a word in the transcript, from anywhere
       if (command && key === 'f' && !menuOpen) {
         event.preventDefault();
+        showInspector();
         store.set({ tab: 'transcript', findRequest: (store.get().findRequest ?? 0) + 1 });
         return;
       }
@@ -841,6 +857,7 @@ function useShortcuts(): void {
           z: () => (event.shiftKey ? redo() : undo()),
           y: redo,
           d: duplicateSelection,
+          i: toggleInspector,
         };
         const action = edits[key];
         if (!action) return;

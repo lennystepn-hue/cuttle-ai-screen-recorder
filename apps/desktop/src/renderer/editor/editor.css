@@ -20,7 +20,7 @@
 
 /* title bar: the window's caption buttons sit over its right end (titleBarOverlay) */
 .titlebar {
-  grid-column: 1 / 3;
+  grid-column: 1 / -1;
   /* the window's whole width, past the gutters: the caption buttons and traffic lights sit where they did */
   margin: 0 calc(-1 * var(--sp-2));
   display: flex;
@@ -3574,4 +3574,141 @@ button.chip-status:hover {
 .look-body .seg {
   background: var(--bg);
   box-shadow: inset 0 0 0 1px var(--line);
+}
+
+/* the layout the person sets (layout.tsx): the inspector hidden, the timeline's own height */
+.app[data-inspector='hidden'] {
+  grid-template-columns: minmax(0, 1fr);
+}
+.app[data-inspector='hidden'] .inspector,
+.app[data-inspector='hidden'] .resize-inspector {
+  display: none;
+}
+:root[data-timeline-sized] .timeline {
+  max-height: none;
+}
+/* the handles in the gutters: a line shows on hover and while dragging */
+.resize-handle {
+  position: relative;
+  z-index: 5;
+  touch-action: none;
+}
+.resize-handle::after {
+  content: '';
+  position: absolute;
+  border-radius: 1px;
+  background: var(--line-strong);
+  opacity: 0;
+  transition: opacity var(--fast);
+}
+.resize-handle:hover::after,
+:root[data-resizing] .resize-handle:active::after {
+  opacity: 1;
+}
+.resize-inspector {
+  grid-row: 2 / 4;
+  grid-column: 2;
+  justify-self: start;
+  width: var(--sp-2);
+  margin-left: calc(-1 * var(--sp-2));
+  cursor: col-resize;
+}
+.resize-inspector::after {
+  top: 12px;
+  bottom: 12px;
+  left: 3px;
+  width: 2px;
+}
+.resize-timeline {
+  grid-row: 3;
+  grid-column: 1;
+  align-self: start;
+  height: var(--sp-2);
+  margin-top: calc(-1 * var(--sp-2));
+  cursor: row-resize;
+}
+.resize-timeline::after {
+  left: 12px;
+  right: 12px;
+  top: 3px;
+  height: 2px;
+}
+/* while a handle is dragged the pointer keeps its shape everywhere, and nothing gets selected */
+:root[data-resizing],
+:root[data-resizing] * {
+  cursor: inherit;
+  user-select: none;
+}
+:root[data-resizing='x'] {
+  cursor: col-resize;
+}
+:root[data-resizing='y'] {
+  cursor: row-resize;
+}
+/* the title bar's inspector switch: a plain icon button, lit while the inspector shows */
+.inspector-toggle {
+  width: 30px;
+  height: 28px;
+  border-radius: var(--r-md);
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+  transition: background var(--fast), color var(--fast);
+}
+.inspector-toggle:hover {
+  background: var(--raised);
+  color: var(--text);
+}
+.inspector-toggle[aria-pressed='true'] {
+  color: var(--text-2);
+}
+/* a block too narrow for its label: the label's first letter */
+.item:has(.initial) {
+  justify-content: center;
+  padding: 0 0 0 3px;
+}
+.item .initial {
+  color: var(--text);
+  font-size: 11px;
+  font-weight: 600;
+}
+/* the timeline's bar folds on a narrow window: first the new items to their coloured dots and Fit to
+   its icon, then Split to its glyph, the speed's word and the scenes' count (each keeps its tooltip) */
+.timeline {
+  container: timeline / inline-size;
+}
+@container timeline (max-width: 1120px) {
+  .tl-bar .add .act-name,
+  .tl-bar .fit .act-name {
+    display: none;
+  }
+  .tl-bar .act.add {
+    padding: 0 9px;
+  }
+}
+@container timeline (max-width: 780px) {
+  .tl-bar .split .act-name,
+  .tl-bar .speed > span,
+  .tl-status {
+    display: none;
+  }
+  .tl-bar input[type='range'] {
+    width: 64px;
+  }
+}
+/* the video's length keeps its place: it gives way last */
+.tl-bar .length-select {
+  flex: none;
+}
+/* the dot of what a menu adds sits beside its name, as on the buttons (an <i> in the menu's value) */
+.tl-bar .select-trigger.add .select-value {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+@container timeline (max-width: 620px) {
+  .tl-bar input[type='range'],
+  .tl-bar .tl-sep {
+    display: none;
+  }
 }

@@ -1,20 +1,32 @@
 .app {
   display: grid;
-  /* the video stays the largest part: the timeline takes about a third of a small window, its lanes all shown at 900 px */
-  grid-template-rows: 44px minmax(0, 1fr) var(--timeline-height, clamp(220px, 40vh, 380px));
-  /* the tools beside the video, the inspector on the right */
-  grid-template-columns: 48px minmax(0, 1fr) 300px;
+  /* the video stays the largest part: the timeline takes about a third of a small window */
+  grid-template-rows: 44px minmax(0, 1fr) var(--timeline-height, clamp(220px, 36vh, 360px));
+  /* the stage (its tools float over its left edge) and the inspector on the right */
+  grid-template-columns: minmax(0, 1fr) var(--inspector-width, 360px);
+  /* panels are cards on the window, apart by a gutter: no line between them */
+  gap: var(--sp-2);
+  padding: 0 var(--sp-2) var(--sp-2);
   height: 100%;
+}
+.stage,
+.inspector,
+.timeline {
+  border-radius: var(--r-xl);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.03),
+    0 0 0 1px var(--line);
 }
 
 /* title bar: the window's caption buttons sit over its right end (titleBarOverlay) */
 .titlebar {
-  grid-column: 1 / 4;
+  grid-column: 1 / 3;
+  /* the window's whole width, past the gutters: the caption buttons and traffic lights sit where they did */
+  margin: 0 calc(-1 * var(--sp-2));
   display: flex;
   align-items: center;
   gap: 12px;
   padding: 0 152px 0 14px;
-  border-bottom: 1px solid var(--line);
   -webkit-app-region: drag;
   min-width: 0;
 }
@@ -42,7 +54,9 @@
   white-space: nowrap;
 }
 .project-name b {
+  font-size: 14px;
   font-weight: 600;
+  letter-spacing: -0.01em;
   overflow: hidden;
   text-overflow: ellipsis;
 }
@@ -63,7 +77,7 @@
   gap: 2px;
 }
 .seg button {
-  padding: 3px 10px;
+  padding: 4px 10px;
   border-radius: 7px;
   color: var(--muted);
   font-size: var(--size-s);
@@ -159,7 +173,7 @@ button.chip-status:hover {
 /* stage: the output view, as large as it fits, with the transport under it */
 .stage {
   grid-row: 2;
-  grid-column: 2;
+  grid-column: 1;
   background: var(--stage);
   position: relative;
   display: flex;
@@ -167,7 +181,8 @@ button.chip-status:hover {
   align-items: center;
   justify-content: center;
   gap: 12px;
-  padding: 20px 24px 14px;
+  /* room on both sides for the tools floating over its left edge, the video centred */
+  padding: 16px 60px 12px;
   min-height: 0;
   min-width: 0;
 }
@@ -226,7 +241,9 @@ button.chip-status:hover {
   color: var(--text);
 }
 .transport {
-  width: 100%;
+  /* as wide as the video (Stage sets --frame-width), its play button under the video's left edge */
+  width: var(--frame-width, 100%);
+  max-width: 100%;
   display: flex;
   align-items: center;
   gap: 14px;
@@ -262,9 +279,9 @@ button.chip-status:hover {
 /* inspector */
 .inspector {
   grid-row: 2 / 4;
-  grid-column: 3;
+  grid-column: 2;
   background: var(--panel);
-  border-left: 1px solid var(--line);
+  overflow: hidden;
   display: flex;
   flex-direction: column;
   min-height: 0;
@@ -599,9 +616,9 @@ button.chip-status:hover {
 /* timeline */
 .timeline {
   grid-row: 3;
-  grid-column: 1 / 3;
+  grid-column: 1;
   background: var(--panel);
-  border-top: 1px solid var(--line);
+  overflow: hidden;
   display: flex;
   flex-direction: column;
   min-height: 0;
@@ -1292,22 +1309,36 @@ button.chip-status:hover {
 
 /* the tools, beside the video */
 .tools {
+  /* floats over the stage's left edge, as a bar of its own (the HUD's look) */
   grid-row: 2;
   grid-column: 1;
-  background: var(--panel);
-  border-right: 1px solid var(--line);
+  align-self: center;
+  justify-self: start;
+  margin-left: 10px;
+  z-index: 3;
+  background: var(--overlay);
+  border-radius: var(--r-xl);
+  box-shadow: var(--shadow-bar);
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 4px;
-  padding: 10px 0;
+  gap: 2px;
+  padding: 4px;
   min-height: 0;
+}
+/* the commands apart from the tools */
+.tools .grow {
+  flex: none;
+  width: 20px;
+  height: 1px;
+  margin: 3px 0;
+  background: var(--line-strong);
 }
 .tools button {
   position: relative;
-  width: 36px;
-  height: 36px;
-  border-radius: 9px;
+  width: 34px;
+  height: 34px;
+  border-radius: var(--r-md);
   display: grid;
   place-items: center;
   color: var(--muted);
@@ -1336,14 +1367,8 @@ button.chip-status:hover {
   color: var(--caption);
 }
 .tools kbd {
-  position: absolute;
-  right: 1px;
-  bottom: 0;
-  padding: 0 2px;
-  background: none;
-  font-size: 10px;
-  line-height: 1.2;
-  color: var(--muted);
+  /* the key is in each tool's tooltip */
+  display: none;
 }
 .tools button[aria-pressed='true'] kbd {
   color: inherit;

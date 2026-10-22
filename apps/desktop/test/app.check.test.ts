@@ -2288,7 +2288,7 @@ describe.runIf(enabled)('the Cuttle app', () => {
     });
     await openLook(first.page, 'background');
     await click(first.page, '.swatch-button.bg-mesh');
-    await expect.poll(() => saved(first.dir).theme).toEqual({ name: 'Nimbus', url: 'nimbus.app', logo: 'brand/nimbus.svg', font: 'Bebas Neue', accent: '#7C5CFF' });
+    await expect.poll(() => saved(first.dir).theme, { timeout: 10_000 }).toEqual({ name: 'Nimbus', url: 'nimbus.app', logo: 'brand/nimbus.svg', font: 'Bebas Neue', accent: '#7C5CFF' });
     expect(readFileSync(join(first.dir, 'brand', 'nimbus.svg'), 'utf8')).toContain('<svg');
     // the end card wears it: the logo, the name's font, the URL, the accent; the editor draws it as `cuttle preview` does
     const firstCard = await settled(first);
@@ -2449,8 +2449,10 @@ describe.runIf(enabled)('the Cuttle app', () => {
     await page.press('[data-testid=watermark-text]', 'Enter');
     await expect.poll(() => saved().watermark?.text).toBe('nimbus.app');
     await asExported(1, 'watermark-text');
+    // the image comes through the file dialog and is copied into the project before the edit is saved:
+    // more than the poll's default second on a busy runner
     await click(page, '[data-testid=watermark-image]');
-    await expect.poll(() => saved().watermark?.image).toBe('images/nimbus.svg');
+    await expect.poll(() => saved().watermark?.image, { timeout: 10_000 }).toBe('images/nimbus.svg');
     await click(page, '[data-testid=watermark-top-left]');
     await page.locator('[data-testid=watermark-size]').evaluate((element) => {
       const input = element as HTMLInputElement;

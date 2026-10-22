@@ -1,0 +1,84 @@
+name: Bug report
+description: Something in Cuttle does not work as it should
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for reporting it. **Leave private data out:** a recording, a still or a `cuttle.json` can show names, keys or messages. A security flaw goes privately through the [security policy](https://github.com/lennystepn-hue/cuttle-ai-screen-recorder/security/policy) instead.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you saw, and what you expected instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: How to make it happen
+      description: The steps from the start, as short as they can be.
+      placeholder: |
+        1. Record a window with the mic on
+        2. Open the take in the editor
+        3. …
+    validations:
+      required: true
+  - type: dropdown
+    id: part
+    attributes:
+      label: Where
+      options:
+        - Recording (the picker, the HUD, the prompter)
+        - The automatic cut (zooms, cuts, masks, transcription)
+        - The editor
+        - The export
+        - Motion or music pages
+        - The cuttle command (CLI)
+        - The Claude skill
+        - Installing or updating
+        - Something else
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Cuttle version
+      description: Settings > General in the app, or `cuttle --version`.
+      placeholder: "0.1.13"
+    validations:
+      required: true
+  - type: dropdown
+    id: system
+    attributes:
+      label: System
+      options:
+        - macOS (Apple silicon)
+        - macOS (Intel, from the repository)
+        - Windows
+        - Another system (say which below)
+    validations:
+      required: true
+  - type: input
+    id: system-version
+    attributes:
+      label: System version
+      placeholder: macOS 26.1, Windows 11 24H2
+  - type: dropdown
+    id: install
+    attributes:
+      label: Installed from
+      options:
+        - A release (the installer or the DMG)
+        - This repository (pnpm app, pnpm cli:install)
+  - type: textarea
+    id: logs
+    attributes:
+      label: What Cuttle said
+      description: An error message, the output of the command with `--json`, or the app's log. Check it for private data first.
+      render: text
+  - type: textarea
+    id: more
+    attributes:
+      label: Anything else
+      description: Screenshots, a short clip of a test screen, ffmpeg's version (`ffmpeg -version`), the displays you use.

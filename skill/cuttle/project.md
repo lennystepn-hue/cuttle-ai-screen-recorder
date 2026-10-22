@@ -90,6 +90,7 @@ happens (below).
 | `background.preset` | `sunset-sky`, `aurora`, `mesh`, `solid` (needs `color`, e.g. `"#0c0c0c"`), `image` (needs `image`: a path; `blur` 0–1 softens it, `dim` 0–0.8 darkens it), `gradient` (needs `colors`: 2 to 4, first to last; `angle` as in CSS, `135` by default; `kind` `linear` or `radial`), and the quiet animated `flow`, `bokeh` and `dots`; `mesh`, `flow`, `bokeh` and `dots` take `colors` too (else their own) |
 | `frame` | `enabled` (`true`), `style` (`mac-dark`, `mac-light`, `browser-light`, `browser-dark`, `windows-light`, `windows-dark`, `terminal`, `none`; and the phones `iphone` and `android`, a bezel and a camera around the screen, for a tall recording of a phone or a narrow window), `title` (`""`), `radius` (`14`; not for the phones), `shadow` (`true`) |
 | `cursor` | `enabled` (`true`), `style` (`system`, `arrow-white`, `arrow-black`, `dot`, `ring`, `spotlight`), `size` (`1`, up to 4), `color` (`"#D97757"`: tints dot, ring, spotlight and the click ripple), `clickEffect` (`ripple`, `none`), `smoothing` (`0.5`: 0 draws the path as recorded, up to 1 very smooth; clicks stay exact) |
+| `keys` | `enabled` (`true`), `show` (`shortcuts`: keys pressed with ⌘ or Ctrl, on Windows also Alt or Win, as `⌘ ⇧ P` or `Ctrl Shift P`; `keys`: also Esc, Enter, Tab, the arrows, Home, End, Page Up and Down and F1–F12 pressed alone), `position` (`bottom`, `top`), `size` (`1`, 0.5 to 2): a badge of each shortcut pressed, as keycaps; the same one again within a second counts up (`⌘ Z ×3`); none in clips faster than 2×, clear of the webcam bubble and the subtitles |
 | `webcam` | `enabled` (`false`; a take recorded with a camera switches it on), `shape` (`circle`, `rounded`, `squircle`, `square`), `corner` (`bottom-left`, `bottom-right`, `top-left`, `top-right`), `size` (`0.18` of the output's short side, up to 0.5), `position` (`{ x, y }`: the bubble's centre as a share of the video, 0–1; it replaces `corner`), `border` (`true`: a white ring), `shadow` (`true`), `mirror` (`false`: flipped left to right) |
 | `audio` | `enabled` (`true`), `muteSpedUp` (`true`: sped-up clips are silent), `cleanup` (`true`: the cleaned-up mic plays, where there is one), `typing` (`true`: a key click for each key typed, where the clip is heard), `typingVolume` (`0.5`, 0 to 1), `effects` (`true`: the `sounds` and the music page's effects), `effectsVolume` (`0.8`, 0 to 1) |
 | `transition` | `enabled` (`true`: a crossfade between scenes), `duration` (`0.3` s, up to 2) |
@@ -267,7 +268,10 @@ recording.
   each press of the mistake key (kind `retake`), and where the take reached each step of the
   script (kind `step`, labelled with the step's id; the first at 0).
 - `takes/<n>/events.jsonl` has the input: `move`, `click` and `scroll` with `x` and `y`, `keys`
-  (presses per half second, never which keys) and the pointer's `shape`. On Windows it also has
+  (presses per half second, never which keys), `shortcut` with its `keys` as the system writes
+  them (`["⌘", "⇧", "P"]`, `["Ctrl", "Shift", "P"]`: only keys pressed with ⌘ or Ctrl, on Windows
+  also Alt or Win, and the keys that type nothing alone, Esc, Enter, the arrows; a letter typed is
+  never named) and the pointer's `shape`. On Windows it also has
   facts about the screen: `caret` with a `rect` (where text is typed, while it is, where the app
   keeps a system caret), `area` with the `rect` of the content area of the window in front (a
   browser's page; `null` for none), and `window` when a `dialog` or `menu` opens or closes

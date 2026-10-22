@@ -173,7 +173,7 @@ const cancelled = (what: string) => new RecorderError('cancelled', `the recordin
 
 /** Whether a pointer event lies in one of the dead zones (keys and shapes have no position). */
 export function inDeadZone(input: RawInput, zones: readonly Bounds[]): boolean {
-  if (input.type === 'key' || input.type === 'shape' || input.type === 'area' || input.type === 'window') return false;
+  if (input.type === 'key' || input.type === 'shortcut' || input.type === 'shape' || input.type === 'area' || input.type === 'window') return false;
   return zones.some((zone) => input.x >= zone.x && input.x < zone.x + zone.width && input.y >= zone.y && input.y < zone.y + zone.height);
 }
 

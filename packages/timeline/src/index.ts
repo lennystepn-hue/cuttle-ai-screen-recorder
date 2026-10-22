@@ -24,6 +24,7 @@ export { STEP_SLIP_SECONDS, STEP_ZOOM, shownFrom, stepMoves, stepZooms, type Ste
 export { ZOOM_MOVE_LEAD, ZOOM_MOVE_SECONDS, ZOOM_RAMP_SECONDS, fitZoomRect, zoomBetween, zoomRectAt, zoomTargetAt } from './zoom';
 export { TEXT_FADE_SECONDS, activeMasks, activeTexts, badgeFor, maskRectAt, type ActiveText } from './overlays';
 export { CLICK_EFFECT_SECONDS, createCursorTrack, cursorAt, smoothedPath, type CursorFrame, type CursorTrack } from './cursor';
+export { KEY_HOLD_SECONDS, KEY_MAX_SPEED, KEY_REPEAT_SECONDS, keyBadgeAt, keyGroups, shortcutsOf, type KeyBadge, type KeyGroup, type Shortcut } from './keys';
 export { createTimeline, type ActiveOverlay, type ActiveTransition, type RenderState, type SceneFrame, type Timeline, type TimelineOptions } from './frame';
 export {
   CAPTION_RULES,

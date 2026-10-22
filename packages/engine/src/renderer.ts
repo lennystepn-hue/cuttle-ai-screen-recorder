@@ -1,7 +1,8 @@
 import type { CardScene, CuttleProject, FrameStyle, Rect, Scene, StillScene, TextOverlay } from '@cuttle/project';
-import type { ActiveCaption, ActiveText, RenderState, SceneFrame } from '@cuttle/timeline';
+import type { ActiveCaption, ActiveText, KeyBadge, RenderState, SceneFrame } from '@cuttle/timeline';
 import type { EngineAssets } from './assets';
 import { CAPTION_LOOKS, drawCaption } from './captions';
+import { drawKeys } from './keys';
 import { createRenderTarget, deleteRenderTarget, type RenderTarget } from './gl/target';
 import { createTexture, sourceSize, uploadPixels, uploadTexture } from './gl/texture';
 import { blurSamples, placeBadge, placeOverlay, stillCrop, unitFor, uvRect, watermarkRect, webcamRect, type Size, type WindowLayout } from './layout';
@@ -105,6 +106,9 @@ const CARD_GAP = 12;
 const TEXT_MAX_WIDTH = 0.8;
 /** Share of the content width that the speed badge may use. */
 const BADGE_MAX_WIDTH = 0.5;
+/** A shortcut's badge rises this far (units) into its place as it comes in, over these seconds. */
+const KEY_RISE = 10;
+const KEY_RISE_SECONDS = 0.2;
 
 /**
  * A WebGL2 compositor for `cuttle.json` frames. Sizes the canvas to `project.output`. Layers are
@@ -280,15 +284,25 @@ export function createRenderer(canvas: HTMLCanvasElement | OffscreenCanvas, proj
     }
   }
 
-  /** The caption over the whole frame (also over a crossfade), clear of the webcam bubble. */
-  function drawCaptionOver(caption: ActiveCaption): void {
+  /** The caption over the whole frame (also over a crossfade), clear of the webcam bubble; where it went. */
+  function drawCaptionOver(caption: ActiveCaption): Rect {
     const { style, color, size, position } = project.captions;
     const lines = caption.cue.lines.map((line) => line.map((word) => word.text));
     const maxWidth = Math.round(output.width * CAPTION_LOOKS[style].maxWidth);
     const key = JSON.stringify(['caption', lines, caption.current, style, color, unit, size, maxWidth]);
     const sprite = sprites.drawn(key, () => drawCaption(lines, caption.current, style, color, unit, size, maxWidth));
-    const [x, y] = placeOverlay(output, sprite.box, position, 'center', webcamArea ? [webcamArea] : []);
-    spritePass.drawSprite(sprite, x, y, 1);
+    const placed = placeOverlay(output, sprite.box, position, 'center', webcamArea ? [webcamArea] : []);
+    spritePass.drawSprite(sprite, placed[0], placed[1], 1);
+    return placed;
+  }
+
+  /** The shortcut's badge over the whole frame, clear of the webcam bubble and the caption; it rises as it comes in. */
+  function drawKeysOver(badge: KeyBadge, caption: Rect | undefined): void {
+    const { position, size } = look.keys;
+    const sprite = sprites.drawn(JSON.stringify(['keys', badge.keys, badge.count, unit, size]), () => drawKeys(badge.keys, badge.count, unit, size));
+    const [x, y] = placeOverlay(output, sprite.box, position, 'center', [webcamArea, caption].filter((rect): rect is Rect => rect !== undefined));
+    const rise = Math.round((1 - Math.min(1, badge.age / KEY_RISE_SECONDS)) * KEY_RISE * unit) * (position === 'top' ? -1 : 1);
+    spritePass.drawSprite(sprite, x, y + rise, badge.opacity);
   }
 
   function drawLayer(layer: SceneFrame, sources: FrameSources, t: number): void {
@@ -357,7 +371,8 @@ export function createRenderer(canvas: HTMLCanvasElement | OffscreenCanvas, proj
       if (between) {
         background.draw(state.t);
         drawMotion(between, `transition into scene ${state.transition!.sceneIndex}`);
-        if (state.caption) drawCaptionOver(state.caption);
+        const caption = state.caption ? drawCaptionOver(state.caption) : undefined;
+        if (state.keys) drawKeysOver(state.keys, caption);
         drawWatermark();
         sprites.endFrame();
         return;
@@ -373,7 +388,8 @@ export function createRenderer(canvas: HTMLCanvasElement | OffscreenCanvas, proj
         gl.bindFramebuffer(gl.FRAMEBUFFER, null);
         spritePass.draw(layerTarget.texture, [0, 0, output.width, output.height], layer.opacity, true);
       }
-      if (state.caption) drawCaptionOver(state.caption);
+      const caption = state.caption ? drawCaptionOver(state.caption) : undefined;
+      if (state.keys) drawKeysOver(state.keys, caption);
       drawWatermark();
       sprites.endFrame();
     },

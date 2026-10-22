@@ -1,6 +1,6 @@
 // The project's media in the editor, read through the cuttle-media protocol (Range requests).
 import { ALL_FORMATS, Input, UrlSource, type InputAudioTrack, type InputVideoTrack, type VideoSinkDecoderOptions } from 'mediabunny';
-import { createCursorTrack, type CursorTrack } from '@cuttle/timeline';
+import { createCursorTrack, shortcutsOf, type CursorTrack, type Shortcut } from '@cuttle/timeline';
 import { parseEventsJsonl, parseMarkersJson, parseProject, parseTranscriptJson, type CuttleProject, type InputEvent, type Marker, type TranscriptFile } from '@cuttle/project';
 import { isSvg, svgBitmap } from '@cuttle/export/svg';
 import { plainIssue } from '../../shared/format';
@@ -160,6 +160,8 @@ export interface EditorMedia {
   events: InputEvent[];
   /** The pointer's track from the input events (drawn when the look's cursor is on). */
   cursor?: CursorTrack;
+  /** The shortcuts the take logged, for their badges (`look.keys`). */
+  shortcuts?: Shortcut[];
   markers: Marker[];
   /** What the mic said (`sources.transcript`), and the path it was read from: it can be linked after the editor opened. */
   transcript?: TranscriptFile;
@@ -212,6 +214,8 @@ export async function openProjectMedia(info: ProjectInfo, project: CuttleProject
     if (text !== undefined) media.events = parseEventsJsonl(text).events;
   }
   if (media.events.length > 0) media.cursor = createCursorTrack(media.events);
+  const shortcuts = shortcutsOf(media.events);
+  if (shortcuts.length > 0) media.shortcuts = shortcuts;
   if (sources.markers) {
     const text = await optional(media, sources.markers, async () => (await fetchText(sources.markers!)) ?? '');
     const parsedMarkers = parseMarkersJson(text ?? '');

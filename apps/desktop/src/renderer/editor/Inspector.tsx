@@ -63,6 +63,7 @@ import {
   CopyIcon,
   CropIcon,
   FilmIcon,
+  KeysIcon,
   MaskIcon,
   MotionIcon,
   PageIcon,
@@ -1708,6 +1709,7 @@ const LOOK_PARTS: { id: LookSection; title: string; icon: ComponentType<{ size?:
   { id: 'background', title: 'Background', icon: BackgroundIcon },
   { id: 'window', title: 'Window', icon: WindowIcon },
   { id: 'cursor', title: 'Cursor', icon: SelectIcon },
+  { id: 'keys', title: 'Keys', icon: KeysIcon },
   { id: 'camera', title: 'Camera', icon: CameraIcon },
   { id: 'subtitles', title: 'Subtitles', icon: SubtitlesIcon },
   { id: 'sound', title: 'Sound', icon: SoundIcon },
@@ -2004,11 +2006,14 @@ const FONT_NOTES: Record<ThemeFont, string> = {
 function LookPanel() {
   const project = useStore(store, (state) => state.doc?.project);
   const raw = useStore(store, (state) => state.doc?.raw);
+  const shortcutCount = useStore(store, (state) => state.media?.shortcuts?.length ?? 0);
   if (!project || !raw) return null;
   const { look: current, output, sources, captions } = project;
   const size = SIZES.find((item) => item.width === output.width && item.height === output.height);
   const webcam = current.webcam;
   const theme = project.theme;
+  // the shortcuts the take logged (none in a take recorded before Cuttle logged them)
+  const shortcuts = shortcutCount;
   const summaries: Record<LookSection, string> = {
     watermark: current.watermark.enabled
       ? [current.watermark.image ? 'Image' : theme.logo ? 'Logo' : current.watermark.text || theme.name ? 'Text' : 'Nothing to show', CORNER_NAMES[current.watermark.corner].toLowerCase()].join(' · ')
@@ -2024,6 +2029,7 @@ function LookPanel() {
             : `${BACKGROUND_NAMES[current.background.preset]}${current.background.colors ? ' · your colours' : ''}`,
     window: current.frame.enabled ? [FRAME_NAMES[current.frame.style], current.frame.title].filter(Boolean).join(' · ') : 'No frame',
     cursor: current.cursor.enabled ? `${CURSOR_NAMES[current.cursor.style]} · ${current.cursor.size}×` : 'Hidden',
+    keys: shortcuts === 0 ? 'No shortcuts in this take' : current.keys.enabled ? `${current.keys.show === 'keys' ? 'All keys' : 'Shortcuts'} · ${current.keys.position} · ${shortcuts} in the take` : 'Off',
     camera: !sources.webcam
       ? 'No webcam in this take'
       : webcam.enabled
@@ -2189,6 +2195,14 @@ function LookPanel() {
       </LookPart>
 
       <LookPart
+        id="keys"
+        summary={summaries.keys}
+        on={{ checked: current.keys.enabled, label: 'Keystroke badges', onChange: (on) => look(['keys', 'enabled'], on, on ? 'Keystroke badges on' : 'Keystroke badges off'), testId: 'keys-enabled' }}
+      >
+        <KeysFields keys={current.keys} shortcuts={shortcuts} />
+      </LookPart>
+
+      <LookPart
         id="camera"
         summary={summaries.camera}
         on={{ checked: webcam.enabled && Boolean(sources.webcam), disabled: !sources.webcam, label: 'Webcam bubble', onChange: (on) => look(['webcam', 'enabled'], on, on ? 'Webcam on' : 'Webcam off'), testId: 'webcam-enabled' }}
@@ -2309,6 +2323,42 @@ function LookPanel() {
         )}
       </LookPart>
     </div>
+  );
+}
+
+/**
+ * The badges of the shortcuts pressed (⌘K, Ctrl+S): chords only or every special key too, under or
+ * over the video, how large. A take recorded before Cuttle logged shortcuts has none.
+ */
+function KeysFields({ keys, shortcuts }: { keys: CuttleProject['look']['keys']; shortcuts: number }) {
+  if (!keys.enabled) return <p className="hint">Off. Switched on, each shortcut pressed in the take shows as keys under the video.</p>;
+  return (
+    <>
+      {shortcuts === 0 && <p className="hint">This take has no shortcuts: a take recorded with an older Cuttle, or one without a keyboard pressed (macOS needs Input Monitoring for it).</p>}
+      <Row label="Show" plain>
+        <div className="seg full" role="group" aria-label="Which keys">
+          <button type="button" aria-pressed={keys.show === 'shortcuts'} onClick={() => look(['keys', 'show'], 'shortcuts', 'Badges: shortcuts')} title="Keys pressed with ⌘, Ctrl, Alt or Win" data-testid="keys-shortcuts">
+            Shortcuts
+          </button>
+          <button type="button" aria-pressed={keys.show === 'keys'} onClick={() => look(['keys', 'show'], 'keys', 'Badges: every key')} title="Shortcuts, and Esc, Enter, Tab and the arrows alone" data-testid="keys-all">
+            All keys
+          </button>
+        </div>
+      </Row>
+      <Row label="Place" plain>
+        <div className="seg full" role="group" aria-label="Where the badges sit">
+          <button type="button" aria-pressed={keys.position === 'bottom'} onClick={() => look(['keys', 'position'], 'bottom', 'Badges at the bottom')}>
+            Bottom
+          </button>
+          <button type="button" aria-pressed={keys.position === 'top'} onClick={() => look(['keys', 'position'], 'top', 'Badges at the top')} data-testid="keys-top">
+            Top
+          </button>
+        </div>
+      </Row>
+      <Row label="Size">
+        <RangeInput value={Math.round(keys.size * 100)} min={50} max={200} label="Badge size" toCommand={(value) => ({ type: 'look', path: ['keys', 'size'], value: value / 100 }) as Command} commitLabel="Badge size" testId="keys-size" />
+      </Row>
+    </>
   );
 }
 

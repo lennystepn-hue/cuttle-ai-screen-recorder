@@ -187,6 +187,8 @@ export type RawInput =
   | { type: 'scroll'; time: number; x: number; y: number; dx: number; dy: number }
   | { type: 'shape'; time: number; shape: CursorShape }
   | { type: 'key'; time: number }
+  /** A shortcut (⌘K, Ctrl+Shift+P, Esc): its keys as the system writes them, never typed text (shortcuts.ts). */
+  | { type: 'shortcut'; time: number; keys: string[] }
   /** The system caret (where text is typed), where the app keeps one. */
   | { type: 'caret'; time: number; x: number; y: number; width: number; height: number }
   /** The content area of the window shown (null: it has none). */

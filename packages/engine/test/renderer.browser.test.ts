@@ -179,6 +179,28 @@ describe('render', () => {
     renderer.dispose();
   });
 
+  it('draws the badge of a shortcut where look.keys puts it, and nothing of it at opacity 0', () => {
+    const project = (position: 'bottom' | 'top') =>
+      parse({ output: { width: 640, height: 360 }, look: { background: { preset: 'solid', color: '#204060' }, keys: { position } }, scenes: [{ type: 'card', title: 'A', duration: 1 }] });
+    const keys = { keys: ['⌘', '⇧', 'P'], count: 3, opacity: 1, age: 1 };
+    // the pixels the badge changed in the output's top and bottom quarter
+    const changed = (a: Pixels, b: Pixels) => {
+      const quarter = (from: number) => {
+        let n = 0;
+        for (let y = from; y < from + 90; y++) for (let x = 0; x < 640; x++) if (pixelAt(a, x, y).join() !== pixelAt(b, x, y).join()) n++;
+        return n;
+      };
+      return { top: quarter(0), bottom: quarter(270) };
+    };
+    for (const position of ['bottom', 'top'] as const) {
+      const plain = render(project(position), { t: 0, layers: [layer(0, 1)] }).pixels;
+      const badge = changed(plain, render(project(position), { t: 0, layers: [layer(0, 1)], keys }).pixels);
+      expect(position === 'bottom' ? badge.bottom : badge.top).toBeGreaterThan(2000);
+      expect(position === 'bottom' ? badge.top : badge.bottom).toBe(0);
+      expect(changed(plain, render(project(position), { t: 0, layers: [layer(0, 1)], keys: { ...keys, opacity: 0 } }).pixels)).toEqual({ top: 0, bottom: 0 });
+    }
+  });
+
   it('throws after dispose', () => {
     const renderer = createRenderer(new OffscreenCanvas(1, 1), CARDS, { assets, screenSize: SCREEN });
     renderer.dispose();

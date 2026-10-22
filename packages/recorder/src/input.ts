@@ -1,5 +1,6 @@
 // Input sources: the global mouse and keyboard hook with the pointer shape (Windows), an event tap
 // (macOS), or synthetic input for the test backend. All deliver wall-clock seconds and desktop pixels.
+import { isChord, shortcutFor } from './shortcuts';
 import type { Platform } from './sources';
 import type { HotkeyAction, RawInput } from './types';
 
@@ -32,19 +33,38 @@ export interface KeyEvent {
   ctrlKey: boolean;
   shiftKey: boolean;
   altKey: boolean;
+  /** Cmd on a Mac, the Windows key on Windows. */
+  metaKey?: boolean;
 }
 
 /**
- * Turns key presses into key counts and hotkeys. Modifier keys count for nothing; a hotkey's key is
- * not counted, and holding it down (auto-repeat) triggers it once.
+ * Turns key presses into key counts, shortcuts and hotkeys. Modifier keys count for nothing; a
+ * hotkey's key is not counted, and holding it down (auto-repeat) triggers it once. `shortcut` names a
+ * press that is a shortcut (shortcuts.ts): a chord (⌘K) is logged as one and not counted as typing,
+ * a special key alone (Enter, Esc) is both; held down, either is logged once.
  */
-export function keyHandler(modifiers: ReadonlySet<number>, hotkeys: ReadonlyMap<number, HotkeyAction>, onInput: InputSink, onHotkey: HotkeySink) {
+export function keyHandler(
+  modifiers: ReadonlySet<number>,
+  hotkeys: ReadonlyMap<number, HotkeyAction>,
+  onInput: InputSink,
+  onHotkey: HotkeySink,
+  shortcut: (event: KeyEvent) => string[] | undefined = () => undefined,
+) {
   const held = new Set<number>();
   return {
-    down(event: KeyEvent): void {
+    down(event: KeyEvent, time = now()): void {
       if (modifiers.has(event.keycode)) return;
       const action = event.ctrlKey && event.shiftKey && event.altKey ? hotkeys.get(event.keycode) : undefined;
-      if (action === undefined) return onInput({ type: 'key', time: now() });
+      if (action === undefined) {
+        const keys = shortcut(event);
+        if (keys) {
+          // held down, a shortcut is logged once; a chord's repeats are not typing either
+          if (!held.has(event.keycode)) onInput({ type: 'shortcut', time, keys });
+          held.add(event.keycode);
+          if (isChord(keys)) return;
+        }
+        return onInput({ type: 'key', time });
+      }
       if (held.has(event.keycode)) return;
       held.add(event.keycode);
       onHotkey(action);
@@ -152,7 +172,23 @@ async function startWindowsInput(onInput: InputSink, onHotkey: HotkeySink): Prom
     UiohookKey.Ctrl, UiohookKey.CtrlRight, UiohookKey.Shift, UiohookKey.ShiftRight,
     UiohookKey.Alt, UiohookKey.AltRight, UiohookKey.Meta, UiohookKey.MetaRight,
   ]);
-  const keys = keyHandler(modifiers, new Map<number, HotkeyAction>([[UiohookKey.S, 'stop'], [UiohookKey.M, 'marker'], [UiohookKey.P, 'pause'], [UiohookKey.X, 'retake'], [UiohookKey.N, 'next'], [UiohookKey.B, 'previous']]), onInput, onHotkey);
+  // a key without a name of its own: the front window's layout names it, else uiohook's name for its place
+  const names = new Map<number, string>(Object.entries(UiohookKey).filter(([name]) => /^[A-Z0-9]$/.test(name)).map(([name, code]) => [code as number, name]));
+  const label = (code: number) => {
+    try {
+      return win.keyLabel(code) ?? names.get(code);
+    } catch {
+      return names.get(code);
+    }
+  };
+  const shortcut = (event: KeyEvent) => shortcutFor('windows', event.keycode, { ctrl: event.ctrlKey, alt: event.altKey, shift: event.shiftKey, meta: event.metaKey ?? false }, label);
+  const keys = keyHandler(
+    modifiers,
+    new Map<number, HotkeyAction>([[UiohookKey.S, 'stop'], [UiohookKey.M, 'marker'], [UiohookKey.P, 'pause'], [UiohookKey.X, 'retake'], [UiohookKey.N, 'next'], [UiohookKey.B, 'previous']]),
+    onInput,
+    onHotkey,
+    shortcut,
+  );
   const buttons = new Map<unknown, 'left' | 'right' | 'middle'>([[1, 'left'], [2, 'right'], [3, 'middle']]);
   let shape = win.cursorShape(); // before the hook starts: nothing to undo if it throws
 
@@ -242,7 +278,15 @@ async function startMacInput(onInput: InputSink, onHotkey: HotkeySink): Promise<
   const mac = await loadDarwin();
   const keyboard = mac.keyboardAccess();
   // modifier keys come as flag changes, not as key presses: none to leave out
-  const keys = keyHandler(new Set(), MAC_HOTKEYS, onInput, onHotkey);
+  const label = (code: number) => {
+    try {
+      return mac.keyLabel(code);
+    } catch {
+      return undefined;
+    }
+  };
+  const shortcut = (event: KeyEvent) => shortcutFor('macos', event.keycode, { ctrl: event.ctrlKey, alt: event.altKey, shift: event.shiftKey, meta: event.metaKey ?? false }, label);
+  const keys = keyHandler(new Set(), MAC_HOTKEYS, onInput, onHotkey, shortcut);
   let typedAt = -Infinity;
   /** Whether the tap has sent an event: until then the pointer is read (`poll`). */
   let tapped = false;
@@ -250,9 +294,9 @@ async function startMacInput(onInput: InputSink, onHotkey: HotkeySink): Promise<
     tapped = true;
     const { time } = event;
     if (event.type === 'key') {
-      const key = { keycode: event.keycode, ctrlKey: event.ctrl, shiftKey: event.shift, altKey: event.alt };
+      const key = { keycode: event.keycode, ctrlKey: event.ctrl, shiftKey: event.shift, altKey: event.alt, metaKey: event.cmd };
       if (event.down) typedAt = time;
-      return event.down ? keys.down(key) : keys.up(key);
+      return event.down ? keys.down(key, time) : keys.up(key);
     }
     if (event.type === 'move') return onInput({ type: 'move', time, x: event.x, y: event.y });
     if (event.type === 'down') return onInput({ type: 'click', time, x: event.x, y: event.y, button: event.button });
@@ -319,7 +363,7 @@ const TEST_INPUT_SECONDS = 1.5;
 
 /**
  * Synthetic input on the test monitor for its first 1.5 s: the pointer circles the centre at 60 Hz,
- * and after 1 s it clicks, scrolls, types three keys and switches to the text cursor.
+ * and after 1 s it clicks, scrolls, types three keys, presses Ctrl+K and switches to the text cursor.
  */
 function startTestInput(onInput: InputSink): InputSource {
   const started = now();
@@ -337,6 +381,7 @@ function startTestInput(onInput: InputSink): InputSource {
     onInput({ type: 'scroll', time, ...position(time), dx: 0, dy: 1 });
     onInput({ type: 'shape', time, shape: 'text' });
     for (let key = 0; key < 3; key++) onInput({ type: 'key', time });
+    onInput({ type: 'shortcut', time, keys: ['Ctrl', 'K'] });
   }, 1000);
   const end = setTimeout(() => clearInterval(moves), TEST_INPUT_SECONDS * 1000);
   return {

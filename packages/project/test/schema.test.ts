@@ -28,6 +28,7 @@ describe('ProjectSchema', () => {
     expect(p.look.background).toEqual({ preset: 'sunset-sky' });
     expect(p.look.frame).toEqual({ enabled: true, style: 'mac-dark', title: '', radius: 14, shadow: true });
     expect(p.look.cursor).toEqual({ enabled: true, style: 'system', size: 1, color: '#D97757', clickEffect: 'ripple', smoothing: 0.5 });
+    expect(p.look.keys).toEqual({ enabled: true, show: 'shortcuts', position: 'bottom', size: 1 });
     expect(p.look.webcam).toEqual({ enabled: false, shape: 'circle', corner: 'bottom-left', size: 0.18, border: true, shadow: true, mirror: false });
     expect(p.look.audio).toEqual({ enabled: true, muteSpedUp: true, cleanup: true, typing: true, typingVolume: 0.5, effects: true, effectsVolume: 0.8 });
     expect(p.look.transition).toEqual({ enabled: true, duration: 0.3 });
@@ -183,6 +184,11 @@ describe('ProjectSchema', () => {
     expect(pathsOf({ ...minimal, look: { cursor: { style: 'laser' } } })).toContain('look.cursor.style');
   });
 
+  it('reads the key badges and refuses an unknown choice and a size out of range', () => {
+    expect(ProjectSchema.parse({ ...minimal, look: { keys: { show: 'keys', position: 'top', size: 1.5 } } }).look.keys).toEqual({ enabled: true, show: 'keys', position: 'top', size: 1.5 });
+    expect(pathsOf({ ...minimal, look: { keys: { show: 'letters', position: 'center', size: 3 } } })).toEqual(['look.keys.show', 'look.keys.position', 'look.keys.size']);
+  });
+
   it('reports every problem in one pass, including cross-field checks', () => {
     const paths = pathsOf({
       ...minimal,
@@ -264,6 +270,8 @@ describe('InputEventSchema', () => {
     expect(InputEventSchema.parse({ t: 2, type: 'shape', shape: 'text' }).type).toBe('shape');
     expect(InputEventSchema.parse({ t: 3, type: 'keys', count: 4 }).type).toBe('keys');
     expect(InputEventSchema.parse({ t: 4, type: 'scroll', x: 0, y: 0, dx: 0, dy: -3 }).type).toBe('scroll');
+    expect(InputEventSchema.parse({ t: 5, type: 'shortcut', keys: ['⌘', '⇧', 'P'] })).toEqual({ t: 5, type: 'shortcut', keys: ['⌘', '⇧', 'P'] });
+    expect(InputEventSchema.safeParse({ t: 5, type: 'shortcut', keys: [] }).success).toBe(false);
     expect(InputEventSchema.safeParse({ t: 2, type: 'shape', shape: 'banana' }).success).toBe(false);
   });
 

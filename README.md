@@ -59,7 +59,7 @@ made that way: nine pages and a score, no camera, no editor. See [Motion videos,
     <td><img src="docs/media/feature-voice.jpg" alt="Karaoke subtitles over a waveform, the filler words struck out" /></td>
   </tr>
   <tr>
-    <td valign="top"><b>Make it look designed.</b> Backgrounds (gradients, animated ones, your wallpaper), window frames from macOS to a phone, cursor styles, a webcam bubble you move and reshape after the take, brand kits, watermarks, motion titles and music written for the video.</td>
+    <td valign="top"><b>Make it look designed.</b> Backgrounds (gradients, animated ones, your wallpaper), window frames from macOS to a phone, cursor styles, keycaps of the shortcuts you press, a webcam bubble you move and reshape after the take, brand kits, watermarks, motion titles and music written for the video.</td>
     <td valign="top"><b>Fillers and pauses, gone.</b> Your voice is transcribed on your computer with Whisper. Filler words and long pauses are cut where the picture rests, subtitles come word by word (or karaoke), and the export writes SRT and VTT.</td>
   </tr>
   <tr>
@@ -214,7 +214,7 @@ koffi (the OS APIs) for both, uiohook-napi (the input hook) for Windows.
 command, Cuttle (or "Electron" when it runs from this repository) for the app. Allow it under
 System Settings > Privacy & Security: *Screen & System Audio Recording* (needed; quit and reopen
 the app afterwards), *Microphone* and *Camera* (when a take uses them), *Input Monitoring*
-(the clicks, scrolls, key counts and hotkeys; without it a take has no input log and warns), and
+(the clicks, scrolls, key counts, shortcuts and hotkeys; without it a take has no input log and warns), and
 *Accessibility* (where text is typed, for zooms that follow typing; where a notification banner
 is and a browser's page; without it zooms follow what the screen changes, a notification is
 masked on the whole right side of the screen and the crop comes from the picture).

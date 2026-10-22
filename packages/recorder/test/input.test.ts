@@ -37,6 +37,26 @@ describe('keyHandler', () => {
     expect(input).toEqual([]);
   });
 
+  it('logs shortcuts: a chord instead of a key, a special key alone as both, a held one once', () => {
+    const input: RawInput[] = [];
+    const ENTER = 28;
+    const K = 37;
+    const shortcut = (event: { keycode: number; ctrlKey: boolean }) => (event.keycode === K && event.ctrlKey ? ['Ctrl', 'K'] : event.keycode === ENTER ? ['Enter'] : undefined);
+    const handler = keyHandler(new Set([CTRL, SHIFT, ALT]), new Map(), (event) => input.push(event), () => {}, shortcut);
+    const ctrl = { ctrlKey: true, shiftKey: false, altKey: false };
+    const plain = { ctrlKey: false, shiftKey: false, altKey: false };
+    for (let repeat = 0; repeat < 3; repeat++) handler.down({ keycode: K, ...ctrl }, 10); // held: auto-repeat
+    handler.up({ keycode: K, ...ctrl });
+    handler.down({ keycode: A, ...plain }, 11);
+    handler.down({ keycode: ENTER, ...plain }, 12);
+    expect(input).toEqual([
+      { type: 'shortcut', time: 10, keys: ['Ctrl', 'K'] },
+      { type: 'key', time: 11 },
+      { type: 'shortcut', time: 12, keys: ['Enter'] },
+      { type: 'key', time: 12 },
+    ]);
+  });
+
   it('triggers a held hotkey once until its key is released', () => {
     const { handler, hotkeys, all } = keys();
     for (let repeat = 0; repeat < 5; repeat++) handler.down({ keycode: M, ...all }); // auto-repeat

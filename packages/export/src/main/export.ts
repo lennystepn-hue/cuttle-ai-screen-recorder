@@ -258,6 +258,7 @@ export async function exportProject(opts: ExportOptions): Promise<ExportResult> 
     ...(sources.screen && { screen: sources.screen }),
     webcam: sources.webcam,
     events: sources.events,
+    ...(sources.shortcuts && { shortcuts: sources.shortcuts }),
     ...(sources.transcript && { transcript: sources.transcript }),
     ...(opts.captions !== undefined && { captions: opts.captions }),
     stills: sources.stills,

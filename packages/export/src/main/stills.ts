@@ -92,6 +92,7 @@ export async function renderStills(opts: StillsOptions): Promise<StillsResult> {
     ...(sources.screen && { screen: sources.screen }),
     webcam: sources.webcam,
     events: sources.events,
+    ...(sources.shortcuts && { shortcuts: sources.shortcuts }),
     ...(sources.transcript && { transcript: sources.transcript }),
     stills: sources.stills,
     backgroundImage: sources.backgroundImage,

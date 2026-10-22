@@ -94,6 +94,9 @@ export class EventsWriter {
       case 'window':
         this.flushMove();
         return this.emit({ t: at, type: 'window', id: input.id, kind: input.kind, rect: this.rect(input.rect), open: input.open });
+      case 'shortcut':
+        this.flushMove();
+        return this.emit({ t: at, type: 'shortcut', keys: input.keys });
       case 'key': {
         const window = Math.floor(t / KEY_WINDOW);
         if (this.keys?.window === window) {

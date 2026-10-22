@@ -1,4 +1,5 @@
 import type { CuttleProject, InputEvent, TranscriptWord } from '@cuttle/project';
+import type { Shortcut } from '@cuttle/timeline';
 import type { MotionView } from './motion/runtime';
 
 /**
@@ -60,6 +61,8 @@ export interface ExportJob {
   webcam?: { path: string; offset: number };
   /** Present when the cursor is on and the project has events. */
   events?: InputEvent[];
+  /** The take's shortcuts (source seconds), for their badges; present when `look.keys` is on and the take has any. */
+  shortcuts?: Shortcut[];
   /** The take's transcript (source seconds), for the captions; present when the project has one. */
   transcript?: TranscriptWord[];
   /** Burn the captions in (default: the project's `captions.enabled`). */

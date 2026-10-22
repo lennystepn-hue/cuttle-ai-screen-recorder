@@ -2481,7 +2481,7 @@ describe.runIf(enabled)('the Cuttle app', () => {
     const page = await openEditor(dir);
     await click(page, '#tab-look');
     const parts = await page.$$eval('.look-part', (sections) => sections.map((section) => (section as HTMLElement).dataset.testid!.replace(/^look-/, '')));
-    expect(parts).toEqual(['brand', 'watermark', 'background', 'window', 'cursor', 'camera', 'subtitles', 'sound', 'video']);
+    expect(parts).toEqual(['brand', 'watermark', 'background', 'window', 'cursor', 'keys', 'camera', 'subtitles', 'sound', 'video']);
     const outside: Record<string, string[]> = {};
     const look = async (part: string) => {
       const found = await outsideItsPanel(page);

@@ -169,6 +169,25 @@ const WatermarkSchema = z.strictObject({
   opacity: z.number().min(0.1).max(1).default(0.7),
 });
 
+/** Which key presses get a badge: chords only (⌘K, Ctrl+S), or also special keys alone (Esc, Enter, the arrows). */
+export const KEY_BADGE_SHOWS = ['shortcuts', 'keys'] as const;
+/** Where the badges sit: under the video's middle, or over it. */
+export const KEY_BADGE_POSITIONS = ['bottom', 'top'] as const;
+
+/** The badges of the shortcuts the take logged (events.jsonl's `shortcut`), drawn over the video. */
+const KeysSchema = z.strictObject({
+  enabled: z.boolean().default(true),
+  show: z.enum(KEY_BADGE_SHOWS).default('shortcuts'),
+  position: z.enum(KEY_BADGE_POSITIONS).default('bottom'),
+  /** A factor on the badge's size (1: keys about 2.6 % of the output's short side high). */
+  size: z.number().min(0.5).max(2).default(1),
+});
+
+/** Every modifier's name on either system (shortcuts as the recorder writes them): a shortcut with one of these but Shift is a chord. */
+export const CHORD_MODIFIERS: ReadonlySet<string> = new Set(['⌃', '⌥', '⌘', 'Ctrl', 'Alt', 'Win']);
+/** Whether a shortcut's keys hold a modifier other than Shift (⌘K, Ctrl+S), not a special key alone (Esc, ⇧⇥). */
+export const isChord = (keys: readonly string[]): boolean => keys.some((key) => CHORD_MODIFIERS.has(key));
+
 const LookSchema = z.strictObject({
   background: BackgroundSchema.default({ preset: 'sunset-sky' }),
   frame: FrameSchema.prefault({}),
@@ -177,6 +196,7 @@ const LookSchema = z.strictObject({
   audio: AudioSchema.prefault({}),
   transition: TransitionSchema.prefault({}),
   watermark: WatermarkSchema.prefault({}),
+  keys: KeysSchema.prefault({}),
   /**
    * Motion blur: how long a frame's shutter is open, as a share of the frame (0 off, 0.25 light,
    * 0.5 a film camera's). The screen smears along the zoom's moves and the pointer along its path.
@@ -519,6 +539,8 @@ export const InputEventSchema = z.discriminatedUnion('type', [
   z.strictObject({ type: z.literal('scroll'), ...point, dx: z.number(), dy: z.number() }),
   z.strictObject({ type: z.literal('shape'), t: seconds, shape: z.enum(CURSOR_SHAPES) }),
   z.strictObject({ type: z.literal('keys'), t: seconds, count: z.number().int().positive() }),
+  // a shortcut (⌘K, Ctrl+Shift+P, Esc): its keys as the recording system writes them; never typed text
+  z.strictObject({ type: z.literal('shortcut'), t: seconds, keys: z.array(z.string().min(1).max(16)).min(1).max(6) }),
   // where text is typed: the system caret, where the app keeps one (a fact, not input)
   z.strictObject({ type: z.literal('caret'), t: seconds, rect: RectSchema }),
   // the content area of the window shown (a browser's page, an Electron app's view); null: none
@@ -534,6 +556,8 @@ export const isFact = (event: InputEvent): boolean => FACTS.has(event.type);
 export type InputEvent = z.output<typeof InputEventSchema>;
 export type CursorShape = (typeof CURSOR_SHAPES)[number];
 export type CursorStyle = (typeof CURSOR_STYLES)[number];
+export type KeyBadgeShow = (typeof KEY_BADGE_SHOWS)[number];
+export type KeyBadgePosition = (typeof KEY_BADGE_POSITIONS)[number];
 export type Ease = (typeof EASES)[number];
 export type MaskStyle = (typeof MASK_STYLES)[number];
 export type TextPosition = (typeof TEXT_POSITIONS)[number];

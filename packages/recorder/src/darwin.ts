@@ -29,6 +29,8 @@ export interface Darwin {
   requestScreenAccess(): void;
   /** Whether this process may watch the keyboard (Input Monitoring); the first call asks macOS for it. */
   keyboardAccess(): boolean;
+  /** The letter or digit a key types on the keyboard's layout now (`Z` on a German Mac's Z key), for a shortcut's badge. */
+  keyLabel(keycode: number): string | undefined;
   /** Seconds on the host clock (mach time since startup, as avfoundation stamps captures) as wall-clock seconds. */
   hostToWall(seconds: number): number;
   /** The pointer's shape now, from the system cursor's hotspot and size (anything unknown is the arrow). */
@@ -172,7 +174,7 @@ export type TapEvent = { time: number } & (
   | { type: 'move'; x: number; y: number }
   | { type: 'down'; x: number; y: number; button: 'left' | 'right' | 'middle' }
   | { type: 'scroll'; x: number; y: number; dx: number; dy: number }
-  | { type: 'key'; down: boolean; keycode: number; ctrl: boolean; shift: boolean; alt: boolean }
+  | { type: 'key'; down: boolean; keycode: number; ctrl: boolean; shift: boolean; alt: boolean; cmd: boolean }
 );
 
 /**
@@ -227,7 +229,7 @@ const MOUSE_EVENTS = [EVENT.leftDown, EVENT.rightDown, EVENT.moved, EVENT.leftDr
 const KEY_EVENTS = [EVENT.keyDown, EVENT.keyUp];
 /** CGEventField values. */
 const FIELD = { buttonNumber: 3, keyAutorepeat: 8, keycode: 9, scrollY: 11, scrollX: 12 };
-const FLAG = { shift: 0x20000n, control: 0x40000n, alternate: 0x80000n };
+const FLAG = { shift: 0x20000n, control: 0x40000n, alternate: 0x80000n, command: 0x100000n };
 /** How often the tap's run loop source is serviced. */
 const TAP_POLL_MS = 8;
 /** A window's page is looked for this long at each look (ms)… */
@@ -360,6 +362,17 @@ async function create(): Promise<Darwin> {
       ticks,
     );
 
+  // The keyboard's layout (HIToolbox, in Carbon): the character a key types, for a shortcut's badge
+  const carbon = koffi.load(`${FRAMEWORKS}/Carbon.framework/Carbon`);
+  const TISCopyCurrentKeyboardLayoutInputSource = carbon.func('TISCopyCurrentKeyboardLayoutInputSource', 'void *', []);
+  const TISGetInputSourceProperty = carbon.func('TISGetInputSourceProperty', 'void *', ['void *', 'void *']);
+  const kTISPropertyUnicodeKeyLayoutData = koffi.decode(carbon.symbol('kTISPropertyUnicodeKeyLayoutData', 'void *'), 'void *') as unknown;
+  const LMGetKbdType = carbon.func('LMGetKbdType', 'uint8', []);
+  const UCKeyTranslate = carbon.func('UCKeyTranslate', 'int32', ['void *', 'uint16', 'uint16', 'uint32', 'uint32', 'uint32', koffi.inout(koffi.pointer('uint32')), 'ulong', koffi.out(koffi.pointer('ulong')), 'void *']);
+  /** UCKeyTranslate's action for the key as a menu shows it, and the option that leaves dead keys out (an accent key names its accent). */
+  const UC_KEY_ACTION_DISPLAY = 3;
+  const UC_NO_DEAD_KEYS = 1;
+
   // The Accessibility API (HIServices, in ApplicationServices): the front app's focused text
   const CFRange = koffi.struct(typeName('CFRange'), { location: 'long', length: 'long' });
   const AXIsProcessTrusted = services.func('AXIsProcessTrusted', 'bool', []);
@@ -389,6 +402,7 @@ async function create(): Promise<Darwin> {
   const CFStringGetCString = cf.func('CFStringGetCString', 'bool', ['void *', 'void *', 'long', 'uint32']);
   const CFNumberGetValue = cf.func('CFNumberGetValue', 'bool', ['void *', 'long', 'void *']);
   const CFBooleanGetValue = cf.func('CFBooleanGetValue', 'bool', ['void *']);
+  const CFDataGetBytePtr = cf.func('CFDataGetBytePtr', 'void *', ['void *']);
   const kCFBooleanTrue = koffi.decode(cf.symbol('kCFBooleanTrue', 'void *'), 'void *') as unknown;
   const kCFBooleanFalse = koffi.decode(cf.symbol('kCFBooleanFalse', 'void *'), 'void *') as unknown;
 
@@ -903,6 +917,7 @@ async function create(): Promise<Darwin> {
             ctrl: (flags & FLAG.control) !== 0n,
             shift: (flags & FLAG.shift) !== 0n,
             alt: (flags & FLAG.alternate) !== 0n,
+            cmd: (flags & FLAG.command) !== 0n,
           });
           return event;
         }
@@ -962,6 +977,23 @@ async function create(): Promise<Darwin> {
     screenAccess: () => CGPreflightScreenCaptureAccess(),
     requestScreenAccess: () => void CGRequestScreenCaptureAccess(),
     keyboardAccess: () => CGPreflightListenEventAccess() || (CGRequestListenEventAccess(), false),
+    keyLabel(keycode) {
+      const source = TISCopyCurrentKeyboardLayoutInputSource();
+      if (!source) return undefined;
+      try {
+        const data = TISGetInputSourceProperty(source, kTISPropertyUnicodeKeyLayoutData);
+        if (!data) return undefined;
+        const dead = [0];
+        const length = [0];
+        const chars = Buffer.alloc(8);
+        // the key without modifiers, as the layout names it (⇧ is its own key in the badge)
+        if (UCKeyTranslate(CFDataGetBytePtr(data), keycode, UC_KEY_ACTION_DISPLAY, 0, LMGetKbdType(), UC_NO_DEAD_KEYS, dead, 4, length, chars) !== 0) return undefined;
+        const text = chars.toString('utf16le', 0, Number(length[0]) * 2).trim();
+        return text === '' ? undefined : text.toUpperCase();
+      } finally {
+        CFRelease(source);
+      }
+    },
     cursorShape,
     hostToWall(seconds) {
       const hostNow = Number((BigInt(mach_absolute_time() as number | bigint) * ticks.numer) / ticks.denom) / 1e9;

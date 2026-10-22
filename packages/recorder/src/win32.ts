@@ -5,6 +5,8 @@ import { OWN_PIDS } from './own-process';
 import type { Bounds, Monitor, WindowInfo } from './types';
 
 export interface Win32 {
+  /** The letter or digit a key (uiohook's code, the keyboard's scan code) types on the front window's layout (`Z` on a German keyboard's Z key), for a shortcut's badge. */
+  keyLabel(code: number): string | undefined;
   /** Outputs of the default adapter, in the order of ffmpeg ddagrab's `output_idx`. */
   monitors(): Monitor[];
   /** Visible top-level windows with a title on one of the monitors, front to back; not Cuttle's own (`own-process.ts`). */
@@ -157,6 +159,13 @@ async function create(): Promise<Win32> {
   const GetWindowTextLengthW = user32.func('__stdcall', 'GetWindowTextLengthW', 'int', ['void *']);
   const GetWindowTextW = user32.func('__stdcall', 'GetWindowTextW', 'int', ['void *', 'void *', 'int']);
   const GetWindowThreadProcessId = user32.func('__stdcall', 'GetWindowThreadProcessId', 'uint32', ['void *', koffi.out(koffi.pointer('uint32'))]);
+  // the keyboard's layout: the character a key types, for a shortcut's badge
+  const GetKeyboardLayout = user32.func('__stdcall', 'GetKeyboardLayout', 'void *', ['uint32']);
+  const MapVirtualKeyExW = user32.func('__stdcall', 'MapVirtualKeyExW', 'uint32', ['uint32', 'uint32', 'void *']);
+  const MAPVK_VK_TO_CHAR = 2;
+  const MAPVK_VSC_TO_VK_EX = 3;
+  /** MAPVK_VK_TO_CHAR marks a dead key (an accent that waits for its letter) in its top bit. */
+  const DEAD_KEY = 0x80000000;
   const GetClassNameW = user32.func('__stdcall', 'GetClassNameW', 'int', ['void *', 'void *', 'int']);
   // A window id (the HWND's address) goes in as an integer.
   const SetForegroundWindow = user32.func('__stdcall', 'SetForegroundWindow', 'int', ['intptr_t']);
@@ -319,6 +328,17 @@ async function create(): Promise<Win32> {
   return {
     monitors: () => outputs().map(({ monitor }) => monitor),
     windows,
+    keyLabel(code) {
+      // the layout of the window the key goes to: each thread may have its own
+      const front = GetForegroundWindow();
+      const layout = GetKeyboardLayout(front ? GetWindowThreadProcessId(front, [0]) : 0);
+      // uiohook's extended keys carry 0x0E00 over the scan code; MapVirtualKeyEx takes them as 0xE0xx
+      const scan = (code & 0x0f00) === 0x0e00 ? 0xe000 | (code & 0xff) : code & 0xff;
+      const vk = MapVirtualKeyExW(scan, MAPVK_VSC_TO_VK_EX, layout);
+      if (vk === 0) return undefined;
+      const char = MapVirtualKeyExW(vk, MAPVK_VK_TO_CHAR, layout) & ~DEAD_KEY;
+      return char > 32 ? String.fromCharCode(char).toUpperCase() : undefined;
+    },
     cursorPosition() {
       GetPhysicalCursorPos(point);
       return { x: point.x, y: point.y };

@@ -193,6 +193,7 @@ export class Player {
     return createTimeline(this.project, {
       screenSize: this.media.screen.size,
       ...(this.media.cursor && { cursor: this.media.cursor }),
+      ...(this.media.shortcuts && { shortcuts: this.media.shortcuts }),
       ...(this.media.transcript && { transcript: this.media.transcript.words }),
     });
   }

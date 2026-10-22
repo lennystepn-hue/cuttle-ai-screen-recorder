@@ -12,6 +12,7 @@ import {
   type TakeFile,
   type TranscriptWord,
 } from '@cuttle/project';
+import { shortcutsOf, type Shortcut } from '@cuttle/timeline';
 import { ExportError } from '../errors';
 import type { MotionPages } from '../job';
 import type { TakeInputs } from '../motion/take';
@@ -31,6 +32,8 @@ export interface ProjectSources {
   events?: InputEvent[];
   /** The take's key counts, for the typing sounds (loaded whether the cursor shows or not). */
   keys?: InputEvent[];
+  /** The take's shortcuts, for their badges (`look.keys`). */
+  shortcuts?: Shortcut[];
   /** The take's transcript (source seconds), for captions and subtitle files. */
   transcript?: TranscriptWord[];
   stills: Record<number, string>;
@@ -186,13 +189,15 @@ export async function loadSources(projectDir: string): Promise<ProjectSources> {
     result.mic = { path: clean ?? path, offset: offsetFor(take, 'mic', path, screen) };
   }
   const typing = look.audio.enabled && look.audio.typing;
-  if (screen && (look.cursor.enabled || typing) && sources.events) {
+  if (screen && (look.cursor.enabled || typing || look.keys.enabled) && sources.events) {
     const path = await existing(projectDir, sources.events, 'input events (sources.events)', false);
     const events = parseEventsJsonl(await readFile(path, 'utf8'));
     if (events.issues.length > 0) throw new ExportError('invalid-project', `${path} is invalid:\n${issuesText(events.issues)}`);
     // the page draws the cursor from them only while it shows
     if (look.cursor.enabled) result.events = events.events;
     if (typing) result.keys = events.events.filter((event) => event.type === 'keys');
+    const shortcuts = look.keys.enabled ? shortcutsOf(events.events) : [];
+    if (shortcuts.length > 0) result.shortcuts = shortcuts;
   }
   if (sources.transcript) {
     // without it the video has no captions: worth a warning, not a failed export

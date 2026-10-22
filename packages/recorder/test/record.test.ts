@@ -94,7 +94,7 @@ describe.concurrent('record (test backend)', () => {
     const { events: input, issues } = parseEventsJsonl(read(projectDir, take.events));
     expect(issues).toEqual([]);
     expect(input.slice(0, 2)).toEqual([expect.objectContaining({ t: 0, type: 'move' }), { t: 0, type: 'shape', shape: 'arrow' }]);
-    expect(new Set(input.map((event) => event.type))).toEqual(new Set(['move', 'shape', 'click', 'scroll', 'keys']));
+    expect(new Set(input.map((event) => event.type))).toEqual(new Set(['move', 'shape', 'click', 'scroll', 'keys', 'shortcut']));
 
     // Marker times count from the screen's first frame, which starts late on a loaded machine.
     const markedSecond = markedAt - takeFile.take.tracks.screen.start;

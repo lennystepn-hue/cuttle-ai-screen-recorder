@@ -2,6 +2,7 @@ import type { CuttleProject, Mask, Rect } from '@cuttle/project';
 import { applyCaptionFixes, captionAt, captionCues, captionWords, type ActiveCaption, type CaptionCue, type SpokenWord } from './captions';
 import { cursorAt, type CursorFrame, type CursorTrack } from './cursor';
 import { clamp, type Curve } from './easing';
+import { keyBadgeAt, keyGroups, type KeyBadge, type Shortcut } from './keys';
 import { occurrences, rampAmount, type Occurrence } from './occurrences';
 import { TEXT_FADE_SECONDS, activeMasks, activeTexts, badgeFor, type ActiveText } from './overlays';
 import { crossfadeHalf, isContinuousCut, pageTransition, sceneSpans, sourceTimeAt, spanAt, totalDuration, type SceneSpan } from './time';
@@ -49,6 +50,8 @@ export interface SceneFrame {
   overlays: ActiveOverlay[];
   badge?: string;
   cursor?: CursorFrame;
+  /** Clip scenes: the badge of the shortcut pressed now (`look.keys`). */
+  keys?: KeyBadge;
 }
 
 /** A scene's transition page while it plays: the scene it goes into, and where its clock is. */
@@ -71,6 +74,8 @@ export interface RenderState {
   transition?: ActiveTransition;
   /** The caption shown over the frame, when captions are on and someone speaks. */
   caption?: ActiveCaption;
+  /** The shortcut's badge over the frame (the more visible layer's during a crossfade). */
+  keys?: KeyBadge;
 }
 
 export interface Timeline {
@@ -88,6 +93,8 @@ export interface TimelineOptions {
   transcript?: readonly SpokenWord[];
   /** Show the captions (default: `captions.enabled`); an export without them passes false. */
   captions?: boolean;
+  /** The take's shortcuts (events.jsonl's `shortcut`, source seconds), for their badges. */
+  shortcuts?: readonly Shortcut[];
 }
 
 export function createTimeline(project: CuttleProject, opts: TimelineOptions): Timeline {
@@ -113,6 +120,7 @@ export function createTimeline(project: CuttleProject, opts: TimelineOptions): T
   const { captions } = project;
   const cues = opts.transcript ? captionCues(captionWords(applyCaptionFixes(opts.transcript, captions.fixes), spans), captions.style) : [];
   const showCaptions = (opts.captions ?? captions.enabled) && cues.length > 0;
+  const keys = project.look.keys.enabled && opts.shortcuts ? keyGroups(opts.shortcuts, project.look.keys.show) : [];
 
   // Where each zoom and text shows in output time, per span: their ramps run in output seconds.
   const zoomShown = new Map(project.zooms.map((zoom) => [zoom, occurrences(spans, zoom.at, zoom.at + zoom.duration)]));
@@ -167,6 +175,7 @@ export function createTimeline(project: CuttleProject, opts: TimelineOptions): T
     const open = Math.max(scene.from, sourceTime - shutter * scene.speed);
     const blurred = shutter > 0 && !pastEnd && scene.speed <= BLUR_MAX_SPEED && open < sourceTime;
     const before = blurred && cursor && opts.cursor ? cursorAt(opts.cursor, open, scene.speed, project.look.cursor.smoothing, cuts) : undefined;
+    const badge = keys.length > 0 ? keyBadgeAt(keys, sourceTime, scene.speed) : undefined;
     return {
       ...base,
       kind: 'clip',
@@ -185,6 +194,7 @@ export function createTimeline(project: CuttleProject, opts: TimelineOptions): T
       }),
       badge: badgeFor(scene),
       cursor,
+      ...(badge && { keys: badge }),
     };
   }
 
@@ -192,7 +202,10 @@ export function createTimeline(project: CuttleProject, opts: TimelineOptions): T
     const time = Number.isNaN(t) ? 0 : clamp(t, 0, duration);
     const state = layersAt(time);
     const caption = showCaptions ? captionAt(cues, time) : undefined;
-    return caption ? { ...state, caption } : state;
+    // the badge of the layer that shows more (a crossfade fades it with its layer)
+    const keyed = state.layers.filter((layer) => layer.keys).sort((a, b) => b.opacity - a.opacity)[0];
+    const badge = keyed?.keys && { ...keyed.keys, opacity: keyed.keys.opacity * keyed.opacity };
+    return { ...state, ...(caption && { caption }), ...(badge && badge.opacity > 0 && { keys: badge }) };
   }
 
   function layersAt(time: number): RenderState {

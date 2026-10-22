@@ -13,9 +13,11 @@ reveal, the end card). Two videos should never sound the same.
 
 ## Make it
 
-1. Start from a template: `cuttle -C "<project>" --json music new <template>` copies it into
-   `music/<name>/index.html` and makes it the video's music (`cuttle --json music templates` lists
-   them: pulse, drift, lofi, bright, cinematic).
+1. Write the page yourself (below), `music/<name>/index.html`, and make it the video's music:
+   `cuttle -C "<project>" --json music set --src music/<name>/index.html`. Or start from a template:
+   `cuttle -C "<project>" --json music new <template>` copies it into `music/<name>/index.html` and
+   makes it the video's music (`cuttle --json music templates` lists them: pulse, drift, lofi,
+   bright, cinematic); the templates are examples to learn from, not the sounds to choose between.
 2. Change the page for this video (below). Small changes go through its params:
    `cuttle -C "<project>" --json music set --param key=E --param bpm=118 --volume 0.7`.
 3. Check it: `cuttle -C "<project>" --json music check`. It renders the music and the sounds alone

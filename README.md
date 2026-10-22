@@ -136,12 +136,13 @@ cuttle render --format 9:16                  # out/9x16.mp4; also 16:9 and 1:1
 <p align="center"><img src="docs/media/motion-video.jpg" width="720" alt="Four frames of a 9:16 motion video made only from code: a kinetic title, a code editor typing, a page saying Ship it., an end card" /><br />
 <sub>Four frames of the 16-second 9:16 video these commands make, with the page below as its third scene</sub></p>
 
-The templates are starting points; a page of your own is a few lines. Everything follows the
-video's time, from 0 at the scene's start, so a page that draws from `t` is right on every frame:
+The templates are examples, not the limit: any page you (or Claude) write goes into the video with
+`cuttle motion add motion/hello/index.html` (a scene; `--as overlay` or `--as transition` for the
+other kinds). A page of your own is a few lines. Everything follows the video's time, from 0 at the
+scene's start, so a page that draws from `t` is right on every frame:
 
 ```html
-<!-- motion/hello/index.html, added to cuttle.json as
-     { "type": "motion", "id": "s9", "src": "motion/hello/index.html", "duration": 3 } -->
+<!-- motion/hello/index.html, added with: cuttle motion add motion/hello/index.html --after s2 -->
 <style>
   body { margin: 0; height: 100vh; display: grid; place-items: center; font: 700 14vmin system-ui; color: white; }
 </style>
@@ -368,7 +369,8 @@ cuttle suggest                       # scenes: quiet start and end trimmed, idle
 cuttle preview                       # 12 stills and a contact sheet in preview/
 cuttle frame 42.5 --grid             # a source frame with a numbered pixel grid, for masks and zooms
 cuttle capture-page https://example.com --scroll --add
-cuttle motion new title --first      # a motion page as the intro (motion templates lists them)
+cuttle motion new title --first      # a motion page as the intro, from a template (motion templates lists them)
+cuttle motion add motion/chart/index.html --after s3   # or a page you wrote, as a scene, an overlay or a transition
 cuttle music new lofi                # music composed for the video, fitted to its scenes and cuts
 cuttle render --format 9:16          # out/9x16.mp4, with the script's steps as its chapters
 cuttle chapters                      # those chapters as lines for a YouTube description

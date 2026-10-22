@@ -2,9 +2,11 @@
 
 A motion item is a web page that Cuttle renders frame by frame into the video. Anything a browser
 draws can be in it: kinetic type, shapes and patterns, a chart that builds, particles, a 3D scene,
-an After Effects animation (Lottie), a code editor that types itself. You are free in what you make
-and how: the templates are only starting points, and a page can be plain HTML and CSS, a canvas,
-SVG, WebGL, Three.js or all of them at once. Make it look like the work of a great motion designer.
+an After Effects animation (Lottie), a code editor that types itself, the product's interface
+rebuilt in HTML. **You write these pages.** The templates are eight examples, not the choice: read
+them for technique, copy one to start fast, or write every page from nothing. A page can be plain
+HTML and CSS, a canvas, SVG, WebGL, Three.js or all of them at once, as many as the video needs.
+Make it look like the work of a great motion designer, and like this video's, not like a template.
 
 ## Two kinds of video
 
@@ -18,14 +20,38 @@ SVG, WebGL, Three.js or all of them at once. Make it look like the work of a gre
 ## Make one
 
 1. Write the page in the project: `motion/<name>/index.html`, with its scripts, images and data next
-   to it (or shared, `motion/shared.js`, imported as `../shared.js`). Or start from a template:
-   `cuttle -C "<project>" --json motion new <template>` (title, end-card, code-typing, device-3d,
-   fold, lower-third, click-callouts, kinetic-captions; `cuttle --json motion templates` says what
-   each shows; a transition takes `--into <scene id>`); it
+   to it (or shared, `motion/shared.js`, imported as `../shared.js`). The smallest page:
+
+   ```html
+   <!doctype html>
+   <style>
+     :root { --u: calc(100vmin / 1080); }
+     body { margin: 0; height: 100vh; display: grid; place-items: center; color: var(--cuttle-fg);
+            font: 800 calc(140 * var(--u)) var(--cuttle-display); }
+   </style>
+   <h1 id="title">Ship it.</h1>
+   <script type="module">
+     import { at, ease } from 'cuttle';
+     const title = document.getElementById('title');
+     cuttle.onFrame((t) => {
+       const shown = at(t, 0.2, 0.8, ease.outExpo);
+       title.style.opacity = shown;
+       title.style.transform = `translateY(${(1 - shown) * 60}px)`;
+     });
+   </script>
+   ```
+
+   Or start from a template: `cuttle -C "<project>" --json motion new <template>` (title, end-card,
+   code-typing, device-3d, fold, lower-third, click-callouts, kinetic-captions;
+   `cuttle --json motion templates` says what each shows; a transition takes `--into <scene id>`)
    copies the page and adds it to cuttle.json. Then change the copy as much as you like. Most
    templates make their sounds (a whoosh with the title, a pop on each callout, keys while code
    types); their `sounds` param switches them off.
-2. Add it (project.md has the fields): a scene,
+2. Add a page you wrote: `cuttle -C "<project>" --json motion add motion/<name>/index.html` makes it
+   a scene at the end (`--first`, `--after <scene>`, `--duration 4`, `--label "Intro"`);
+   `--as overlay --at <source s> --duration <s>` puts it over the clips, `--as transition --into
+   <scene>` makes it the way into a scene. Or write the item into cuttle.json yourself (project.md
+   has the fields): a scene,
    `{ "type": "motion", "id": "s9", "label": "Intro", "src": "motion/intro/index.html", "duration": 3 }`,
    or an overlay over the clips, `{ "id": "o1", "src": "motion/callouts/index.html", "at": 4, "duration": 20 }`.
 3. Check it: `cuttle -C "<project>" --json motion check motion/<name>/index.html`. It renders eight
@@ -40,6 +66,21 @@ and logged in its inspector, and they can change the params you declared there. 
 for what they may want to set themselves (a text, a colour, a side), with a clear `label`; and say
 which page you changed, so they can look. The app adds templates too (+ Motion): you may find a
 page in `motion/` you did not write.
+
+## Pages of your own, as many as the video needs
+
+- **One design for the whole video:** a `motion/shared.css` and `motion/shared.js` (palette, type
+  scale, easing curves, the background, the logo's mark, helpers you write) that every page imports,
+  so the scenes read as one film.
+- **Generate pages:** a script you write (Node, Python, anything) may write many pages from data:
+  one scene per feature, per changelog entry, per number, per quote. Add each with `motion add`.
+- **Real content:** a page reads the project's files (`fetch('./data.json')`, images as
+  `/brand/logo.svg`): put the real numbers, texts and screenshots there. `cuttle capture-page
+  <url or file>` turns a web page, also one you wrote, into a PNG in `stills/` for a page to use.
+- **Rebuild instead of record:** the product's interface, a terminal, a chat, a dashboard can be
+  rebuilt in HTML and animated exactly: perfect text, any size, no private data to mask.
+- **Mix:** pages between clips, over them, and as the way between scenes; `card` and `still` scenes
+  and recorded clips in the same video.
 
 ## The page's world
 

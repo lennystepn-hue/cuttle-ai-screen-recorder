@@ -94,7 +94,7 @@ export async function motionCheckCommand(projectDir: string, src: string, args: 
   const late = offsets.find((t) => t >= duration);
   if (late !== undefined) throw new CliError('usage', `--at ${late} is past the item's end (${duration} s)`);
   const times = offsets.map((t) => Math.round((from + t) * 1000) / 1000);
-  const name = page.replace(/\/index\.html?$/i, '').replace(/\.html?$/i, '').split('/').at(-1) || 'page';
+  const name = pageName(page);
   const outDir = args.out ? resolve(args.out) : join(file.dir, 'preview', `motion-${name}`);
   const motion: MotionCheck = {
     src: page,
@@ -137,17 +137,23 @@ export async function motionCheckCommand(projectDir: string, src: string, args: 
   return checked;
 }
 
-export interface MotionNewArgs {
-  /** The folder's name in motion/ (default: the template's). */
-  name?: string;
+/** Where an item goes in cuttle.json: options both `motion new` and `motion add` take. */
+interface Placement {
   /** An overlay's start (source seconds; default: the first clip's start). */
   at?: number;
-  /** Seconds it lasts (a scene's output seconds, an overlay's source seconds; default: the template's, or the whole take). */
+  /** Seconds it lasts (a scene's output seconds, an overlay's source seconds). */
   duration?: number;
   /** A scene goes first, not last. */
   first?: boolean;
+  /** A scene goes right after this one, by id or place from 0. */
+  after?: string;
   /** A transition: the scene it leads into, by id or place (from 0; default: the second scene). */
   into?: string;
+}
+
+export interface MotionNewArgs extends Placement {
+  /** The folder's name in motion/ (default: the template's). */
+  name?: string;
 }
 
 export interface MotionNewResult {
@@ -166,34 +172,96 @@ const NAME = /^[a-z0-9][a-z0-9-]{0,47}$/;
 /** "end-card" as a label: "End card" (and "device-3d": "Device 3D"). */
 const labelOf = (name: string) => `${name.charAt(0).toUpperCase()}${name.slice(1).replace(/-/g, ' ')}`.replace(/ 3d\b/, ' 3D');
 
-/** `cuttle motion templates`: the templates `motion new` copies. */
-export async function motionTemplatesCommand(output: Output): Promise<{ templates: readonly MotionTemplate[] }> {
-  const result = { templates: MOTION_TEMPLATES };
-  output.result(result, () => MOTION_TEMPLATES.map((template) => `${template.name.padEnd(17)}${template.kind.padEnd(8)} ${template.description}`).join('\n'));
+/** A page's name for its label: its folder (motion/intro/index.html), else its file (motion/intro.html). */
+const pageName = (src: string) => src.replace(/\/index\.html?$/i, '').replace(/\.html?$/i, '').split('/').at(-1) || 'page';
+
+/** A scene by id or by place from 0; -1 when there is none. */
+function sceneAt(scenes: readonly { id?: string }[], wanted: string): number {
+  const byId = scenes.findIndex((candidate) => candidate.id === wanted);
+  if (byId >= 0) return byId;
+  return /^\d+$/.test(wanted) && Number(wanted) < scenes.length ? Number(wanted) : -1;
+}
+
+/**
+ * Adds a page to cuttle.json as `kind`: a scene (at the end, `first`, or `after` a scene), an
+ * overlay over the clips (from `at`, the first clip's start by default, for `duration`, else for
+ * the rest of the clips when `whole`), or the transition `into` a scene. Durations default to
+ * `duration` given by the caller's template.
+ */
+function place(
+  file: Awaited<ReturnType<typeof readProjectFile>>,
+  kind: MotionTemplate['kind'],
+  src: string,
+  label: string,
+  args: Placement,
+  defaults: { duration: number; whole?: boolean },
+): { item: Record<string, unknown>; into?: number } {
+  const scenes = file.project.scenes;
+  const clips = scenes.filter((scene) => scene.type === 'clip');
+  if (kind === 'overlay' && clips.length === 0) throw new CliError('invalid-project', `${file.path} has no clips: an overlay goes over a clip (a video without a recording is made of scenes)`);
+  const taken = usedIds(file.project);
+  if (kind === 'transition') {
+    // a transition leads into a scene that has one before it
+    const wanted = args.into ?? '1';
+    const into = sceneAt(scenes, wanted);
+    if (!(into >= 1)) throw new CliError('usage', `--into ${wanted}: a transition leads into a scene after the first (${scenes.length} scenes)`);
+    const item = { src, duration: args.duration ?? defaults.duration };
+    const raw = file.raw.scenes as Record<string, unknown>[];
+    raw[into] = { ...raw[into], transition: item };
+    return { item, into };
+  }
+  if (kind === 'scene') {
+    if (args.first && args.after !== undefined) throw new CliError('usage', '--first or --after, not both');
+    const item = { type: 'motion', id: newId('scenes', taken), label, src, duration: args.duration ?? defaults.duration };
+    const raw = (file.raw.scenes as unknown[] | undefined) ?? [];
+    let at = args.first ? 0 : raw.length;
+    if (args.after !== undefined) {
+      const after = sceneAt(scenes, args.after);
+      if (after < 0) throw new CliError('usage', `--after ${args.after}: no scene with that id or place (${scenes.length} scenes)`);
+      at = after + 1;
+    }
+    file.raw.scenes = [...raw.slice(0, at), item, ...raw.slice(at)];
+    return { item };
+  }
+  const start = Math.min(...clips.map((clip) => clip.from));
+  const end = Math.max(...clips.map((clip) => clip.to));
+  const at = args.at ?? start;
+  const duration = args.duration ?? (defaults.whole ? Math.max(0.1, end - at) : defaults.duration);
+  const item = { id: newId('overlays', taken), label, src, at, duration: Math.round(duration * 1000) / 1000 };
+  file.raw.overlays = [...((file.raw.overlays as unknown[] | undefined) ?? []), item];
+  return { item };
+}
+
+/** What was added, for people. */
+function saidAdded(kind: MotionTemplate['kind'], src: string, item: Record<string, unknown>, into: number | undefined, where: string): string {
+  if (kind === 'transition') return `added ${src} as the ${String(item.duration)} s transition into scenes[${into}]`;
+  if (kind === 'scene') return `added ${src} as a ${String(item.duration)} s scene ${where} (${String(item.id)})`;
+  return `added ${src} as an overlay over source ${String(item.at)} s for ${String(item.duration)} s (${String(item.id)})`;
+}
+
+const whereOf = (args: Placement) => (args.first ? 'at the start' : args.after !== undefined ? `after scene ${args.after}` : 'at the end');
+
+/** `cuttle motion templates`: the templates `motion new` copies, and the way to a page of your own. */
+export async function motionTemplatesCommand(output: Output): Promise<{ templates: readonly MotionTemplate[]; ownPage: string }> {
+  const ownPage = 'Templates are starting points, not the limit: write any page (motion/<name>/index.html: HTML, CSS, canvas, SVG, WebGL, Three.js) and add it with `cuttle motion add motion/<name>/index.html`.';
+  const result = { templates: MOTION_TEMPLATES, ownPage };
+  output.result(result, () => [...MOTION_TEMPLATES.map((template) => `${template.name.padEnd(17)}${template.kind.padEnd(8)} ${template.description}`), '', ownPage].join('\n'));
   return result;
 }
 
 /**
  * `cuttle motion new <template>`: copies a template into `motion/<name>/` and adds it to cuttle.json,
- * a scene at the end (`--first`: at the start) or an overlay over the clips (`--at`).
+ * a scene at the end (`--first`: at the start; `--after`: after a scene) or an overlay over the clips
+ * (`--at`), or the transition into a scene (`--into`). The copy is the project's to change.
  */
 export async function motionNewCommand(projectDir: string, template: string, args: MotionNewArgs, output: Output): Promise<MotionNewResult> {
   const info = MOTION_TEMPLATES.find((candidate) => candidate.name === template);
-  if (!info) throw new CliError('usage', `no template "${template}" (${MOTION_TEMPLATES.map((candidate) => candidate.name).join(', ')})`);
+  if (!info) throw new CliError('usage', `no template "${template}" (${MOTION_TEMPLATES.map((candidate) => candidate.name).join(', ')}); a page of your own goes in with \`motion add\``);
   const name = args.name ?? template;
   if (!NAME.test(name)) throw new CliError('usage', `--name "${name}" must be lower-case letters, digits and dashes`);
   const file = await readProjectFile(projectDir);
-  const clips = file.project.scenes.filter((scene) => scene.type === 'clip');
-  if (info.kind === 'overlay' && clips.length === 0) throw new CliError('invalid-project', `${file.path} has no clips: an overlay goes over a clip`);
-  // a transition leads into a scene that has one before it
-  let into = -1;
-  if (info.kind === 'transition') {
-    const scenes = file.project.scenes;
-    const wanted = args.into ?? '1';
-    into = scenes.findIndex((candidate) => candidate.id === wanted);
-    if (into < 0 && /^\d+$/.test(wanted)) into = Number(wanted);
-    if (!(into >= 1 && into < scenes.length)) throw new CliError('usage', `--into ${wanted}: a transition leads into a scene after the first (${scenes.length} scenes)`);
-  }
+  // checked before anything is copied
+  if (info.kind === 'overlay' && !file.project.scenes.some((scene) => scene.type === 'clip')) throw new CliError('invalid-project', `${file.path} has no clips: an overlay goes over a clip`);
   // a folder of its own, beside any page there already
   let src: string;
   try {
@@ -202,33 +270,47 @@ export async function motionNewCommand(projectDir: string, template: string, arg
     if (error instanceof MissingTemplateError) throw new CliError('missing-file', `${error.message}: build the CLI again`);
     throw error;
   }
-  const folder = src.split('/')[1]!;
-  const taken = usedIds(file.project);
-  let item: Record<string, unknown>;
-  if (info.kind === 'transition') {
-    item = { src, duration: args.duration ?? info.duration };
-    const scenes = file.raw.scenes as Record<string, unknown>[];
-    scenes[into] = { ...scenes[into], transition: item };
-  } else if (info.kind === 'scene') {
-    item = { type: 'motion', id: newId('scenes', taken), label: labelOf(folder), src, duration: args.duration ?? info.duration };
-    const scenes = (file.raw.scenes as unknown[] | undefined) ?? [];
-    file.raw.scenes = args.first ? [item, ...scenes] : [...scenes, item];
-  } else {
-    const start = Math.min(...clips.map((clip) => clip.from));
-    const end = Math.max(...clips.map((clip) => clip.to));
-    const at = args.at ?? start;
-    const duration = args.duration ?? (info.whole ? Math.max(0.1, end - at) : info.duration);
-    item = { id: newId('overlays', taken), label: labelOf(folder), src, at, duration: Math.round(duration * 1000) / 1000 };
-    file.raw.overlays = [...((file.raw.overlays as unknown[] | undefined) ?? []), item];
-  }
+  const { item, into } = place(file, info.kind, src, labelOf(src.split('/')[1]!), args, { duration: info.duration, ...(info.whole && { whole: true }) });
   await writeProjectFile(file, 'motion new');
-  const result: MotionNewResult = { template, kind: info.kind, src, item, ...(into >= 0 && { into }) };
-  output.result(result, () =>
-    info.kind === 'transition'
-      ? `added ${src} as the ${String(item.duration)} s transition into scenes[${into}]`
-      : info.kind === 'scene'
-        ? `added ${src} as a ${String(item.duration)} s scene ${args.first ? 'at the start' : 'at the end'} (${String(item.id)})`
-        : `added ${src} as an overlay over source ${String(item.at)} s for ${String(item.duration)} s (${String(item.id)})`,
-  );
+  const result: MotionNewResult = { template, kind: info.kind, src, item, ...(into !== undefined && { into }) };
+  output.result(result, () => saidAdded(info.kind, src, item, into, whereOf(args)));
+  return result;
+}
+
+export interface MotionAddArgs extends Placement {
+  /** What the page is in the video (default: a scene). */
+  as?: string;
+  /** Its name on the timeline (default: from its folder or file). */
+  label?: string;
+}
+
+export interface MotionAddResult {
+  kind: MotionTemplate['kind'];
+  /** The page, from the project folder. */
+  src: string;
+  item: Record<string, unknown>;
+  into?: number;
+}
+
+const KINDS = ['scene', 'overlay', 'transition'] as const;
+/** A page of your own lasts this long unless told: a scene 3 s, a transition 0.8 s; an overlay the rest of the clips. */
+const OWN_SECONDS = { scene: 3, overlay: 3, transition: 0.8 } as const;
+
+/**
+ * `cuttle motion add <page>`: a page you wrote (any page in the project) into the video: a scene
+ * (at the end, `--first`, or `--after` a scene), an overlay over the clips (`--as overlay`, from
+ * `--at`), or the transition into a scene (`--as transition --into`).
+ */
+export async function motionAddCommand(projectDir: string, page: string, args: MotionAddArgs, output: Output): Promise<MotionAddResult> {
+  const kind = (args.as ?? 'scene') as MotionTemplate['kind'];
+  if (!KINDS.includes(kind)) throw new CliError('usage', `--as ${args.as}: scene, overlay or transition`);
+  const file = await readProjectFile(projectDir);
+  const src = await pageOf(file.dir, page);
+  if (!/\.html?$/i.test(src)) throw new CliError('usage', `${src} is not a page: a motion item is an .html file`);
+  const label = args.label?.trim() || labelOf(pageName(src));
+  const { item, into } = place(file, kind, src, label, args, { duration: OWN_SECONDS[kind], ...(kind === 'overlay' && args.duration === undefined && { whole: true }) });
+  await writeProjectFile(file, 'motion add');
+  const result: MotionAddResult = { kind, src, item, ...(into !== undefined && { into }) };
+  output.result(result, () => `${saidAdded(kind, src, item, into, whereOf(args))}\ncheck it: cuttle motion check ${src}`);
   return result;
 }

@@ -47,7 +47,10 @@ describe('SKILL.md', () => {
     expect(fields.name).toBe('cuttle');
     expect(fields.description!.length).toBeGreaterThan(200);
     expect(fields.description!.length).toBeLessThanOrEqual(1024); // the Agent Skills limit
-    expect(fields.description).toMatch(/^Records the screen/); // third person, what it does first
+    expect(fields.description).toMatch(/^Makes videos/); // third person, what it does first
+    // both ways: a take edited, and a video written in code without one, so Claude takes it for either
+    expect(fields.description).toMatch(/records the screen/);
+    expect(fields.description).toMatch(/without any recording/);
     expect(fields.description).toMatch(/Use when .*demo.*screencast.*screen recording/);
   });
 
@@ -71,7 +74,7 @@ async function help(command: string): Promise<string> {
 
 /** `--flag` as a whole option in a help text (not `--until` inside `--until-file`). */
 const hasFlag = (text: string, flag: string) => new RegExp(`${flag}(?![\\w-])`).test(text);
-const COMMANDS = ['devices', 'record', 'import', 'suggest', 'transcribe', 'models', 'transcript', 'preview', 'fit', 'frame', 'capture-page', 'motion check', 'motion new', 'motion templates', 'music new', 'music templates', 'music set', 'music check', 'sound add', 'sound list', 'brand list', 'brand save', 'brand apply', 'brand remove', 'background', 'init', 'render', 'chapters', 'recover'];
+const COMMANDS = ['devices', 'record', 'import', 'suggest', 'transcribe', 'models', 'transcript', 'preview', 'fit', 'frame', 'capture-page', 'motion check', 'motion add', 'motion new', 'motion templates', 'music new', 'music templates', 'music set', 'music check', 'sound add', 'sound list', 'brand list', 'brand save', 'brand apply', 'brand remove', 'background', 'init', 'render', 'chapters', 'recover'];
 /** Commands with subcommands: the subcommand is part of the command (`motion check`). */
 const GROUPS = ['motion', 'music', 'sound', 'brand'];
 

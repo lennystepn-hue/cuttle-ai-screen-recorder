@@ -3,7 +3,8 @@ packages:
   - apps/*
   - skill
 allowBuilds:
-  # its postinstall downloads the Electron binary (checked against its checksums)
+  # its install script, should a version bring one back: since Electron 44 the binary comes on the
+  # first require('electron') instead (checked against its checksums)
   electron: true
   # electron-builder's Squirrel installer, which Cuttle does not build (its installer is NSIS)
   electron-winstaller: false

@@ -58,7 +58,8 @@ jobs:
           node-version: 24
           cache: pnpm
 
-      # also downloads Electron and, on macOS, builds the screen capture helper with Xcode's Swift
+      # on macOS also builds the screen capture helper with Xcode's Swift (Electron's binary comes when
+      # package.mjs asks for it; the packager takes a copy of its own)
       - run: pnpm install --frozen-lockfile
 
       # macOS: the Developer ID certificate in a keychain of this run, when the repository has it

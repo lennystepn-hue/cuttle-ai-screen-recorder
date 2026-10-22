@@ -206,7 +206,7 @@ To run Cuttle from its source, or to work on it:
 | Transcription (whisper) | in Gyan's ffmpeg (its `whisper` filter) | `brew install whisper-cpp` (no macOS ffmpeg has the filter; Cuttle runs `whisper-cli` instead) |
 | Permissions | none | the first recording asks for them (below) |
 
-`pnpm install` also downloads Electron's binary for the platform. Native modules come prebuilt:
+Electron's binary for the platform is downloaded the first time the app or a check starts. Native modules come prebuilt:
 koffi (the OS APIs) for both, uiohook-napi (the input hook) for Windows.
 
 **macOS permissions.** macOS asks the app the recorder runs in: the terminal for the `cuttle`

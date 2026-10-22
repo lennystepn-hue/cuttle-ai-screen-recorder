@@ -58,8 +58,12 @@ jobs:
           brew install ffmpeg-full
           echo "$(brew --prefix ffmpeg-full)/bin" >> "$GITHUB_PATH"
 
-      # also downloads Electron and, on macOS, builds the screen capture helper with Xcode's Swift
+      # on macOS also builds the screen capture helper with Xcode's Swift
       - run: pnpm install --frozen-lockfile
+
+      # Electron's binary comes on the first require('electron'), not with the install: fetched here, so
+      # no check's time limit pays for the download (on a slow runner it took over a minute)
+      - run: node -e "console.log(require('electron'))"
 
       - run: pnpm typecheck
 
@@ -110,5 +114,9 @@ jobs:
           echo "$(brew --prefix ffmpeg-full)/bin" >> "$GITHUB_PATH"
 
       - run: pnpm install --frozen-lockfile
+
+      # Electron's binary comes on the first require('electron'), not with the install: fetched here, so
+      # no check's time limit pays for the download (on a slow runner it took over a minute)
+      - run: node -e "console.log(require('electron'))"
 
       - run: pnpm app:check

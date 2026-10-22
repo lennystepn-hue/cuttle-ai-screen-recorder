@@ -7,7 +7,7 @@ import { fitCommand } from './commands/fit';
 import { frameCommand } from './commands/frame';
 import { importCommand, type ImportArgs } from './commands/import';
 import { init } from './commands/init';
-import { motionCheckCommand, motionNewCommand, motionTemplatesCommand } from './commands/motion';
+import { motionAddCommand, motionCheckCommand, motionNewCommand, motionTemplatesCommand } from './commands/motion';
 import { musicCheckCommand, musicNewCommand, musicSetCommand, musicTemplatesCommand, soundAddCommand, soundListCommand } from './commands/music';
 import { previewCommand } from './commands/preview';
 import { recordCommand } from './commands/record';
@@ -224,19 +224,39 @@ export async function runCli(argv: readonly string[], streams?: Streams): Promis
       ),
     );
 
-  const motion = program.command('motion').description('motion pages: scenes and overlays drawn by code (HTML, CSS, canvas, WebGL)');
+  const motion = program.command('motion').description('motion pages: scenes, overlays and transitions drawn by code (HTML, CSS, canvas, SVG, WebGL): write your own, or start from a template');
+  motion
+    .command('add <page>')
+    .description('add a page you wrote (any page in the project) to the video: a scene at the end, an overlay over the clips, or the transition into a scene')
+    .option('--as <kind>', 'scene, overlay or transition (default: scene)')
+    .option('--label <text>', 'its name on the timeline (default: from its folder)')
+    .option('--duration <seconds>', 'how long it lasts (default: a scene 3 s, a transition 0.8 s, an overlay the rest of the clips)', positive)
+    .option('--first', 'a scene goes first instead of last (an intro)')
+    .option('--after <scene>', 'a scene goes right after this one, by id or place from 0')
+    .option('--at <seconds>', 'an overlay\'s start, in source seconds (default: the first clip\'s start)', seconds)
+    .option('--into <scene>', 'a transition: the scene it leads into, by id or place from 0 (default: the second scene)')
+    .action(
+      action((output, project, page: string, options: { as?: string; label?: string; duration?: number; first?: boolean; after?: string; at?: number; into?: string }) =>
+        motionAddCommand(project, page, options, output),
+      ),
+    );
   motion
     .command('new <template>')
-    .description('copy a template into motion/<name>/ and add it: a scene at the end, an overlay over the clips, or the transition into a scene (motion templates lists them)')
+    .description('copy a template into motion/<name>/ and add it, as a starting point to make your own: a scene at the end, an overlay over the clips, or the transition into a scene (motion templates lists them)')
     .option('--name <name>', 'the folder in motion/ (default: the template\'s name)')
     .option('--at <seconds>', 'an overlay\'s start, in source seconds (default: the first clip\'s start)', seconds)
     .option('--duration <seconds>', 'how long it lasts (default: the template\'s; a callout or caption overlay: the whole take)', positive)
     .option('--first', 'a scene goes first instead of last (an intro)')
+    .option('--after <scene>', 'a scene goes right after this one, by id or place from 0')
     .option('--into <scene>', 'a transition: the scene it leads into, by id or place from 0 (default: the second scene)')
-    .action(action((output, project, template: string, options: { name?: string; at?: number; duration?: number; first?: boolean; into?: string }) => motionNewCommand(project, template, options, output)));
+    .action(
+      action((output, project, template: string, options: { name?: string; at?: number; duration?: number; first?: boolean; after?: string; into?: string }) =>
+        motionNewCommand(project, template, options, output),
+      ),
+    );
   motion
     .command('templates')
-    .description('the templates motion new copies: their kind and what they show')
+    .description('the templates motion new copies (starting points: any page of your own goes in with motion add)')
     .action(action((output) => motionTemplatesCommand(output)));
   motion
     .command('check <src>')

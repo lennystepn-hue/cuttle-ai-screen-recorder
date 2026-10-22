@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Report a security flaw
+    url: https://github.com/lennystepn-hue/cuttle-ai-screen-recorder/security/advisories/new
+    about: Privately, never in a public issue (see SECURITY.md).
+  - name: How to set up, record and make a video
+    url: https://github.com/lennystepn-hue/cuttle-ai-screen-recorder#get-started
+    about: The README covers installing, the permissions, the app, the CLI and Claude Code.

@@ -450,9 +450,11 @@ On one computer, `pnpm app:build && pnpm app:installer` makes the installer of t
 
 ## Contributing
 
-Issues and pull requests are welcome. Cuttle runs on Windows and macOS: a change made on one has to
-keep working on the other ([CLAUDE.md](CLAUDE.md) has the platform rules). Run `pnpm typecheck` and
-`pnpm test`, and `pnpm app:check` for a change to the app.
+Issues and pull requests are welcome: [CONTRIBUTING.md](CONTRIBUTING.md) says how to set up, which
+checks to run and what a pull request needs. Cuttle runs on Windows and macOS, and a change made on
+one has to keep working on the other ([CLAUDE.md](CLAUDE.md) has the platform rules). Everyone
+taking part follows the [Code of Conduct](CODE_OF_CONDUCT.md). Found a security flaw? Report it
+privately, as [SECURITY.md](SECURITY.md) says, never in a public issue.
 
 ## License
 

@@ -1,0 +1,44 @@
+name: Idea or feature request
+description: Something Cuttle could do, or do better
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What you want to do
+      description: The video you are making, and where Cuttle gets in the way or falls short.
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: What would help
+      description: How you imagine it. A sketch, a screenshot or an example from another tool is welcome.
+    validations:
+      required: true
+  - type: dropdown
+    id: part
+    attributes:
+      label: Where
+      options:
+        - Recording
+        - The automatic cut
+        - The editor
+        - The look (backgrounds, frames, cursor, camera, subtitles)
+        - Motion or music pages
+        - The export
+        - The cuttle command (CLI)
+        - The Claude skill
+        - Something else
+  - type: checkboxes
+    id: platforms
+    attributes:
+      label: Systems
+      description: Cuttle runs on both; say where you need it.
+      options:
+        - label: macOS
+        - label: Windows
+  - type: textarea
+    id: more
+    attributes:
+      label: Anything else

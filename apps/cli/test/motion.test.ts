@@ -82,6 +82,9 @@ describe('cuttle motion new and templates', () => {
     expect((await cli('--json', '-C', dir, 'motion', 'new', 'sparkles')).json).toMatchObject({ error: { code: 'usage', message: expect.stringContaining('no template "sparkles"') } });
     expect((await cli('--json', '-C', dir, 'motion', 'new', 'title', '--name', 'My Intro')).json).toMatchObject({ error: { code: 'usage' } });
     expect((await cli('--json', '-C', dir, 'motion', 'new', 'lower-third')).json).toMatchObject({ error: { code: 'invalid-project', message: expect.stringContaining('has no clips') } });
+    // a page with nowhere to go leaves no copy behind: the next one gets the template's name
+    expect((await cli('--json', '-C', dir, 'motion', 'new', 'title', '--after', 's9')).code).toBe(1);
+    expect(existsSync(join(dir, 'motion', 'title'))).toBe(false);
   });
 });
 

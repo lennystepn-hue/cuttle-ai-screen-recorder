@@ -1,5 +1,5 @@
-import { stat } from 'node:fs/promises';
-import { isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { rm, stat } from 'node:fs/promises';
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { readProjectFile, writeProjectFile } from '@cuttle/core';
 import { MOTION_TEMPLATES, type MotionTemplate } from '@cuttle/motion-kit';
 import { copyTemplate, MissingTemplateError } from '@cuttle/motion-kit/files';
@@ -270,7 +270,15 @@ export async function motionNewCommand(projectDir: string, template: string, arg
     if (error instanceof MissingTemplateError) throw new CliError('missing-file', `${error.message}: build the CLI again`);
     throw error;
   }
-  const { item, into } = place(file, info.kind, src, labelOf(src.split('/')[1]!), args, { duration: info.duration, ...(info.whole && { whole: true }) });
+  let placed: ReturnType<typeof place>;
+  try {
+    placed = place(file, info.kind, src, labelOf(src.split('/')[1]!), args, { duration: info.duration, ...(info.whole && { whole: true }) });
+  } catch (error) {
+    // nowhere to go: the copy goes again, so the next try gets the name
+    await rm(join(file.dir, dirname(src)), { recursive: true, force: true });
+    throw error;
+  }
+  const { item, into } = placed;
   await writeProjectFile(file, 'motion new');
   const result: MotionNewResult = { template, kind: info.kind, src, item, ...(into !== undefined && { into }) };
   output.result(result, () => saidAdded(info.kind, src, item, into, whereOf(args)));

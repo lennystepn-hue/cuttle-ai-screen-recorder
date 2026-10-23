@@ -109,9 +109,12 @@ describe.runIf(enabled)('cuttle in Electron', () => {
     expect(stills.map((still) => still.source)).toEqual([1, undefined]);
   }, 120_000);
 
-  it('renders the project with its still scene to 1:1', () => {
-    const { code, json } = cuttle('-C', project, 'render', '--format', '1:1');
+  it("renders the project with its still scene to 1:1, at a podcast's loudness", () => {
+    const { code, json } = cuttle('-C', project, 'render', '--format', '1:1', '--loudness', 'podcast');
     expect(code).toBe(0);
+    const loudness = json.loudness as { expected: { lufs: number }; video: { lufs: number; truePeak: number } };
+    expect(Math.abs(loudness.video.lufs - -16), `${loudness.video.lufs} LUFS`).toBeLessThan(1);
+    expect(loudness.video.truePeak).toBeLessThanOrEqual(-1);
     const seconds = json.seconds as number;
     expect(seconds).toBeGreaterThan(5.9); // the 3 s take plus the 3 s still (the crossfade between them does not shorten it)
     expect(probe(json.out as string).split(/\r?\n/).slice(0, 2)).toEqual(['h264,1080,1080', 'aac']);
@@ -555,13 +558,14 @@ describe.runIf(enabled)('cuttle in Electron', () => {
       const rgb = (png: PNG, x: number, y: number) => [...png.data.subarray((y * png.width + x) * 4, (y * png.width + x) * 4 + 3)];
       const close = (actual: number[], expected: number[]) => actual.every((value, i) => Math.abs(value - expected[i]!) <= 24);
       expect(close(rgb(frame(0.5), 190, 90), [0xd9, 0x77, 0x57])).toBe(true);
+      // (left of the middle: the take's Ctrl+K shows as keycaps at the bottom, over the overlay)
       const late = frame(3.5);
-      expect(close(rgb(late, 960, 1040), [0, 255, 0])).toBe(true);
-      expect(close(rgb(late, 960, 700), [0, 255, 0])).toBe(false);
+      expect(close(rgb(late, 300, 1040), [0, 255, 0])).toBe(true);
+      expect(close(rgb(late, 300, 700), [0, 255, 0])).toBe(false);
       // the preview shows the same
       const still = cuttle('-C', project, 'preview', '--at', '3.5', '-o', join(project, 'motion-still'));
       const shown = PNG.sync.read(readFileSync((still.json.stills as { file: string }[])[0]!.file));
-      expect(rgb(shown, 960, 1040)).toEqual([0, 255, 0]);
+      expect(rgb(shown, 300, 1040)).toEqual([0, 255, 0]);
     } finally {
       writeFileSync(file, before);
     }

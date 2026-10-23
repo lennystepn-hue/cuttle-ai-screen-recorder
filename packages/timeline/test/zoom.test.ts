@@ -95,6 +95,20 @@ describe('zoomTargetAt', () => {
     expect(zoomTargetAt({ rect: a }, 3)).toBe(a);
   });
 
+  it('takes each move on its own curve: in and out, at an even pace, or a jump at its time', () => {
+    const at = (curve: 'smooth' | 'linear' | 'jump', t: number) => zoomTargetAt({ rect: a, moves: [{ at: 2, rect: b, ease: curve }] }, t)[0];
+    // the same 0.8 s from 0.3 s before the move: halfway through, half the way (in and out), and a quarter in a quarter of the way
+    expect(at('smooth', 2.1)).toBeCloseTo(200, 6);
+    expect(at('smooth', 1.9)).toBeLessThan(400 * 0.25);
+    expect(at('linear', 1.9)).toBeCloseTo(100, 6);
+    expect(at('linear', 2.5)).toBe(400);
+    // a jump: where it was until its time, then there
+    expect(at('jump', 1.99)).toBe(0);
+    expect(at('jump', 2)).toBe(400);
+    // and on from where a jump left it
+    expect(zoomTargetAt({ rect: a, moves: [{ at: 2, rect: b, ease: 'jump' }, { at: 3, rect: c }] }, 4)).toEqual(c);
+  });
+
   it('blends moves that overlap without a jump or a stop, and arrives at the last', () => {
     const path = { rect: a, moves: [{ at: 2, rect: b }, { at: 2.2, rect: c }] };
     const step = 1 / 120;

@@ -4,13 +4,14 @@
 // it, its handles to resize it (a zoom keeps the screen's shape: what is drawn is what it shows).
 // Esc goes back to the video.
 import { useEffect, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
-import type { Rect } from '@cuttle/project';
+import type { Rect, Zoom } from '@cuttle/project';
 import type { Command } from '../../shared/document';
 import { formatSource } from '../../shared/format';
 import { maskRectAt, zoomTargetAt } from '@cuttle/timeline';
 import { adjustRect, drawnRect, fitInside, movePath, toSource, toStage, type Fit, type Handle } from '../../shared/edit';
 import { addAnnotation, addMask, addZoom, cropClip, overlayBlocked, playheadPlace } from './actions';
 import { edit, preview } from './doc';
+import { placeCommand, placeOf, selectedZoom, selectPlace } from './path';
 import { beginGesture, cancelGesture } from './gesture';
 import { FrameGrabber } from './frames';
 import { currentPlayer, select, setTool, shownProject, sourceViewShown, store } from './session';
@@ -47,6 +48,7 @@ export function SourceView() {
   // an arrow being drawn: from where the drag started to the pointer (source px)
   const [drawingArrow, setDrawingArrow] = useState<[number, number, number, number]>();
   const annotationKind = useStore(store, (state) => state.annotationKind);
+  const pathPlace = useStore(store, (state) => state.place);
   const grabber = useRef<{ grabber: FrameGrabber; source: unknown }>(undefined);
 
   // a drag under way ends with the view (Esc, playing)
@@ -86,7 +88,9 @@ export function SourceView() {
   const croppedClip = cropTarget?.type === 'clip' ? cropTarget : undefined;
   const cropRange = croppedClip ? [croppedClip.from, croppedClip.to] : undefined;
   const range = item ? ('at' in item ? [item.at, item.at + item.duration] : [item.from, item.to]) : cropRange;
-  const frameAt = range && (source === undefined || source < range[0]! || source >= range[1]!) ? range[0] : source;
+  // a place on the selected zoom's path shows at its own second, as it is
+  const placed = selection?.kind === 'zoom' && item && pathPlace !== undefined ? placeOf(item as Zoom, pathPlace) : undefined;
+  const frameAt = placed ? placed.at : range && (source === undefined || source < range[0]! || source >= range[1]!) ? range[0] : source;
 
   // The screen frame at that source second, decoded on its own (the player's frames are the video's).
   useEffect(() => {
@@ -123,7 +127,8 @@ export function SourceView() {
   if (!active || !project) return null;
   // a zoom that follows shows where it is at that second
   const speed = place?.span.scene.type === 'clip' ? place.span.scene.speed : 1;
-  const zoomAt = (zoom: (typeof project.zooms)[number]): Rect => (frameAt === undefined ? zoom.rect : (zoomTargetAt(zoom, frameAt, speed).map((value) => Math.round(value)) as Rect));
+  const zoomAt = (zoom: (typeof project.zooms)[number]): Rect =>
+    placed && selection?.id === zoom.id ? placed.rect : frameAt === undefined ? zoom.rect : (zoomTargetAt(zoom, frameAt, speed).map((value) => Math.round(value)) as Rect);
   const boxes: Box[] = [
     ...project.zooms.map((zoom) => ({ kind: 'zoom' as const, id: zoom.id!, rect: zoomAt(zoom), here: frameAt !== undefined && frameAt >= zoom.at && frameAt < zoom.at + zoom.duration })),
     // a mask that follows covers, at that second, where it is (between two places both)
@@ -196,11 +201,18 @@ export function SourceView() {
     const list = box.kind === 'zoom' ? 'zooms' : box.kind === 'mask' ? 'masks' : box.kind === 'annotation' ? 'annotations' : 'scenes';
     const clip = box.kind === 'crop' ? project.scenes.find((scene) => scene.id === box.id) : undefined;
     const path = box.kind === 'zoom' ? project.zooms.find((zoom) => zoom.id === box.id) : box.kind === 'mask' ? project.masks.find((mask) => mask.id === box.id) : undefined;
+    // a place of a zoom's path, selected: that place alone
+    const pathZoom = box.kind === 'zoom' && pathPlace !== undefined ? selectedZoom() : undefined;
     let commands: Command[] | undefined;
     follow(
       event,
       (dx, dy) => {
         const rect = adjustRect(box.rect, handle, dx, dy, screen, box.kind === 'zoom' ? aspect : undefined).map((value) => Math.round(value));
+        if (pathZoom) {
+          commands = [placeCommand(pathZoom, pathPlace!, { rect: rect as Rect })];
+          preview(commands);
+          return;
+        }
         // a crop moved by hand is the person's: a new crop object, without the automatic tag; a zoom
         // or mask that follows takes its whole path along
         const fields =
@@ -214,7 +226,29 @@ export function SourceView() {
       },
       (moved) => {
         if (!moved || !commands) return preview(undefined);
-        edit(commands, handle === 'move' ? `Move the ${box.kind} area` : `Resize the ${box.kind} area`);
+        const what = pathZoom ? (pathPlace === 0 ? 'where the zoom starts' : `the zoom's move ${pathPlace}`) : `the ${box.kind} area`;
+        edit(commands, `${handle === 'move' ? 'Move' : 'Resize'} ${what}`);
+      },
+    );
+  };
+
+  /** A press on a place of the selected zoom's path: it is selected (its frame shows); dragged, its rect moves. */
+  const pressPlace = (event: ReactPointerEvent<SVGCircleElement>, index: number) => {
+    if (event.button !== 0) return;
+    const zoom = selectedZoom();
+    const at = zoom && placeOf(zoom, index);
+    if (!zoom || !at) return;
+    selectPlace(index);
+    let commands: Command[] | undefined;
+    follow(
+      event as unknown as ReactPointerEvent<HTMLElement>,
+      (dx, dy) => {
+        commands = [placeCommand(zoom, index, { rect: adjustRect(at.rect, 'move', dx, dy, screen, aspect).map((value) => Math.round(value)) as Rect })];
+        preview(commands);
+      },
+      (moved) => {
+        if (!moved || !commands) return preview(undefined);
+        edit(commands, `Move ${index === 0 ? 'where the zoom starts' : `the zoom's move ${index}`}`);
       },
     );
   };
@@ -294,7 +328,7 @@ export function SourceView() {
     <div className="source-view" ref={area} onPointerDown={pressFrame} data-testid="source-view">
       <canvas ref={canvas} style={{ width: size.width, height: size.height }} />
       {(selected?.kind === 'zoom' || selected?.kind === 'crop') && <ZoomDim fit={fit} rect={selected.rect} size={size} />}
-      {selected?.kind === 'zoom' && <ZoomPath fit={fit} zoom={project.zooms.find((zoom) => zoom.id === selected.id)} />}
+      {selected?.kind === 'zoom' && <ZoomPath fit={fit} zoom={project.zooms.find((zoom) => zoom.id === selected.id)} place={pathPlace} onPress={pressPlace} />}
       {selected?.kind === 'mask' && <ZoomPath fit={fit} mask={project.masks.find((mask) => mask.id === selected.id)} />}
       {!selected && tool === 'crop' && boxes.some((box) => box.kind === 'crop') && <ZoomDim fit={fit} rect={boxes.find((box) => box.kind === 'crop')!.rect} size={size} />}
       {boxes.map((box) => {
@@ -356,7 +390,9 @@ export function SourceView() {
         <b>Source view</b>
         {frameAt === undefined
           ? ' · move the playhead onto a clip to see the screen'
-          : frameAt !== source
+          : placed && tool === 'select'
+            ? ` · ${pathPlace === 0 ? 'where the zoom starts' : `its move ${pathPlace}`}, at ${formatSource(placed.at)}: drag the box to place it, a dot for another`
+            : frameAt !== source
             ? ` · the frame at ${formatSource(frameAt)}, where this ${selection?.kind} starts`
             : tool === 'annotate'
               ? blocked
@@ -407,7 +443,21 @@ type Following = { rect: Rect; moves?: { at: number; rect: Rect }[] };
  * rests (its first and last place, and where it stays `REST` or longer). A privacy mask has a place
  * in each frame its text moved: those are on the way only.
  */
-function ZoomPath({ fit, zoom, mask }: { fit: Fit; zoom?: Following & { at: number; duration: number }; mask?: Following & { from: number; to: number } }) {
+function ZoomPath({
+  fit,
+  zoom,
+  mask,
+  place,
+  onPress,
+}: {
+  fit: Fit;
+  zoom?: Following & { at: number; duration: number };
+  mask?: Following & { from: number; to: number };
+  /** The selected place (a zoom's). */
+  place?: number;
+  /** A press on a place of a zoom's path: each one is a handle. */
+  onPress?: (event: ReactPointerEvent<SVGCircleElement>, index: number) => void;
+}) {
   const item = zoom ?? mask;
   if (!item?.moves?.length) return null;
   const kind = zoom ? 'zoom' : 'mask';
@@ -421,9 +471,12 @@ function ZoomPath({ fit, zoom, mask }: { fit: Fit; zoom?: Following & { at: numb
         <rect key={i} x={rect.x} y={rect.y} width={rect.width} height={rect.height} />
       ))}
       <polyline points={middles.join(' ')} />
-      {rects.map((rect, i) => (
-        <circle key={i} cx={rect.x + rect.width / 2} cy={rect.y + rect.height / 2} r={3} />
-      ))}
+      {onPress && zoom
+        ? places.map((_, i) => {
+            const [x, y] = middles[i]!.split(',').map(Number);
+            return <circle key={i} className={`place${place === i ? ' selected' : ''}`} cx={x} cy={y} r={place === i ? 6 : 5} onPointerDown={(event) => onPress(event, i)} data-place={i} />;
+          })
+        : rects.map((rect, i) => <circle key={i} cx={rect.x + rect.width / 2} cy={rect.y + rect.height / 2} r={3} />)}
     </svg>
   );
 }

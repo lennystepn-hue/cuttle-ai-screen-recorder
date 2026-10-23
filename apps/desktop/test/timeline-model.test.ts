@@ -62,7 +62,10 @@ describe('timelineModel', () => {
   it('marks where a zoom that follows moves on, in output seconds', () => {
     const typed = project({ scenes: [{ type: 'clip', from: 0, to: 4 }, { type: 'clip', from: 4, to: 12, speed: 2 }], zooms: [{ at: 1, duration: 9, rect: [0, 0, 100, 100], moves: [{ at: 3, rect: [50, 0, 100, 100] }, { at: 8, rect: [90, 0, 100, 100] }] }] });
     const [block] = timelineModel(typed, sceneSpans(typed.scenes), []).lanes.zoom.blocks;
-    expect(block?.marks).toEqual([3, 6]);
+    expect(block?.marks).toEqual([
+      { t: 3, index: 0 },
+      { t: 6, index: 1 },
+    ]);
   });
 
   it('lists what is worth a second look before an export', () => {

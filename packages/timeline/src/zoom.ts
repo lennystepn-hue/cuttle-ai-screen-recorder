@@ -1,5 +1,5 @@
 import type { Rect, Zoom } from '@cuttle/project';
-import { clamp, lerp, settle } from './easing';
+import { clamp, ease, lerp } from './easing';
 
 /** Length of a zoom's ramps in output seconds (see `rampAmount`; a settling ramp is 95 % in after half a second). */
 export const ZOOM_RAMP_SECONDS = 0.8;
@@ -47,18 +47,25 @@ export function zoomBetween(from: Rect, to: Rect, t: number): Rect {
 }
 
 /**
- * Where a zoom aims at `sourceTime` (source seconds): its `rect`, then each move's rect in turn,
- * settling over `ZOOM_MOVE_SECONDS` output seconds from `ZOOM_MOVE_LEAD` before the move (`speed`:
- * the clip's, which turns them into source seconds). A move that comes while the one before is
- * still on its way sets off from where that one is, keeping its speed: no jump, no stop.
+ * Where a zoom aims at `sourceTime` (source seconds): its `rect`, then each move's rect in turn, over
+ * `ZOOM_MOVE_SECONDS` output seconds from `ZOOM_MOVE_LEAD` before the move (`speed`: the clip's,
+ * which turns them into source seconds), on the move's curve (`settle` unless it says; `jump` is
+ * there at its time). A move that comes while the one before is still on its way sets off from where
+ * that one is: no jump, no stop.
  */
 export function zoomTargetAt(zoom: Pick<Zoom, 'rect' | 'moves'>, sourceTime: number, speed = 1): Rect {
   const lead = ZOOM_MOVE_LEAD * speed;
   const length = ZOOM_MOVE_SECONDS * speed;
   let rect = zoom.rect;
   for (const move of zoom.moves ?? []) {
+    const curve = move.ease ?? 'settle';
+    if (curve === 'jump') {
+      if (sourceTime < move.at) break;
+      rect = move.rect;
+      continue;
+    }
     if (sourceTime <= move.at - lead) break;
-    rect = zoomBetween(rect, move.rect, settle((sourceTime - (move.at - lead)) / length));
+    rect = zoomBetween(rect, move.rect, ease(curve, (sourceTime - (move.at - lead)) / length));
   }
   return rect;
 }

@@ -66,8 +66,8 @@ export interface OverlayBlock {
   title: string;
   /** The row inside its lane: blocks that overlap in time go to separate rows. */
   row: number;
-  /** Where a zoom that follows moves on, in output seconds. */
-  marks?: number[];
+  /** Where a zoom that follows moves on, in output seconds, each with its move's index in `moves`. */
+  marks?: { t: number; index: number }[];
 }
 
 /** Rows a lane grows to; blocks beyond overlap in the last one. */
@@ -168,7 +168,11 @@ function lane<T extends { enabled: boolean; label?: string; id?: string }>(
         enabled: item.enabled,
         title: item.label ?? title(item),
         row: 0,
-        ...(marks && { marks: marks(item).flatMap((t) => outputTimesOf(spans, t)).filter((t) => t >= occurrence.start && t < occurrence.end) }),
+        ...(marks && {
+          marks: marks(item)
+            .flatMap((at, index) => outputTimesOf(spans, at).map((t) => ({ t, index })))
+            .filter(({ t }) => t >= occurrence.start && t < occurrence.end),
+        }),
       });
     }
   });

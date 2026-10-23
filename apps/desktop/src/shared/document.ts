@@ -136,7 +136,7 @@ export function clampRect(rect: readonly number[], screen: { width: number; heig
   return [round(x), round(y), round(w), round(h)];
 }
 
-type Move = { at: number; rect: number[] };
+type Move = { at: number; rect: number[]; ease?: string };
 
 /** An item's source range: a mask's `from` and `to`, a zoom's `at` and `at + duration`. */
 const rangeOf = (item: Item): [number, number] => (item.from !== undefined ? [Number(item.from), Number(item.to)] : [Number(item.at), Number(item.at) + Number(item.duration)]);
@@ -196,7 +196,8 @@ function clampItem(list: ListName, item: Item, limits: EditLimits): void {
   }
   if (Array.isArray(item.rect)) item.rect = clampRect(item.rect as number[], limits.screen);
   if ((list === 'zooms' || list === 'masks') && Array.isArray(item.moves)) {
-    item.moves = (item.moves as Move[]).map((move) => ({ at: Number(move.at), rect: clampRect(move.rect, limits.screen) }));
+    // a zoom's move keeps its curve
+    item.moves = (item.moves as Move[]).map((move) => ({ ...move, at: Number(move.at), rect: clampRect(move.rect, limits.screen) }));
     keepPath(item);
   }
 }

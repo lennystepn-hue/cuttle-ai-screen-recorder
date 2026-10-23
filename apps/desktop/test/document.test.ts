@@ -434,6 +434,10 @@ describe('a zoom that follows, in the document', () => {
     expect(still.auto).toBeUndefined();
     const off = zoom(applyCommand(following, { type: 'set', list: 'zooms', id: 'z1', fields: { moves: [{ at: 5, rect: [1000, 700, 640, 400] }] } }, limits));
     expect(off.moves).toEqual([{ at: 5, rect: [1000, 700, 280, 100] }]);
+    // a move's curve stays through the clamp and a shift
+    const eased = applyCommand(following, { type: 'set', list: 'zooms', id: 'z1', fields: { moves: [{ at: 5, rect: [300, 200, 640, 400], ease: 'jump' }] } }, limits);
+    expect(zoom(eased).moves).toEqual([{ at: 5, rect: [300, 200, 640, 400], ease: 'jump' }]);
+    expect(zoom(applyCommand(eased, { type: 'shift', list: 'zooms', id: 'z1', by: 1 }, limits)).moves).toEqual([{ at: 6, rect: [300, 200, 640, 400], ease: 'jump' }]);
     expect(project(applyCommand(following, { type: 'set', list: 'zooms', id: 'z1', fields: { at: 0.5 } }, limits)).zooms[0]!.moves).toHaveLength(2);
   });
 

@@ -991,6 +991,58 @@ describe.runIf(enabled)('the Cuttle app', () => {
     await editor.waitForFunction(() => document.querySelectorAll('.item.zoom[data-id=z8]').length === 0);
   }, 45_000);
 
+  it("edits a zoom's path: a place picked in the inspector, on the timeline or in the source view moves alone; a move added at the playhead, eased, removed; drawn as the export draws it", async () => {
+    const original = readFileSync(projectFile(), 'utf8');
+    type Path = { rect: number[]; moves?: { at: number; rect: number[]; ease?: string }[]; auto?: string };
+    const path = (file: Written) => file.zooms.find((zoom) => zoom.id === 'z8') as unknown as Path;
+    // suggest's typing zoom in the first clip (1×: source seconds are the video's)
+    const outside = onDisk() as unknown as { zooms: unknown[] };
+    outside.zooms.push({ id: 'z8', label: 'Typing', at: 0.3, duration: 2.5, rect: [100, 100, 576, 360], moves: [{ at: 1.2, rect: [400, 100, 576, 360] }, { at: 2, rect: [600, 300, 576, 360] }], auto: 'typing' });
+    writeFileSync(projectFile(), `${JSON.stringify(outside, null, 2)}\n`);
+    await editor.waitForSelector('.item.zoom[data-id=z8]');
+    await press('.item.zoom[data-id=z8]');
+    await editor.waitForSelector('[data-testid=zoom-path-part]');
+    expect(await editor.locator('[data-testid^=zoom-place-]').count()).toBe(3);
+    // the first move, picked in the inspector: the source view shows it as it is, and its box moves it alone
+    await click(editor, '[data-testid=zoom-place-1]');
+    await editor.waitForSelector('.zoom-path circle.place.selected');
+    await drag('.source-box.selected', [40, 0]);
+    await savedWhen((file) => path(file).moves![0]!.rect[0]! > 400);
+    const placed = path(onDisk());
+    expect([placed.rect[0], placed.moves![1]!.rect[0]]).toEqual([100, 600]);
+    expect(placed.auto).toBeUndefined();
+    expect((await doc()).undo).toBe("Move the zoom's move 1");
+    // the second move's time, dragged on the timeline
+    await drag('.item.zoom[data-id=z8] .move-mark.handle[data-place="2"]', [-15, 0]);
+    await savedWhen((file) => path(file).moves![1]!.at < 2 - 0.02);
+    expect((await doc()).undo).toBe('Move a move of the zoom');
+    expect(await editor.locator('[data-testid=zoom-place-2][aria-pressed=true]').count()).toBe(1);
+    // the first one's curve: a jump
+    await chooseIn(editor, '[data-testid=zoom-move-ease-1]', 'Jump');
+    await savedWhen((file) => path(file).moves![0]!.ease === 'jump');
+    // a move at the playhead, where the zoom aims there (nothing changes until it is moved), then taken off
+    await click(editor, '[data-testid=zoom-place-2]');
+    await seek(2.6);
+    await click(editor, '[data-testid=zoom-add-move]');
+    await savedWhen((file) => path(file).moves!.length === 3);
+    expect(path(onDisk()).moves![2]!.at).toBeCloseTo(2.6, 2);
+    await editor.waitForSelector('[data-testid=zoom-place-3][aria-pressed=true]');
+    await shot('32b-zoom-path');
+    await click(editor, '[data-testid=zoom-move-remove-3]');
+    await savedWhen((file) => path(file).moves!.length === 2);
+    expect((await doc()).undo).toBe('Remove a move of the zoom');
+    // just after the jump, the editor draws what cuttle preview draws
+    await editor.keyboard.press('Escape');
+    await editor.evaluate(() => (window as unknown as Hooked).__cuttleCheck.flush());
+    const still = spawnSync('node', [CLI, '--json', '-C', dirname(projectFile()), 'preview', '--at', '1.3', '-o', join(root, 'zoom-path-still')], { encoding: 'utf8', timeout: 120_000 });
+    expect(still.status, still.stderr).toBe(0);
+    const exported = PNG.sync.read(readFileSync((JSON.parse(still.stdout) as { stills: { file: string }[] }).stills[0]!.file));
+    await expect.poll(async () => (await seek(1.3), difference(await pixels(), exported).mean), { timeout: 20_000, message: 'the jump: the editor against the export' }).toBeLessThan(1.5);
+    await undoAll();
+    writeFileSync(projectFile(), original);
+    await editor.waitForFunction(() => document.querySelectorAll('.item.zoom[data-id=z8]').length === 0);
+  }, 90_000);
+
   it('shows a privacy mask that follows text up the screen: its path in the source view, the Auto tab row, Hold still', async () => {
     const original = readFileSync(projectFile(), 'utf8');
     // suggest's mask over a token that scrolled up 200 px from 1 s, followed frame by frame: still at

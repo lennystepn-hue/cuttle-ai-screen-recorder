@@ -9,6 +9,7 @@ import { frameCommand } from './commands/frame';
 import { importCommand, type ImportArgs } from './commands/import';
 import { init } from './commands/init';
 import { itemsCommand, type ItemsArgs } from './commands/items';
+import { zoomPathCommand, type ZoomPathArgs } from './commands/zoom-path';
 import { motionAddCommand, motionCheckCommand, motionNewCommand, motionTemplatesCommand } from './commands/motion';
 import { musicCheckCommand, musicNewCommand, musicSetCommand, musicTemplatesCommand, soundAddCommand, soundListCommand } from './commands/music';
 import { previewCommand } from './commands/preview';
@@ -429,6 +430,16 @@ export async function runCli(argv: readonly string[], streams?: Streams): Promis
       const { yours, ...rest } = options;
       return itemsCommand(project, { ...rest, ...(yours && { auto: false }) }, output);
     }));
+
+  program
+    .command('zoom-path <id>')
+    .description("a zoom's path: where it starts and each move (source seconds, source px, the curve to it); --at with --rect adds a move or places the one there anew, --ease, --remove, --clear")
+    .option('--at <seconds>', "the move's source second", seconds)
+    .option('--rect <x,y,w,h...>', 'where the zoom aims from then, in source px')
+    .option('--ease <curve>', 'how it gets there: settle (default), smooth, linear or jump')
+    .option('--remove', 'take the move at --at off the path')
+    .option('--clear', 'take every move off: the zoom holds still')
+    .action(action((output, project, id: string, options: ZoomPathArgs) => zoomPathCommand(project, id, options, output)));
 
   const sound = program.command('sound').description('sounds at moments of the video: built-in effects or files of the project');
   sound

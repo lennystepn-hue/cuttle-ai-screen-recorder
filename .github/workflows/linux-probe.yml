@@ -1,4 +1,4 @@
-# Temporary: the Linux render job alone, on pushes to the linux branch, while it is made to work (#129).
+# Temporary: CI's linux and docker jobs alone, on pushes to the linux branch, while they are made to work (#129).
 name: Linux probe
 
 on:
@@ -9,42 +9,60 @@ permissions:
   contents: read
 
 jobs:
+  # Linux renders only (no recording, no app): the CLI's renders, previews and checks in a virtual
+  # display, and the engine's goldens, all with Chromium's software GL
   linux:
-    name: render on linux
+    name: ubuntu-latest
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
+
       - uses: pnpm/action-setup@v4
+
       - uses: actions/setup-node@v4
         with:
           node-version: 24
           cache: pnpm
+
       # ffmpeg, a display for Electron (Xvfb), and the libraries Electron's Chromium loads
       - run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends ffmpeg xvfb xauth libnss3 libatk1.0-0t64 libatk-bridge2.0-0t64 libcups2t64 libgtk-3-0t64 libgbm1 libasound2t64 libxss1 libxshmfence1 libdrm2 fonts-noto-color-emoji
-          ffmpeg -hide_banner -version | head -1
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends ffmpeg xvfb xauth libnss3 libatk1.0-0t64 libatk-bridge2.0-0t64 libcups2t64 libgtk-3-0t64 libgbm1 libasound2t64 libxss1 libxshmfence1 libdrm2 fonts-noto-color-emoji >/dev/null
+
       - run: pnpm install --frozen-lockfile
+
       - run: node -e "console.log(require('electron'))"
+
       - run: pnpm typecheck
+
       - run: pnpm exec vitest run --project node --retry 1
-        continue-on-error: true
+
       - run: xvfb-run -a pnpm cli:check
-        continue-on-error: true
-      # the engine's goldens for Linux, made here once (-u) and kept as the run's artifact to look at
+
       - run: pnpm exec playwright install --with-deps chromium
-      - run: pnpm exec vitest run --project browser -u || true
-      - uses: actions/upload-artifact@v4
-        with:
-          name: linux-goldens
-          path: packages/*/test/__golden__/**/*.linux.png
-      # the image, and a video of the kit's templates rendered in it
+
+      - run: pnpm exec vitest run --project browser
+
+  # The Docker image, and a video of the kit's templates rendered in it
+  docker:
+    name: docker
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
       - run: docker build -t cuttle .
-      - run: |
-          mkdir -p "$RUNNER_TEMP/docker"
-          docker run --rm -v "$RUNNER_TEMP/docker:/work" cuttle init /work/reel
-          docker run --rm -v "$RUNNER_TEMP/docker:/work" cuttle -C /work/reel motion new title --first
-          docker run --rm -v "$RUNNER_TEMP/docker:/work" cuttle -C /work/reel motion new end-card
-          docker run --rm -v "$RUNNER_TEMP/docker:/work" cuttle -C /work/reel --json render
-          ffprobe -v error -show_entries stream=codec_name,width,height:format=duration -of csv=p=0 "$RUNNER_TEMP/docker/reel/out/16x9.mp4"
+
+      - name: a video rendered in the image
+        run: |
+          work="$RUNNER_TEMP/docker"
+          mkdir -p "$work"
+          cuttle() { timeout 300 docker run --rm --init -v "$work:/work" cuttle "$@"; }
+          cuttle init /work/reel
+          cuttle -C /work/reel motion new title --first
+          cuttle -C /work/reel motion new end-card
+          cuttle -C /work/reel --json render
+          probe="$(docker run --rm --entrypoint ffprobe -v "$work:/work" cuttle -v error -select_streams v -show_entries stream=codec_name,width,height -of csv=p=0 /work/reel/out/16x9.mp4)"
+          echo "$probe"
+          test "$probe" = "h264,1920,1080"

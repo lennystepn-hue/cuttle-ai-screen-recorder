@@ -272,7 +272,7 @@ xvfb-run -a cuttle -C my-video render
 ```
 
 The `Dockerfile` builds the same as an image: `docker build -t cuttle .`, then
-`docker run --rm -v "$PWD/my-video:/video" cuttle -C /video --json render`.
+`docker run --rm --init -v "$PWD/my-video:/video" cuttle -C /video --json render`.
 
 ## With any agent (MCP)
 

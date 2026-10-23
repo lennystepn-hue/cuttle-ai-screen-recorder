@@ -11,11 +11,21 @@ import { exportChecks } from '../../shared/timeline-model';
 import { bridge } from '../bridge';
 import { CheckIcon, CloseIcon, FolderIcon } from '../icons';
 import { Select } from '../Select';
+import { LOUDNESS_TARGETS, type LoudnessTarget } from '@cuttle/project';
+import type { Command } from '../../shared/document';
+import { edit } from './doc';
 import { cancelExport, closeExport, startExport, store } from './session';
 import { useStore } from './store';
 import { FORMATS, ownFormat, targetName } from './targets';
 
 const ENCODERS = { auto: 'Automatic', hardware: 'Graphics card', software: 'Processor' } as const;
+/** The loudness targets as people know them (`LOUDNESS`). */
+const LOUDNESS_NAMES: Record<LoudnessTarget, string> = {
+  off: 'As mixed',
+  youtube: 'YouTube & social · −14 LUFS',
+  podcast: 'Podcast · −16 LUFS',
+  broadcast: 'Broadcast · −23 LUFS',
+};
 
 /** When an earlier export was made, for people: `14:05` today, `12 Oct, 14:05` before. */
 function madeAt(time: number): string {
@@ -157,6 +167,18 @@ export function ExportSheet() {
                 testId="encoder"
               />
             </div>
+            <div className="row">
+              Loudness
+              <Select
+                value={project?.look.audio.loudness ?? 'off'}
+                options={LOUDNESS_TARGETS.map((value) => ({ value, label: LOUDNESS_NAMES[value] }))}
+                onChange={(value) => edit([{ type: 'look', path: ['audio', 'loudness'], value: value === 'off' ? undefined : value } as Command], `Loudness: ${LOUDNESS_NAMES[value]}`)}
+                label="Loudness"
+                variant="compact"
+                testId="export-loudness"
+                title="Where a platform plays the sound: the whole mix brought there, its peaks kept under -1 dBTP (kept in the project)"
+              />
+            </div>
             {transcribed && (
               <div className="row">
                 Subtitles
@@ -280,6 +302,7 @@ export function ExportSheet() {
                     {targetName(file.format, output)} · {formatDuration(file.seconds)} · {formatBytes(file.bytes)}
                     {file.subtitles && ` · with ${file.subtitles.map((path) => `.${path.split('.').at(-1)}`).join(' and ')}`}
                     {file.chapters && ` · ${file.chapters.length} chapter${file.chapters.length === 1 ? '' : 's'}`}
+                    {file.loudness && ` · ${file.loudness.lufs === null ? 'silent' : `${file.loudness.lufs.toFixed(1)} LUFS`}`}
                   </small>
                 </div>
                 <button className="ghost" onClick={() => void bridge.invoke('project:reveal', file.out)} title="Show in folder">

@@ -5,7 +5,7 @@ import { TYPING_RULES, clickSamples, keyPresses, mixTyping, typingClicks } from 
 
 const keys = (t: number, count: number): InputEvent => ({ t, type: 'keys', count });
 const clip = (from: number, to: number, speed = 1): Scene => ({ type: 'clip', from, to, speed });
-const audio: Look['audio'] = { enabled: true, muteSpedUp: true, cleanup: true, typing: true, typingVolume: 0.5, effects: true, effectsVolume: 0.8, system: true, systemVolume: 0.8, systemDuck: 12 };
+const audio: Look['audio'] = { enabled: true, muteSpedUp: true, cleanup: true, typing: true, typingVolume: 0.5, effects: true, effectsVolume: 0.8, system: true, systemVolume: 0.8, systemDuck: 12, loudness: 'off' };
 /** The largest absolute sample (a spread of a long track would overflow the stack). */
 const peakOf = (samples: Float32Array) => samples.reduce((peak, sample) => Math.max(peak, Math.abs(sample)), 0);
 /** The share of a sound's energy below `cutoff` Hz (a one-pole low-pass). */

@@ -19,7 +19,7 @@ export interface MotionCheck {
 }
 
 export type ElectronRequest = (
-  | { command: 'render'; projectDir: string; out: string; format?: string; encoder?: string; captions?: boolean; subtitles?: string[] }
+  | { command: 'render'; projectDir: string; out: string; format?: string; encoder?: string; captions?: boolean; subtitles?: string[]; loudness?: string }
   | { command: 'preview'; projectDir: string; outDir: string; times: number[]; format?: string; sheet?: { columns?: number }; clean?: boolean; motion?: MotionCheck }
   | { command: 'capture-page'; target: string; out: string; width: number; height: number; fullPage: boolean; waitMs: number }
   | { command: 'music'; projectDir: string; out: string; sheet?: string; src?: string }

@@ -2401,14 +2401,21 @@ describe.runIf(enabled)('the Cuttle app', () => {
     await expect.poll(async () => (await now()).sound.status.state, { timeout: 90_000 }).toBe('ready');
     await shotOf('41-music-sounds', '/editor.html', 'music-editor · Cuttle');
 
-    // the export has the music (the take has no mic: what is heard is the music and the sounds)
+    // the export has the music (the take has no mic: what is heard is the music and the sounds), at
+    // YouTube's loudness, picked in the sheet (and kept in the project)
     await page.keyboard.press('Control+E');
     await page.waitForSelector('[data-testid=export-sheet]');
+    await chooseIn(page, '[data-testid=export-loudness]', 'YouTube & social', true);
+    await expect.poll(() => (saved() as unknown as { look?: { audio?: { loudness?: string } } }).look?.audio?.loudness).toBe('youtube');
     await page.click('[data-testid=export-start]');
     await exported(page);
-    const meter = spawnSync('ffmpeg', ['-hide_banner', '-nostats', '-i', join(dir, 'out', 'export.mp4'), '-map', '0:a', '-af', 'ebur128', '-f', 'null', '-'], { encoding: 'utf8', windowsHide: true }).stderr;
-    const lufs = Number(/I:\s+(-?[\d.]+) LUFS/.exec(meter.slice(meter.lastIndexOf('Summary:')))?.[1]);
-    expect(lufs).toBeGreaterThan(-30);
+    const meter = spawnSync('ffmpeg', ['-hide_banner', '-nostats', '-i', join(dir, 'out', 'export.mp4'), '-map', '0:a', '-af', 'ebur128=peak=true', '-f', 'null', '-'], { encoding: 'utf8', windowsHide: true }).stderr;
+    const summary = meter.slice(meter.lastIndexOf('Summary:'));
+    const lufs = Number(/I:\s+(-?[\d.]+) LUFS/.exec(summary)?.[1]);
+    const truePeak = Number(/True peak:\s+Peak:\s+(-?[\d.]+) dBFS/.exec(summary)?.[1]);
+    expect(Math.abs(lufs + 14), `${lufs} LUFS`).toBeLessThan(1);
+    expect(truePeak, `${truePeak} dBTP`).toBeLessThanOrEqual(-1);
+    expect(await page.locator('[data-testid=export-file]').textContent()).toContain('LUFS');
     await page.keyboard.press('Escape');
     await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find((window) => window.getTitle() === 'music-editor · Cuttle')?.close());
   }, 300_000);

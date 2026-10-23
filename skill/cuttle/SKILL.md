@@ -344,7 +344,10 @@ cuttle -C "<project>" --json render --format 16:9
 ```
 
 With a transcript, `--srt` and `--vtt` also write the subtitles next to the video, and
-`--no-captions` leaves them out of the picture. Run it in the background when the video is longer than about a minute; the Bash tool stops long
+`--no-captions` leaves them out of the picture. Where the video goes sets its loudness:
+`--loudness youtube` (-14 LUFS: YouTube, Spotify, TikTok, Instagram), `podcast` (-16) or `broadcast`
+(-23) brings the whole mix there with its peaks under -1 dBTP (`look.audio.loudness` keeps it in the
+project); the JSON's `loudness` says what the video measures. Use `youtube` for a video for the web. Run it in the background when the video is longer than about a minute; the Bash tool stops long
 commands. It writes `out/16x9.mp4` (or `-o <file>`); the JSON has the frames, the seconds and the
 encoder (`stats`). For 9:16, check `preview --format 9:16` first. Render each format the user
 wants. Tell the user the file's path and length. Do not upload it anywhere.

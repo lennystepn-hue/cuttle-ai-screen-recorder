@@ -3,9 +3,10 @@ import { mkdir, mkdtemp, readdir, rename, rm, stat, writeFile } from 'node:fs/pr
 import { tmpdir } from 'node:os';
 import { basename, dirname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { LOUDNESS, type LoudnessTarget } from '@cuttle/project';
 import { applyCaptionFixes, captionCues, captionWords, sceneSpans, stepChapters, toSrt, toVtt, typingClicks, type Chapter } from '@cuttle/timeline';
 import { app } from 'electron';
-import { INLINE_GRAPH_LIMIT, audioFilterGraph, muxArgs, planAudio } from '../audio';
+import { INLINE_GRAPH_LIMIT, audioFilterGraph, masterGraph, meteredGraph, meterArgs, muxArgs, parseMeter, planAudio } from '../audio';
 import { chapterMetadata } from '../chapters';
 import { duckExpression, speechSpans } from '../music/duck';
 import { placeNarration, writeNarrationTrack } from './narration';
@@ -40,6 +41,32 @@ export interface ExportOptions {
   captions?: boolean;
   /** Subtitle files written next to `out` (`<name>.srt`, `<name>.vtt`); the project needs a transcript. */
   subtitles?: readonly SubtitleFormat[];
+  /** The loudness the mix is brought to (default: the project's `look.audio.loudness`). */
+  loudness?: LoudnessTarget;
+}
+
+/** The most a quiet mix is raised (dB): more would lift its noise into the video. */
+export const MAX_LOUDNESS_GAIN = 24;
+/** A mix quieter than this (LUFS) is silence: it gets no gain. */
+const SILENT_LUFS = -70;
+
+/** An EBU R128 measurement: integrated loudness (LUFS) and true peak (dBTP); null for silence. */
+export interface Level {
+  lufs: number | null;
+  truePeak: number | null;
+}
+
+/** How the export brought its mix to a platform's loudness. */
+export interface LoudnessReport {
+  target: Exclude<LoudnessTarget, 'off'>;
+  /** Where the platform plays: its loudness and the true peak ceiling. */
+  expected: { lufs: number; truePeak: number };
+  /** The mix as it was. */
+  mix: Level;
+  /** The gain on the whole mix (dB), before the limiter that keeps it under the ceiling. */
+  gain: number;
+  /** The written video's sound, measured. */
+  video: Level;
 }
 
 export const SUBTITLE_FORMATS = ['srt', 'vtt'] as const;
@@ -71,6 +98,8 @@ export interface ExportResult {
   motion?: MotionItemReport[];
   /** The music and sounds, when the project has any: what the page made and said, and sounds that could not play. */
   music?: SoundtrackReport;
+  /** The loudness the mix was brought to, when one was asked for. */
+  loudness?: LoudnessReport;
   stats: ExportStats;
 }
 
@@ -395,21 +424,38 @@ export async function exportProject(opts: ExportOptions): Promise<ExportResult> 
       ...(typing && { typing: input }),
       ...(sound && { sound: input }),
     });
-    const graphFile = graph.length > INLINE_GRAPH_LIMIT ? join(work, 'audio.graph') : undefined;
-    if (graphFile) await writeFile(graphFile, graph);
+    const tracks = {
+      video,
+      mic: usesMic ? sources.mic?.path : undefined,
+      system: usesSystem ? sources.system?.path : undefined,
+      narration: narrationFile,
+      typing,
+      sound,
+    };
+    // a platform's loudness: the mix measured, then one gain and a limiter after it
+    const target = opts.loudness ?? project.look.audio.loudness;
+    let mastering: { gain: number; mix: Level } | undefined;
+    let mastered = graph;
+    if (target !== 'off') {
+      const metered = meteredGraph(graph);
+      const meterFile = metered.length > INLINE_GRAPH_LIMIT ? join(work, 'meter.graph') : undefined;
+      if (meterFile) await writeFile(meterFile, metered);
+      const mix = parseMeter(await runFfmpeg(meterArgs({ ...tracks, graph: metered, graphFile: meterFile }), signal));
+      const gain = mix.lufs === null || mix.lufs <= SILENT_LUFS ? 0 : Math.round(Math.min(MAX_LOUDNESS_GAIN, LOUDNESS[target].lufs - mix.lufs) * 100) / 100;
+      mastered = masterGraph(graph, gain, LOUDNESS[target].truePeak);
+      mastering = { gain, mix };
+      throwIfCancelled();
+    }
+    const graphFile = mastered.length > INLINE_GRAPH_LIMIT ? join(work, 'audio.graph') : undefined;
+    if (graphFile) await writeFile(graphFile, mastered);
     // the script's steps as the video's chapters, where the take reached them
     const chapters = stepChapters(project.script, take.markers, spans);
     const chapterFile = chapters.length > 0 ? join(work, 'chapters.txt') : undefined;
     if (chapterFile) await writeFile(chapterFile, chapterMetadata(chapters));
     await runFfmpeg(
       muxArgs({
-        video,
-        mic: usesMic ? sources.mic?.path : undefined,
-        system: usesSystem ? sources.system?.path : undefined,
-        narration: narrationFile,
-        typing,
-        sound,
-        graph,
+        ...tracks,
+        graph: mastered,
         graphFile,
         ...(chapterFile && { chapters: chapterFile }),
         out: partial,
@@ -422,6 +468,11 @@ export async function exportProject(opts: ExportOptions): Promise<ExportResult> 
     } catch (error) {
       throw new ExportError('render', `could not replace ${out} (is it open in a player?): ${(error as Error).message}`, { cause: error });
     }
+    // what the platform will hear: the written file, measured
+    const loudness: LoudnessReport | undefined =
+      mastering && target !== 'off'
+        ? { target, expected: LOUDNESS[target], ...mastering, video: parseMeter(await runFfmpeg(['-hide_banner', '-nostdin', '-nostats', '-i', out, '-map', '0:a:0', '-af', 'ebur128=peak=true', '-f', 'null', '-'], signal)) }
+        : undefined;
     const written: string[] = [];
     if (subtitles.length > 0) {
       // as subtitles, whatever the burned-in style: two lines a cue, on the video's timeline, the narration's words with the take's
@@ -442,6 +493,7 @@ export async function exportProject(opts: ExportOptions): Promise<ExportResult> 
       ...(chapters.length > 0 && { chapters }),
       ...(said && { motion: said }),
       ...(musicReport && { music: musicReport }),
+      ...(loudness && { loudness }),
       stats: {
         gpu: page.gpu,
         codec: page.codec,

@@ -7,7 +7,7 @@ import { MOTION_SCHEME_PRIVILEGES, SUBTITLE_FORMATS, checkMusic, exportProject, 
 import { capturePage } from './capture-page';
 import { failure, finish } from './finish';
 import { decodeRequest, type CancelMessage, type ElectronRequest, type ElectronResponse, type MotionCheck, type ProgressMessage } from './protocol';
-import type { CuttleProject } from '@cuttle/project';
+import type { CuttleProject, LoudnessTarget } from '@cuttle/project';
 
 // Motion pages are served from a scheme of their own, which must be known before the app is ready.
 protocol.registerSchemesAsPrivileged([MOTION_SCHEME_PRIVILEGES]);
@@ -77,6 +77,7 @@ async function handle(request: ElectronRequest): Promise<unknown> {
         ...(request.encoder !== undefined && { encoder: request.encoder as EncoderPreference }),
         ...(request.captions !== undefined && { captions: request.captions }),
         ...(request.subtitles && { subtitles: subtitleFormats(request.subtitles) }),
+        ...(request.loudness !== undefined && { loudness: request.loudness as LoudnessTarget }),
         signal: cancel.signal,
         onProgress: progress('frames', request.quiet),
       });

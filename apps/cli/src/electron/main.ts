@@ -6,7 +6,7 @@ import { app, protocol } from 'electron';
 import { MOTION_SCHEME_PRIVILEGES, SUBTITLE_FORMATS, checkMusic, exportProject, isExportFormat, renderStills, type EncoderPreference, type ExportFormat, type SubtitleFormat } from '@cuttle/export';
 import { capturePage } from './capture-page';
 import { failure, finish } from './finish';
-import { decodeRequest, type CancelMessage, type ElectronRequest, type ElectronResponse, type MotionCheck } from './protocol';
+import { decodeRequest, type CancelMessage, type ElectronRequest, type ElectronResponse, type MotionCheck, type ProgressMessage } from './protocol';
 import type { CuttleProject } from '@cuttle/project';
 
 // Motion pages are served from a scheme of their own, which must be known before the app is ready.
@@ -29,14 +29,15 @@ process.on('disconnect', () => {
 for (const signal of ['SIGINT', 'SIGTERM', 'SIGBREAK'] as const) process.on(signal, onCancel);
 
 /** Progress for people on stderr, every 10 %; nothing for --json. */
+/** Reports every tenth of the job: to the CLI over the IPC channel, and on stderr unless `quiet`. */
 function progress(label: string, quiet: boolean | undefined): (done: number, total: number) => void {
   let shown = -1;
   return (done, total) => {
-    if (quiet) return;
     const percent = Math.floor((done / total) * 10) * 10;
     if (percent === shown) return;
     shown = percent;
-    process.stderr.write(`${label} ${done}/${total}\n`);
+    process.send?.({ type: 'progress', label, done, total } satisfies ProgressMessage);
+    if (!quiet) process.stderr.write(`${label} ${done}/${total}\n`);
   };
 }
 

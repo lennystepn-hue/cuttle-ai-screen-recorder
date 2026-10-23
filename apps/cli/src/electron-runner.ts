@@ -4,7 +4,7 @@ import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { CliError, isKnownCode } from './errors';
-import { encodeRequest, type CancelMessage, type ElectronRequest, type ElectronResponse, type ResponseMessage } from './electron/protocol';
+import { encodeRequest, type CancelMessage, type ElectronRequest, type ElectronResponse, type ResponseMessage, type ProgressMessage } from './electron/protocol';
 
 /** After Ctrl+C, Electron gets this long to clean up before it is killed. */
 const CANCEL_GRACE_MS = 15_000;
@@ -52,7 +52,7 @@ function electronBinary(): string {
  * `signal` (Ctrl+C) sends a cancel over the IPC channel: Electron runs without a console, so the
  * console's Ctrl+C never reaches it on Windows. After a grace period Electron is killed.
  */
-export function runInElectron<T>(request: ElectronRequest, signal: AbortSignal): Promise<T> {
+export function runInElectron<T>(request: ElectronRequest, signal: AbortSignal, onProgress?: (label: string, done: number, total: number) => void): Promise<T> {
   return new Promise((resolve, reject) => {
     const binary = electronBinary(); // may download Electron first
     if (signal.aborted) return reject(new CliError('cancelled', 'cancelled before Electron started'));
@@ -64,8 +64,9 @@ export function runInElectron<T>(request: ElectronRequest, signal: AbortSignal):
     const child = spawn(binary, [entry, encodeRequest(request)], { stdio: ['ignore', 'pipe', 'inherit', 'ipc'], windowsHide: true, env });
     child.stdout?.pipe(process.stderr);
     let response: ElectronResponse | undefined;
-    child.on('message', (message: ResponseMessage) => {
+    child.on('message', (message: ResponseMessage | ProgressMessage) => {
       if (message?.type === 'response') response = message.response;
+      else if (message?.type === 'progress') onProgress?.(message.label, message.done, message.total);
     });
     let grace: NodeJS.Timeout | undefined;
     const onAbort = () => {

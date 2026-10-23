@@ -61,6 +61,9 @@ Cuttle runs on **Windows and macOS**. A change made on one has to keep working o
 - **Words for people** name both ways: `winget install Gyan.FFmpeg` and `brew install ffmpeg`,
   Windows' Settings and macOS's System Settings (Privacy & Security for the screen, camera,
   microphone and Input Monitoring).
+- **The MCP server** (`cuttle mcp`): the same Node server on both. A client starts the `cuttle`
+  shim, which is a `.cmd` on Windows: there it goes through `cmd /c cuttle mcp` (the README and the
+  app's Claude settings say so). Nothing but the protocol may write to its stdout.
 - **Icons**: one generator for both, `tools/icons.mjs` (`pnpm icons`): Windows' icon.ico, icon.png
   and tray.png, macOS's icon.icns (packed on a Mac only), icon-mac.png and trayTemplate, and the
   app's mark (`renderer/mark.ts`). A change to the design is made there, never to one platform's files.

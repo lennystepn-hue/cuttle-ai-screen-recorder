@@ -18,6 +18,8 @@ export interface Output {
 export interface Streams {
   stdout: (text: string) => void;
   stderr: (text: string) => void;
+  /** Each status line for people (`info`), also with --json: what `cuttle mcp` reports as progress. */
+  progress?: (text: string) => void;
 }
 
 const processStreams: Streams = {
@@ -33,6 +35,7 @@ export function createOutput(json: boolean, streams: Streams = processStreams): 
     },
     info(text) {
       if (!json) streams.stderr(`${text}\n`);
+      streams.progress?.(text);
     },
     warn(text) {
       streams.stderr(`warning: ${text}\n`);

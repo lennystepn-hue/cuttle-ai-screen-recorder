@@ -47,15 +47,18 @@ function electronBinary(): string {
 }
 
 /**
- * Chromium's sandbox on Linux needs unprivileged user namespaces or its setuid helper
- * (`chrome-sandbox` next to the binary, owned by root). Ubuntu 24.04 allows user namespaces only to
- * programs AppArmor names, npm's Electron has no setuid helper, and Chromium refuses to run as root
- * (a container): there it aborts at start, so the CLI runs it without the sandbox. Its pages are the
- * project's own, kept off the network either way.
+ * Chromium's switches on Linux, none elsewhere. Its sandbox needs unprivileged user namespaces or
+ * its setuid helper (`chrome-sandbox` next to the binary, owned by root): Ubuntu 24.04 allows user
+ * namespaces only to programs AppArmor names, npm's Electron has no setuid helper, and Chromium
+ * refuses to run as root (a container). There it aborts at start, so it runs without the sandbox;
+ * its pages are the project's own, kept off the network either way. And it draws with its own
+ * software GL (SwiftShader through ANGLE): a server or CI runner has no GPU, Chromium blocks WebGL
+ * on the system's software GL, and SwiftShader gives the same pixels on every machine.
  */
-export function sandboxSwitches(linux: { root: boolean; namespaces: boolean; helper: boolean } | undefined): string[] {
+export function chromiumSwitches(linux: { root: boolean; namespaces: boolean; helper: boolean } | undefined): string[] {
   if (linux === undefined) return [];
-  return linux.root || (!linux.namespaces && !linux.helper) ? ['--no-sandbox'] : [];
+  const sandbox = linux.root || (!linux.namespaces && !linux.helper) ? ['--no-sandbox'] : [];
+  return [...sandbox, '--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'];
 }
 
 /** What decides the sandbox on this Linux; undefined elsewhere. */
@@ -97,7 +100,7 @@ export function runInElectron<T>(request: ElectronRequest, signal: AbortSignal, 
     // CLI's Electron part instead of itself when CUTTLE_CLI_ELECTRON names it.
     const { ELECTRON_RUN_AS_NODE: _node, ...env } = process.env;
     if (process.env.CUTTLE_ELECTRON) env.CUTTLE_CLI_ELECTRON = entry;
-    const child = spawn(binary, [...sandboxSwitches(linuxSandbox(binary)), entry, encodeRequest(request)], { stdio: ['ignore', 'pipe', 'inherit', 'ipc'], windowsHide: true, env });
+    const child = spawn(binary, [...chromiumSwitches(linuxSandbox(binary)), entry, encodeRequest(request)], { stdio: ['ignore', 'pipe', 'inherit', 'ipc'], windowsHide: true, env });
     child.stdout?.pipe(process.stderr);
     let response: ElectronResponse | undefined;
     child.on('message', (message: ResponseMessage | ProgressMessage) => {

@@ -1,7 +1,7 @@
 // The project's media in the editor, read through the cuttle-media protocol (Range requests).
 import { ALL_FORMATS, Input, UrlSource, type InputAudioTrack, type InputVideoTrack, type VideoSinkDecoderOptions } from 'mediabunny';
 import { createCursorTrack, shortcutsOf, type CursorTrack, type Shortcut } from '@cuttle/timeline';
-import { parseEventsJsonl, parseMarkersJson, parseProject, parseTranscriptJson, type CuttleProject, type InputEvent, type Marker, type TranscriptFile, parseVoiceRender, speaks, voiceLineKey, voiceRenderFiles, type VoiceRender } from '@cuttle/project';
+import { parseEventsJsonl, parseMarkersJson, parseProject, parseTranscriptJson, type CuttleProject, type InputEvent, type Marker, type TranscriptFile, parseVoiceRender, showsCamera, speaks, voiceLineKey, voiceRenderFiles, type VoiceRender } from '@cuttle/project';
 import { isSvg, svgBitmap } from '@cuttle/export/svg';
 import { plainIssue } from '../../shared/format';
 import { MEDIA_ORIGIN, type ProjectInfo } from '../../shared/ipc';
@@ -278,7 +278,7 @@ export async function ensureMedia(media: EditorMedia, project: CuttleProject): P
     media.watermarkPath = mark;
     added = true;
   }
-  if (sources.webcam && look.webcam.enabled && !media.webcam) {
+  if (sources.webcam && showsCamera(project) && !media.webcam) {
     const video = await optional(media, sources.webcam, () => openVideo(sources.webcam!, 'The webcam recording'));
     if (video) {
       media.webcam = { ...video, offset: media.offsets.webcam };

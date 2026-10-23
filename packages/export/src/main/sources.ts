@@ -1,6 +1,6 @@
 import { readFile, stat } from 'node:fs/promises';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
-import { parseEventsJsonl, parseMarkersJson, parseProjectJson, parseTakeJson, parseTranscriptJson, trackOffset, type CuttleProject, type InputEvent, type TakeFile, type TranscriptWord, speaks } from '@cuttle/project';
+import { parseEventsJsonl, parseMarkersJson, parseProjectJson, parseTakeJson, parseTranscriptJson, trackOffset, type CuttleProject, type InputEvent, type TakeFile, type TranscriptWord, showsCamera, speaks } from '@cuttle/project';
 import { shortcutsOf, type Shortcut } from '@cuttle/timeline';
 import { ExportError } from '../errors';
 import { loadNarration, type NarrationLine } from './narration';
@@ -173,7 +173,7 @@ export async function loadSources(projectDir: string, options: { narration?: 'wh
   const inputs = [resolve(projectPath), ...(screen ? [join(dirname(screen), TAKE_FILE)] : []), ...named.map((path) => resolve(projectDir, path))];
   const result: ProjectSources = { project, ...(screen && { screen }), stills: {}, inputs, warnings: takeFile?.warning ? [takeFile.warning] : [] };
 
-  if (screen && look.webcam.enabled && sources.webcam) {
+  if (screen && showsCamera(project) && sources.webcam) {
     const path = await existing(projectDir, sources.webcam, 'webcam recording (sources.webcam)');
     result.webcam = { path, offset: offsetFor(take, 'webcam', path, screen) };
   }

@@ -340,7 +340,7 @@ move and stretch (Alt copies, Ctrl skips snapping). Shift- or Ctrl-click adds an
 selection (a Shift-drag on the lanes, all a band touches): dragged, switched off, duplicated or
 deleted, they go together, one step to undo. The tools beside the video: V selects (a click
 on a caption picks it), Z and M draw a zoom or a mask on the screen itself (the source view, Esc
-for the video), T types a caption on the video. A zoom that follows shows its path: a dot in the
+for the video), T types a caption on the video. With a webcam, the camera can take over for a while (full, side by side with the screen, or a large bubble), its own lane on the timeline. A zoom that follows shows its path: a dot in the
 source view or a diamond on the timeline picks a place to drag (its spot, its time), and the
 inspector adds a move at the playhead and sets how the zoom gets to each one (settle, smooth,
 linear, jump). The inspector edits the selection and the look;

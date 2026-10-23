@@ -493,6 +493,26 @@ const AnnotationSchema = z
   });
 
 /**
+ * How the camera shows for a while: `full` over the whole video (a talking-head intro or outro),
+ * `side` beside the screen (below it on a tall video), `large` a big bubble in its corner.
+ */
+export const CAMERA_LAYOUTS = ['full', 'side', 'large'] as const;
+export type CameraLayout = (typeof CAMERA_LAYOUTS)[number];
+
+/**
+ * The camera in another layout where the clips show source seconds `at` to `at + duration`; the
+ * bubble turns into it and back over half a second each way. It needs a webcam take (`sources.webcam`);
+ * with the bubble off (`look.webcam.enabled`) the camera fades in instead.
+ */
+const CameraSchema = z.strictObject({
+  ...named,
+  layout: z.enum(CAMERA_LAYOUTS),
+  at: seconds,
+  duration: positiveSeconds,
+  enabled: z.boolean().default(true),
+});
+
+/**
  * A page drawn over the video where its clips show source seconds `at` to `at + duration`, with
  * its transparency (a lower third, callouts, a logo); its own clock runs in output seconds.
  */
@@ -624,6 +644,7 @@ export const ProjectSchema = z
     masks: z.array(MaskSchema).default([]),
     texts: z.array(TextSchema).default([]),
     annotations: z.array(AnnotationSchema).default([]),
+    cameras: z.array(CameraSchema).default([]),
     overlays: z.array(MotionOverlaySchema).default([]),
     cuts: z.array(CutSchema).default([]),
     music: MusicSchema.optional(),
@@ -638,7 +659,7 @@ export const ProjectSchema = z
   .superRefine((project, ctx) => {
     const seen = new Map<string, string>();
     const lists: [string[], readonly { id?: string }[]][] = [
-      ...(['scenes', 'zooms', 'masks', 'texts', 'annotations', 'overlays', 'cuts', 'sounds', 'script'] as const).map((list): [string[], readonly { id?: string }[]] => [[list], project[list]]),
+      ...(['scenes', 'zooms', 'masks', 'texts', 'annotations', 'cameras', 'overlays', 'cuts', 'sounds', 'script'] as const).map((list): [string[], readonly { id?: string }[]] => [[list], project[list]]),
       [['voiceover', 'lines'], project.voiceover.lines],
     ];
     for (const [path, items] of lists) {
@@ -734,6 +755,10 @@ export type WindowKind = (typeof WINDOW_KINDS)[number];
 export type Mask = CuttleProject['masks'][number];
 export type TextOverlay = CuttleProject['texts'][number];
 export type Annotation = CuttleProject['annotations'][number];
+export type Camera = CuttleProject['cameras'][number];
+
+/** Whether the video shows the webcam at all: its bubble, or a camera layout (`cameras`). */
+export const showsCamera = (project: Pick<CuttleProject, 'look' | 'cameras'>): boolean => project.look.webcam.enabled || project.cameras.some((camera) => camera.enabled);
 export type AnnotationKind = (typeof ANNOTATION_KINDS)[number];
 export type Cut = CuttleProject['cuts'][number];
 export type AutoKind = (typeof AUTO_KINDS)[number];

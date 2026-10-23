@@ -286,6 +286,13 @@ export const COMMAND_TOOLS: readonly CommandTool[] = [
     },
     argv: (input) => ['zoom-path', input.id, ...option('at', input.at), ...option('rect', input.rect?.join(',')), ...option('ease', input.ease), ...on('remove', input.remove), ...on('clear', input.clear)],
   }),
+  tool({
+    name: 'camera',
+    title: 'Show the camera',
+    description: 'The webcam in another layout for a while (source seconds, as a caption): full over the whole video (a talking-head intro or outro), side beside the screen (below it on a tall video), large a big bubble. The bubble turns into it and back over half a second.',
+    input: { project, layout: z.enum(['full', 'side', 'large']), at: seconds, duration: seconds.positive().optional(), label: z.string().optional() },
+    argv: (input) => ['camera', input.layout, '--at', String(input.at), ...option('duration', input.duration), ...option('label', input.label)],
+  }),
   tool({ name: 'sound_list', title: 'Built-in sounds', description: 'The built-in sounds (whoosh, click, pop, …).', input: {}, global: true, readOnly: true, argv: () => ['sound', 'list'] }),
   tool({
     name: 'sound_add',

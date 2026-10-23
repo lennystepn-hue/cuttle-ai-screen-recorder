@@ -12,6 +12,8 @@ import {
   EASES,
   MOVE_EASES,
   type MoveEase,
+  CAMERA_LAYOUTS,
+  type CameraLayout,
   FRAME_STYLES,
   MASK_STYLES,
   STILL_MOTIONS,
@@ -55,13 +57,13 @@ import {
   TEXT_STYLE_NAMES,
   WEBCAM_SHAPE_NAMES,
 } from '../../shared/names';
-import { ANNOTATION_NAMES, motionName, outputTimesOf, soundName } from '../../shared/timeline-model';
+import { ANNOTATION_NAMES, CAMERA_NAMES, motionName, outputTimesOf, soundName } from '../../shared/timeline-model';
 import { BUILT_IN_SOUNDS } from '@cuttle/motion-kit';
 import { BackgroundIcon, BrandIcon, CameraIcon, CardIcon, CheckIcon, ChevronIcon, CloseIcon, CopyIcon, CropIcon, FilmIcon, KeysIcon, MaskIcon, MotionIcon, PageIcon, SelectIcon, SoundIcon, SplitIcon, SubtitlesIcon, TextIcon, TrashIcon, WatermarkIcon, WindowIcon, ZoomIcon, AnnotateIcon } from '../icons';
 import { bridge } from '../bridge';
 import { Select as StyledSelect } from '../Select';
 import { shortcut } from '../keys';
-import { chooseImage, chooseTool, cutShownAt, deleteSelection, duplicateSelection, LIST_OF, playheadPlace, reveal, setSpeed, SPEEDS, switchSelection } from './actions';
+import { addCamera, chooseImage, chooseTool, cutShownAt, deleteSelection, duplicateSelection, LIST_OF, playheadPlace, reveal, setSpeed, SPEEDS, switchSelection } from './actions';
 import { edit, preview } from './doc';
 import { addMove, removeMove, selectPlace, setMoveEase } from './path';
 import { currentPlayer, engineAssets, select, setTool, store, type LookSection, type Selection, type Tool } from './session';
@@ -895,6 +897,13 @@ function SelectedPanel() {
   return <Details project={project} selection={selection} />;
 }
 
+/** What each camera layout does, in a few words. */
+const CAMERA_HINTS: Record<CameraLayout, string> = {
+  full: 'the camera over the whole video: an intro, an outro, a word to the viewer',
+  side: 'the screen and the camera side by side (one above the other on a tall video)',
+  large: 'a big bubble in its corner, over the screen',
+};
+
 /** How a zoom gets to a move's place, in words. */
 const MOVE_EASE_NAMES: Record<MoveEase, string> = { settle: 'Settle', smooth: 'Smooth', linear: 'Linear', jump: 'Jump' };
 
@@ -947,6 +956,7 @@ const KIND_NAMES: Record<Selection['kind'], [string, string]> = {
   mask: ['mask', 'masks'],
   caption: ['caption', 'captions'],
   annotation: ['annotation', 'annotations'],
+  camera: ['camera layout', 'camera layouts'],
   motion: ['motion overlay', 'motion overlays'],
   cut: ['cut', 'cuts'],
   crop: ['crop', 'crops'],
@@ -1134,7 +1144,7 @@ function Details({ project, selection }: { project: CuttleProject; selection: Se
   }
 
   /** An overlay's place: where the video shows it (read) and its length there. */
-  const timing = (list: 'zooms' | 'texts' | 'masks' | 'annotations' | 'overlays', from: number, to: number) => {
+  const timing = (list: 'zooms' | 'texts' | 'masks' | 'annotations' | 'cameras' | 'overlays', from: number, to: number) => {
     const stretch = stretchOf(project, selection, from, to);
     const speed = stretch?.speed ?? 1;
     const label = NOUNS[list];
@@ -1149,7 +1159,7 @@ function Details({ project, selection }: { project: CuttleProject; selection: Se
             value={(to - from) / speed}
             min={0.05}
             onCommit={(length) => set(list, id, list === 'masks' ? { to: from + length * speed } : { duration: length * speed }, `Change the length of the ${label}`)}
-            testId={`${list === 'overlays' ? 'motion' : label}-length`}
+            testId={`${list === 'overlays' ? 'motion' : list === 'cameras' ? 'camera' : label}-length`}
           />
         </Row>
       </Section>
@@ -1157,7 +1167,7 @@ function Details({ project, selection }: { project: CuttleProject; selection: Se
   };
 
   /** Where an overlay starts in the take (a mask: where it starts and ends), for Advanced. */
-  const inTake = (list: 'zooms' | 'texts' | 'masks' | 'annotations' | 'overlays', from: number, to: number) =>
+  const inTake = (list: 'zooms' | 'texts' | 'masks' | 'annotations' | 'cameras' | 'overlays', from: number, to: number) =>
     list === 'masks' ? (
       <div className="grid2">
         <Row label="From">
@@ -1192,7 +1202,7 @@ function Details({ project, selection }: { project: CuttleProject; selection: Se
 
   const pixels = (list: 'zooms' | 'masks', rect: Rect) => <AreaFields rect={rect} onCommit={(next) => set(list, id, { rect: next }, `Change the ${NOUNS[list]} area`)} />;
 
-  const enabled = (list: 'zooms' | 'masks' | 'texts' | 'annotations' | 'overlays', on: boolean) => (
+  const enabled = (list: 'zooms' | 'masks' | 'texts' | 'annotations' | 'cameras' | 'overlays', on: boolean) => (
     <Row label="Show" inline>
       <em>{on ? 'On' : 'Off: kept, not in the video'}</em>
       <Toggle checked={on} label={`Show the ${NOUNS[list]}`} onChange={(value) => set(list, id, { enabled: value ? undefined : false }, value ? `Turn ${NOUNS[list]} on` : `Turn ${NOUNS[list]} off`)} />
@@ -1318,6 +1328,27 @@ function Details({ project, selection }: { project: CuttleProject; selection: Se
       </>
     );
   }
+  if (selection.kind === 'camera') {
+    const camera = project.cameras.find((item) => item.id === id)!;
+    return (
+      <>
+        <Head icon={<CameraIcon />} color="var(--camera)" name={camera.label ?? CAMERA_NAMES[camera.layout]} />
+        <Row label="Label">
+          <TextInput value={camera.label ?? ''} placeholder={CAMERA_NAMES[camera.layout]} onCommit={(value) => set('cameras', id, { label: value.trim() || undefined }, 'Rename the camera layout')} />
+        </Row>
+        <Section title="Camera">
+          <Row label="Layout" note={CAMERA_HINTS[camera.layout]}>
+            <Select value={camera.layout} options={CAMERA_LAYOUTS} names={CAMERA_NAMES} onChange={(layout) => set('cameras', id, { layout }, `${CAMERA_NAMES[layout]} there`)} testId="camera-layout" />
+          </Row>
+          {!project.sources.webcam && <p className="hint">This take has no webcam: record with a camera to see it here.</p>}
+          {project.sources.webcam && !project.look.webcam.enabled && <p className="hint">The bubble is off (Look, Camera): the camera fades in here instead of growing out of it.</p>}
+        </Section>
+        {timing('cameras', camera.at, camera.at + camera.duration)}
+        {enabled('cameras', camera.enabled)}
+        <Advanced note={ADVANCED_NOTE}>{inTake('cameras', camera.at, camera.at + camera.duration)}</Advanced>
+      </>
+    );
+  }
   if (selection.kind === 'sound') return <SoundDetails project={project} id={id} />;
   const text = project.texts.find((item) => item.id === id)!;
   return (
@@ -1350,7 +1381,7 @@ function Details({ project, selection }: { project: CuttleProject; selection: Se
 }
 
 /** What each list's items are called in the names of their changes. */
-const NOUNS = { zooms: 'zoom', masks: 'mask', texts: 'caption', annotations: 'annotation', overlays: 'motion overlay' } as const;
+const NOUNS = { zooms: 'zoom', masks: 'mask', texts: 'caption', annotations: 'annotation', cameras: 'camera layout', overlays: 'motion overlay' } as const;
 
 const ADVANCED_NOTE = 'Seconds into the take and pixels of the screen, as cuttle.json has them.';
 
@@ -2547,6 +2578,17 @@ function LookPanel() {
           <CameraFields webcam={webcam} />
         ) : (
           <p className="hint">Off. Switched on, the webcam shows as a bubble over the video.</p>
+        )}
+        {sources.webcam && (
+          <Row label="From the playhead" note="for 3 s, then back: a lane of its own on the timeline">
+            <div className="seg full" role="group" aria-label="Camera layouts">
+              {CAMERA_LAYOUTS.map((layout) => (
+                <button key={layout} type="button" onClick={() => addCamera(layout)} title={CAMERA_HINTS[layout]} data-testid={`camera-add-${layout}`}>
+                  {CAMERA_NAMES[layout]}
+                </button>
+              ))}
+            </div>
+          </Row>
         )}
       </LookPart>
 

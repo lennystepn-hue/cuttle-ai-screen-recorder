@@ -195,7 +195,7 @@ export async function openSession(canvas: HTMLCanvasElement): Promise<void> {
   }
 }
 
-const LISTS = { scene: 'scenes', zoom: 'zooms', mask: 'masks', caption: 'texts', annotation: 'annotations', motion: 'overlays', cut: 'cuts', crop: 'scenes', sound: 'sounds' } as const;
+const LISTS = { scene: 'scenes', zoom: 'zooms', mask: 'masks', caption: 'texts', annotation: 'annotations', camera: 'cameras', motion: 'overlays', cut: 'cuts', crop: 'scenes', sound: 'sounds' } as const;
 
 /** Whether the selected item is still in the project. */
 function stillThere(selection: Selection, project: CuttleProject): boolean {

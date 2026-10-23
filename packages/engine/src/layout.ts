@@ -1,4 +1,4 @@
-import type { Look, Rect, StillMotion, TextPosition } from '@cuttle/project';
+import type { CameraLayout, Look, Rect, StillMotion, TextPosition } from '@cuttle/project';
 import { easeInOutCubic } from '@cuttle/timeline';
 
 export interface Size {
@@ -42,26 +42,29 @@ export function windowLayout(
   output: Size,
   contentAspect: number,
   chrome: { titleBar: number; radius: number; device?: { bezel: number; radius: number } } | null,
+  area: Rect = [0, 0, output.width, output.height],
 ): WindowLayout {
+  // the chrome keeps the output's unit; the window is centred in `area` (what the camera leaves)
   const unit = unitFor(output);
+  const [left, top, areaWidth, areaHeight] = area;
   const padding = chrome ? WINDOW_PADDING * unit : 0;
   if (chrome?.device) {
     const { bezel, radius } = chrome.device;
-    // the screen as large as the output allows with the bezel (a share of its short side) around it
+    // the screen as large as the area allows with the bezel (a share of its short side) around it
     const short = Math.min(contentAspect, 1);
-    const exact = Math.min((output.width - 2 * padding) / (contentAspect + 2 * bezel * short), (output.height - 2 * padding) / (1 + 2 * bezel * short));
+    const exact = Math.min((areaWidth - 2 * padding) / (contentAspect + 2 * bezel * short), (areaHeight - 2 * padding) / (1 + 2 * bezel * short));
     const height = Math.round(exact);
     const width = Math.round(exact * contentAspect);
     const band = Math.round(bezel * Math.min(width, height));
-    const x = Math.round((output.width - width) / 2);
-    const y = Math.round((output.height - height) / 2);
+    const x = Math.round(left + (areaWidth - width) / 2);
+    const y = Math.round(top + (areaHeight - height) / 2);
     const window: Rect = [x - band, y - band, width + 2 * band, height + 2 * band];
     const outer = Math.min(radius * Math.min(window[2], window[3]), window[2] / 2, window[3] / 2);
     return { window, content: [x, y, width, height], radius: outer, titleBar: 0, clip: [x, y, width, height], clipRadius: Math.max(0, outer - band) };
   }
   const titleBar = chrome ? Math.round(chrome.titleBar * unit) : 0;
-  const availableWidth = output.width - 2 * padding;
-  const availableHeight = output.height - 2 * padding - titleBar;
+  const availableWidth = areaWidth - 2 * padding;
+  const availableHeight = areaHeight - 2 * padding - titleBar;
   let width = availableWidth;
   let height = width / contentAspect;
   if (height > availableHeight) {
@@ -70,8 +73,8 @@ export function windowLayout(
   }
   width = Math.round(width);
   height = Math.round(height);
-  const x = Math.round((output.width - width) / 2);
-  const y = Math.round((output.height - height - titleBar) / 2);
+  const x = Math.round(left + (areaWidth - width) / 2);
+  const y = Math.round(top + (areaHeight - height - titleBar) / 2);
   const radius = chrome ? Math.min(chrome.radius * unit, width / 2, (height + titleBar) / 2) : 0;
   const window: Rect = [x, y, width, height + titleBar];
   return { window, content: [x, y + titleBar, width, height], radius, titleBar, clip: window, clipRadius: radius };
@@ -270,4 +273,85 @@ export function stillCrop(image: Size, view: Size, motion: StillMotion, progress
     return [x + (width - width / zoom) / 2, (height - height / zoom) / 2, width / zoom, height / zoom];
   }
   return [x, 0, width, height];
+}
+
+/** The camera beside the screen (`side`): its share of the output's width (of its height on a tall video), and its corner radius in units. */
+export const CAMERA_SIDE = { share: 0.4, radius: 28 } as const;
+/** A `large` camera: its size as a share of the output's short side. */
+export const CAMERA_LARGE = 0.42;
+/** The corner radius of a `rounded` bubble, as a share of its size. */
+export const ROUNDED_RADIUS = 0.22;
+
+/** Where the camera is drawn, and the part of the output the window is centred in. */
+export interface CameraPlace {
+  /** The part of the output the window is centred in: all of it, or what the camera leaves. */
+  area: Rect;
+  /** The camera's box in output px, and its corner radius; `squircle`: the bubble's own shape. */
+  box: Rect;
+  radius: number;
+  squircle: boolean;
+  /** How much of the bubble's white border and of its shadow it keeps (0 to 1), and how opaque it is. */
+  border: number;
+  shadow: number;
+  opacity: number;
+}
+
+const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
+const lerpRect = (a: Rect, b: Rect, t: number): Rect => [lerp(a[0], b[0], t), lerp(a[1], b[1], t), lerp(a[2], b[2], t), lerp(a[3], b[3], t)];
+
+/**
+ * The camera on a frame: the bubble (`look.webcam`), or turning into a layout of `cameras`
+ * (`amount` of the way, eased): `full` over the whole output, `side` in a column beside the window
+ * (a band below it on a tall video), `large` a big bubble where the bubble is. The window's area
+ * gives way to it. With the bubble off, the camera fades in where the layout puts it.
+ */
+export function cameraPlace(output: Size, webcam: Look['webcam'], camera?: { layout: CameraLayout; amount: number }): CameraPlace {
+  const unit = unitFor(output);
+  const whole: Rect = [0, 0, output.width, output.height];
+  const shapeRadius = (box: Rect) => (webcam.shape === 'circle' ? box[2] / 2 : webcam.shape === 'rounded' ? box[2] * ROUNDED_RADIUS : 0);
+  const bubble = webcamRect(output, webcam);
+  const base: CameraPlace = { area: whole, box: bubble, radius: shapeRadius(bubble), squircle: webcam.shape === 'squircle', border: 1, shadow: 1, opacity: webcam.enabled ? 1 : 0 };
+  if (!camera || !(camera.amount > 0)) return base;
+  let target: CameraPlace;
+  if (camera.layout === 'full') target = { area: whole, box: whole, radius: 0, squircle: false, border: 0, shadow: 0, opacity: 1 };
+  else if (camera.layout === 'large') {
+    const box = webcamRect(output, { ...webcam, size: CAMERA_LARGE });
+    target = { area: whole, box, radius: shapeRadius(box), squircle: webcam.shape === 'squircle', border: 1, shadow: 1, opacity: 1 };
+  } else {
+    const pad = Math.round(WINDOW_PADDING * unit);
+    const tall = output.height > output.width;
+    const radius = CAMERA_SIDE.radius * unit;
+    target = tall
+      ? {
+          area: [0, 0, output.width, Math.round(output.height * (1 - CAMERA_SIDE.share))],
+          box: [pad, Math.round(output.height * (1 - CAMERA_SIDE.share)), output.width - 2 * pad, Math.round(output.height * CAMERA_SIDE.share) - pad],
+          radius,
+          squircle: false,
+          border: 0,
+          shadow: 1,
+          opacity: 1,
+        }
+      : {
+          area: [0, 0, Math.round(output.width * (1 - CAMERA_SIDE.share)), output.height],
+          box: [Math.round(output.width * (1 - CAMERA_SIDE.share)), pad, Math.round(output.width * CAMERA_SIDE.share) - pad, output.height - 2 * pad],
+          radius,
+          squircle: false,
+          border: 0,
+          shadow: 1,
+          opacity: 1,
+        };
+  }
+  const t = camera.amount;
+  // with the bubble off there is nothing to turn: the camera fades in at its place
+  const from = webcam.enabled ? base : { ...target, area: whole, opacity: 0 };
+  return {
+    area: lerpRect(whole, target.area, t).map((value) => Math.round(value)) as Rect,
+    box: lerpRect(from.box, target.box, t).map((value) => Math.round(value)) as Rect,
+    radius: lerp(from.radius, target.radius, t),
+    // a squircle bubble keeps its shape until it is mostly a box
+    squircle: from.squircle && target.squircle ? true : from.squircle && t < 0.15,
+    border: lerp(from.border, target.border, t),
+    shadow: lerp(from.shadow, target.shadow, t),
+    opacity: lerp(from.opacity, target.opacity, t),
+  };
 }

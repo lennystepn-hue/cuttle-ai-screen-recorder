@@ -713,6 +713,37 @@ describe.runIf(enabled)('the Cuttle app', () => {
     expect(readFileSync(projectFile(), 'utf8')).toBe(original);
   }, 30_000);
 
+  it('shows the camera in another layout from the Look tab: its lane, its layout in the inspector, drawn as the export draws it', async () => {
+    const original = readFileSync(projectFile(), 'utf8');
+    type Cameras = { cameras?: { id: string; layout: string; at: number; duration: number }[] };
+    const cameras = () => (onDisk() as unknown as Cameras).cameras ?? [];
+    await seek(1);
+    await click(editor, '#tab-look');
+    await openLook(editor, 'camera');
+    await editor.waitForSelector('[data-testid=camera-add-side]');
+    await click(editor, '[data-testid=camera-add-side]');
+    await savedWhen(() => cameras().length === 1);
+    expect(cameras()[0]).toMatchObject({ id: 'k1', layout: 'side' });
+    expect(cameras()[0]!.at).toBeCloseTo(1, 1);
+    // its own lane, and the inspector with it selected
+    await editor.waitForSelector('.item.camera');
+    await editor.waitForSelector('[data-testid=camera-layout]');
+    await chooseIn(editor, '[data-testid=camera-layout]', 'Camera full');
+    await savedWhen(() => cameras()[0]?.layout === 'full');
+    expect((await doc()).undo).toBe('Camera full there');
+    // a second in: the camera over the whole video, as cuttle preview draws it
+    await editor.keyboard.press('Escape');
+    await editor.evaluate(() => (window as unknown as Hooked).__cuttleCheck.flush());
+    const t = cameras()[0]!.at + 1;
+    const still = spawnSync('node', [CLI, '--json', '-C', project, 'preview', '--at', String(t), '-o', join(root, 'camera-still')], { encoding: 'utf8', timeout: 120_000 });
+    expect(still.status, still.stderr).toBe(0);
+    const exported = PNG.sync.read(readFileSync((JSON.parse(still.stdout) as { stills: { file: string }[] }).stills[0]!.file));
+    await expect.poll(async () => (await seek(t), difference(await pixels(), exported).mean), { timeout: 20_000, message: 'the camera full: the editor against the export' }).toBeLessThan(2);
+    await shot('08-camera-full');
+    await undoAll();
+    expect(readFileSync(projectFile(), 'utf8')).toBe(original);
+  }, 90_000);
+
   it('selects several items on the timeline (Shift- and Ctrl-click, a rubber band): moved, switched off and deleted together, each one step to undo', async () => {
     const original = readFileSync(projectFile(), 'utf8');
     const selected = () => editor.locator('.item.selected, .scene.selected').count();
@@ -2513,8 +2544,8 @@ describe.runIf(enabled)('the Cuttle app', () => {
     await expect.poll(() => saved(second.dir).theme).toEqual({ name: 'Nimbus', url: 'nimbus.app', logo: 'brand/nimbus-logo.svg', foreground: '#FFFFFF', font: 'Bebas Neue', accent: '#7C5CFF', kit: 'Nimbus' });
     expect(saved(second.dir).look).toMatchObject({ background: { preset: 'mesh' }, frame: { style: 'mac-dark' }, cursor: { style: 'system', color: '#D97757' } });
     expect(existsSync(join(second.dir, 'brand', 'nimbus-logo.svg'))).toBe(true);
-    const secondCard = await settled(second);
-    expect(difference(secondCard, firstCard).mean, 'the second end card against the first').toBeLessThan(0.5);
+    // the page may still say ready from its render before the kit: the card as it comes, until it matches
+    await expect.poll(async () => difference(await settled(second), firstCard).mean, { timeout: 30_000, message: 'the second end card against the first' }).toBeLessThan(0.5);
     await shotOf('42b-brand-applied', '/editor.html', 'brand-second · Cuttle');
     await second.page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
     await second.page.keyboard.press('Control+Z');

@@ -1,7 +1,7 @@
 // The editor's actions on the document (the timeline bar, the keys, the command menu and the tools
 // call these): each is one step to undo. Where the playhead stands decides where things go.
 import { MOTION_TEMPLATES, MUSIC_TEMPLATES } from '@cuttle/motion-kit';
-import type { ClipScene, CuttleProject, Scene } from '@cuttle/project';
+import type { CameraLayout, ClipScene, CuttleProject, Scene } from '@cuttle/project';
 import { clickZooms, sceneSpans, shownClicks, TEXT_FADE_SECONDS, type SceneSpan, type ZoomScreen } from '@cuttle/timeline';
 import type { Command, ListName } from '../../shared/document';
 import { outputTimesOf } from '../../shared/timeline-model';
@@ -14,10 +14,10 @@ import { currentPlayer, documentProject, select, setTool, store, type Selection,
 export const NEW_OVERLAY_SECONDS = 3;
 export const SPEEDS = [1, 2, 4, 8, 12, 20] as const;
 
-export const LIST_OF: Record<Exclude<Selection['kind'], 'music'>, ListName> = { scene: 'scenes', zoom: 'zooms', mask: 'masks', caption: 'texts', annotation: 'annotations', motion: 'overlays', cut: 'cuts', crop: 'scenes', sound: 'sounds' };
+export const LIST_OF: Record<Exclude<Selection['kind'], 'music'>, ListName> = { scene: 'scenes', zoom: 'zooms', mask: 'masks', caption: 'texts', annotation: 'annotations', camera: 'cameras', motion: 'overlays', cut: 'cuts', crop: 'scenes', sound: 'sounds' };
 /** What people call a scene of each type. */
 const SCENE_NOUNS: Record<Scene['type'], string> = { clip: 'clip', still: 'page', card: 'card', motion: 'motion scene' };
-const NAMES: Record<ListName, string> = { scenes: 'scene', zooms: 'zoom', masks: 'mask', texts: 'caption', annotations: 'annotation', overlays: 'motion overlay', cuts: 'cut', sounds: 'sound' };
+const NAMES: Record<ListName, string> = { scenes: 'scene', zooms: 'zoom', masks: 'mask', texts: 'caption', annotations: 'annotation', cameras: 'camera layout', overlays: 'motion overlay', cuts: 'cut', sounds: 'sound' };
 
 /** Where the playhead is: its scene and, in a clip, the source second it shows. */
 export interface PlayheadPlace {
@@ -174,7 +174,7 @@ function addAndSelect(command: Extract<Command, { type: 'add' }>, kind: Selectio
 }
 
 const itemIds = (project: CuttleProject | undefined) =>
-  project ? [...project.scenes, ...project.zooms, ...project.masks, ...project.texts, ...project.annotations, ...project.overlays].map((item) => item.id!).filter(Boolean) : [];
+  project ? [...project.scenes, ...project.zooms, ...project.masks, ...project.texts, ...project.annotations, ...project.cameras, ...project.overlays].map((item) => item.id!).filter(Boolean) : [];
 
 /** A zoom at the playhead: 3 output seconds (so it rests at full zoom for a while), on the middle half of the screen; then the source view to place it. */
 export function addZoom(rect?: number[]): void {
@@ -221,6 +221,17 @@ export function autoZoomClicks(): void {
 export function cropClip(rect: number[], id = selectedOrCurrentClip()?.id): void {
   if (!id) return toast('Select a clip, or move the playhead onto one, to crop it.', { tone: 'warning' });
   if (edit([{ type: 'set', list: 'scenes', id, fields: { crop: { rect } } }], 'Crop clip')) select({ kind: 'crop', id });
+}
+
+/** The camera in `layout` from the playhead for 3 output seconds (a talking-head moment), selected to set it. */
+export function addCamera(layout: CameraLayout): void {
+  const blocked = overlayBlocked();
+  if (blocked) return toast(blocked, { tone: 'warning' });
+  if (!documentProject()?.sources.webcam) return toast('This take has no webcam: record with a camera to show it.', { tone: 'warning' });
+  const place = playheadPlace()!;
+  const clip = place.clip!;
+  const duration = Math.min(NEW_OVERLAY_SECONDS * clip.speed, clip.to - place.source!);
+  addAndSelect({ type: 'add', list: 'cameras', item: { layout, at: place.source!, duration } }, 'camera', 'Add a camera layout');
 }
 
 /**
@@ -395,7 +406,7 @@ export async function chooseImage(purpose: 'still' | 'background' | 'logo' | 'wa
 }
 
 /** What selecting an item of each list selects. */
-const KIND_OF: Record<ListName, Selection['kind']> = { scenes: 'scene', zooms: 'zoom', masks: 'mask', texts: 'caption', annotations: 'annotation', overlays: 'motion', cuts: 'cut', sounds: 'sound' };
+const KIND_OF: Record<ListName, Selection['kind']> = { scenes: 'scene', zooms: 'zoom', masks: 'mask', texts: 'caption', annotations: 'annotation', cameras: 'camera', overlays: 'motion', cuts: 'cut', sounds: 'sound' };
 
 /** Selects an item and moves the playhead to where the video first shows it (the toast's "Show"). */
 export function reveal(list: ListName, id: string): void {

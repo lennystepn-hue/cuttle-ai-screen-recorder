@@ -1,7 +1,7 @@
 import type { Look, Rect } from '@cuttle/project';
 import { FRAGMENT_PRELUDE, RECT_VERTEX, drawRect } from '../gl/rect';
 import { Shader } from '../gl/shader';
-import { unitFor, webcamRect, type Size } from '../layout';
+import { cameraPlace, unitFor, type CameraPlace, type Size } from '../layout';
 
 const FRAGMENT = `${FRAGMENT_PRELUDE}
 uniform sampler2D u_tex;
@@ -12,6 +12,7 @@ uniform float u_border;
 uniform float u_shadow;
 uniform float u_squircle;
 uniform float u_mirror;
+uniform float u_opacity;
 // A superellipse (|x|^5 + |y|^5 = 1) over the box: the squircle, as the app's icon has it. Its value
 // is scaled to px at the edge's middles (a little softer towards the corners, which coverage hides).
 float sdSquircle(vec2 p, vec4 box) {
@@ -31,19 +32,20 @@ void main() {
   vec3 color = mix(vec3(1.0), camera, coverage(d + u_border));
   vec4 body = vec4(color * outer, outer);
   float shadow = u_shadow > 0.0 ? 0.4 * (1.0 - smoothstep(-u_shadow * 0.5, u_shadow, shape(v_px - vec2(0.0, u_shadow * 0.35)))) : 0.0;
-  o_color = body + vec4(0.0, 0.0, 0.0, shadow) * (1.0 - body.a);
+  o_color = (body + vec4(0.0, 0.0, 0.0, shadow) * (1.0 - body.a)) * u_opacity;
 }`;
 
-/** Border width and shadow size of the bubble, in units; corner radius of the `rounded` shape as a share of its size. */
-export const WEBCAM_BUBBLE = { border: 4, shadow: 24, roundedRadius: 0.22 } as const;
+/** Border width and shadow size of the bubble, in units (its `rounded` corners: `ROUNDED_RADIUS` in the layout). */
+export const WEBCAM_BUBBLE = { border: 4, shadow: 24 } as const;
 
-/** The centred square of a camera frame, in texture coordinates. */
-export function webcamCrop(camera: Size): Rect {
-  if (camera.width >= camera.height) {
-    const w = camera.height / camera.width;
+/** The centred part of a camera frame with the `aspect` (width / height) of the box it fills (a square for the bubble), in texture coordinates. */
+export function webcamCrop(camera: Size, aspect = 1): Rect {
+  const own = camera.width / camera.height;
+  if (own >= aspect) {
+    const w = aspect / own;
     return [(1 - w) / 2, 0, w, 1];
   }
-  const h = camera.width / camera.height;
+  const h = own / aspect;
   return [0, (1 - h) / 2, 1, h];
 }
 
@@ -58,21 +60,22 @@ export class WebcamPass {
     this.shader = new Shader(gl, 'webcam', RECT_VERTEX, FRAGMENT);
   }
 
-  draw(texture: WebGLTexture, camera: Size, look: Look['webcam']): void {
+  /** The bubble as the look has it, or where a camera layout puts the camera (`cameraPlace`). */
+  draw(texture: WebGLTexture, camera: Size, look: Look['webcam'], place: CameraPlace = cameraPlace(this.output, { ...look, enabled: true })): void {
     const u = unitFor(this.output);
-    const box = webcamRect(this.output, look);
-    const radius = look.shape === 'circle' ? box[2] / 2 : look.shape === 'rounded' ? box[2] * WEBCAM_BUBBLE.roundedRadius : 0;
-    const shadow = look.shadow ? WEBCAM_BUBBLE.shadow * u : 0;
+    const { box, radius } = place;
+    const shadow = look.shadow ? WEBCAM_BUBBLE.shadow * u * place.shadow : 0;
     this.shader
       .use()
       .texture('u_tex', 0, texture)
       .vec4('u_box', box)
       .float('u_radius', radius)
-      .float('u_squircle', look.shape === 'squircle' ? 1 : 0)
+      .float('u_squircle', place.squircle ? 1 : 0)
       .float('u_mirror', look.mirror ? 1 : 0)
-      .vec4('u_crop', webcamCrop(camera))
-      .float('u_border', look.border ? WEBCAM_BUBBLE.border * u : 0)
-      .float('u_shadow', shadow);
+      .vec4('u_crop', webcamCrop(camera, box[2] / Math.max(1, box[3])))
+      .float('u_border', look.border ? WEBCAM_BUBBLE.border * u * place.border : 0)
+      .float('u_shadow', shadow)
+      .float('u_opacity', place.opacity);
     const pad = Math.max(shadow * 1.5, 2);
     drawRect(this.gl, this.shader, [box[0] - pad, box[1] - pad, box[2] + 2 * pad, box[3] + 2 * pad], this.output);
   }

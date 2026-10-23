@@ -51,7 +51,7 @@ made that way: nine pages and a score, no camera, no editor. See [Motion videos,
     <td><img src="docs/media/feature-privacy.jpg" alt="Keys, an email address and a notification masked in a terminal" /></td>
   </tr>
   <tr>
-    <td valign="top"><b>Zooms that follow you.</b> Smooth zooms on every click and on dialogs, gliding along each line you type and following the caret. A browser's tabs and bars are cropped away on their own.</td>
+    <td valign="top"><b>Zooms that follow you.</b> Smooth zooms on every click and on dialogs, gliding along each line you type and following the caret. A browser's tabs and bars are cropped away on their own. Point at things with arrows, boxes, a highlighter, a spotlight or a magnifier that draw themselves in.</td>
     <td valign="top"><b>Secrets masked before you share.</b> Cuttle reads the screen's text on your computer (Windows' OCR, macOS's Vision) and masks API keys, tokens, email addresses, IBANs and card numbers, also while they scroll, and every notification that pops up. Add your own words to always hide.</td>
   </tr>
   <tr>

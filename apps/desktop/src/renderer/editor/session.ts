@@ -2,7 +2,7 @@
 // selection, and the export.
 import { loadEngineAssets, type EngineAssets } from '@cuttle/engine';
 import { withFormat, type ExportFormat } from '@cuttle/export/formats';
-import type { CuttleProject } from '@cuttle/project';
+import type { CuttleProject, AnnotationKind } from '@cuttle/project';
 import type { Command, EditLimits } from '../../shared/document';
 import type { ExportEnd, ExportProgress, ExportTarget, MediaState, MotionStatusView, ProjectInfo, ProjectStatus, SoundStatusView } from '../../shared/ipc';
 import type { OverlayKind } from '../../shared/timeline-model';
@@ -18,7 +18,7 @@ import { createStore } from './store';
 export type Selection = { kind: 'scene' | OverlayKind | 'cut' | 'crop' | 'music'; id: string; start?: number; end?: number };
 
 /** The tools: V selects; Z and M draw zooms and masks in the source view; T adds a caption. */
-export type Tool = 'select' | 'zoom' | 'mask' | 'caption' | 'crop';
+export type Tool = 'select' | 'zoom' | 'mask' | 'caption' | 'crop' | 'annotate';
 
 /** The look's parts, as the Look tab lists them. */
 export type LookSection = 'brand' | 'watermark' | 'background' | 'window' | 'cursor' | 'keys' | 'camera' | 'subtitles' | 'sound' | 'video';
@@ -69,6 +69,8 @@ export interface EditorState {
   soundStatus: SoundStatusView;
   /** The soundtrack rendered last (it plays while a newer one renders). */
   soundtrack?: Soundtrack;
+  /** What the Annotate tool draws. */
+  annotationKind: AnnotationKind;
   /** The narration: its lines being spoken, or why they could not be (a voice to download, ElevenLabs' key). */
   voiceStatus: { state: 'idle' | 'speaking' | 'failed'; message?: string };
 }
@@ -92,6 +94,7 @@ export const store = createStore<EditorState>({
   motionFiles: 0,
   soundStatus: { state: 'none', errors: [], console: [], skipped: [] },
   voiceStatus: { state: 'idle' },
+  annotationKind: 'arrow',
 });
 
 let player: Player | undefined;
@@ -184,7 +187,7 @@ export async function openSession(canvas: HTMLCanvasElement): Promise<void> {
   }
 }
 
-const LISTS = { scene: 'scenes', zoom: 'zooms', mask: 'masks', caption: 'texts', motion: 'overlays', cut: 'cuts', crop: 'scenes', sound: 'sounds' } as const;
+const LISTS = { scene: 'scenes', zoom: 'zooms', mask: 'masks', caption: 'texts', annotation: 'annotations', motion: 'overlays', cut: 'cuts', crop: 'scenes', sound: 'sounds' } as const;
 
 /** Whether the selected item is still in the project. */
 function stillThere(selection: Selection, project: CuttleProject): boolean {
@@ -390,12 +393,20 @@ function dismissWarning(): void {
 /** The stage shows the source view: paused, with the Zoom or Mask tool on or a zoom or mask selected (playing shows the video). */
 export const sourceViewShown = (state: EditorState): boolean =>
   !state.player.playing &&
-  (state.tool === 'zoom' || state.tool === 'mask' || state.tool === 'crop' || state.selection?.kind === 'zoom' || state.selection?.kind === 'mask' || state.selection?.kind === 'crop');
+  (state.tool === 'zoom' ||
+    state.tool === 'mask' ||
+    state.tool === 'crop' ||
+    state.tool === 'annotate' ||
+    state.selection?.kind === 'zoom' ||
+    state.selection?.kind === 'mask' ||
+    state.selection?.kind === 'crop' ||
+    state.selection?.kind === 'annotation');
 
-/** Picks a tool; Esc goes back to Select. Zoom, Mask and Crop show the source view. */
+/** Picks a tool; Esc goes back to Select. Zoom, Mask, Crop and Annotate show the source view. */
 export function setTool(tool: Tool): void {
   dismissWarning();
-  store.set({ tool });
+  // the Annotate tool's picker (what it draws) is in the selection's tab
+  store.set({ tool, ...(tool === 'annotate' && { tab: 'selection' as const }) });
 }
 
 /** Opens the export sheet: on the running export or one that ended unseen, else on a new one. */

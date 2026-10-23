@@ -280,7 +280,10 @@ Then refine `cuttle.json` ([project.md](project.md)) and preview again:
   (`suggest --length 45` fits in the same run, before any hand edits.)
 - **Focus.** Add or fix `zooms` on what matters: 2–4 s on the answer or a result, with the rect
   read off a `frame --grid`. Over a sped-up clip, durations are source seconds: 3 s at 12× is a
-  quarter second on screen (see project.md).
+  quarter second on screen (see project.md). Point at what the viewer must not miss:
+  `cuttle -C "<project>" --json annotate arrow --at 12.5 --from 300,700 --to 620,410 --text "Click here"`,
+  or `box`, `highlight`, `spotlight`, `magnifier` with `--rect x,y,w,h` (off the same grid); one or
+  two per step, never on a sped-up clip.
 - **Look.** When `cuttle --json brand list` shows brand kits, ask which one the video wears and run
   `cuttle -C "<project>" --json brand apply "<name>"`: the brand (name, URL, logo, colours, heading
   font) for the motion pages, the background, frame and cursor. Without one, set `theme` (project.md)

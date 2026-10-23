@@ -430,6 +430,45 @@ const TextSchema = z.strictObject({
 });
 
 /**
+ * What an annotation draws: an arrow at something, a box or an ellipse round it, a highlighter
+ * stroke over it, a spotlight on it (the rest of the screen darker), a magnifier over it.
+ */
+export const ANNOTATION_KINDS = ['arrow', 'box', 'ellipse', 'highlight', 'spotlight', 'magnifier'] as const;
+
+/** A point in source px. */
+const PointSchema = z.tuple([z.number(), z.number()]);
+
+/**
+ * A mark on the screen's content (source px), where its clips show source seconds `at` to
+ * `at + duration`: it draws itself in, fades out, and moves with the content under zooms. An arrow
+ * goes `from` → `to`; the others take `rect` (a magnifier shows it `zoom` times larger, over it).
+ */
+const AnnotationSchema = z
+  .strictObject({
+    ...named,
+    kind: z.enum(ANNOTATION_KINDS),
+    at: seconds,
+    duration: positiveSeconds,
+    rect: RectSchema.optional(),
+    from: PointSchema.optional(),
+    to: PointSchema.optional(),
+    /** Its colour: the brand's accent, else the cursor's. */
+    color: hexColor.optional(),
+    /** A short callout beside it. */
+    text: z.string().max(120).optional(),
+    /** A magnifier: how many times larger. */
+    zoom: z.number().min(1.5).max(4).default(2),
+    enabled: z.boolean().default(true),
+    auto: autoKind,
+  })
+  .superRefine((annotation, ctx) => {
+    if (annotation.kind === 'arrow') {
+      if (!annotation.from) ctx.addIssue({ code: 'custom', message: 'an arrow needs "from" (where it starts, source px)', path: ['from'] });
+      if (!annotation.to) ctx.addIssue({ code: 'custom', message: 'an arrow needs "to" (where it points, source px)', path: ['to'] });
+    } else if (!annotation.rect) ctx.addIssue({ code: 'custom', message: `a ${annotation.kind} needs "rect" (source px)`, path: ['rect'] });
+  });
+
+/**
  * A page drawn over the video where its clips show source seconds `at` to `at + duration`, with
  * its transparency (a lower third, callouts, a logo); its own clock runs in output seconds.
  */
@@ -560,6 +599,7 @@ export const ProjectSchema = z
     zooms: z.array(ZoomSchema).default([]),
     masks: z.array(MaskSchema).default([]),
     texts: z.array(TextSchema).default([]),
+    annotations: z.array(AnnotationSchema).default([]),
     overlays: z.array(MotionOverlaySchema).default([]),
     cuts: z.array(CutSchema).default([]),
     music: MusicSchema.optional(),
@@ -574,7 +614,7 @@ export const ProjectSchema = z
   .superRefine((project, ctx) => {
     const seen = new Map<string, string>();
     const lists: [string[], readonly { id?: string }[]][] = [
-      ...(['scenes', 'zooms', 'masks', 'texts', 'overlays', 'cuts', 'sounds', 'script'] as const).map((list): [string[], readonly { id?: string }[]] => [[list], project[list]]),
+      ...(['scenes', 'zooms', 'masks', 'texts', 'annotations', 'overlays', 'cuts', 'sounds', 'script'] as const).map((list): [string[], readonly { id?: string }[]] => [[list], project[list]]),
       [['voiceover', 'lines'], project.voiceover.lines],
     ];
     for (const [path, items] of lists) {
@@ -669,6 +709,8 @@ export type ZoomMove = NonNullable<Zoom['moves']>[number];
 export type WindowKind = (typeof WINDOW_KINDS)[number];
 export type Mask = CuttleProject['masks'][number];
 export type TextOverlay = CuttleProject['texts'][number];
+export type Annotation = CuttleProject['annotations'][number];
+export type AnnotationKind = (typeof ANNOTATION_KINDS)[number];
 export type Cut = CuttleProject['cuts'][number];
 export type AutoKind = (typeof AUTO_KINDS)[number];
 export type AutoEdits = CuttleProject['autoEdits'];

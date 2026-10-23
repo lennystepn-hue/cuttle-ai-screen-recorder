@@ -1,4 +1,5 @@
 import { Command, CommanderError, InvalidArgumentError, Option } from 'commander';
+import { annotateCommand, type AnnotateArgs } from './commands/annotate';
 import { backgroundCommand, type BackgroundArgs } from './commands/background';
 import { brandApplyCommand, brandListCommand, brandRemoveCommand, brandSaveCommand } from './commands/brand';
 import { capturePageCommand } from './commands/capture-page';
@@ -388,6 +389,20 @@ export async function runCli(argv: readonly string[], streams?: Streams): Promis
     .command('render')
     .description('speak every line not spoken yet (into voiceover/), and say where each plays and how long it is')
     .action(action((output, project) => withSignal(output, (signal) => voiceRenderCommand(project, output, signal))));
+
+  program
+    .command('annotate <kind>')
+    .description('a mark on the screen at a moment of the take: an arrow (--from, --to), or a box, ellipse, highlight, spotlight or magnifier over --rect (source px, as "frame --grid" shows them)')
+    .requiredOption('--at <seconds>', 'source seconds it starts at', seconds)
+    .option('--duration <seconds>', 'how long it stays, in source seconds (default 3)', positive)
+    .option('--rect <x,y,w,h...>', 'what it marks, in source px')
+    .option('--from <x,y...>', "an arrow's start, in source px")
+    .option('--to <x,y...>', 'what an arrow points at, in source px')
+    .option('--text <words>', 'a callout beside it')
+    .option('--color <hex>', "its colour (default: the brand's accent)")
+    .option('--zoom <times>', 'a magnifier: how much it enlarges (1.5 to 4, default 2)', positive)
+    .option('--label <text>', 'a name for it')
+    .action(action((output, project, kind: string, options: AnnotateArgs) => annotateCommand(project, kind, options, output)));
 
   const sound = program.command('sound').description('sounds at moments of the video: built-in effects or files of the project');
   sound

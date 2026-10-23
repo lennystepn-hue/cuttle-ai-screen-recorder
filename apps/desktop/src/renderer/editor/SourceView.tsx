@@ -9,7 +9,7 @@ import type { Command } from '../../shared/document';
 import { formatSource } from '../../shared/format';
 import { maskRectAt, zoomTargetAt } from '@cuttle/timeline';
 import { adjustRect, drawnRect, fitInside, movePath, toSource, toStage, type Fit, type Handle } from '../../shared/edit';
-import { addMask, addZoom, cropClip, overlayBlocked, playheadPlace } from './actions';
+import { addAnnotation, addMask, addZoom, cropClip, overlayBlocked, playheadPlace } from './actions';
 import { edit, preview } from './doc';
 import { beginGesture, cancelGesture } from './gesture';
 import { FrameGrabber } from './frames';
@@ -25,7 +25,7 @@ const MARGIN = 14;
 const MIN_DRAW = 12;
 
 interface Box {
-  kind: 'zoom' | 'mask' | 'crop';
+  kind: 'zoom' | 'mask' | 'crop' | 'annotation';
   id: string;
   rect: Rect;
   /** It shows at the playhead's source second (others are drawn faint). */
@@ -44,6 +44,9 @@ export function SourceView() {
   const canvas = useRef<HTMLCanvasElement>(null);
   const [size, setSize] = useState({ width: 0, height: 0 });
   const [drawing, setDrawing] = useState<Rect>();
+  // an arrow being drawn: from where the drag started to the pointer (source px)
+  const [drawingArrow, setDrawingArrow] = useState<[number, number, number, number]>();
+  const annotationKind = useStore(store, (state) => state.annotationKind);
   const grabber = useRef<{ grabber: FrameGrabber; source: unknown }>(undefined);
 
   // a drag under way ends with the view (Esc, playing)
@@ -68,7 +71,14 @@ export function SourceView() {
   const inner = fitInside({ width: Math.max(1, size.width - 2 * MARGIN), height: Math.max(1, size.height - BAND - MARGIN) }, screen);
   const fit: Fit = { x: inner.x + MARGIN, y: inner.y + BAND, scale: inner.scale };
   // A selected zoom or mask the playhead is not on shows on the frame where it starts.
-  const item = selection?.kind === 'zoom' ? project?.zooms.find((zoom) => zoom.id === selection.id) : selection?.kind === 'mask' ? project?.masks.find((mask) => mask.id === selection.id) : undefined;
+  const item =
+    selection?.kind === 'zoom'
+      ? project?.zooms.find((zoom) => zoom.id === selection.id)
+      : selection?.kind === 'mask'
+        ? project?.masks.find((mask) => mask.id === selection.id)
+        : selection?.kind === 'annotation'
+          ? project?.annotations.find((annotation) => annotation.id === selection.id)
+          : undefined;
   // The clip the crop is about: a selected crop's, with the Crop tool the selected clip, else the one
   // at the playhead. Its frames show: the playhead's when it is on the clip, else the clip's first.
   const cropSelected = selection?.kind === 'crop' || (tool === 'crop' && selection?.kind === 'scene');
@@ -118,7 +128,18 @@ export function SourceView() {
     ...project.zooms.map((zoom) => ({ kind: 'zoom' as const, id: zoom.id!, rect: zoomAt(zoom), here: frameAt !== undefined && frameAt >= zoom.at && frameAt < zoom.at + zoom.duration })),
     // a mask that follows covers, at that second, where it is (between two places both)
     ...project.masks.map((mask) => ({ kind: 'mask' as const, id: mask.id!, rect: frameAt === undefined ? mask.rect : maskRectAt(mask, frameAt), here: frameAt !== undefined && frameAt >= mask.from && frameAt < mask.to })),
+    // an annotation with an area (an arrow is a line of its own, below)
+    ...project.annotations.flatMap((annotation) =>
+      annotation.rect ? [{ kind: 'annotation' as const, id: annotation.id!, rect: annotation.rect, here: frameAt !== undefined && frameAt >= annotation.at && frameAt < annotation.at + annotation.duration }] : [],
+    ),
   ].filter((box) => box.here || (selection?.kind === box.kind && selection.id === box.id));
+  const arrows = project.annotations.filter(
+    (annotation) =>
+      annotation.kind === 'arrow' &&
+      annotation.from &&
+      annotation.to &&
+      ((frameAt !== undefined && frameAt >= annotation.at && frameAt < annotation.at + annotation.duration) || (selection?.kind === 'annotation' && selection.id === annotation.id)),
+  );
   // that clip's crop, while cropping or selected
   if (croppedClip?.crop && croppedClip.id) boxes.push({ kind: 'crop', id: croppedClip.id, rect: croppedClip.crop.rect, here: true });
   const selected = boxes.find((box) => selection?.kind === box.kind && selection.id === box.id);
@@ -172,7 +193,7 @@ export function SourceView() {
     if (event.button !== 0) return;
     const handle = ((event.target as HTMLElement).dataset.handle as Handle | undefined) ?? 'move';
     select({ kind: box.kind, id: box.id });
-    const list = box.kind === 'zoom' ? 'zooms' : box.kind === 'mask' ? 'masks' : 'scenes';
+    const list = box.kind === 'zoom' ? 'zooms' : box.kind === 'mask' ? 'masks' : box.kind === 'annotation' ? 'annotations' : 'scenes';
     const clip = box.kind === 'crop' ? project.scenes.find((scene) => scene.id === box.id) : undefined;
     const path = box.kind === 'zoom' ? project.zooms.find((zoom) => zoom.id === box.id) : box.kind === 'mask' ? project.masks.find((mask) => mask.id === box.id) : undefined;
     let commands: Command[] | undefined;
@@ -198,10 +219,53 @@ export function SourceView() {
     );
   };
 
-  /** A press on the frame: with the Zoom, Mask or Crop tool, draw a new one there. */
+  /** A press on an arrow: on its line it moves, on an end that end moves. */
+  const pressArrow = (event: ReactPointerEvent<HTMLElement | SVGElement>, id: string, from: readonly number[], to: readonly number[]) => {
+    if (event.button !== 0) return;
+    const end = (event.target as Element).getAttribute('data-end') as 'from' | 'to' | null;
+    select({ kind: 'annotation', id });
+    let commands: Command[] | undefined;
+    const clampPoint = (x: number, y: number) => [Math.round(Math.min(Math.max(x, 0), screen.width)), Math.round(Math.min(Math.max(y, 0), screen.height))];
+    follow(
+      event as ReactPointerEvent<HTMLElement>,
+      (dx, dy) => {
+        const fields =
+          end === 'from'
+            ? { from: clampPoint(from[0]! + dx, from[1]! + dy) }
+            : end === 'to'
+              ? { to: clampPoint(to[0]! + dx, to[1]! + dy) }
+              : { from: clampPoint(from[0]! + dx, from[1]! + dy), to: clampPoint(to[0]! + dx, to[1]! + dy) };
+        commands = [{ type: 'set', list: 'annotations', id, fields }];
+        preview(commands);
+      },
+      (moved) => {
+        if (!moved || !commands) return preview(undefined);
+        edit(commands, end ? 'Move the end of the arrow' : 'Move the arrow');
+      },
+    );
+  };
+
+  /** A press on the frame: with the Zoom, Mask, Crop or Annotate tool, draw a new one there. */
   const pressFrame = (event: ReactPointerEvent<HTMLElement>) => {
     if (event.button !== 0) return;
-    const kind = tool === 'zoom' || tool === 'mask' || tool === 'crop' ? tool : undefined;
+    if (tool === 'annotate' && annotationKind === 'arrow') {
+      // an arrow: from where the drag starts to where it ends
+      let line: [number, number, number, number] | undefined;
+      const begin = follow(
+        event,
+        (_dx, _dy, at) => {
+          line = [begin.x, begin.y, Math.min(Math.max(at.x, 0), screen.width), Math.min(Math.max(at.y, 0), screen.height)];
+          setDrawingArrow(line);
+        },
+        (moved) => {
+          setDrawingArrow(undefined);
+          if (!moved || !line || Math.hypot(line[2] - line[0], line[3] - line[1]) * fit.scale < MIN_DRAW) return;
+          addAnnotation({ from: [Math.round(line[0]), Math.round(line[1])], to: [Math.round(line[2]), Math.round(line[3])] });
+        },
+      );
+      return;
+    }
+    const kind = tool === 'zoom' || tool === 'mask' || tool === 'crop' || tool === 'annotate' ? tool : undefined;
     if (!kind) {
       select(undefined);
       return;
@@ -219,6 +283,7 @@ export function SourceView() {
         const whole = rect.map((value) => Math.round(value));
         if (kind === 'zoom') addZoom(whole);
         else if (kind === 'crop') cropClip(whole, croppedClip?.id);
+        else if (kind === 'annotate') addAnnotation({ rect: whole });
         else addMask(whole);
       },
     );
@@ -248,10 +313,36 @@ export function SourceView() {
           </div>
         );
       })}
+      {(arrows.length > 0 || drawingArrow) && (
+        <svg className="source-arrows" data-testid="source-arrows">
+          {arrows.map((arrow) => {
+            const [x1, y1] = stagePoint(arrow.from!, fit);
+            const [x2, y2] = stagePoint(arrow.to!, fit);
+            const isSelected = selection?.kind === 'annotation' && selection.id === arrow.id;
+            return (
+              <g key={arrow.id} className={`source-arrow${isSelected ? ' selected' : ''}`} onPointerDown={(event) => pressArrow(event, arrow.id!, arrow.from!, arrow.to!)} data-id={arrow.id}>
+                <line x1={x1} y1={y1} x2={x2} y2={y2} className="hit" />
+                <line x1={x1} y1={y1} x2={x2} y2={y2} />
+                {isSelected && (
+                  <>
+                    <circle cx={x1} cy={y1} r={6} data-end="from" />
+                    <circle cx={x2} cy={y2} r={6} data-end="to" />
+                  </>
+                )}
+              </g>
+            );
+          })}
+          {drawingArrow && (
+            <g className="source-arrow drawing">
+              <line x1={stagePoint([drawingArrow[0], drawingArrow[1]], fit)[0]} y1={stagePoint([drawingArrow[0], drawingArrow[1]], fit)[1]} x2={stagePoint([drawingArrow[2], drawingArrow[3]], fit)[0]} y2={stagePoint([drawingArrow[2], drawingArrow[3]], fit)[1]} />
+            </g>
+          )}
+        </svg>
+      )}
       {drawing && (tool === 'zoom' || tool === 'crop') && <ZoomDim fit={fit} rect={drawing} size={size} />}
       {drawing && (
         <div
-          className={`source-box ${tool} drawing`}
+          className={`source-box ${tool === 'annotate' ? 'annotation' : tool} drawing`}
           style={(() => {
             const at = toStage(drawing, fit);
             return { left: at.x, top: at.y, width: at.width, height: at.height };
@@ -267,21 +358,27 @@ export function SourceView() {
           ? ' · move the playhead onto a clip to see the screen'
           : frameAt !== source
             ? ` · the frame at ${formatSource(frameAt)}, where this ${selection?.kind} starts`
-            : tool === 'crop'
-              ? !croppedClip
-                ? ' · select a clip, or move the playhead onto one, to crop it'
-                : boxes.some((box) => box.kind === 'crop')
-                  ? ' · drag the crop to move it, its handles to resize it, elsewhere for a new one'
-                  : ' · drag over the part of the screen this clip shows'
-              : tool === 'zoom' || tool === 'mask'
-                ? blocked
-                  ? ` · ${blocked}`
-                  : selected
-                    ? ` · drag the box to place it, elsewhere for a new ${tool}`
-                    : ` · drag to draw a ${tool}`
-                : (selected?.kind === 'zoom' ? project.zooms : selected?.kind === 'mask' ? project.masks : []).find((item) => item.id === selected?.id)?.moves?.length
-                  ? ' · it follows the dashed path: drag the box to move all of it, its handles to resize it'
-                  : ' · drag the box to move it, its handles to resize it'}
+            : tool === 'annotate'
+              ? blocked
+                ? ` · ${blocked}`
+                : annotationKind === 'arrow'
+                  ? ' · drag from where the arrow starts to what it points at'
+                  : ` · drag over what the ${annotationKind} marks`
+              : tool === 'crop'
+                ? !croppedClip
+                  ? ' · select a clip, or move the playhead onto one, to crop it'
+                  : boxes.some((box) => box.kind === 'crop')
+                    ? ' · drag the crop to move it, its handles to resize it, elsewhere for a new one'
+                    : ' · drag over the part of the screen this clip shows'
+                : tool === 'zoom' || tool === 'mask'
+                  ? blocked
+                    ? ` · ${blocked}`
+                    : selected
+                      ? ` · drag the box to place it, elsewhere for a new ${tool}`
+                      : ` · drag to draw a ${tool}`
+                  : (selected?.kind === 'zoom' ? project.zooms : selected?.kind === 'mask' ? project.masks : []).find((item) => item.id === selected?.id)?.moves?.length
+                    ? ' · it follows the dashed path: drag the box to move all of it, its handles to resize it'
+                    : ' · drag the box to move it, its handles to resize it'}
         <span className="sep" />
         <kbd>Esc</kbd> for the video
       </div>
@@ -291,7 +388,7 @@ export function SourceView() {
         onPointerDown={(event) => event.stopPropagation()}
         onClick={() => {
           setTool('select');
-          if (selection?.kind === 'zoom' || selection?.kind === 'mask' || selection?.kind === 'crop') select(undefined);
+          if (selection?.kind === 'zoom' || selection?.kind === 'mask' || selection?.kind === 'crop' || selection?.kind === 'annotation') select(undefined);
         }}
       >
         Back to the video
@@ -336,4 +433,10 @@ function ZoomDim({ fit, rect, size }: { fit: Fit; rect: Rect; size: { width: num
   const at = toStage(rect, fit);
   const hole = `polygon(evenodd, 0 0, ${size.width}px 0, ${size.width}px ${size.height}px, 0 ${size.height}px, 0 0, ${at.x}px ${at.y}px, ${at.x + at.width}px ${at.y}px, ${at.x + at.width}px ${at.y + at.height}px, ${at.x}px ${at.y + at.height}px, ${at.x}px ${at.y}px)`;
   return <div className="zoom-dim" style={{ clipPath: hole }} />;
+}
+
+/** A point in source px on the stage. */
+function stagePoint(point: readonly number[], fit: Fit): [number, number] {
+  const at = toStage([point[0]!, point[1]!, 0, 0], fit);
+  return [at.x, at.y];
 }

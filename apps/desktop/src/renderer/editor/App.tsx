@@ -7,26 +7,7 @@ import { formatDuration, formatSource, formatTime, plainIssue } from '../../shar
 import type { MediaState } from '../../shared/ipc';
 import { bridge } from '../bridge';
 import { shortcut } from '../keys';
-import {
-  ChevronIcon,
-  CloseIcon,
-  ExportIcon,
-  FolderIcon,
-  KeysIcon,
-  Mark,
-  MaskIcon,
-  PauseIcon,
-  PlayIcon,
-  RecordIcon,
-  RedoIcon,
-  SelectIcon,
-  SidebarIcon,
-  TextIcon,
-  UndoIcon,
-  WarningIcon,
-  ZoomIcon,
-  CropIcon,
-} from '../icons';
+import { ChevronIcon, CloseIcon, ExportIcon, FolderIcon, KeysIcon, Mark, MaskIcon, PauseIcon, PlayIcon, RecordIcon, RedoIcon, SelectIcon, SidebarIcon, TextIcon, UndoIcon, WarningIcon, ZoomIcon, CropIcon, AnnotateIcon } from '../icons';
 import { captionCommand, captionPositionsAt, chooseTool, cycleSpeed, freeCaptionPosition, deleteSelection, duplicateSelection, overlayBlocked, reveal, showRawTake, split, type CaptionPosition } from './actions';
 import { CommandMenu, closeMenu, openMenu } from './CommandMenu';
 import { beginGesture, cancelGesture } from './gesture';
@@ -330,6 +311,7 @@ const TOOLS: { tool: Tool; Icon: ComponentType<{ size?: number }>; name: string;
   { tool: 'zoom', Icon: ZoomIcon, name: 'Zoom', keys: 'Z', hint: 'drag over what the video should show close up' },
   { tool: 'mask', Icon: MaskIcon, name: 'Mask', keys: 'M', hint: 'drag over what the video should hide (a password, an address…)' },
   { tool: 'caption', Icon: TextIcon, name: 'Caption', keys: 'T', hint: 'type a caption on the video at the playhead' },
+  { tool: 'annotate', Icon: AnnotateIcon, name: 'Annotate', keys: 'A', hint: 'draw an arrow, a box, a highlight, a spotlight or a magnifier on the screen' },
   { tool: 'crop', Icon: CropIcon, name: 'Crop', keys: 'C', hint: 'drag over the part of the screen the clip shows (tabs, a taskbar left out)' },
 ];
 
@@ -893,6 +875,7 @@ function useShortcuts(): void {
         m: () => chooseTool('mask'),
         t: () => chooseTool('caption'),
         c: () => chooseTool('crop'),
+        a: () => chooseTool('annotate'),
         '?': openMenu,
       };
       const action = keys[key];
@@ -934,7 +917,8 @@ function backOut(): void {
   if (cancelGesture()) return;
   const { tool, selection } = store.get();
   closeMenu();
-  const inSource = tool === 'zoom' || tool === 'mask' || tool === 'crop' || selection?.kind === 'zoom' || selection?.kind === 'mask' || selection?.kind === 'crop';
+  const inSource =
+    tool === 'zoom' || tool === 'mask' || tool === 'crop' || tool === 'annotate' || selection?.kind === 'zoom' || selection?.kind === 'mask' || selection?.kind === 'crop' || selection?.kind === 'annotation';
   if (tool !== 'select') setTool('select');
   if (inSource || tool === 'select') select(undefined);
 }

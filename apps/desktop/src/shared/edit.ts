@@ -17,7 +17,7 @@ export function overlayRange(item: { from?: number; to?: number; at?: number; du
 }
 
 /** The fields that give an overlay of `list` the source range [from, to) (a sound: its moment, `from`). */
-export function rangeFields(list: 'zooms' | 'masks' | 'texts' | 'overlays' | 'sounds', from: number, to: number): Record<string, number> {
+export function rangeFields(list: 'zooms' | 'masks' | 'texts' | 'annotations' | 'overlays' | 'sounds', from: number, to: number): Record<string, number> {
   if (list === 'sounds') return { at: from };
   return list === 'masks' ? { from, to } : { at: from, duration: to - from };
 }

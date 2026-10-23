@@ -10,6 +10,7 @@ import { BackgroundPass } from './passes/background';
 import { ContentPass } from './passes/content';
 import { CursorPass } from './passes/cursor';
 import { MaskPass } from './passes/masks';
+import { drawAnnotations } from './annotations';
 import { SpritePass } from './passes/sprite';
 import { WebcamPass } from './passes/webcam';
 import { WindowPass } from './passes/window';
@@ -170,6 +171,10 @@ export function createRenderer(canvas: HTMLCanvasElement | OffscreenCanvas, proj
   const stillTexture = texture(true);
   const motionTexture = texture(false);
   const fullFrame: Rect = [0, 0, output.width, output.height];
+  // the annotations: drawn into a canvas the output's size, made when a frame first shows one
+  let annotationCanvas: OffscreenCanvasRenderingContext2D | undefined;
+  let annotationTexture: WebGLTexture | undefined;
+  const accent = project.theme.accent ?? look.cursor.color;
   let uploadedStill: ImageBitmap | undefined;
   // the watermark: an image uploaded once, else its text (its own, else the brand's name)
   const watermark = look.watermark.enabled ? look.watermark : undefined;
@@ -216,6 +221,16 @@ export function createRenderer(canvas: HTMLCanvasElement | OffscreenCanvas, proj
     const samples = from ? blurSamples(from, zoom, layout.content) : 1;
     content.draw(screenTexture, uvRect(zoom, screenSize), layout, undefined, samples > 1 && from ? { from: uvRect(from, screenSize), samples } : undefined);
     masks.draw(layer.masks, screenTexture, screenSize, zoom, layout, samples > 1 ? from : undefined);
+    if (layer.annotations) {
+      annotationCanvas ??= new OffscreenCanvas(output.width, output.height).getContext('2d')!;
+      annotationTexture ??= texture(false);
+      annotationCanvas.clearRect(0, 0, output.width, output.height);
+      // a magnifier draws the frame itself (an ImageData cannot be drawn: its lens stays empty)
+      const drawable = 'data' in screen ? undefined : (screen as CanvasImageSource);
+      drawAnnotations(annotationCanvas, layer.annotations, { zoom, layout, unit, accent, masks: layer.masks, ...(drawable && { screen: drawable }), screenSize });
+      uploadTexture(gl, annotationTexture, annotationCanvas.canvas, false);
+      spritePass.draw(annotationTexture, fullFrame, 1);
+    }
     if (layer.cursor) cursor.draw(layer.cursor, look.cursor, screenSize, zoom, layout, layer.motion);
     // a device's camera over its screen
     if (chrome) windowPass.drawOver(layout, chrome);

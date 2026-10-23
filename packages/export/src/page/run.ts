@@ -109,7 +109,7 @@ async function exportVideo(job: ExportJob): Promise<PageSuccess> {
   const started = performance.now();
   const fps = job.project.output.fps;
   return withRendering(job, (timeline) => planFrames(timeline, fps), Math.round(LOOKAHEAD_SECONDS * fps), async ({ timeline, plan, renderer, canvas, gl, sources }) => {
-    const output = job.transparent ? await createAlphaOutput(canvas, job.project.output) : await createVideoOutput(canvas, job.project.output, job.encoder);
+    const output = job.transparent ? await createAlphaOutput(canvas, job.project.output) : await createVideoOutput(canvas, job.project.output, job.encoder, job.codec);
     const timings = { decodeMs: 0, renderMs: 0, encodeMs: 0, finalizeMs: 0, totalMs: 0 };
     try {
       for (let frame = 0; frame < plan.frames; frame++) {

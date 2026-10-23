@@ -472,6 +472,7 @@ export async function startExport(
   encoder: 'auto' | 'hardware' | 'software',
   subtitles: { captions?: boolean; files?: ('srt' | 'vtt')[] } = {},
   file: ExportFileKind = 'mp4',
+  quality: { size?: 'hd' | '4k'; fps?: 24 | 25 | 30 | 50 | 60; codec?: 'h264' | 'hevc' } = {},
 ): Promise<void> {
   store.set({ exporting: true, exportEnd: undefined, exportProgress: undefined, exportStarted: Date.now() });
   try {
@@ -480,6 +481,9 @@ export async function startExport(
       formats,
       encoder,
       ...(file !== 'mp4' && { file }),
+      ...(quality.size === '4k' && { size: '4k' as const }),
+      ...(quality.fps && { fps: quality.fps }),
+      ...(quality.codec === 'hevc' && file === 'mp4' && { codec: 'hevc' as const }),
       ...(subtitles.captions !== undefined && { captions: subtitles.captions }),
       ...(subtitles.files && subtitles.files.length > 0 && { subtitles: subtitles.files }),
     });

@@ -71,6 +71,8 @@ export interface ExportJob {
   captions?: boolean;
   /** Frames with transparency, no background: a video encodes VP9 with alpha in WebM, a still keeps its alpha. */
   transparent?: boolean;
+  /** The video's codec (default H.264); HEVC needs a hardware encoder. */
+  codec?: 'h264' | 'hevc';
   /** Scene index → image of a still scene. */
   stills: Record<number, string>;
   /** Image for `look.background.preset: 'image'`. */

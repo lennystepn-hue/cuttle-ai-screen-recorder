@@ -1,7 +1,7 @@
 // Main-process API (Electron). Bundle it with Vite: the packages ship TypeScript source.
 export { SUBTITLE_FORMATS, exportProject, exportProjects, subtitlePath, type BatchExportOptions, type ExportOptions, type ExportResult, type ExportStats, type ExportTarget, type SubtitleFormat } from './main/export';
 export { ExportError } from './errors';
-export { EXPORT_FORMATS, isExportFormat, type ExportFormat } from './formats';
+export { EXPORT_CODECS, EXPORT_FORMATS, EXPORT_FPS, EXPORT_SIZES, isExportFormat, withFormat, type ExportCodec, type ExportFormat, type ExportSize } from './formats';
 export type { EncoderPreference, ExportErrorCode } from './job';
 export { renderStills, stillName, type StillsOptions, type StillsResult } from './main/stills';
 export { MOTION_SCHEME_PRIVILEGES } from './main/motion';

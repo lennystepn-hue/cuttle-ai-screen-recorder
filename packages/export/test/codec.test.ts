@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { avcCodecString, videoBitrate } from '../src/codec';
+import { avcCodecString, hevcCodecString, videoBitrate } from '../src/codec';
 
 describe('videoBitrate', () => {
   it('is about 10 Mbit/s at 1080p30 and scales with pixels and frame rate', () => {
@@ -28,5 +28,18 @@ describe('avcCodecString', () => {
   it('covers everything the project schema allows and refuses larger outputs', () => {
     expect(at(4096, 4096, 120)).toBe('avc1.64003d'); // 6.1
     expect(() => avcCodecString(8192, 8192, 30, 10_000_000)).toThrow(/level 6.2/);
+  });
+});
+
+describe('hevcCodecString', () => {
+  it('takes the smallest Main tier level for the size, the frame rate and its bitrate', () => {
+    const at = (width: number, height: number, fps: number) => hevcCodecString(width, height, fps, videoBitrate(width, height, fps, 'hevc'));
+    expect(at(1920, 1080, 30)).toBe('hvc1.1.6.L120.B0');
+    expect(at(3840, 2160, 30)).toBe('hvc1.1.6.L150.B0');
+    expect(at(3840, 2160, 60)).toBe('hvc1.1.6.L156.B0');
+    expect(at(2160, 3840, 60)).toBe('hvc1.1.6.L156.B0');
+    // HEVC keeps the picture in fewer bits
+    expect(videoBitrate(3840, 2160, 60, 'hevc')).toBeCloseTo(videoBitrate(3840, 2160, 60) * 0.6, -1);
+    expect(() => hevcCodecString(16_000, 9_000, 60, 1e6)).toThrow();
   });
 });

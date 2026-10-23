@@ -593,6 +593,29 @@ describe.runIf(enabled)('the Cuttle app', () => {
     expect(await editor.locator('[data-testid=export-sheet]').count()).toBe(0);
   }, 150_000);
 
+  it('offers 4K, 60 fps and HEVC in the export sheet, its formats at their 4K sizes', async () => {
+    await editor.keyboard.press('Control+E');
+    await editor.waitForSelector('[data-testid=export-sheet]');
+    await editor.waitForSelector('[data-testid=export-size]');
+    // the sheet keeps its choices: the check before exported a transparent WebM
+    await chooseIn(editor, '[data-testid=export-file-kind]', 'MP4');
+    await chooseIn(editor, '[data-testid=export-size]', '4K');
+    await editor.waitForFunction(() => [...document.querySelectorAll('.format')].some((button) => button.textContent?.includes('2160×3840')));
+    // the project's own 16:9 too, at 2160 on its short side
+    expect(await editor.locator('.format').first().textContent()).toContain('3840×2160');
+    await chooseIn(editor, '[data-testid=export-fps]', '60 fps');
+    await chooseIn(editor, '[data-testid=export-codec]', 'HEVC, smaller');
+    // a transparent file is VP9 or ProRes: no codec to choose then
+    await chooseIn(editor, '[data-testid=export-file-kind]', 'WebM, transparent');
+    expect(await editor.locator('[data-testid=export-codec]').count()).toBe(0);
+    // the sheet keeps its choices: back as they were, for the exports after this one
+    await chooseIn(editor, '[data-testid=export-file-kind]', 'MP4');
+    await chooseIn(editor, '[data-testid=export-codec]', 'H.264');
+    await chooseIn(editor, '[data-testid=export-fps]', `${FIXTURE_OUTPUT.fps} fps, the project's`);
+    await chooseIn(editor, '[data-testid=export-size]', 'As the format');
+    await editor.keyboard.press('Escape');
+  }, 30_000);
+
   // ---- editing: every edit is checked in the file ----------------------------------------------
 
   const projectFile = () => join(project, 'cuttle.json');

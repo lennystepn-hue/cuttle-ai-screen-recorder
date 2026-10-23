@@ -1,6 +1,6 @@
 import type { Output as OutputSettings } from '@cuttle/project';
 import { CanvasSource, Mp4OutputFormat, Output, Quality, StreamTarget, WebMOutputFormat, type StreamTargetChunk } from 'mediabunny';
-import { avcCodecString, videoBitrate } from '../codec';
+import { avcCodecString, hevcCodecString, videoBitrate } from '../codec';
 import type { EncoderPreference } from '../job';
 import { host, PageError } from './host';
 
@@ -27,7 +27,7 @@ const CANDIDATES: Record<EncoderPreference, Acceleration[]> = {
   software: ['prefer-software'],
 };
 
-async function chooseAcceleration(codec: string, settings: OutputSettings, bitrate: number, preference: EncoderPreference): Promise<Acceleration> {
+async function chooseAcceleration(codec: string, settings: OutputSettings, bitrate: number, preference: EncoderPreference, kind: 'h264' | 'hevc' = 'h264'): Promise<Acceleration> {
   for (const hardwareAcceleration of CANDIDATES[preference]) {
     const { supported } = await VideoEncoder.isConfigSupported({
       codec,
@@ -38,28 +38,31 @@ async function chooseAcceleration(codec: string, settings: OutputSettings, bitra
       bitrateMode: 'variable',
       latencyMode: 'quality',
       hardwareAcceleration,
-      avc: { format: 'avc' },
-    });
+      ...(kind === 'hevc' ? { hevc: { format: 'hevc' } } : { avc: { format: 'avc' } }),
+    } as VideoEncoderConfig);
     if (supported) return hardwareAcceleration;
+  }
+  if (kind === 'hevc') {
+    throw new PageError('render', `no HEVC encoder for ${codec} at ${settings.width}×${settings.height}, ${settings.fps} fps on this computer (HEVC needs one in the graphics card): export in H.264`);
   }
   throw new PageError('render', `no ${preference === 'auto' ? '' : `${preference} `}H.264 encoder for ${codec} at ${settings.width}×${settings.height}, ${settings.fps} fps`);
 }
 
 /**
- * H.264 High encoder plus MP4 muxer for the canvas. The MP4 (video only, moov at the end) streams
- * to the main process in chunks; ffmpeg moves the moov to the front when it adds the audio.
+ * H.264 High (or HEVC Main: `kind`) encoder plus MP4 muxer for the canvas. The MP4 (video only, moov
+ * at the end) streams to the main process in chunks; ffmpeg moves the moov to the front when it adds the audio.
  */
-export async function createVideoOutput(canvas: OffscreenCanvas, settings: OutputSettings, preference: EncoderPreference): Promise<VideoOutput> {
-  const bitrate = videoBitrate(settings.width, settings.height, settings.fps);
-  const codec = avcCodecString(settings.width, settings.height, settings.fps, bitrate);
-  const hardwareAcceleration = await chooseAcceleration(codec, settings, bitrate, preference);
+export async function createVideoOutput(canvas: OffscreenCanvas, settings: OutputSettings, preference: EncoderPreference, kind: 'h264' | 'hevc' = 'h264'): Promise<VideoOutput> {
+  const bitrate = videoBitrate(settings.width, settings.height, settings.fps, kind);
+  const codec = kind === 'hevc' ? hevcCodecString(settings.width, settings.height, settings.fps, bitrate) : avcCodecString(settings.width, settings.height, settings.fps, bitrate);
+  const hardwareAcceleration = await chooseAcceleration(codec, settings, bitrate, preference, kind);
   const writable = new WritableStream<StreamTargetChunk>({ write: (chunk) => host().write(chunk.data, chunk.position) });
   const output = new Output({
     format: new Mp4OutputFormat({ fastStart: false }),
     target: new StreamTarget(writable, { chunked: true, chunkSize: WRITE_CHUNK_BYTES }),
   });
   const source = new CanvasSource(canvas, {
-    codec: 'avc',
+    codec: kind === 'hevc' ? 'hevc' : 'avc',
     fullCodecString: codec,
     quality: new Quality({ bitrate, bitrateMode: 'variable' }),
     keyFrameInterval: KEY_FRAME_INTERVAL,

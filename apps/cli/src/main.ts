@@ -510,8 +510,11 @@ export async function runCli(argv: readonly string[], streams?: Streams): Promis
     .option('--vtt', 'also write the captions as <name>.vtt next to the video')
     .option('--loudness <target>', "bring the sound to a platform's loudness: youtube (-14 LUFS: YouTube, Spotify, TikTok, Instagram), podcast (-16), broadcast (-23) or off (default: the project's look.audio.loudness)")
     .option('--alpha', 'with transparency, no background, for another editor: VP9 with alpha in out/<format>.webm, or ProRes 4444 with -o <file>.mov')
+    .option('--size <size>', '4k: the short side 2160 (3840×2160 for 16:9); hd: the format\'s size (default)')
+    .option('--fps <fps>', '24, 25, 30, 50 or 60 instead of the project\'s', integer)
+    .option('--codec <codec>', 'h264 (default, plays everywhere) or hevc (smaller files at 4K; needs a hardware encoder)')
     .action(
-      action((output, project, options: { format?: string[]; out?: string; all?: string; encoder?: string; captions: boolean; srt?: boolean; vtt?: boolean; loudness?: string; alpha?: boolean }) =>
+      action((output, project, options: { format?: string[]; out?: string; all?: string; encoder?: string; captions: boolean; srt?: boolean; vtt?: boolean; loudness?: string; alpha?: boolean; size?: string; fps?: number; codec?: string }) =>
         withSignal<unknown>(output, (signal) => (options.all !== undefined ? renderAllCommand(options.all, options, output, signal) : renderCommand(project, options, output, signal))),
       ),
     );

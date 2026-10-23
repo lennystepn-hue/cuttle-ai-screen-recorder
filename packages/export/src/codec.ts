@@ -21,10 +21,12 @@ const HIGH_BITRATE_FACTOR = 1.25;
 
 /** Bits per output pixel and frame: about 10 Mbit/s at 1080p30, enough for sharp screen text. */
 const BITS_PER_PIXEL = 0.16;
+/** HEVC keeps the same picture in about this share of H.264's bits. */
+const HEVC_SHARE = 0.6;
 
-/** Target video bitrate in bit/s for an output size and frame rate. */
-export function videoBitrate(width: number, height: number, fps: number): number {
-  return Math.round(width * height * fps * BITS_PER_PIXEL);
+/** Target video bitrate in bit/s for an output size and frame rate (HEVC: less for the same picture). */
+export function videoBitrate(width: number, height: number, fps: number, codec: 'h264' | 'hevc' = 'h264'): number {
+  return Math.round(width * height * fps * BITS_PER_PIXEL * (codec === 'hevc' ? HEVC_SHARE : 1));
 }
 
 /**
@@ -45,4 +47,37 @@ export function avcCodecString(width: number, height: number, fps: number, bitra
   );
   if (!level) throw new Error(`avcCodecString: ${width}×${height} at ${fps} fps and ${bitrate} bit/s exceeds H.264 level 6.2`);
   return `avc1.6400${level.idc.toString(16).padStart(2, '0')}`;
+}
+
+/**
+ * HEVC Main profile levels (ITU-T H.265 Table A.8, Main tier): the luma picture size, the luma
+ * sample rate and the bitrate each allows. `idc` is 30 × the level.
+ */
+const HEVC_LEVELS = [
+  { idc: 120, maxPs: 2_228_224, maxSr: 66_846_720, maxKbps: 12_000 }, // 4
+  { idc: 123, maxPs: 2_228_224, maxSr: 133_693_440, maxKbps: 20_000 }, // 4.1
+  { idc: 150, maxPs: 8_912_896, maxSr: 267_386_880, maxKbps: 25_000 }, // 5
+  { idc: 153, maxPs: 8_912_896, maxSr: 534_773_760, maxKbps: 40_000 }, // 5.1
+  { idc: 156, maxPs: 8_912_896, maxSr: 1_069_547_520, maxKbps: 60_000 }, // 5.2
+  { idc: 180, maxPs: 35_651_584, maxSr: 1_069_547_520, maxKbps: 60_000 }, // 6
+  { idc: 183, maxPs: 35_651_584, maxSr: 2_139_095_040, maxKbps: 120_000 }, // 6.1
+  { idc: 186, maxPs: 35_651_584, maxSr: 4_278_190_080, maxKbps: 240_000 }, // 6.2
+] as const;
+
+/**
+ * The WebCodecs codec string for HEVC Main profile, Main tier, at the smallest level that fits, e.g.
+ * `hvc1.1.6.L156.B0` (level 5.2) for 3840×2160 at 60 fps.
+ */
+export function hevcCodecString(width: number, height: number, fps: number, bitrate: number): string {
+  const size = width * height;
+  const level = HEVC_LEVELS.find(
+    (candidate) =>
+      size <= candidate.maxPs &&
+      // each side at most sqrt(8 × MaxLumaPs)
+      Math.max(width, height) <= Math.sqrt(8 * candidate.maxPs) &&
+      size * fps <= candidate.maxSr &&
+      bitrate <= candidate.maxKbps * 1000,
+  );
+  if (!level) throw new Error(`hevcCodecString: ${width}×${height} at ${fps} fps and ${bitrate} bit/s exceeds HEVC level 6.2`);
+  return `hvc1.1.6.L${level.idc}.B0`;
 }

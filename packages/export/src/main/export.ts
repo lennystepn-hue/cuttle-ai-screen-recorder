@@ -12,7 +12,7 @@ import { chapterMetadata } from '../chapters';
 import { duckExpression, speechSpans } from '../music/duck';
 import { placeNarration, writeNarrationTrack } from './narration';
 import { ExportError } from '../errors';
-import { withFormat, type ExportFormat } from '../formats';
+import { EXPORT_FPS, withFormat, type ExportCodec, type ExportFormat, type ExportSize } from '../formats';
 import { CHANNELS, type EncoderPreference, type ExportJob, type PageResult, type PageStillsSuccess, type PageSuccess } from '../job';
 import { checkFfmpeg, runFfmpeg } from './ffmpeg';
 import { FileHost } from './files';
@@ -49,6 +49,12 @@ export interface ExportOptions {
    * `.webm` (VP9 with alpha, Opus sound) or a `.mov` (ProRes 4444, PCM sound).
    */
   transparent?: boolean;
+  /** 4K (the short side 2160) instead of the format's size. */
+  size?: ExportSize;
+  /** Another frame rate than the project's `output.fps` (`EXPORT_FPS`). */
+  fps?: number;
+  /** HEVC instead of H.264: smaller files at 4K, where the computer has a hardware encoder for it. */
+  codec?: ExportCodec;
 }
 
 /** What a batch of transparent videos is written as: all WebM or all MOV, by their names. */
@@ -335,8 +341,11 @@ export async function exportProjects(opts: BatchExportOptions): Promise<ExportRe
   // the formats differ in their size only: the scenes, the frames, the sound and the narration are the same
   const project = sources.project;
   const spans = sceneSpans(project.scenes, project.cuts);
-  const frames = frameCount(totalDuration(spans), project.output.fps);
-  const seconds = frames / project.output.fps;
+  const fps = opts.fps ?? project.output.fps;
+  if (opts.fps !== undefined && !(EXPORT_FPS as readonly number[]).includes(opts.fps)) throw new ExportError('invalid-project', `${opts.fps} fps is not one an export takes: ${EXPORT_FPS.join(', ')}`);
+  if (opts.codec === 'hevc' && opts.transparent) throw new ExportError('invalid-project', 'a transparent video is VP9 or ProRes, not HEVC');
+  const frames = frameCount(totalDuration(spans), fps);
+  const seconds = frames / fps;
   // the narration on the video: its lines, and their words for the captions, the mix and the duck
   const narration = sources.narration ? placeNarration(project, spans, sources.narration) : undefined;
   for (const index of narration?.left ?? []) {
@@ -345,7 +354,7 @@ export async function exportProjects(opts: BatchExportOptions): Promise<ExportRe
   }
   const jobOf = (format: ExportFormat | undefined): ExportJob => ({
     kind: 'video',
-    project: withFormat(project, format),
+    project: withFormat(project, format, { ...(opts.size && { size: opts.size }), ...(opts.fps !== undefined && { fps: opts.fps }) }),
     ...(sources.screen && { screen: sources.screen }),
     webcam: sources.webcam,
     events: sources.events,
@@ -358,6 +367,7 @@ export async function exportProjects(opts: BatchExportOptions): Promise<ExportRe
     watermarkImage: sources.watermarkImage,
     ...(sources.motion && { motion: sources.motion }),
     ...(alpha && { transparent: true }),
+    ...(opts.codec === 'hevc' && { codec: 'hevc' as const }),
     encoder: opts.encoder ?? 'auto',
   });
   for (const out of outs) {
@@ -542,7 +552,7 @@ export async function exportProjects(opts: BatchExportOptions): Promise<ExportRe
     for (const [index, partial] of partials.entries()) {
       const video = pages[index]!.video;
       const chaptersOf = chapterFile ? { chapters: chapterFile } : {};
-      await runFfmpeg(alpha ? alphaMuxArgs({ video, audio, ...(master && { master }), ...chaptersOf, container: alpha, out: partial }) : muxArgs({ video, audio, ...chaptersOf, out: partial }), signal);
+      await runFfmpeg(alpha ? alphaMuxArgs({ video, audio, ...(master && { master }), ...chaptersOf, container: alpha, out: partial }) : muxArgs({ video, audio, ...chaptersOf, ...(opts.codec === 'hevc' && { hevc: true }), out: partial }), signal);
       throwIfCancelled();
     }
     if (loudness && alpha) loudness.video = parseMeter(await runFfmpeg(meterArgs(partials[0]!), signal));

@@ -400,8 +400,11 @@ export const COMMAND_TOOLS: readonly CommandTool[] = [
       vtt: z.boolean().optional(),
       loudness: z.enum(['youtube', 'podcast', 'broadcast', 'off']).optional().describe("the sound at a platform's loudness: youtube -14 LUFS (also Spotify, TikTok, Instagram), podcast -16, broadcast -23 (default: the project's)"),
       transparent: z.boolean().optional().describe('with transparency, no background, for another editor: VP9 with alpha in a .webm, or ProRes 4444 when out ends in .mov'),
+      size: z.enum(['hd', '4k']).optional().describe('4k: the short side 2160'),
+      fps: z.union([z.literal(24), z.literal(25), z.literal(30), z.literal(50), z.literal(60)]).optional(),
+      codec: z.enum(['h264', 'hevc']).optional().describe('hevc: smaller files at 4K, needs a hardware encoder'),
     },
-    argv: (input) => ['render', ...option('format', input.format), ...options('format', input.formats), ...option('all', input.all), ...option('out', input.out), ...off('captions', input.captions), ...on('srt', input.srt), ...on('vtt', input.vtt), ...option('loudness', input.loudness), ...on('alpha', input.transparent)],
+    argv: (input) => ['render', ...option('format', input.format), ...options('format', input.formats), ...option('all', input.all), ...option('out', input.out), ...off('captions', input.captions), ...on('srt', input.srt), ...on('vtt', input.vtt), ...option('loudness', input.loudness), ...on('alpha', input.transparent), ...option('size', input.size), ...option('fps', input.fps), ...option('codec', input.codec)],
   }),
   tool({
     name: 'import',

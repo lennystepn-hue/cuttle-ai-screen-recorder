@@ -378,17 +378,20 @@ export const COMMAND_TOOLS: readonly CommandTool[] = [
   tool({
     name: 'render',
     title: 'Render the video',
-    description: 'Renders the video as an MP4 (out/<format>.mp4 in the project unless out is given), with subtitle files on request. It takes a while: progress is reported.',
+    description:
+      'Renders the video as an MP4 (out/<format>.mp4 in the project unless out is given), with subtitle files on request. Several formats render in one go (their frames side by side, the sound once); all: every project in a folder. It takes a while: progress is reported.',
     input: {
       project,
       format: format.optional(),
+      formats: z.array(z.enum(['16:9', '1:1', '9:16'])).optional().describe('several formats in one go, each to out/<format>.mp4'),
+      all: z.string().optional().describe('a folder: every project in it (it and the folders in it with a cuttle.json), one after another'),
       out: z.string().optional(),
       captions: z.boolean().optional().describe('false: no captions burned in'),
       srt: z.boolean().optional(),
       vtt: z.boolean().optional(),
       loudness: z.enum(['youtube', 'podcast', 'broadcast', 'off']).optional().describe("the sound at a platform's loudness: youtube -14 LUFS (also Spotify, TikTok, Instagram), podcast -16, broadcast -23 (default: the project's)"),
     },
-    argv: (input) => ['render', ...option('format', input.format), ...option('out', input.out), ...off('captions', input.captions), ...on('srt', input.srt), ...on('vtt', input.vtt), ...option('loudness', input.loudness)],
+    argv: (input) => ['render', ...option('format', input.format), ...options('format', input.formats), ...option('all', input.all), ...option('out', input.out), ...off('captions', input.captions), ...on('srt', input.srt), ...on('vtt', input.vtt), ...option('loudness', input.loudness)],
   }),
   tool({
     name: 'import',

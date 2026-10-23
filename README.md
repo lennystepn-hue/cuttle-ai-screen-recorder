@@ -130,7 +130,7 @@ cuttle motion new end-card                   # your logo, a line, the URL typing
 cuttle music new pulse                       # a score for this video (pulse, drift, lofi, bright, cinematic)
 cuttle motion check motion/title/index.html  # its frames, a contact sheet, what the page threw
 cuttle music check                           # the music alone: a WAV, its levels, the hits on the cuts
-cuttle render --format 9:16                  # out/9x16.mp4; also 16:9 and 1:1
+cuttle render --format 9:16 --format 1:1     # out/9x16.mp4 and out/1x1.mp4 in one go; also 16:9
 ```
 
 <p align="center"><img src="docs/media/motion-video.jpg" width="720" alt="Four frames of a 9:16 motion video made only from code: a kinetic title, a code editor typing, a page saying Ship it., an end card" /><br />
@@ -401,7 +401,7 @@ cuttle capture-page https://example.com --scroll --add
 cuttle motion new title --first      # a motion page as the intro, from a template (motion templates lists them)
 cuttle motion add motion/chart/index.html --after s3   # or a page you wrote, as a scene, an overlay or a transition
 cuttle music new lofi                # music composed for the video, fitted to its scenes and cuts
-cuttle render --format 9:16 --loudness youtube   # out/9x16.mp4 at -14 LUFS, with the script's steps as its chapters
+cuttle render --format 16:9 --format 9:16 --loudness youtube   # both in one go, at -14 LUFS, with the script's steps as chapters
 cuttle chapters                      # those chapters as lines for a YouTube description
 cuttle recover takes/2               # after a crash
 ```

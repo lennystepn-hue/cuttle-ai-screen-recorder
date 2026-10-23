@@ -1,7 +1,7 @@
 import { parseProject, type CuttleProject, type CuttleProjectInput } from '@cuttle/project';
 import { sceneSpans } from '@cuttle/timeline';
 import { describe, expect, it } from 'vitest';
-import { atempoChain, audioFilterGraph, muxArgs, planAudio } from '../src/audio';
+import { atempoChain, audioFilterGraph, encodeArgs, mixArgs, muxArgs, planAudio } from '../src/audio';
 
 function project(input: Omit<CuttleProjectInput, 'version' | 'sources'>): CuttleProject {
   const parsed = parseProject({ version: 1, sources: { screen: 's.mp4', mic: 'm.m4a' }, ...input });
@@ -168,28 +168,36 @@ describe('audioFilterGraph', () => {
   });
 });
 
-describe('muxArgs', () => {
-  it('copies the video and encodes AAC at 48 kHz with the moov in front', () => {
-    const args = muxArgs({ video: 'v.mp4', mic: 'm.m4a', graph: 'G', out: 'o.mp4' });
-    expect(args.join(' ')).toBe(
-      '-hide_banner -nostdin -loglevel error -y -i v.mp4 -i m.m4a -filter_complex G -map 0:v:0 -map [aout] -c:v copy -c:a aac -b:a 160k -ar 48000 -movflags +faststart -f mp4 o.mp4',
-    );
-    expect(muxArgs({ video: 'v.mp4', graph: 'G', out: 'o.mp4' })).not.toContain('m.m4a');
-    // the typing sounds' track comes after the mic
-    expect(muxArgs({ video: 'v.mp4', mic: 'm.m4a', typing: 't.wav', graph: 'G', out: 'o.mp4' }).join(' ')).toContain('-i v.mp4 -i m.m4a -i t.wav -filter_complex G');
-    expect(muxArgs({ video: 'v.mp4', sound: 's.wav', graph: 'G', out: 'o.mp4' }).join(' ')).toContain('-i v.mp4 -i s.wav -filter_complex G');
-    expect(muxArgs({ video: 'v.mp4', mic: 'm.m4a', system: 'y.m4a', sound: 's.wav', graph: 'G', out: 'o.mp4' }).join(' ')).toContain('-i v.mp4 -i m.m4a -i y.m4a -i s.wav -filter_complex G');
-  });
-
-  it('takes the chapters from their metadata file, the input after the sound', () => {
-    expect(muxArgs({ video: 'v.mp4', mic: 'm.m4a', sound: 's.wav', graph: 'G', chapters: 'c.txt', out: 'o.mp4' }).join(' ')).toContain('-i v.mp4 -i m.m4a -i s.wav -i c.txt -filter_complex G -map 0:v:0 -map [aout] -map_chapters 3 -c:v copy');
-    expect(muxArgs({ video: 'v.mp4', graph: 'G', chapters: 'c.txt', out: 'o.mp4' }).join(' ')).toContain('-i v.mp4 -i c.txt -filter_complex G -map 0:v:0 -map [aout] -map_chapters 1 -c:v copy');
+describe('mixArgs', () => {
+  it('mixes the sound inputs into one WAV of floats, a picture of nothing standing in for the video', () => {
+    const args = mixArgs({ mic: 'm.m4a', graph: 'G', out: 'mix.wav' });
+    expect(args.join(' ')).toBe('-hide_banner -nostdin -loglevel error -y -f lavfi -i color=s=16x16:d=1 -i m.m4a -filter_complex G -map [aout] -c:a pcm_f32le -ar 48000 -rf64 auto -f wav mix.wav');
+    // the typing sounds' track comes after the mic, the system audio between them
+    expect(mixArgs({ mic: 'm.m4a', typing: 't.wav', graph: 'G', out: 'mix.wav' }).join(' ')).toContain('-i color=s=16x16:d=1 -i m.m4a -i t.wav -filter_complex G');
+    expect(mixArgs({ mic: 'm.m4a', system: 'y.m4a', sound: 's.wav', graph: 'G', out: 'mix.wav' }).join(' ')).toContain('-i m.m4a -i y.m4a -i s.wav -filter_complex G');
   });
 
   it('reads a long graph from a file (Windows limits a command line to 32 767 characters)', () => {
-    const args = muxArgs({ video: 'v.mp4', mic: 'm.m4a', graph: 'G', graphFile: 'audio.graph', out: 'o.mp4' });
-    expect(args.join(' ')).toContain('-/filter_complex audio.graph -map 0:v:0');
+    const args = mixArgs({ mic: 'm.m4a', graph: 'G', graphFile: 'audio.graph', out: 'mix.wav' });
+    expect(args.join(' ')).toContain('-/filter_complex audio.graph -map [aout]');
     expect(args).not.toContain('G');
+  });
+});
+
+describe('encodeArgs', () => {
+  it('encodes the mix once as AAC at 48 kHz, through the master stage when there is one', () => {
+    expect(encodeArgs({ mix: 'mix.wav', out: 'sound.m4a' }).join(' ')).toBe('-hide_banner -nostdin -loglevel error -y -i mix.wav -map 0:a:0 -c:a aac -b:a 160k -ar 48000 -f mp4 sound.m4a');
+    expect(encodeArgs({ mix: 'mix.wav', master: 'volume=2dB', out: 'sound.m4a' }).join(' ')).toContain('-map 0:a:0 -af volume=2dB -c:a aac');
+  });
+});
+
+describe('muxArgs', () => {
+  it('puts the sound beside the video, both copied, with the moov in front', () => {
+    expect(muxArgs({ video: 'v.mp4', audio: 'sound.m4a', out: 'o.mp4' }).join(' ')).toBe('-hide_banner -nostdin -loglevel error -y -i v.mp4 -i sound.m4a -map 0:v:0 -map 1:a:0 -c copy -movflags +faststart -f mp4 o.mp4');
+  });
+
+  it('takes the chapters from their metadata file, the input after the sound', () => {
+    expect(muxArgs({ video: 'v.mp4', audio: 'sound.m4a', chapters: 'c.txt', out: 'o.mp4' }).join(' ')).toContain('-i v.mp4 -i sound.m4a -i c.txt -map 0:v:0 -map 1:a:0 -map_chapters 2 -c copy');
   });
 });
 

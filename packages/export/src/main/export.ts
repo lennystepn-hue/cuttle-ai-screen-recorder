@@ -4,9 +4,10 @@ import { tmpdir } from 'node:os';
 import { basename, dirname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { LOUDNESS, type LoudnessTarget } from '@cuttle/project';
-import { applyCaptionFixes, captionCues, captionWords, sceneSpans, stepChapters, toSrt, toVtt, typingClicks, type Chapter } from '@cuttle/timeline';
+import { applyCaptionFixes, captionCues, captionWords, sceneSpans, stepChapters, toSrt, toVtt, totalDuration, typingClicks, type Chapter } from '@cuttle/timeline';
 import { app } from 'electron';
-import { INLINE_GRAPH_LIMIT, audioFilterGraph, masterGraph, meteredGraph, meterArgs, muxArgs, parseMeter, planAudio } from '../audio';
+import { INLINE_GRAPH_LIMIT, audioFilterGraph, encodeArgs, masterFilter, meterArgs, mixArgs, muxArgs, parseMeter, planAudio } from '../audio';
+import { frameCount } from '../frame-plan';
 import { chapterMetadata } from '../chapters';
 import { duckExpression, speechSpans } from '../music/duck';
 import { placeNarration, writeNarrationTrack } from './narration';
@@ -262,38 +263,71 @@ async function sweepStale(out: string): Promise<void> {
  * process. Partial output never reaches `out`, and `out` may not be one of the project's files.
  */
 export async function exportProject(opts: ExportOptions): Promise<ExportResult> {
+  const { format, out, ...rest } = opts;
+  const [result] = await exportProjects({ ...rest, targets: [{ ...(format !== undefined && { format }), out }] });
+  return result!;
+}
+
+/** One video of a batch: its format (none: the project's own size) and its file. */
+export interface ExportTarget {
+  format?: ExportFormat;
+  out: string;
+}
+
+export interface BatchExportOptions extends Omit<ExportOptions, 'format' | 'out' | 'onProgress'> {
+  targets: readonly ExportTarget[];
+  /** Called after each rendered frame of any of them: the frames done and to do over all of them. */
+  onProgress?: (done: number, total: number) => void;
+}
+
+/**
+ * Renders a project in several formats in one go. Their frames render one format after another, each
+ * in a window of its own (the next one opens while a page renders): the encoder takes most of the
+ * time, and takes one video at a time, so pages side by side would only wait for each other. The
+ * sound (the music page, the narration, the mix, its loudness, the AAC) is made once, while the
+ * frames render, and each video gets it as it is. The results are in the order of `targets`; a
+ * failure or a cancel leaves none of them.
+ */
+export async function exportProjects(opts: BatchExportOptions): Promise<ExportResult[]> {
   const started = performance.now();
   const { signal } = opts;
   const throwIfCancelled = (): void => {
     if (signal?.aborted) throw cancelledError();
   };
+  if (opts.targets.length === 0) throw new ExportError('invalid-project', 'nothing to export: no format given');
   await app.whenReady();
   const projectDir = resolve(opts.projectDir);
-  const out = resolve(opts.out);
+  const outs = opts.targets.map((target) => resolve(target.out));
+  const twice = outs.find((out, i) => outs.findIndex((other) => samePath(other, out)) !== i);
+  if (twice) throw new ExportError('invalid-project', `two formats would write ${twice}: give each its own file`);
   const sources = await loadSources(projectDir);
   for (const warning of sources.warnings) console.warn(`warning: ${warning}`);
-  await checkOutput(out, sources.inputs);
+  for (const out of outs) await checkOutput(out, sources.inputs);
   const subtitles = [...new Set(opts.subtitles ?? [])];
   const narrated = sources.narration !== undefined && sources.narration.length > 0 && sources.project.voiceover.captions;
   if (subtitles.length > 0 && !sources.transcript && !narrated) {
     throw new ExportError('missing-file', 'subtitle files need the take\'s transcript (sources.transcript): run "cuttle transcribe" first');
   }
-  for (const format of subtitles) await checkOutput(subtitlePath(out, format), sources.inputs);
+  for (const out of outs) for (const format of subtitles) await checkOutput(subtitlePath(out, format), sources.inputs);
   await checkFfmpeg();
   if (sources.mic) await checkMic(sources.mic.path, signal);
   if (sources.system) await checkMic(sources.system.path, signal, "the computer's sound (sources.system)");
   throwIfCancelled();
-  await sweepStale(out);
-  const project = withFormat(sources.project, opts.format);
+  for (const out of outs) await sweepStale(out);
+  // the formats differ in their size only: the scenes, the frames, the sound and the narration are the same
+  const project = sources.project;
+  const spans = sceneSpans(project.scenes, project.cuts);
+  const frames = frameCount(totalDuration(spans), project.output.fps);
+  const seconds = frames / project.output.fps;
   // the narration on the video: its lines, and their words for the captions, the mix and the duck
-  const narration = sources.narration ? placeNarration(project, sceneSpans(project.scenes, project.cuts), sources.narration) : undefined;
+  const narration = sources.narration ? placeNarration(project, spans, sources.narration) : undefined;
   for (const index of narration?.left ?? []) {
     const line = project.voiceover.lines[index]!;
     console.warn(`warning: the narration's line ${line.id ?? `#${index + 1}`} plays nowhere: ${line.scene !== undefined ? 'it starts after its scene ends' : 'no clip shows its second'}`);
   }
-  const job: ExportJob = {
+  const jobOf = (format: ExportFormat | undefined): ExportJob => ({
     kind: 'video',
-    project,
+    project: withFormat(project, format),
     ...(sources.screen && { screen: sources.screen }),
     webcam: sources.webcam,
     events: sources.events,
@@ -306,214 +340,243 @@ export async function exportProject(opts: ExportOptions): Promise<ExportResult> 
     watermarkImage: sources.watermarkImage,
     ...(sources.motion && { motion: sources.motion }),
     encoder: opts.encoder ?? 'auto',
-  };
-  try {
-    await mkdir(dirname(out), { recursive: true });
-  } catch (error) {
-    throw new ExportError('invalid-project', `cannot create the output folder ${dirname(out)}: ${(error as Error).message}`, { cause: error });
+  });
+  for (const out of outs) {
+    try {
+      await mkdir(dirname(out), { recursive: true });
+    } catch (error) {
+      throw new ExportError('invalid-project', `cannot create the output folder ${dirname(out)}: ${(error as Error).message}`, { cause: error });
+    }
   }
 
-  const partial = join(dirname(out), `.${basename(out)}.${randomUUID().slice(0, 8)}.partial`);
+  const partials = outs.map((out) => join(dirname(out), `.${basename(out)}.${randomUUID().slice(0, 8)}.partial`));
   const cancel = whenCancelled(signal);
-  const guard = watchdog();
+  const guards: ReturnType<typeof watchdog>[] = [];
+  const windows: ExportWindow[] = [];
+  const hosts: FileHost[] = [];
+  const motions: MotionHost[] = [];
   let work: string | undefined;
-  let files: FileHost | undefined;
-  let window: ExportWindow | undefined;
-  const motion = sources.motion && sources.motionTake ? new MotionHost(project, sources.motion, sources.motionTake) : undefined;
+  // set once the batch is over: a window still opening then closes at once
+  let over = false;
+  const openWindow = async (): Promise<ExportWindow> => {
+    const window = await openExportWindow(opts.pageDir ?? defaultPageDir());
+    if (over) window.win.destroy();
+    else windows.push(window);
+    return window;
+  };
   // the music and sounds render beside the frames, in a page of their own; checked here, so a missing
   // music page fails before the frames, and planned again with the sounds the motion pages ask for
   // the take as the music sees it, with the narration's words (spoken where they play)
   const take = { ...(sources.motionTake ?? (await motionTake(projectDir, project))), ...(narration && { narration: narration.words }) };
   await planSoundtrack(projectDir, project, take);
-  let soundtrack: Promise<{ plan: SoundtrackPlan; stems: MusicStems } | undefined> | undefined;
   try {
     work = await mkdtemp(join(tmpdir(), WORK_PREFIX));
-    const video = join(work, 'video.mp4');
-    const images = [...Object.values(sources.stills), ...[sources.backgroundImage, sources.watermarkImage].filter((path): path is string => path !== undefined)];
-    const host = new FileHost([...(sources.screen ? [sources.screen] : []), ...(sources.webcam ? [sources.webcam.path] : [])], video, images);
-    files = host;
-    window = await openExportWindow(opts.pageDir ?? defaultPageDir());
-    throwIfCancelled();
-    const ipc = window.win.webContents.ipc;
-    ipc.handle(CHANNELS.job, () => job);
-    ipc.handle(CHANNELS.size, (_event, path: string) => host.size(path));
-    ipc.handle(CHANNELS.read, (_event, path: string, start: number, end: number) => {
-      guard.alive();
-      return host.read(path, start, end);
-    });
-    ipc.handle(CHANNELS.readFile, (_event, path: string) => host.readFile(path));
-    ipc.handle(CHANNELS.write, (_event, data: Uint8Array, position: number) => {
-      guard.alive();
-      return host.write(data, position);
-    });
-    ipc.on(CHANNELS.progress, (_event, done: number, total: number) => {
-      guard.progress(done);
-      opts.onProgress?.(done, total);
-    });
-    serveMotion(ipc, motion, guard.alive);
-    soundtrack = (async () => {
-      const asked = await motionSoundCues(project, sources.motion, take);
-      const plan = await planSoundtrack(projectDir, project, take, asked.cues);
-      if (!plan) return void asked.errors.forEach((error) => console.warn(`warning: ${error}`));
-      plan.skipped.push(...asked.errors);
-      return { plan, stems: await renderSoundtrack(projectDir, plan) };
-    })();
-    soundtrack.catch(() => {});
+    const folder = work;
 
-    const page = await runPage<PageSuccess>(window, guard.stalled, cancel.promise);
-    guard.stop();
-    const said = await motion?.close();
-    for (const warning of motionWarnings(said ?? [])) console.warn(`warning: ${warning}`);
-    // The window stays open until the end: closing an app's last window quits it by default.
-    await host.close(); // flushes the video-only MP4 before ffmpeg reads it
-
-    const audioStarted = performance.now();
-    const seconds = page.frames / project.output.fps;
-    const spans = sceneSpans(project.scenes, project.cuts);
-    const segments = planAudio({ spans, look: project.look, mic: sources.mic !== undefined, system: sources.system !== undefined, seconds });
-    const audible = segments.some((segment) => segment.mic !== undefined);
-    const usesMic = audible && sources.mic !== undefined;
-    const usesSystem = audible && sources.system !== undefined;
-    const narrationFile = narration && narration.placed.length > 0 && project.look.audio.enabled ? join(work, 'narration.wav') : undefined;
-    if (narrationFile) await writeNarrationTrack(narrationFile, narration!.placed, seconds);
-    // the typing sounds: a track of their own on the video's timeline, mixed in after the mic
-    const clicks = typingClicks(spans, sources.keys ?? [], project.look.audio);
-    // with music or sounds, one stereo soundtrack holds them and the typing clicks; else the clicks alone
-    const rendered = await soundtrack.catch((error: Error) => {
-      throw new ExportError('render', `the music could not be rendered: ${error.message}`, { cause: error });
-    });
-    let musicReport: SoundtrackReport | undefined;
-    let typing: string | undefined;
-    let sound: string | undefined;
-    if (rendered) {
-      const { plan, stems } = rendered;
-      musicReport = soundtrackReport(projectDir, plan, stems);
-      for (const warning of [...musicReport.errors, ...musicReport.skipped]) console.warn(`warning: music${musicReport.src ? ` (${musicReport.src})` : ''}: ${warning}`);
-      sound = join(work, 'sound.wav');
-      await writeSoundTrack(sound, {
-        seconds,
-        stems,
-        ...(project.music?.enabled && { music: { volume: project.music.volume, duck: project.music.duck } }),
-        speech: plan.video.speech,
-        effectsVolume: project.look.audio.effects ? project.look.audio.effectsVolume : 0,
-        ...(clicks.length > 0 && { typing: { clicks, volume: project.look.audio.typingVolume } }),
+    // the sound, once for every format, while the frames render
+    const sound = (async () => {
+      const soundtrack = (async () => {
+        const asked = await motionSoundCues(project, sources.motion, take);
+        const plan = await planSoundtrack(projectDir, project, take, asked.cues);
+        if (!plan) return void asked.errors.forEach((error) => console.warn(`warning: ${error}`));
+        plan.skipped.push(...asked.errors);
+        return { plan, stems: await renderSoundtrack(projectDir, plan) };
+      })();
+      soundtrack.catch(() => {});
+      const audioStarted = performance.now();
+      const segments = planAudio({ spans, look: project.look, mic: sources.mic !== undefined, system: sources.system !== undefined, seconds });
+      const audible = segments.some((segment) => segment.mic !== undefined);
+      const usesMic = audible && sources.mic !== undefined;
+      const usesSystem = audible && sources.system !== undefined;
+      const narrationFile = narration && narration.placed.length > 0 && project.look.audio.enabled ? join(folder, 'narration.wav') : undefined;
+      if (narrationFile) await writeNarrationTrack(narrationFile, narration!.placed, seconds);
+      // the typing sounds: a track of their own on the video's timeline, mixed in after the mic
+      const clicks = typingClicks(spans, sources.keys ?? [], project.look.audio);
+      // with music or sounds, one stereo soundtrack holds them and the typing clicks; else the clicks alone
+      const rendered = await soundtrack.catch((error: Error) => {
+        throw new ExportError('render', `the music could not be rendered: ${error.message}`, { cause: error });
       });
-    } else if (clicks.length > 0) {
-      typing = join(work, 'typing.wav');
-      await writeTypingTrack(typing, clicks, project.look.audio.typingVolume, seconds);
-    }
-    // the inputs after the video: the mic, the computer's sound, then the typing or the soundtrack
-    let input = 1;
-    const micInput = usesMic ? input++ : undefined;
-    const systemInput = usesSystem ? input++ : undefined;
-    const narrationInput = narrationFile ? input++ : undefined;
-    const speech = speechSpans(project, sources.transcript ?? [], spans, narration?.words ?? []);
-    const graph = audioFilterGraph(segments, {
-      ...(micInput !== undefined && sources.mic && { mic: { input: micInput, offset: sources.mic.offset } }),
-      ...(systemInput !== undefined &&
-        sources.system && {
-          system: {
-            input: systemInput,
-            offset: sources.system.offset,
-            volume: project.look.audio.systemVolume,
-            // down under speech (the take's and the narration's), as the music
-            duck: duckExpression(speech, project.look.audio.systemDuck),
-          },
-        }),
-      ...(narrationInput !== undefined && { narration: narrationInput }),
-      ...(typing && { typing: input }),
-      ...(sound && { sound: input }),
-    });
-    const tracks = {
-      video,
-      mic: usesMic ? sources.mic?.path : undefined,
-      system: usesSystem ? sources.system?.path : undefined,
-      narration: narrationFile,
-      typing,
-      sound,
-    };
-    // a platform's loudness: the mix measured, then one gain and a limiter after it
-    const target = opts.loudness ?? project.look.audio.loudness;
-    let mastering: { gain: number; mix: Level } | undefined;
-    let mastered = graph;
-    if (target !== 'off') {
-      const metered = meteredGraph(graph);
-      const meterFile = metered.length > INLINE_GRAPH_LIMIT ? join(work, 'meter.graph') : undefined;
-      if (meterFile) await writeFile(meterFile, metered);
-      const mix = parseMeter(await runFfmpeg(meterArgs({ ...tracks, graph: metered, graphFile: meterFile }), signal));
-      const gain = mix.lufs === null || mix.lufs <= SILENT_LUFS ? 0 : Math.round(Math.min(MAX_LOUDNESS_GAIN, LOUDNESS[target].lufs - mix.lufs) * 100) / 100;
-      mastered = masterGraph(graph, gain, LOUDNESS[target].truePeak);
-      mastering = { gain, mix };
+      let music: SoundtrackReport | undefined;
+      let typing: string | undefined;
+      let soundFile: string | undefined;
+      if (rendered) {
+        const { plan, stems } = rendered;
+        music = soundtrackReport(projectDir, plan, stems);
+        for (const warning of [...music.errors, ...music.skipped]) console.warn(`warning: music${music.src ? ` (${music.src})` : ''}: ${warning}`);
+        soundFile = join(folder, 'sound.wav');
+        await writeSoundTrack(soundFile, {
+          seconds,
+          stems,
+          ...(project.music?.enabled && { music: { volume: project.music.volume, duck: project.music.duck } }),
+          speech: plan.video.speech,
+          effectsVolume: project.look.audio.effects ? project.look.audio.effectsVolume : 0,
+          ...(clicks.length > 0 && { typing: { clicks, volume: project.look.audio.typingVolume } }),
+        });
+      } else if (clicks.length > 0) {
+        typing = join(folder, 'typing.wav');
+        await writeTypingTrack(typing, clicks, project.look.audio.typingVolume, seconds);
+      }
+      // the inputs after the video: the mic, the computer's sound, then the typing or the soundtrack
+      let input = 1;
+      const micInput = usesMic ? input++ : undefined;
+      const systemInput = usesSystem ? input++ : undefined;
+      const narrationInput = narrationFile ? input++ : undefined;
+      const speech = speechSpans(project, sources.transcript ?? [], spans, narration?.words ?? []);
+      const graph = audioFilterGraph(segments, {
+        ...(micInput !== undefined && sources.mic && { mic: { input: micInput, offset: sources.mic.offset } }),
+        ...(systemInput !== undefined &&
+          sources.system && {
+            system: {
+              input: systemInput,
+              offset: sources.system.offset,
+              volume: project.look.audio.systemVolume,
+              // down under speech (the take's and the narration's), as the music
+              duck: duckExpression(speech, project.look.audio.systemDuck),
+            },
+          }),
+        ...(narrationInput !== undefined && { narration: narrationInput }),
+        ...(typing && { typing: input }),
+        ...(soundFile && { sound: input }),
+      });
+      const graphFile = graph.length > INLINE_GRAPH_LIMIT ? join(folder, 'audio.graph') : undefined;
+      if (graphFile) await writeFile(graphFile, graph);
+      const mix = join(folder, 'mix.wav');
+      const inputs = { mic: usesMic ? sources.mic?.path : undefined, system: usesSystem ? sources.system?.path : undefined, narration: narrationFile, typing, sound: soundFile };
+      await runFfmpeg(mixArgs({ ...inputs, graph, graphFile, out: mix }), signal);
+      // a platform's loudness: the mix measured, then one gain and a limiter on the way to AAC
+      const target = opts.loudness ?? project.look.audio.loudness;
+      let loudness: LoudnessReport | undefined;
+      let master: string | undefined;
+      const audio = join(folder, 'sound.m4a');
+      if (target !== 'off') {
+        const measured = parseMeter(await runFfmpeg(meterArgs(mix), signal));
+        const gain = measured.lufs === null || measured.lufs <= SILENT_LUFS ? 0 : Math.round(Math.min(MAX_LOUDNESS_GAIN, LOUDNESS[target].lufs - measured.lufs) * 100) / 100;
+        master = masterFilter(gain, LOUDNESS[target].truePeak);
+        loudness = { target, expected: LOUDNESS[target], mix: measured, gain, video: { lufs: null, truePeak: null } };
+      }
+      await runFfmpeg(encodeArgs({ mix, ...(master && { master }), out: audio }), signal);
+      // what the platform will hear: the sound every video gets, measured
+      if (loudness) loudness.video = parseMeter(await runFfmpeg(meterArgs(audio), signal));
+      return { audio, music, loudness, audioMs: Math.round(performance.now() - audioStarted) };
+    })();
+    sound.catch(() => {});
+
+    // each format's frames, one after another; the progress over all of them
+    const done = opts.targets.map(() => 0);
+    const report = () => opts.onProgress?.(done.reduce((sum, value) => sum + value, 0), frames * opts.targets.length);
+    const pages: { page: PageSuccess; video: string; said: MotionItemReport[] | undefined }[] = [];
+    let opening = openWindow();
+    for (const [index, target] of opts.targets.entries()) {
       throwIfCancelled();
+      const window = await opening;
+      // the next format's window opens while this one renders
+      if (index + 1 < opts.targets.length) {
+        opening = openWindow();
+        opening.catch(() => {});
+      }
+      const job = jobOf(target.format);
+      const video = join(folder, `video-${index}.mp4`);
+      const images = [...Object.values(sources.stills), ...[sources.backgroundImage, sources.watermarkImage].filter((path): path is string => path !== undefined)];
+      const host = new FileHost([...(sources.screen ? [sources.screen] : []), ...(sources.webcam ? [sources.webcam.path] : [])], video, images);
+      hosts.push(host);
+      const guard = watchdog();
+      guards.push(guard);
+      const motion = sources.motion && sources.motionTake ? new MotionHost(job.project, sources.motion, sources.motionTake) : undefined;
+      if (motion) motions.push(motion);
+      const ipc = window.win.webContents.ipc;
+      ipc.handle(CHANNELS.job, () => job);
+      ipc.handle(CHANNELS.size, (_event, path: string) => host.size(path));
+      ipc.handle(CHANNELS.read, (_event, path: string, start: number, end: number) => {
+        guard.alive();
+        return host.read(path, start, end);
+      });
+      ipc.handle(CHANNELS.readFile, (_event, path: string) => host.readFile(path));
+      ipc.handle(CHANNELS.write, (_event, data: Uint8Array, position: number) => {
+        guard.alive();
+        return host.write(data, position);
+      });
+      ipc.on(CHANNELS.progress, (_event, made: number) => {
+        guard.progress(made);
+        done[index] = made;
+        report();
+      });
+      serveMotion(ipc, motion, guard.alive);
+      const page = await runPage<PageSuccess>(window, guard.stalled, cancel.promise);
+      guard.stop();
+      if (page.frames !== frames) throw new ExportError('render', `the ${target.format ?? 'project'} video has ${page.frames} frames where ${frames} were planned`);
+      const said = await motion?.close();
+      for (const warning of motionWarnings(said ?? [])) console.warn(`warning: ${warning}`);
+      await host.close(); // flushes the video-only MP4 before ffmpeg reads it
+      // done with it (the next one is open already: the app keeps a window, it does not quit)
+      window.win.destroy();
+      pages.push({ page, video, said });
     }
-    const graphFile = mastered.length > INLINE_GRAPH_LIMIT ? join(work, 'audio.graph') : undefined;
-    if (graphFile) await writeFile(graphFile, mastered);
+    const { audio, music, loudness, audioMs } = await sound;
+    throwIfCancelled();
+
     // the script's steps as the video's chapters, where the take reached them
     const chapters = stepChapters(project.script, take.markers, spans);
-    const chapterFile = chapters.length > 0 ? join(work, 'chapters.txt') : undefined;
+    const chapterFile = chapters.length > 0 ? join(folder, 'chapters.txt') : undefined;
     if (chapterFile) await writeFile(chapterFile, chapterMetadata(chapters));
-    await runFfmpeg(
-      muxArgs({
-        ...tracks,
-        graph: mastered,
-        graphFile,
-        ...(chapterFile && { chapters: chapterFile }),
-        out: partial,
-      }),
-      signal,
-    );
-    throwIfCancelled();
-    try {
-      await rename(partial, out);
-    } catch (error) {
-      throw new ExportError('render', `could not replace ${out} (is it open in a player?): ${(error as Error).message}`, { cause: error });
+    // each video with the sound, then all of them in place
+    for (const [index, partial] of partials.entries()) {
+      await runFfmpeg(muxArgs({ video: pages[index]!.video, audio, ...(chapterFile && { chapters: chapterFile }), out: partial }), signal);
+      throwIfCancelled();
     }
-    // what the platform will hear: the written file, measured
-    const loudness: LoudnessReport | undefined =
-      mastering && target !== 'off'
-        ? { target, expected: LOUDNESS[target], ...mastering, video: parseMeter(await runFfmpeg(['-hide_banner', '-nostdin', '-nostats', '-i', out, '-map', '0:a:0', '-af', 'ebur128=peak=true', '-f', 'null', '-'], signal)) }
-        : undefined;
-    const written: string[] = [];
-    if (subtitles.length > 0) {
-      // as subtitles, whatever the burned-in style: two lines a cue, on the video's timeline, the narration's words with the take's
-      const spans = sceneSpans(project.scenes, project.cuts);
-      const spoken = sources.transcript ? captionWords(applyCaptionFixes(sources.transcript, project.captions.fixes), spans) : [];
-      const cues = captionCues([...spoken, ...(narrated && narration ? narration.words : [])].sort((a, b) => a.t - b.t), 'subtitle');
-      for (const format of subtitles) {
-        const path = subtitlePath(out, format);
-        await writeFile(path, format === 'srt' ? toSrt(cues) : toVtt(cues));
-        written.push(path);
+    for (const [index, out] of outs.entries()) {
+      try {
+        await rename(partials[index]!, out);
+      } catch (error) {
+        throw new ExportError('render', `could not replace ${out} (is it open in a player?): ${(error as Error).message}`, { cause: error });
       }
     }
-    return {
-      out,
-      frames: page.frames,
-      seconds,
-      ...(written.length > 0 && { subtitles: written }),
-      ...(chapters.length > 0 && { chapters }),
-      ...(said && { motion: said }),
-      ...(musicReport && { music: musicReport }),
-      ...(loudness && { loudness }),
-      stats: {
-        gpu: page.gpu,
-        codec: page.codec,
-        hardwareAcceleration: page.hardwareAcceleration,
-        bitrate: page.bitrate,
-        page: page.timings,
-        audioMs: Math.round(performance.now() - audioStarted),
-        totalMs: Math.round(performance.now() - started),
-      },
+    // as subtitles, whatever the burned-in style: two lines a cue, on the video's timeline, the narration's words with the take's
+    const cues = () => {
+      const spoken = sources.transcript ? captionWords(applyCaptionFixes(sources.transcript, project.captions.fixes), spans) : [];
+      return captionCues([...spoken, ...(narrated && narration ? narration.words : [])].sort((a, b) => a.t - b.t), 'subtitle');
     };
+    const results: ExportResult[] = [];
+    for (const [index, out] of outs.entries()) {
+      const { page, said } = pages[index]!;
+      const written: string[] = [];
+      for (const format of subtitles) {
+        const path = subtitlePath(out, format);
+        await writeFile(path, format === 'srt' ? toSrt(cues()) : toVtt(cues()));
+        written.push(path);
+      }
+      results.push({
+        out,
+        frames: page.frames,
+        seconds,
+        ...(written.length > 0 && { subtitles: written }),
+        ...(chapters.length > 0 && { chapters }),
+        ...(said && { motion: said }),
+        ...(music && { music }),
+        ...(loudness && { loudness }),
+        stats: {
+          gpu: page.gpu,
+          codec: page.codec,
+          hardwareAcceleration: page.hardwareAcceleration,
+          bitrate: page.bitrate,
+          page: page.timings,
+          audioMs,
+          totalMs: Math.round(performance.now() - started),
+        },
+      });
+    }
+    return results;
   } catch (error) {
-    await rm(partial, { force: true, maxRetries: 3 }).catch(() => {});
+    // none of them: a batch that failed leaves no half of itself
+    await Promise.all(partials.map((partial) => rm(partial, { force: true, maxRetries: 3 }).catch(() => {})));
     if (error instanceof ExportError) throw error;
     throw new ExportError('render', error instanceof Error ? error.message : String(error), { cause: error });
   } finally {
-    guard.stop();
+    over = true;
+    for (const guard of guards) guard.stop();
     cancel.dispose();
-    await motion?.close().catch(() => {});
-    if (window && !window.win.isDestroyed()) window.win.destroy();
-    await files?.close();
+    await Promise.all(motions.map((motion) => motion.close().catch(() => {})));
+    for (const window of windows) if (!window.win.isDestroyed()) window.win.destroy();
+    await Promise.all(hosts.map((host) => host.close()));
     if (work) {
       const folder = work;
       await rm(folder, { recursive: true, force: true, maxRetries: 3 }).catch((error: Error) =>

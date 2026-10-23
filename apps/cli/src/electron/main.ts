@@ -3,7 +3,7 @@
 // channel, which carries the answer back and a cancel in; progress and warnings go to stderr.
 // Loaded by bootstrap.ts, which handles uncaught exceptions.
 import { app, protocol } from 'electron';
-import { MOTION_SCHEME_PRIVILEGES, SUBTITLE_FORMATS, checkMusic, exportProject, isExportFormat, renderStills, type EncoderPreference, type ExportFormat, type SubtitleFormat } from '@cuttle/export';
+import { MOTION_SCHEME_PRIVILEGES, SUBTITLE_FORMATS, checkMusic, exportProjects, isExportFormat, renderStills, type EncoderPreference, type ExportFormat, type SubtitleFormat } from '@cuttle/export';
 import { capturePage } from './capture-page';
 import { failure, finish } from './finish';
 import { decodeRequest, type CancelMessage, type ElectronRequest, type ElectronResponse, type MotionCheck, type ProgressMessage } from './protocol';
@@ -70,10 +70,10 @@ function motionCheckProject(project: CuttleProject, check: MotionCheck): CuttleP
 async function handle(request: ElectronRequest): Promise<unknown> {
   switch (request.command) {
     case 'render':
-      return exportProject({
+      // every format in one go: their frames side by side, the sound once
+      return exportProjects({
         projectDir: request.projectDir,
-        out: request.out,
-        ...exportFormat(request.format),
+        targets: request.targets.map((target) => ({ out: target.out, ...exportFormat(target.format) })),
         ...(request.encoder !== undefined && { encoder: request.encoder as EncoderPreference }),
         ...(request.captions !== undefined && { captions: request.captions }),
         ...(request.subtitles && { subtitles: subtitleFormats(request.subtitles) }),

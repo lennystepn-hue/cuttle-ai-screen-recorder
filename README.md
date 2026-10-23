@@ -253,6 +253,10 @@ private and renders the MP4.
 needs `cuttle` on PATH (`pnpm cli:install`). Then ask Claude Code for a demo video, or type
 `/cuttle`.
 
+## From your own code (SDK)
+
+`@cuttle/sdk` builds a video in TypeScript (scenes, motion pages, music, the look) and renders it with the same engine: a release video per version, a video per customer. See [docs/sdk](docs/sdk/README.md).
+
 ## With any agent (MCP)
 
 `cuttle mcp` is an MCP server over stdio: Claude Desktop, Claude Code, Cursor or any MCP client

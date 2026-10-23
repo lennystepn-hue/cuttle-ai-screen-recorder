@@ -36,6 +36,11 @@ export interface EditorState {
   selection?: Selection;
   /** The other selected items, besides `selection` (Shift- or Ctrl/⌘-click, a rubber band on the timeline): edited together. */
   also: Selection[];
+  /**
+   * A place on the selected zoom's path: 0 where it starts (its `rect`), k its k-th move. The source
+   * view shows and edits that place's rect, the timeline its time, the inspector its curve.
+   */
+  place?: number;
   tool: Tool;
   tab: 'selection' | 'auto' | 'transcript' | 'voice' | 'look';
   /** The part of the look that is open (one at a time; none once it is closed). */
@@ -248,6 +253,9 @@ function followDocument(): void {
     const { selection, also, doc } = store.get();
     if (selection && doc && !stillThere(selection, doc.project)) select(undefined);
     else if (doc && also.some((item) => !stillThere(item, doc.project))) store.set({ also: also.filter((item) => stillThere(item, doc.project)) });
+    // a place an undo or an outside change took off the path
+    const { place } = store.get();
+    if (place !== undefined && place > 0 && doc && selection?.kind === 'zoom' && (doc.project.zooms.find((zoom) => zoom.id === selection.id)?.moves?.length ?? 0) < place) store.set({ place: undefined });
     const next = shownProject();
     if (next === last || !next) return;
     last = next;
@@ -386,7 +394,10 @@ export function setFormat(format: ExportFormat | undefined): void {
 
 export function select(selection: Selection | undefined): void {
   dismissWarning();
-  store.set({ selection, also: [], ...(selection && { tab: 'selection' as const }) });
+  // a place on a zoom's path stays while the zoom stays selected
+  const before = store.get().selection;
+  const kept = before && selection && same(before, selection);
+  store.set({ selection, also: [], ...(!kept && { place: undefined }), ...(selection && { tab: 'selection' as const }) });
 }
 
 const same = (a: Selection, b: Selection) => a.kind === b.kind && a.id === b.id;
@@ -401,11 +412,11 @@ export function toggleSelect(item: Selection): void {
   dismissWarning();
   if (same(selection, item)) {
     const [next, ...rest] = also;
-    return store.set({ selection: next, also: rest });
+    return store.set({ selection: next, also: rest, place: undefined });
   }
   if (also.some((each) => same(each, item))) return store.set({ also: also.filter((each) => !same(each, item)) });
   // the one clicked last is the one the inspector would show alone
-  store.set({ selection: item, also: [...also, selection], tab: 'selection' });
+  store.set({ selection: item, also: [...also, selection], place: undefined, tab: 'selection' });
 }
 
 /** Selects these items together (a rubber band); none leaves nothing selected. */
@@ -413,7 +424,7 @@ export function selectMany(items: readonly Selection[]): void {
   const kept = items.filter(groupable);
   if (kept.length <= 1) return select(kept[0]);
   dismissWarning();
-  store.set({ selection: kept.at(-1), also: kept.slice(0, -1), tab: 'selection' });
+  store.set({ selection: kept.at(-1), also: kept.slice(0, -1), place: undefined, tab: 'selection' });
 }
 
 /** Every selected item: the selection, then the others. */

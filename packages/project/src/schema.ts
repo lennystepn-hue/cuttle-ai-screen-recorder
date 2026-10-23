@@ -304,8 +304,17 @@ const MotionSceneSchema = z.strictObject({
 
 const SceneSchema = z.discriminatedUnion('type', [ClipSceneSchema, StillSceneSchema, CardSceneSchema, MotionSceneSchema]);
 
-/** A point on a zoom's path: from `at` (source seconds) the zoom shows `rect`. */
-const ZoomMoveSchema = z.strictObject({ at: seconds, rect: RectSchema });
+/**
+ * How a zoom gets to a move's rect: `settle` as a camera does (the default: off at once, slowing
+ * into place), `smooth` in and out, `linear` at an even pace, or `jump` there at its time.
+ */
+export const MOVE_EASES = ['settle', 'smooth', 'linear', 'jump'] as const;
+export type MoveEase = (typeof MOVE_EASES)[number];
+
+/** A point on a zoom's path: from `at` (source seconds) the zoom shows `rect`, getting there as `ease` says. */
+const ZoomMoveSchema = z.strictObject({ at: seconds, rect: RectSchema, ease: z.enum(MOVE_EASES).optional() });
+/** A point on a mask's path: from `at` (source seconds) it covers `rect`. */
+const MaskMoveSchema = z.strictObject({ at: seconds, rect: RectSchema });
 
 const ZoomSchema = z
   .strictObject({
@@ -335,7 +344,7 @@ const MaskSchema = z
     to: seconds,
     rect: RectSchema,
     /** A mask that follows (text that scrolls): from `rect` it goes to each move's rect in turn. */
-    moves: z.array(ZoomMoveSchema).optional(),
+    moves: z.array(MaskMoveSchema).optional(),
     style: z.enum(MASK_STYLES).default('fill'),
     enabled: z.boolean().default(true),
     auto: autoKind,

@@ -142,11 +142,14 @@ there are not two cursors.
 and goes out over 0.8 output seconds each where it starts and ends on screen, as a camera settles
 (`smooth`: it sets off at once and slows into place, 95 % there after half a second; a cut into
 its middle lands zoomed), so give it 2.5 output seconds or more (`2.5 × speed` source seconds over
-a sped-up clip). A zoom that follows (a typing zoom from `suggest`) has `moves`: `[{ "at", "rect" }]`, each
+a sped-up clip). A zoom that follows (a typing zoom from `suggest`) has `moves`: `[{ "at", "rect", "ease" }]`, each
 `at` (source seconds) after the one before and inside the zoom. It starts on `rect` and goes to each
-move's rect in turn, settling over 0.8 output seconds from 0.3 s before the move's `at` (three
-quarters there at it). To move the whole path, change every rect by the same amount; without
-`moves` it holds still.
+move's rect in turn over 0.8 output seconds from 0.3 s before the move's `at`, on the move's `ease`:
+`settle` as a camera (left out: three quarters there at `at`), `smooth` in and out, `linear` at an
+even pace, or `jump` there at `at`. To move the whole path, change every rect by the same amount;
+without `moves` it holds still. `cuttle zoom-path <id>` lists the path; `--at <s> --rect x,y,w,h
+[--ease]` adds a move or places the one at that second anew, `--remove` and `--clear` take moves
+off (an edited path loses its `auto`).
 
 `masks` hide private things: `from` and `to` (source seconds), `rect`, `style` (`fill`: the colour
 around it, safest for tokens and keys; `blur`) and `enabled` (`true`). Make the rect generous: a

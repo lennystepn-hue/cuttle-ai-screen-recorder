@@ -10,6 +10,8 @@ import {
   CLICK_EFFECTS,
   CURSOR_STYLES,
   EASES,
+  MOVE_EASES,
+  type MoveEase,
   FRAME_STYLES,
   MASK_STYLES,
   STILL_MOTIONS,
@@ -61,6 +63,7 @@ import { Select as StyledSelect } from '../Select';
 import { shortcut } from '../keys';
 import { chooseImage, chooseTool, cutShownAt, deleteSelection, duplicateSelection, LIST_OF, playheadPlace, reveal, setSpeed, SPEEDS, switchSelection } from './actions';
 import { edit, preview } from './doc';
+import { addMove, removeMove, selectPlace, setMoveEase } from './path';
 import { currentPlayer, engineAssets, select, setTool, store, type LookSection, type Selection, type Tool } from './session';
 import { isColoured, swatch, type SwatchKey } from './swatches';
 import { useStore } from './store';
@@ -892,6 +895,51 @@ function SelectedPanel() {
   return <Details project={project} selection={selection} />;
 }
 
+/** How a zoom gets to a move's place, in words. */
+const MOVE_EASE_NAMES: Record<MoveEase, string> = { settle: 'Settle', smooth: 'Smooth', linear: 'Linear', jump: 'Jump' };
+
+/**
+ * A zoom's path: where it starts and each move (picked, the source view shows and edits it, the
+ * playhead goes there), each move's curve, a move added at the playhead, one taken off.
+ */
+function PathPart({ project, zoom }: { project: CuttleProject; zoom: CuttleProject['zooms'][number] }) {
+  const place = useStore(store, (state) => state.place);
+  const spans = sceneSpans(project.scenes, project.cuts);
+  const places: { at: number; ease?: MoveEase }[] = [{ at: zoom.at }, ...(zoom.moves ?? [])];
+  return (
+    <Section title="Path" testId="zoom-path-part">
+      {zoom.moves?.length ? (
+        <ul className="path-places">
+          {places.map((each, index) => {
+            const t = outputTimesOf(spans, each.at)[0];
+            return (
+              <li key={index} className={place === index ? 'selected' : undefined}>
+                <button type="button" className="path-place" onClick={() => selectPlace(place === index ? undefined : index)} aria-pressed={place === index} data-testid={`zoom-place-${index}`}>
+                  <span className="auto-time">{t === undefined ? '–' : formatTime(t)}</span>
+                  <span className="auto-label">{index === 0 ? 'Start' : `Move ${index}`}</span>
+                </button>
+                {index > 0 && (
+                  <>
+                    <Select value={each.ease ?? 'settle'} options={MOVE_EASES} names={MOVE_EASE_NAMES} onChange={(ease) => setMoveEase(index, ease)} testId={`zoom-move-ease-${index}`} />
+                    <button type="button" className="head-action" onClick={() => removeMove(index)} title="Take this move off the path" aria-label={`Remove move ${index}`} data-testid={`zoom-move-remove-${index}`}>
+                      <CloseIcon size={13} />
+                    </button>
+                  </>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+      ) : (
+        <p className="hint">It holds still. A move makes it follow something: added at the playhead, then dragged in the source view.</p>
+      )}
+      <button type="button" className="ghost small" onClick={addMove} data-testid="zoom-add-move">
+        Add a move at the playhead
+      </button>
+    </Section>
+  );
+}
+
 /** What each kind is called, one and several. */
 const KIND_NAMES: Record<Selection['kind'], [string, string]> = {
   scene: ['scene', 'scenes'],
@@ -1167,6 +1215,7 @@ function Details({ project, selection }: { project: CuttleProject; selection: Se
             <Select value={zoom.ease} options={EASES} names={EASE_NAMES} onChange={(ease) => set('zooms', id, { ease }, 'Change easing')} />
           </Row>
         </Section>
+        <PathPart project={project} zoom={zoom} />
         {enabled('zooms', zoom.enabled)}
         <Advanced note={ADVANCED_NOTE}>
           {inTake('zooms', zoom.at, zoom.at + zoom.duration)}

@@ -271,6 +271,21 @@ export const COMMAND_TOOLS: readonly CommandTool[] = [
     input: { project, ...ITEM_FILTERS, change: z.enum(['on', 'off', 'delete', 'shift']), by: z.number().optional().describe('shift: the source seconds to move them by') },
     argv: (input) => ['items', ...itemFilters(input), ...(input.change === 'shift' ? option('shift', input.by ?? 0) : [`--${input.change}`])],
   }),
+  tool({
+    name: 'zoom_path',
+    title: "A zoom's path",
+    description: "A zoom that follows something: where it starts and each move (source seconds and px). With at and rect it adds a move (or places the one at that second anew); ease is how it gets there (settle as a camera, smooth, linear, or jump); remove takes the move at `at` off; clear holds the zoom still.",
+    input: {
+      project,
+      id: z.string().min(1).describe("the zoom's id"),
+      at: seconds.optional(),
+      rect: z.array(z.number()).length(4).optional().describe('x, y, width, height in source px'),
+      ease: z.enum(['settle', 'smooth', 'linear', 'jump']).optional(),
+      remove: z.boolean().optional(),
+      clear: z.boolean().optional(),
+    },
+    argv: (input) => ['zoom-path', input.id, ...option('at', input.at), ...option('rect', input.rect?.join(',')), ...option('ease', input.ease), ...on('remove', input.remove), ...on('clear', input.clear)],
+  }),
   tool({ name: 'sound_list', title: 'Built-in sounds', description: 'The built-in sounds (whoosh, click, pop, …).', input: {}, global: true, readOnly: true, argv: () => ['sound', 'list'] }),
   tool({
     name: 'sound_add',

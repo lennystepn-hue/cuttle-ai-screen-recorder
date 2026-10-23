@@ -284,7 +284,10 @@ Then refine `cuttle.json` ([project.md](project.md)) and preview again:
   (`suggest --length 45` fits in the same run, before any hand edits.)
 - **Focus.** Add or fix `zooms` on what matters: 2–4 s on the answer or a result, with the rect
   read off a `frame --grid`. Over a sped-up clip, durations are source seconds: 3 s at 12× is a
-  quarter second on screen (see project.md). Point at what the viewer must not miss:
+  quarter second on screen (see project.md). A zoom can follow what moves: give it a path with
+  `cuttle -C "<project>" --json zoom-path z3 --at 14.2 --rect 900,300,640,400` (a move at 14.2 s;
+  `--ease smooth`, `linear` or `jump`), checked with `frame` at and after the move. Point at what
+  the viewer must not miss:
   `cuttle -C "<project>" --json annotate arrow --at 12.5 --from 300,700 --to 620,410 --text "Click here"`,
   or `box`, `highlight`, `spotlight`, `magnifier` with `--rect x,y,w,h` (off the same grid); one or
   two per step, never on a sped-up clip.

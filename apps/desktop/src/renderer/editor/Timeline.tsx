@@ -33,6 +33,7 @@ import { Select } from '../Select';
 import { addCard, addMask, addMotion, addMusic, addPage, addSound, addZoom, overlayBlocked, selectedOrCurrentClip, setSpeed, split, SPEEDS, templateLabel } from './actions';
 import { audible } from './audio';
 import { edit, fitLength, preview } from './doc';
+import { placeCommand, selectedZoom, selectPlace } from './path';
 import { beginGesture } from './gesture';
 import { mediaUrl } from './media';
 import type { MotionStrip } from './motion';
@@ -142,6 +143,7 @@ export function Timeline() {
   const pps = useStore(store, (state) => state.pxPerSecond);
   const selection = useStore(store, (state) => state.selection);
   const also = useStore(store, (state) => state.also);
+  const place = useStore(store, (state) => state.place);
   const chosen = selection ? [selection, ...also] : [];
   // a rubber band being drawn (Shift-drag on the lanes), in the content's px
   const [band, setBand] = useState<{ left: number; top: number; width: number; height: number }>();
@@ -466,6 +468,34 @@ export function Timeline() {
     window.addEventListener('pointercancel', up);
   };
 
+  /** A press on a move of the selected zoom: it is selected (the playhead goes there), dragged it moves in time. */
+  const pressMark = (event: ReactPointerEvent<HTMLElement>, block: OverlayBlock, index: number, at: number) => {
+    if (event.button !== 0) return;
+    event.stopPropagation();
+    const zoom = selectedZoom();
+    if (!zoom) return;
+    selectPlace(index);
+    // the source second shown at an output time inside the block (its clip's speed, across cuts)
+    const sourceAt = (t: number) => {
+      const span = spans.find((candidate) => t >= candidate.start && t < candidate.end) ?? spans[block.span];
+      return span?.scene.type === 'clip' ? span.scene.from + (t - span.start) * span.scene.speed : undefined;
+    };
+    let command: Command | undefined;
+    follow(
+      event,
+      (dx) => {
+        const source = sourceAt(Math.min(block.end - 1e-6, Math.max(block.start, at + dx / pps)));
+        if (source === undefined) return;
+        command = placeCommand(zoom, index, { at: source });
+        preview([command]);
+      },
+      (moved) => {
+        if (!moved || !command) return preview(undefined);
+        edit([command], 'Move a move of the zoom');
+      },
+    );
+  };
+
   /** A press on an overlay block: select it; its edges change its length, its body moves it (Alt: a copy). */
   const pressOverlay = (event: ReactPointerEvent<HTMLElement>, block: OverlayBlock, list: OverlayList) => {
     if (event.button !== 0 || !project) return;
@@ -667,8 +697,20 @@ export function Timeline() {
                               </span>
                             )
                           )}
-                          {/* a zoom that follows: where it moves on */}
-                          {block.marks?.map((mark) => <i key={mark} className="move-mark" style={{ left: (mark - block.start) * pps }} />)}
+                          {/* a zoom that follows: where it moves on; selected alone, each one's handle (select, drag its time) */}
+                          {block.marks?.map((mark) => {
+                            const handle = lane.kind === 'zoom' && also.length === 0 && isSelected(chosen, 'zoom', block.id);
+                            return (
+                              <i
+                                key={`${mark.index}@${mark.t}`}
+                                className={`move-mark${handle ? ' handle' : ''}${handle && place === mark.index + 1 ? ' selected' : ''}`}
+                                style={{ left: (mark.t - block.start) * pps }}
+                                data-place={mark.index + 1}
+                                onPointerDown={handle ? (event) => pressMark(event, block, mark.index + 1, mark.t) : undefined}
+                                title={handle ? 'A move: drag it to change when the zoom moves on' : undefined}
+                              />
+                            );
+                          })}
                           {blockWidth >= 14 && lane.kind !== 'sound' && <i className="edge end" data-edge="end" />}
                         </button>
                       );

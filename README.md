@@ -271,8 +271,12 @@ pnpm install && pnpm cli:install
 xvfb-run -a cuttle -C my-video render
 ```
 
-The `Dockerfile` builds the same as an image: `docker build -t cuttle .`, then
-`docker run --rm --init -v "$PWD/my-video:/video" cuttle -C /video --json render`.
+The same as an image: each release puts one on GitHub's registry (`ghcr.io/lennystepn-hue/cuttle`,
+or `docker build -t cuttle .` from the `Dockerfile`):
+
+```bash
+docker run --rm --init -v "$PWD/my-video:/video" ghcr.io/lennystepn-hue/cuttle -C /video --json render
+```
 
 **A release video in GitHub Actions.** [`actions/release-video`](actions/release-video/action.yml)
 makes a video of what is new in a release from its notes (a title with the version, a card per

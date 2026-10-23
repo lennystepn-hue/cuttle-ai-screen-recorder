@@ -137,12 +137,24 @@ jobs:
           node-version: 24
           cache: pnpm
 
-      # ffmpeg, a display for Electron (Xvfb), and the libraries Electron's Chromium loads; without
-      # man-db's index rebuilt after each install, which took the runner over 20 minutes
-      - run: |
+      # the packages the step below downloads, kept between runs (a newer one is downloaded anew)
+      - uses: actions/cache@v4
+        with:
+          path: ~/apt-archives
+          key: apt-${{ runner.os }}-${{ hashFiles('.github/workflows/ci.yml') }}
+          restore-keys: apt-${{ runner.os }}-
+
+      # ffmpeg, a display for Electron (Xvfb), and the libraries Electron's Chromium loads (the image
+      # has all but ffmpeg). A slow mirror hung apt for 20 minutes and more: each connection now gives
+      # up after 30 s and is tried again, and man-db does not rebuild its index after the install.
+      - timeout-minutes: 10
+        run: |
           sudo rm -f /var/lib/man-db/auto-update
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq --no-install-recommends ffmpeg xvfb xauth libnss3 libatk1.0-0t64 libatk-bridge2.0-0t64 libcups2t64 libgtk-3-0t64 libgbm1 libasound2t64 libxss1 libxshmfence1 libdrm2 fonts-noto-color-emoji >/dev/null
+          mkdir -p ~/apt-archives/partial
+          apt=(sudo apt-get -qq -o Acquire::Retries=5 -o Acquire::http::Timeout=30 -o Dir::Cache::Archives="$HOME/apt-archives")
+          "${apt[@]}" update
+          "${apt[@]}" install -y --no-install-recommends ffmpeg xvfb xauth libnss3 libatk1.0-0t64 libatk-bridge2.0-0t64 libcups2t64 libgtk-3-0t64 libgbm1 libasound2t64 libxss1 libxshmfence1 libdrm2 fonts-noto-color-emoji >/dev/null
+          sudo chown -R "$USER" ~/apt-archives
 
       - run: pnpm install --frozen-lockfile
 
@@ -154,7 +166,8 @@ jobs:
 
       - run: xvfb-run -a pnpm cli:check
 
-      - run: pnpm exec playwright install --with-deps chromium
+      # its libraries are the image's and the ones above
+      - run: pnpm exec playwright install chromium
 
       - run: pnpm exec vitest run --project browser
 

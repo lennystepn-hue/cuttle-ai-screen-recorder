@@ -1,5 +1,5 @@
 import { spawn, spawnSync } from 'node:child_process';
-import { existsSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, statfsSync, statSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -53,16 +53,29 @@ function electronBinary(): string {
  * refuses to run as root (a container). There it aborts at start, so it runs without the sandbox;
  * its pages are the project's own, kept off the network either way. And it draws with its own
  * software GL (SwiftShader through ANGLE): a server or CI runner has no GPU, Chromium blocks WebGL
- * on the system's software GL, and SwiftShader gives the same pixels on every machine.
+ * on the system's software GL, and SwiftShader gives the same pixels on every machine. A container's
+ * shared memory (/dev/shm, 64 MB in Docker) is too small for its frames: there it uses /tmp instead.
  */
-export function chromiumSwitches(linux: { root: boolean; namespaces: boolean; helper: boolean } | undefined): string[] {
+export function chromiumSwitches(linux: LinuxChromium | undefined): string[] {
   if (linux === undefined) return [];
   const sandbox = linux.root || (!linux.namespaces && !linux.helper) ? ['--no-sandbox'] : [];
-  return [...sandbox, '--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'];
+  const memory = linux.sharedMemory < SHARED_MEMORY_BYTES ? ['--disable-dev-shm-usage'] : [];
+  return [...sandbox, ...memory, '--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'];
 }
 
-/** What decides the sandbox on this Linux; undefined elsewhere. */
-function linuxSandbox(binary: string): { root: boolean; namespaces: boolean; helper: boolean } | undefined {
+/** What decides Chromium's switches on Linux: root, user namespaces, the setuid helper, /dev/shm's size (bytes). */
+export interface LinuxChromium {
+  root: boolean;
+  namespaces: boolean;
+  helper: boolean;
+  sharedMemory: number;
+}
+
+/** Shared memory Chromium's frames need at 1080p and 4K, with room. */
+const SHARED_MEMORY_BYTES = 512 * 1024 * 1024;
+
+/** What decides Chromium's switches on this Linux; undefined elsewhere. */
+function linuxChromium(binary: string): LinuxChromium | undefined {
   if (process.platform !== 'linux') return undefined;
   const setting = (name: string): string | undefined => {
     try {
@@ -78,10 +91,18 @@ function linuxSandbox(binary: string): { root: boolean; namespaces: boolean; hel
   } catch {
     // no helper
   }
+  let sharedMemory = 0;
+  try {
+    const shm = statfsSync('/dev/shm');
+    sharedMemory = shm.blocks * shm.bsize;
+  } catch {
+    // none
+  }
   return {
     root: process.getuid?.() === 0,
     namespaces: setting('apparmor_restrict_unprivileged_userns') !== '1' && setting('unprivileged_userns_clone') !== '0',
     helper,
+    sharedMemory,
   };
 }
 
@@ -100,7 +121,7 @@ export function runInElectron<T>(request: ElectronRequest, signal: AbortSignal, 
     // CLI's Electron part instead of itself when CUTTLE_CLI_ELECTRON names it.
     const { ELECTRON_RUN_AS_NODE: _node, ...env } = process.env;
     if (process.env.CUTTLE_ELECTRON) env.CUTTLE_CLI_ELECTRON = entry;
-    const child = spawn(binary, [...chromiumSwitches(linuxSandbox(binary)), entry, encodeRequest(request)], { stdio: ['ignore', 'pipe', 'inherit', 'ipc'], windowsHide: true, env });
+    const child = spawn(binary, [...chromiumSwitches(linuxChromium(binary)), entry, encodeRequest(request)], { stdio: ['ignore', 'pipe', 'inherit', 'ipc'], windowsHide: true, env });
     child.stdout?.pipe(process.stderr);
     let response: ElectronResponse | undefined;
     child.on('message', (message: ResponseMessage | ProgressMessage) => {

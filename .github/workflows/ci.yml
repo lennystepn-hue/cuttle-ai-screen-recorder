@@ -175,6 +175,6 @@ jobs:
           cuttle -C /work/reel motion new title --first
           cuttle -C /work/reel motion new end-card
           cuttle -C /work/reel --json render
-          probe="$(docker run --rm --entrypoint ffprobe -v "$work:/work" cuttle -v error -select_streams v -show_entries stream=codec_name,width,height -of csv=p=0 /work/reel/out/16x9.mp4)"
+          probe="$(docker run --rm --entrypoint ffprobe -v "$work:/work" cuttle -v error -select_streams v -show_entries stream=codec_name,width,height -of csv=p=0 /work/reel/out/export.mp4)"
           echo "$probe"
           test "$probe" = "h264,1920,1080"

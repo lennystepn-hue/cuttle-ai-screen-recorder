@@ -4,8 +4,8 @@
 // cuttle.json and everything else. Each update says what changed and what the run found, its errors
 // first; with --json one line of JSON each, for an agent to read as they come. Runs never overlap:
 // what changes during one runs after it, once. Ctrl+C stops it.
-import { existsSync, statSync, watch, type FSWatcher } from 'node:fs';
-import { join, posix, resolve, sep } from 'node:path';
+import { existsSync, readdirSync, statSync, watch, type FSWatcher } from 'node:fs';
+import { join, posix, relative, resolve, sep } from 'node:path';
 import { PROJECT_FILE, readProjectFile } from '@cuttle/core';
 import type { CuttleProject } from '@cuttle/project';
 import { CliError, toCliError } from '../errors';
@@ -25,6 +25,58 @@ const IGNORED = /^(?:out|preview|takes|voiceover|node_modules)(?:\/|$)|(?:^|\/)\
 
 /** Settles this long (ms) after the last change before it runs: an editor's save is several. */
 export const WATCH_SETTLE_MS = 300;
+
+/**
+ * Watches `dir` and every folder in it, telling each change by its path in `dir`. Windows and macOS
+ * watch a tree themselves. On Linux Node watches a tree file by file and loses a file once an editor
+ * saves it by rename: there each folder has a watch of its own (inotify reports the changes to its
+ * files), and a folder made or moved in gets one too. An error stops the watch of the project
+ * itself; a folder that went away is let go.
+ */
+function watchTree(dir: string, onChange: (path: string | undefined) => void, onError: (error: Error) => void, perFolder = process.platform === 'linux'): { close(): void } {
+  if (!perFolder) {
+    const tree = watch(dir, { recursive: true }, (_event, filename) => onChange(filename?.toString()));
+    tree.on('error', onError);
+    return tree;
+  }
+  const folders = new Map<string, FSWatcher>();
+  const add = (folder: string) => {
+    const path = relative(dir, folder).split(sep).join('/');
+    if (folders.has(folder) || (path !== '' && IGNORED.test(`${path}/`))) return;
+    let folderWatch: FSWatcher;
+    try {
+      folderWatch = watch(folder, (_event, filename) => {
+        if (!filename) return onChange(undefined);
+        const changed = join(folder, filename.toString());
+        onChange(relative(dir, changed));
+        if (statSync(changed, { throwIfNoEntry: false })?.isDirectory()) addTree(changed);
+      });
+    } catch (error) {
+      if (folder === dir) throw error;
+      return; // gone again
+    }
+    folderWatch.on('error', (error) => {
+      folderWatch.close();
+      folders.delete(folder);
+      if (folder === dir) onError(error);
+    });
+    folders.set(folder, folderWatch);
+  };
+  const addTree = (folder: string) => {
+    add(folder);
+    if (!folders.has(folder)) return;
+    const entries = (() => {
+      try {
+        return readdirSync(folder, { withFileTypes: true });
+      } catch {
+        return []; // gone again
+      }
+    })();
+    for (const entry of entries) if (entry.isDirectory()) addTree(join(folder, entry.name));
+  };
+  addTree(dir);
+  return { close: () => folders.forEach((folderWatch) => folderWatch.close()) };
+}
 
 /** The pages of the project's motion items (scenes, overlays, transitions). */
 function motionPages(project: CuttleProject): string[] {
@@ -99,6 +151,8 @@ export interface WatchOptions {
   settleMs?: number;
   /** Called once it watches (a test waits for it). */
   onReady?: () => void;
+  /** A watch for each folder, as on Linux (`watchTree`); a test's choice elsewhere. */
+  perFolder?: boolean;
 }
 
 /** Runs a check as its command does, its result and warnings caught. */
@@ -194,27 +248,33 @@ export async function watchCommand(projectDir: string, output: Output, signal: A
     }, settle);
   };
 
-  let watcher: FSWatcher;
+  let stop: (error?: Error) => void = () => {};
+  let watcher: { close(): void };
   try {
-    watcher = watch(dir, { recursive: true }, (_event, filename) => {
-      // a platform that cannot say which file: the project as a whole
-      const path = filename ? filename.toString().split(sep).join('/') : PROJECT_FILE;
-      if (IGNORED.test(path)) return;
-      pending.add(path);
-      schedule();
-    });
+    watcher = watchTree(
+      dir,
+      (filename) => {
+        // a platform that cannot say which file: the project as a whole
+        const path = filename ? filename.split(sep).join('/') : PROJECT_FILE;
+        if (IGNORED.test(path)) return;
+        pending.add(path);
+        schedule();
+      },
+      (error) => stop(error),
+      options.perFolder,
+    );
   } catch (error) {
     throw new CliError('usage', `cannot watch ${dir}: ${(error as Error).message}`, { cause: error });
   }
   output.info(`watching ${dir} (Ctrl+C stops)`);
   options.onReady?.();
   await new Promise<void>((done) => {
+    stop = (error) => {
+      if (error) output.warn(`watching stopped: ${error.message}`);
+      done();
+    };
     if (signal.aborted) return done();
     signal.addEventListener('abort', () => done(), { once: true });
-    watcher.on('error', (error) => {
-      output.warn(`watching stopped: ${error.message}`);
-      done();
-    });
   });
   watcher.close();
   if (timer) clearTimeout(timer);

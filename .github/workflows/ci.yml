@@ -1,7 +1,7 @@
 # Typecheck, unit tests and the app end to end on Windows and macOS, so a change made on one
 # platform cannot quietly break the other. The recorder's tests use its test backend (ffmpeg test
 # sources), which runs on both; the platform tests (DXGI and Win32 on Windows, CoreGraphics on
-# macOS) run on their own runner.
+# macOS) run on their own runner. Linux, which only renders, has a job of its own.
 name: CI
 
 on:
@@ -120,3 +120,61 @@ jobs:
       - run: node -e "console.log(require('electron'))"
 
       - run: pnpm app:check
+
+  # Linux renders only (no recording, no app): the CLI's renders, previews and checks in a virtual
+  # display, and the engine's goldens, all with Chromium's software GL
+  linux:
+    name: ubuntu-latest
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      # ffmpeg, a display for Electron (Xvfb), and the libraries Electron's Chromium loads
+      - run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends ffmpeg xvfb xauth libnss3 libatk1.0-0t64 libatk-bridge2.0-0t64 libcups2t64 libgtk-3-0t64 libgbm1 libasound2t64 libxss1 libxshmfence1 libdrm2 fonts-noto-color-emoji >/dev/null
+
+      - run: pnpm install --frozen-lockfile
+
+      - run: node -e "console.log(require('electron'))"
+
+      - run: pnpm typecheck
+
+      - run: pnpm exec vitest run --project node --retry 1
+
+      - run: xvfb-run -a pnpm cli:check
+
+      - run: pnpm exec playwright install --with-deps chromium
+
+      - run: pnpm exec vitest run --project browser
+
+  # The Docker image, and a video of the kit's templates rendered in it
+  docker:
+    name: docker
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - run: docker build -t cuttle .
+
+      - name: a video rendered in the image
+        run: |
+          work="$RUNNER_TEMP/docker"
+          mkdir -p "$work"
+          cuttle() { timeout 300 docker run --rm --init -v "$work:/work" cuttle "$@"; }
+          cuttle init /work/reel
+          cuttle -C /work/reel motion new title --first
+          cuttle -C /work/reel motion new end-card
+          cuttle -C /work/reel --json render
+          probe="$(docker run --rm --entrypoint ffprobe -v "$work:/work" cuttle -v error -select_streams v -show_entries stream=codec_name,width,height -of csv=p=0 /work/reel/out/export.mp4)"
+          echo "$probe"
+          test "$probe" = "h264,1920,1080"

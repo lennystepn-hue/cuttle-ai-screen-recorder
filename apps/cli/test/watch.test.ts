@@ -46,7 +46,7 @@ describe('runsFor', () => {
 });
 
 describe('cuttle watch', () => {
-  it('reruns a motion page’s check within two seconds of a save (also one by rename), one run after another', async () => {
+  const reruns = (perFolder: boolean | undefined) => async () => {
     const dir = mkdtempSync(join(tmpdir(), 'cuttle-watch-'));
     dirs.push(dir);
     mkdirSync(join(dir, 'motion', 'title'), { recursive: true });
@@ -61,6 +61,7 @@ describe('cuttle watch', () => {
     const watching = new Promise<void>((done) => (ready = done));
     const stopped = watchCommand(dir, createOutput(true, { stdout: (text) => void (stdout += text), stderr: () => {} }), controller.signal, {
       settleMs: 100,
+      perFolder,
       onReady: () => ready(),
       run: async (_dir, run) => {
         ran.push({ run, at: performance.now() });
@@ -113,6 +114,13 @@ describe('cuttle watch', () => {
     await new Promise((done) => setTimeout(done, 300));
     expect(ran.slice(during + 1).map(({ run }) => run.check)).toEqual(['motion']);
 
+    // a folder made while it watches: its files too
+    const made = ran.length;
+    mkdirSync(join(dir, 'motion', 'chart'));
+    await new Promise((done) => setTimeout(done, 300));
+    writeFileSync(join(dir, 'motion', 'chart', 'index.html'), '<!doctype html>');
+    await until(made + 1);
+
     controller.abort();
     const { updates } = await stopped;
     expect(updates).toBe(early + ran.length);
@@ -121,7 +129,9 @@ describe('cuttle watch', () => {
     expect(lines).toHaveLength(updates);
     expect(lines.slice(early).find((line) => line.check === 'motion')).toMatchObject({ check: 'motion', src: 'motion/title/index.html', changed: ['motion/title/index.html'], errors: [], result: { sheet: 'preview/sheet.png' } });
     expect(lines.slice(early).find((line) => line.check === 'preview')).toMatchObject({ changed: ['cuttle.json'], errors: ['a warning'] });
-  }, 30_000);
+  };
+  it('reruns a motion page’s check within two seconds of a save (also one by rename), one run after another', reruns(undefined), 30_000);
+  it('does the same with a watch for each folder, as on Linux, where a file saved by rename would get lost', reruns(true), 30_000);
 
   it('refuses a folder without a project', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'cuttle-watch-empty-'));

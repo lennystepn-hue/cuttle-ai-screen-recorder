@@ -1,5 +1,5 @@
 import { spawn, spawnSync } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, statfsSync, statSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -47,6 +47,66 @@ function electronBinary(): string {
 }
 
 /**
+ * Chromium's switches on Linux, none elsewhere. Its sandbox needs unprivileged user namespaces or
+ * its setuid helper (`chrome-sandbox` next to the binary, owned by root): Ubuntu 24.04 allows user
+ * namespaces only to programs AppArmor names, npm's Electron has no setuid helper, and Chromium
+ * refuses to run as root (a container). There it aborts at start, so it runs without the sandbox;
+ * its pages are the project's own, kept off the network either way. And it draws with its own
+ * software GL (SwiftShader through ANGLE): a server or CI runner has no GPU, Chromium blocks WebGL
+ * on the system's software GL, and SwiftShader gives the same pixels on every machine. A container's
+ * shared memory (/dev/shm, 64 MB in Docker) is too small for its frames: there it uses /tmp instead.
+ */
+export function chromiumSwitches(linux: LinuxChromium | undefined): string[] {
+  if (linux === undefined) return [];
+  const sandbox = linux.root || (!linux.namespaces && !linux.helper) ? ['--no-sandbox'] : [];
+  const memory = linux.sharedMemory < SHARED_MEMORY_BYTES ? ['--disable-dev-shm-usage'] : [];
+  return [...sandbox, ...memory, '--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'];
+}
+
+/** What decides Chromium's switches on Linux: root, user namespaces, the setuid helper, /dev/shm's size (bytes). */
+export interface LinuxChromium {
+  root: boolean;
+  namespaces: boolean;
+  helper: boolean;
+  sharedMemory: number;
+}
+
+/** Shared memory Chromium's frames need at 1080p and 4K, with room. */
+const SHARED_MEMORY_BYTES = 512 * 1024 * 1024;
+
+/** What decides Chromium's switches on this Linux; undefined elsewhere. */
+function linuxChromium(binary: string): LinuxChromium | undefined {
+  if (process.platform !== 'linux') return undefined;
+  const setting = (name: string): string | undefined => {
+    try {
+      return readFileSync(`/proc/sys/kernel/${name}`, 'utf8').trim();
+    } catch {
+      return undefined;
+    }
+  };
+  let helper = false;
+  try {
+    const stats = statSync(join(dirname(binary), 'chrome-sandbox'));
+    helper = stats.uid === 0 && (stats.mode & 0o4000) !== 0;
+  } catch {
+    // no helper
+  }
+  let sharedMemory = 0;
+  try {
+    const shm = statfsSync('/dev/shm');
+    sharedMemory = shm.blocks * shm.bsize;
+  } catch {
+    // none
+  }
+  return {
+    root: process.getuid?.() === 0,
+    namespaces: setting('apparmor_restrict_unprivileged_userns') !== '1' && setting('unprivileged_userns_clone') !== '0',
+    helper,
+    sharedMemory,
+  };
+}
+
+/**
  * Runs a render, preview or page capture in Electron (Chromium: WebGL2, WebCodecs) and returns its
  * result. Electron's output (progress, warnings) goes to stderr, so stdout stays free for --json.
  * `signal` (Ctrl+C) sends a cancel over the IPC channel: Electron runs without a console, so the
@@ -61,7 +121,7 @@ export function runInElectron<T>(request: ElectronRequest, signal: AbortSignal, 
     // CLI's Electron part instead of itself when CUTTLE_CLI_ELECTRON names it.
     const { ELECTRON_RUN_AS_NODE: _node, ...env } = process.env;
     if (process.env.CUTTLE_ELECTRON) env.CUTTLE_CLI_ELECTRON = entry;
-    const child = spawn(binary, [entry, encodeRequest(request)], { stdio: ['ignore', 'pipe', 'inherit', 'ipc'], windowsHide: true, env });
+    const child = spawn(binary, [...chromiumSwitches(linuxChromium(binary)), entry, encodeRequest(request)], { stdio: ['ignore', 'pipe', 'inherit', 'ipc'], windowsHide: true, env });
     child.stdout?.pipe(process.stderr);
     let response: ElectronResponse | undefined;
     child.on('message', (message: ResponseMessage | ProgressMessage) => {
@@ -75,11 +135,11 @@ export function runInElectron<T>(request: ElectronRequest, signal: AbortSignal, 
     };
     signal.addEventListener('abort', onAbort, { once: true });
     child.on('error', (error) => reject(new CliError('internal', `Electron could not start: ${error.message}`, { cause: error })));
-    child.on('close', (code) => {
+    child.on('close', (code, killed) => {
       signal.removeEventListener('abort', onAbort);
       clearTimeout(grace);
       if (response === undefined) {
-        reject(new CliError(signal.aborted ? 'cancelled' : 'render', `Electron exited (code ${code}) without a result`));
+        reject(new CliError(signal.aborted ? 'cancelled' : 'render', `Electron exited (${killed ?? `code ${code}`}) without a result`));
       } else if (response.ok) {
         resolve(response.result as T);
       } else {

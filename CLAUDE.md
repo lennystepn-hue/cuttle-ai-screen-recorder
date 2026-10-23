@@ -67,6 +67,14 @@ Cuttle runs on **Windows and macOS**. A change made on one has to keep working o
 - **Icons**: one generator for both, `tools/icons.mjs` (`pnpm icons`): Windows' icon.ico, icon.png
   and tray.png, macOS's icon.icns (packed on a Mac only), icon-mac.png and trayTemplate, and the
   app's mark (`renderer/mark.ts`). A change to the design is made there, never to one platform's files.
+- **Linux renders, nothing more**: the CLI's `render`, `preview`, `motion check` and `music check`
+  run in a virtual display (`xvfb-run -a`), in CI's `linux` job, the `Dockerfile` and the release
+  video action (`actions/release-video`). Recording refuses (`platformFor`), and the app and the
+  OCR stay Windows and macOS. There the CLI gives Chromium switches (`chromiumSwitches`): it draws
+  with SwiftShader, runs without its sandbox where that cannot start (Ubuntu 24.04 without the
+  setuid helper, root in a container) and keeps its frames out of a small /dev/shm (Docker's). A motion frame gets longer to paint there, and `cuttle watch`
+  watches each folder (Node's recursive watch loses a file saved by rename). Nothing in the Windows
+  or macOS paths may change for Linux.
 
 ## Checks
 

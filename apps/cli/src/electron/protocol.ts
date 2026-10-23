@@ -36,6 +36,14 @@ export interface ResponseMessage {
   response: ElectronResponse;
 }
 
+/** Electron → CLI: how far the job is (frames or stills done of all), every tenth. */
+export interface ProgressMessage {
+  type: 'progress';
+  label: string;
+  done: number;
+  total: number;
+}
+
 /** CLI → Electron: stop the job and clean up (Ctrl+C). */
 export interface CancelMessage {
   type: 'cancel';

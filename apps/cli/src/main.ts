@@ -339,6 +339,15 @@ export async function runCli(argv: readonly string[], streams?: Streams): Promis
     .description('remove a saved kit (projects keep what it set)')
     .action(action((output, _project, name: string) => brandRemoveCommand(name, output)));
 
+  program
+    .command('mcp')
+    .description('Cuttle as an MCP server over stdio: its commands as tools for any agent (Claude Desktop, Claude Code, Cursor); recording stays with you')
+    .action(async () => {
+      // not through action(): stdout is the protocol's, the server answers on it until the client goes
+      const { serveMcp } = await import('./mcp');
+      await serveMcp();
+    });
+
   const voice = program.command('voice').description("the narration: lines of text spoken by a voice on this computer or ElevenLabs' (by its voice ID), or recordings made elsewhere, at moments of the video");
   voice
     .command('list')

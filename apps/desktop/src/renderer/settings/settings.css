@@ -332,6 +332,7 @@
   margin-top: 10px;
 }
 .command {
+  max-width: 100%;
   height: 30px;
   display: inline-flex;
   align-items: center;
@@ -348,6 +349,11 @@
   font-family: var(--mono);
   color: var(--text);
   user-select: text;
+  /* a long text (an MCP client's config) stays on its line, cut at the end */
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .command:hover {
   color: var(--text);

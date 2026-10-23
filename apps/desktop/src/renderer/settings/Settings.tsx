@@ -209,6 +209,11 @@ export function Settings() {
                   <Section title="Tools">
                     <ClaudeTools tools={tools} setTools={setTools} />
                   </Section>
+                  <Section title="Other agents (MCP)">
+                    <Row label="Claude Desktop, Cursor and other MCP clients" hint="Cuttle's commands as tools for any agent: add this to the client's MCP settings. It needs the cuttle command (above). Recording stays with you." stacked>
+                      <CopyText text={MCP_CONFIG} testid="copy-mcp" />
+                    </Row>
+                  </Section>
                 </>
               )}
 
@@ -700,6 +705,30 @@ function Updates({ view, change }: { view: SettingsView | undefined; change: (ne
         </button>
       </Row>
     </>
+  );
+}
+
+/** The MCP server's entry for a client's settings: Windows starts the cuttle shim (a .cmd) through cmd. */
+const MCP_CONFIG = JSON.stringify({ mcpServers: { cuttle: MAC ? { command: 'cuttle', args: ['mcp'] } : { command: 'cmd', args: ['/c', 'cuttle', 'mcp'] } } });
+
+/** A text to copy (into a client's settings), with a button that says it was. */
+function CopyText({ text, testid }: { text: string; testid: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <button
+      className="command"
+      onClick={() => {
+        void bridge.invoke('tools:copy', text);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 1600);
+      }}
+      title="Copy, then paste it into the client's MCP settings"
+      data-testid={testid}
+    >
+      <code>{text}</code>
+      {copied ? <CheckIcon size={13} /> : <CopyIcon size={13} />}
+      <span>{copied ? 'Copied' : 'Copy'}</span>
+    </button>
   );
 }
 

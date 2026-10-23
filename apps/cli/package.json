@@ -13,9 +13,11 @@
     "@cuttle/project": "workspace:*",
     "@cuttle/recorder": "workspace:*",
     "@cuttle/timeline": "workspace:*",
+    "@modelcontextprotocol/sdk": "1.32.1",
     "commander": "15.0.0",
     "koffi": "3.3.2",
     "sherpa-onnx-node": "1.13.8",
-    "uiohook-napi": "1.5.5"
+    "uiohook-napi": "1.5.5",
+    "zod": "^4.6.7"
   }
 }

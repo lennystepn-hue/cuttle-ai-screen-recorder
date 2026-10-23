@@ -40,7 +40,8 @@ export async function renderCommand(projectDir: string, args: RenderArgs, output
   const result = await runInElectron<RenderResult>(
     {
       command: 'render',
-      quiet: output.json,
+      // its progress comes over the IPC channel (to stderr, and to `cuttle mcp`'s client)
+      quiet: true,
       projectDir: file.dir,
       out,
       ...(args.format !== undefined && { format: args.format }),
@@ -49,6 +50,7 @@ export async function renderCommand(projectDir: string, args: RenderArgs, output
       ...((args.srt || args.vtt) && { subtitles: [...(args.srt ? ['srt'] : []), ...(args.vtt ? ['vtt'] : [])] }),
     },
     signal,
+    (label, done, total) => output.info(`${label} ${done}/${total}`),
   );
   output.result(result, () =>
     [

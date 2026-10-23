@@ -57,8 +57,10 @@ export async function previewCommand(projectDir: string, args: PreviewArgs, outp
   const outDir = args.out ? resolve(args.out) : join(file.dir, 'preview');
   output.info(`rendering ${times.length} still(s) into ${outDir} …`);
   const result = await runInElectron<PreviewResult>(
-    { command: 'preview', projectDir: file.dir, outDir, times, quiet: output.json, clean: args.out === undefined, ...(args.format !== undefined && { format: args.format }), ...(sheet && { sheet: edges.length > 0 && at.length === 0 ? { columns: 4 } : {} }) },
+    // its progress comes over the IPC channel (to stderr, and to `cuttle mcp`'s client)
+    { command: 'preview', projectDir: file.dir, outDir, times, quiet: true, clean: args.out === undefined, ...(args.format !== undefined && { format: args.format }), ...(sheet && { sheet: edges.length > 0 && at.length === 0 ? { columns: 4 } : {} }) },
     signal,
+    (label, done, total) => output.info(`${label} ${done}/${total}`),
   );
   if (edges.length > 0) result.masks = edges;
   const named = (edge: (typeof edges)[number]) => `${edge.label ?? 'mask'} ${edge.id ?? `#${edge.mask}`}`;

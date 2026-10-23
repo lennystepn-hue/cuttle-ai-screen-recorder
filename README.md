@@ -251,6 +251,27 @@ private and renders the MP4.
 needs `cuttle` on PATH (`pnpm cli:install`). Then ask Claude Code for a demo video, or type
 `/cuttle`.
 
+## With any agent (MCP)
+
+`cuttle mcp` is an MCP server over stdio: Claude Desktop, Claude Code, Cursor or any MCP client
+gets Cuttle's commands as tools (make a project, add and check motion pages, music, a narration,
+preview, render…), the skill's guides as a tool, and `cuttle.json` to read and write. Previews and
+checks answer with their stills as images; renders report their progress. Recording stays with you:
+no tool records, you record in the app or with `cuttle record`.
+
+Claude Desktop (`claude_desktop_config.json`), Cursor (`.cursor/mcp.json`) and other clients:
+
+```json
+{ "mcpServers": { "cuttle": { "command": "cuttle", "args": ["mcp"] } } }
+```
+
+On Windows `cuttle` is a `.cmd` shim, which a client starts through `cmd`:
+`{ "command": "cmd", "args": ["/c", "cuttle", "mcp"] }`. Claude Code:
+
+```bash
+claude mcp add cuttle -- cuttle mcp
+```
+
 
 ## Privacy
 

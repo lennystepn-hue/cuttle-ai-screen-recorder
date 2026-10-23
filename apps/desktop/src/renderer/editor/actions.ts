@@ -67,7 +67,7 @@ export function chooseTool(tool: Tool): void {
 /** The screen's size, and its scale when the take says one (zooms on clicks are sized by it, as suggest sizes them). */
 const screenSize = (): ZoomScreen => {
   const media = store.get().media;
-  return media ? { ...media.screen.size, ...(media.scale !== undefined && { scale: media.scale }) } : { width: 1920, height: 1080 };
+  return media ? { ...media.screenSize, ...(media.scale !== undefined && { scale: media.scale }) } : { width: 1920, height: 1080 };
 };
 
 /** Splits the clip under the playhead there (a continuous cut). */
@@ -434,8 +434,8 @@ export function cutShownAt(spans: readonly SceneSpan[], cut: { from: number; to:
 
 /** One clip over the whole take, instead of the cut (undo brings the cut back). */
 export function showRawTake(): void {
-  const media = store.get().media;
-  if (!media) return;
-  const scenes: Scene[] = [{ type: 'clip', from: Math.max(0, media.screen.start), to: media.screen.end, speed: 1 }];
+  const screen = store.get().media?.screen;
+  if (!screen) return;
+  const scenes: Scene[] = [{ type: 'clip', from: Math.max(0, screen.start), to: screen.end, speed: 1 }];
   if (edit([{ type: 'scenes', scenes: scenes as unknown as Record<string, unknown>[] }], 'Show raw take')) select(undefined);
 }

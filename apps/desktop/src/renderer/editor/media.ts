@@ -150,7 +150,10 @@ async function placeholder(path?: string): Promise<ImageBitmap> {
  * webcam on), see `ensureMedia`.
  */
 export interface EditorMedia {
-  screen: VideoSource;
+  /** The take's screen track; none in a video without a recording (no clip shows one), as the export renders it. */
+  screen?: VideoSource;
+  /** The take's frame size: the screen track's, else the output's, where nothing of a take shows. */
+  screenSize: { width: number; height: number };
   /** The recorded display's pixels per point (take.json), when it says: zooms are sized by it. */
   scale?: number;
   webcam?: VideoSource & { offset: number };
@@ -216,8 +219,11 @@ async function optional<T>(media: Pick<EditorMedia, 'warnings' | 'failed'>, key:
 
 export async function openProjectMedia(info: ProjectInfo, project: CuttleProject): Promise<EditorMedia> {
   const { sources } = project;
-  const screen = await openVideo(sources.screen, 'The screen recording');
-  const media: EditorMedia = { screen, ...(info.scale !== undefined && { scale: info.scale }), events: [], markers: [], stills: new Map(), narration: new Map(), offsets: info.offsets, failed: new Set(), warnings: [] };
+  // a video of motion scenes, stills and cards shows nothing of a take: it opens without one
+  const clips = project.scenes.some((scene) => scene.type === 'clip');
+  const screen = clips || (await present(sources.screen)) ? await openVideo(sources.screen, 'The screen recording') : undefined;
+  const screenSize = screen?.size ?? { width: project.output.width, height: project.output.height };
+  const media: EditorMedia = { ...(screen && { screen }), screenSize, ...(info.scale !== undefined && { scale: info.scale }), events: [], markers: [], stills: new Map(), narration: new Map(), offsets: info.offsets, failed: new Set(), warnings: [] };
   if (sources.events) {
     const text = await optional(media, sources.events, async () => {
       const found = await fetchText(sources.events!);

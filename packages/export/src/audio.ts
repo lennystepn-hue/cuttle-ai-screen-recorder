@@ -405,8 +405,8 @@ export function alphaMuxArgs({ video, audio, master, chapters, container, out }:
   ];
 }
 
-/** dB the master limiter stays under its ceiling: the AAC encoder's overshoot on loud peaks. */
-export const CODEC_HEADROOM = 0.5;
+/** dB the master limiter stays under its ceiling: the AAC encoder overshoots on loud transients (hits on hard cuts went 1.1 dB over at 0.5). */
+export const CODEC_HEADROOM = 1.5;
 
 /**
  * The master stage for a platform's loudness: `gain` dB on the whole mix, then a limiter at four

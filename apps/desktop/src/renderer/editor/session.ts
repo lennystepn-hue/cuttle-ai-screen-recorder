@@ -128,7 +128,7 @@ export const documentProject = (): CuttleProject | undefined => store.get().doc?
 export function editLimits(): EditLimits {
   const { media, doc } = store.get();
   return {
-    ...(media && { sourceEnd: media.screen.end, screen: media.screen.size }),
+    ...(media && { ...(media.screen && { sourceEnd: media.screen.end }), screen: media.screenSize }),
     ...(doc && { fps: doc.project.output.fps }),
   };
 }

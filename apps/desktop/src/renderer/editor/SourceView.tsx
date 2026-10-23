@@ -69,7 +69,7 @@ export function SourceView() {
   const project = active ? shownProject() : undefined;
   const place = active ? playheadPlace(t) : undefined;
   const source = place?.source;
-  const screen = media?.screen.size ?? { width: 1920, height: 1080 };
+  const screen = media?.screenSize ?? { width: 1920, height: 1080 };
   const inner = fitInside({ width: Math.max(1, size.width - 2 * MARGIN), height: Math.max(1, size.height - BAND - MARGIN) }, screen);
   const fit: Fit = { x: inner.x + MARGIN, y: inner.y + BAND, scale: inner.scale };
   // A selected zoom or mask the playhead is not on shows on the frame where it starts.
@@ -98,6 +98,7 @@ export function SourceView() {
     const player = currentPlayer();
     if (!player) return;
     const video = player.screenSource;
+    if (!video) return;
     if (grabber.current?.source !== video) grabber.current = { grabber: new FrameGrabber(video), source: video };
     let cancelled = false;
     void grabber.current.grabber.grab(frameAt).then(

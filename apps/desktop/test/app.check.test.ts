@@ -2850,7 +2850,7 @@ describe.runIf(enabled)('the Cuttle app', () => {
   }, 180_000);
 
   // late in the check: the project it opens joins the recent list the pill's check counts
-  it('opens the project the cuttle command names (cuttle open): a second launch hands it to the running app', async () => {
+  it('opens the project the cuttle command names (cuttle open): a second launch hands it to the running app; a video without a recording opens', async () => {
     const reel = join(root, 'reel');
     for (const argv of [['init', reel], ['-C', reel, 'motion', 'new', 'title', '--first']]) {
       expect(spawnSync('node', [CLI, '--json', ...argv], { encoding: 'utf8', timeout: 60_000 }).status).toBe(0);
@@ -2864,6 +2864,16 @@ describe.runIf(enabled)('the Cuttle app', () => {
     expect(opened.status, opened.stdout + opened.stderr).toBe(0);
     expect(JSON.parse(opened.stdout)).toEqual({ dir: reel, app: MAIN });
     await expect.poll(editorTitles, { timeout: 30_000 }).toContain('reel · Cuttle');
+    // the project has no take (a video written in code): the editor opens it all the same, and plays its page
+    const page = await waitForPage(
+      app,
+      async (candidate) =>
+        candidate.url().includes('/editor.html') &&
+        basename((await candidate.evaluate(() => (window as unknown as { cuttle: { invoke(channel: string): Promise<{ dir: string }> } }).cuttle.invoke('project:info'))).dir) === 'reel',
+    );
+    await page.waitForSelector('.app[data-phase="ready"]', { timeout: 30_000 });
+    expect(await page.locator('.project-name span').textContent()).toContain('no recording');
+    expect(await page.locator('.scene').count()).toBe(1);
     await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find((window) => window.getTitle() === 'reel · Cuttle')?.close());
   });
 

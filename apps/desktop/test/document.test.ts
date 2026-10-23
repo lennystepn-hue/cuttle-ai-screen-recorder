@@ -235,8 +235,11 @@ describe('the gestures', () => {
     expect(dragRange([4, 6], 'move', -3, 4, 0.1)).toEqual([0, 2]);
     expect(dragRange([4, 6], 'start', 1, 4, 0.1)).toEqual([5.9, 6]);
     expect(dragRange([4, 6], 'end', -0.25, 2, 0.1)).toEqual([4, 5.5]);
-    expect(overlayRange({ at: 2, duration: 3 })).toEqual([2, 5]);
-    expect(overlayRange({ from: 1, to: 4 })).toEqual([1, 4]);
+    expect(overlayRange('zooms', { at: 2, duration: 3 })).toEqual([2, 5]);
+    expect(overlayRange('masks', { from: 1, to: 4 })).toEqual([1, 4]);
+    // an arrow's from and to are its points (source px): its range is its at and duration
+    expect(overlayRange('annotations', { at: 2, duration: 3, from: [100, 200], to: [300, 120] })).toEqual([2, 5]);
+    expect(dragRange(overlayRange('annotations', { at: 2, duration: 3, from: [100, 200], to: [300, 120] }), 'end', 1, 1, 0.1)).toEqual([2, 6]);
     expect(rangeFields('masks', 1, 2)).toEqual({ from: 1, to: 2 });
     expect(rangeFields('zooms', 1, 3)).toEqual({ at: 1, duration: 2 });
   });

@@ -540,7 +540,7 @@ export function Timeline() {
       return;
     }
     if (!item || scene?.type !== 'clip') return adding && clicked();
-    const range = overlayRange(item as { from?: number; to?: number; at?: number; duration?: number });
+    const range = overlayRange(list, item as { from?: unknown; to?: unknown; at?: number; duration?: number });
     const others = targets({ overlay: block.id });
     let commands: Command[] | undefined;
     follow(

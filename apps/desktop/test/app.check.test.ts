@@ -76,7 +76,7 @@ interface Written {
   zooms: { id: string; at: number; duration: number; rect: number[]; enabled?: boolean }[];
   masks: { id: string; from: number; to: number; rect: number[]; style?: string; label?: string }[];
   texts: { id: string; text: string; position?: string; at?: number; enabled?: boolean }[];
-  annotations?: { id: string; kind: string; at: number; rect?: number[]; from?: number[]; to?: number[]; text?: string }[];
+  annotations?: { id: string; kind: string; at: number; duration: number; rect?: number[]; from?: number[]; to?: number[]; text?: string }[];
 }
 
 const electronPath = (): string => createRequire(import.meta.url)('electron') as unknown as string;
@@ -740,6 +740,16 @@ describe.runIf(enabled)('the Cuttle app', () => {
     expect(arrow.to![0]! - arrow.from![0]!).toBeGreaterThan(50);
     expect(arrow.to![1]!).toBeLessThan(arrow.from![1]!);
     await editor.waitForSelector('.source-arrow.selected');
+    // its block on the timeline: longer by its end edge, then moved, its points kept (they are not seconds)
+    const block = '[data-kind=annotation][data-id=n2]';
+    await editor.waitForSelector(`${block} .edge.end`);
+    await drag(`${block} .edge.end`, [40, 0]);
+    await savedWhen((file) => file.annotations![1]!.duration > arrow.duration + 0.1);
+    const longer = onDisk().annotations![1]!;
+    await drag(block, [30, 0], { from: [0.4, 0.5] });
+    await savedWhen((file) => file.annotations![1]!.at > longer.at + 0.05);
+    expect(onDisk().annotations![1]).toMatchObject({ from: arrow.from, to: arrow.to, duration: longer.duration });
+    expect((await state()).error).toBeUndefined();
     await shot('08-annotations');
     // the video draws them: no error at the playhead
     await editor.keyboard.press('Escape');

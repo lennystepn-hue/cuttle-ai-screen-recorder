@@ -11,9 +11,13 @@ export function snapTime(t: number, targets: readonly number[], tolerance: numbe
   return { t: Math.round(t * fps) / fps };
 }
 
-/** An overlay's source range: a mask's from and to, a zoom's or caption's at and at + duration. */
-export function overlayRange(item: { from?: number; to?: number; at?: number; duration?: number }): [number, number] {
-  return item.from !== undefined && item.to !== undefined ? [item.from, item.to] : [item.at ?? 0, (item.at ?? 0) + (item.duration ?? 0)];
+/**
+ * An overlay's source range: a mask's from and to, anything else's at and at + duration. By its list,
+ * as `rangeFields` writes it: an arrow's `from` and `to` are its points, not seconds.
+ */
+export function overlayRange(list: 'zooms' | 'masks' | 'texts' | 'annotations' | 'cameras' | 'overlays' | 'sounds', item: { from?: unknown; to?: unknown; at?: number; duration?: number }): [number, number] {
+  if (list === 'masks') return [Number(item.from), Number(item.to)];
+  return [item.at ?? 0, (item.at ?? 0) + (item.duration ?? 0)];
 }
 
 /** The fields that give an overlay of `list` the source range [from, to) (a sound: its moment, `from`). */

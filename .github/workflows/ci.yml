@@ -126,7 +126,7 @@ jobs:
   linux:
     name: ubuntu-latest
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
 
@@ -137,8 +137,10 @@ jobs:
           node-version: 24
           cache: pnpm
 
-      # ffmpeg, a display for Electron (Xvfb), and the libraries Electron's Chromium loads
+      # ffmpeg, a display for Electron (Xvfb), and the libraries Electron's Chromium loads; without
+      # man-db's index rebuilt after each install, which took the runner over 20 minutes
       - run: |
+          sudo rm -f /var/lib/man-db/auto-update
           sudo apt-get update -qq
           sudo apt-get install -y -qq --no-install-recommends ffmpeg xvfb xauth libnss3 libatk1.0-0t64 libatk-bridge2.0-0t64 libcups2t64 libgtk-3-0t64 libgbm1 libasound2t64 libxss1 libxshmfence1 libdrm2 fonts-noto-color-emoji >/dev/null
 

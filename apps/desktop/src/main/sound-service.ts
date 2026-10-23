@@ -128,6 +128,7 @@ export class EditorSound {
           version: shown.version,
           key,
           info: result.info ?? null,
+          stems: result.stems,
           renderMs: result.renderMs,
           errors: report.errors,
           console: report.console,

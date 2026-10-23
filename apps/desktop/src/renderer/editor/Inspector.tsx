@@ -1437,7 +1437,7 @@ function MusicDetails({ music }: { music: Music }) {
   const status = useStore(store, (state) => state.soundStatus);
   const declared = useMusicParams(music.src);
   const info = status.info;
-  const summary = [info?.bpm ? `${Math.round(info.bpm * 10) / 10} BPM` : '', info?.key ?? '', info?.sections?.length ? `${info.sections.length} parts` : ''].filter(Boolean).join(' · ');
+  const summary = [info?.bpm ? `${Math.round(info.bpm * 10) / 10} BPM` : '', info?.key ?? '', info?.sections?.length ? `${info.sections.length} sections` : ''].filter(Boolean).join(' · ');
   const values = music.params;
   const param = (name: string, value: unknown): Command => {
     const next: Record<string, unknown> = { ...values };
@@ -1466,6 +1466,29 @@ function MusicDetails({ music }: { music: Music }) {
           <RangeInput value={music.duck} min={0} max={30} label="How far the music goes down under speech (dB)" toCommand={(value) => musicEdit({ duck: value })} commitLabel="Music under speech" format={(value) => (value > 0 ? `−${value} dB` : 'as is')} testId="music-duck" />
         </Row>
       </Section>
+      {status.stems && status.stems.length > 0 && (
+        <Section title="Stems" testId="music-stems">
+          {status.stems.map((stem) => (
+            <Row key={stem} label={stem[0]!.toUpperCase() + stem.slice(1)}>
+              <RangeInput
+                value={Math.round((music.stems?.[stem] ?? 1) * 100)}
+                min={0}
+                max={200}
+                label={`The ${stem}' level`}
+                toCommand={(value) => {
+                  // as composed: left out
+                  const { [stem]: _left, ...rest } = music.stems ?? {};
+                  const next = value === 100 ? rest : { ...rest, [stem]: value / 100 };
+                  return musicEdit({ stems: Object.keys(next).length > 0 ? next : undefined });
+                }}
+                commitLabel={`The music's ${stem}`}
+                format={(value) => (value === 0 ? 'off' : value === 100 ? 'as made' : `${value}%`)}
+                testId={`music-stem-${stem}`}
+              />
+            </Row>
+          ))}
+        </Section>
+      )}
       {declared && (declared.params.length > 0 || declared.issues.length > 0) && (
         <Section title="Params" testId="music-params">
           {declared.issues.map((issue) => (

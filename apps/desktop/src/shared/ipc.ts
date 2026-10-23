@@ -292,6 +292,8 @@ export interface SoundStatusView {
   /** The rendered soundtrack to ask for (`sound:soundtrack`). */
   key?: string;
   info?: MusicInfoView | null;
+  /** The music's stems (what its page mixes as stems: the kit's drums, bass, keys, pads, lead). */
+  stems?: string[];
   renderMs?: number;
   failure?: string;
   errors: string[];

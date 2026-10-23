@@ -331,7 +331,8 @@ Then refine `cuttle.json` ([project.md](project.md)) and preview again:
   `cuttle -C "<project>" --json music check`: it renders the music alone into `preview/music.wav`
   and `preview/music.png` and reports each part's level, the hits on the scene changes, the
   loudness and the page's errors. Read the sheet, fix the errors, check again. It goes down under
-  speech by itself; `music set --volume`, `--duck` and `--param` tune it. Ask the user before
+  speech by itself; `music set --volume`, `--duck` and `--param` tune it, and `--stem drums=0.5`
+  sets a stem's level ("less drums", "no lead under the voice"). Ask the user before
   adding music to a video with a voice that should stand alone.
 - **Sounds.** A sound at a moment, without the music: `cuttle -C "<project>" --json sound add whoosh --at 12.4`
   (source seconds) or `--scene s5 --at 0.2`; `sound list` has the built-in sounds. A motion page

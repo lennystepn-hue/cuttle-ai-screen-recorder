@@ -197,13 +197,14 @@ export const COMMAND_TOOLS: readonly CommandTool[] = [
   tool({
     name: 'music_set',
     title: 'Set the music',
-    description: 'The music\'s page, level, duck under speech, its params, and whether it plays.',
+    description: "The music's page, level, duck under speech, its params, its stems' levels (drums, bass, keys, pads, lead: 0 silent, 1 as composed, up to 2; music_check lists them), and whether it plays.",
     input: {
       project,
       src: z.string().optional(),
       volume: z.number().min(0).max(1).optional(),
       duck: z.number().min(0).max(40).optional(),
       params: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])).optional().describe('the page\'s params (a value "" removes one)'),
+      stems: z.record(z.string(), z.number().min(0).max(2)).optional().describe("each stem's level, e.g. { drums: 0.5 }"),
       play: z.boolean().optional(),
     },
     argv: (input) => [
@@ -212,6 +213,7 @@ export const COMMAND_TOOLS: readonly CommandTool[] = [
       ...option('src', input.src),
       ...option('volume', input.volume),
       ...option('duck', input.duck),
+      ...options('stem', Object.entries(input.stems ?? {}).map(([name, level]) => `${name}=${level}`)),
       ...options('param', Object.entries(input.params ?? {}).map(([name, value]) => `${name}=${value}`)),
       ...(input.play === true ? ['--on'] : input.play === false ? ['--off'] : []),
     ],

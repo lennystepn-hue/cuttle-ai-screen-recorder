@@ -116,7 +116,8 @@ builds, a code editor that types itself, a laptop in 3D, particles, an After Eff
 (Lottie), anything HTML, CSS, canvas, SVG, WebGL or Three.js can draw. Cuttle renders the page frame
 by frame on the video's own clock, so a render is the same every time, and one page serves 16:9,
 1:1 and 9:16. The music is a page too: it composes the score in WebAudio for this
-video, from its scenes and cuts, and nothing is licensed or downloaded.
+video, from its scenes and cuts, and nothing is licensed or downloaded. Its stems (drums, bass,
+keys, pads, lead) each have a level in the editor's mixer, or with `cuttle music set --stem drums=0.5`.
 
 A whole motion video from the command line, from an empty folder to an MP4 (this one renders in
 seconds):

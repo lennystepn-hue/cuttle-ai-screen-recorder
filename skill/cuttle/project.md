@@ -27,6 +27,7 @@ Unknown fields are errors, and every command names the path of a problem, counti
   "sources": {
     "screen": "takes/1/screen.mp4",
     "mic": "takes/1/mic.m4a",
+    "system": "takes/1/system.m4a",
     "events": "takes/1/events.jsonl",
     "markers": "takes/1/markers.json",
     "transcript": "takes/1/transcript.json",
@@ -65,7 +66,9 @@ once the mic was transcribed (`cuttle transcribe`, or `suggest` with a speech mo
 transcript.json: `{ "language", "model", "words": [{ "t", "end", "text" }], "sounds": [{ "t", "end" }] }`,
 in source seconds; `sounds` are stretches the mic heard without a word (a cough, a dropped filler).
 `cleanMic` is the mic cleaned up with it (less noise, even loudness), played instead of the mic
-while `look.audio.cleanup` is on. `screenText` is the screen's text, read where the picture
+while `look.audio.cleanup` is on. `system` is what the computer played while the take recorded
+(`record --system-audio`: its apps' sound, stereo; a window take on macOS hears the window's app
+alone), cut and sped up with the clips like the mic. `screenText` is the screen's text, read where the picture
 changed (`suggest`, on Windows): one JSON line per frame read,
 `{ "t", "lines": [{ "text", "rect", "words": [{ "text", "rect" }] }] }`. Read it to find what the
 screen showed where; never edit it.
@@ -92,7 +95,7 @@ happens (below).
 | `cursor` | `enabled` (`true`), `style` (`system`, `arrow-white`, `arrow-black`, `dot`, `ring`, `spotlight`), `size` (`1`, up to 4), `color` (`"#D97757"`: tints dot, ring, spotlight and the click ripple), `clickEffect` (`ripple`, `none`), `smoothing` (`0.5`: 0 draws the path as recorded, up to 1 very smooth; clicks stay exact) |
 | `keys` | `enabled` (`true`), `show` (`shortcuts`: keys pressed with ⌘ or Ctrl, on Windows also Alt or Win, as `⌘ ⇧ P` or `Ctrl Shift P`; `keys`: also Esc, Enter, Tab, the arrows, Home, End, Page Up and Down and F1–F12 pressed alone), `position` (`bottom`, `top`), `size` (`1`, 0.5 to 2): a badge of each shortcut pressed, as keycaps; the same one again within a second counts up (`⌘ Z ×3`); none in clips faster than 2×, clear of the webcam bubble and the subtitles |
 | `webcam` | `enabled` (`false`; a take recorded with a camera switches it on), `shape` (`circle`, `rounded`, `squircle`, `square`), `corner` (`bottom-left`, `bottom-right`, `top-left`, `top-right`), `size` (`0.18` of the output's short side, up to 0.5), `position` (`{ x, y }`: the bubble's centre as a share of the video, 0–1; it replaces `corner`), `border` (`true`: a white ring), `shadow` (`true`), `mirror` (`false`: flipped left to right) |
-| `audio` | `enabled` (`true`), `muteSpedUp` (`true`: sped-up clips are silent), `cleanup` (`true`: the cleaned-up mic plays, where there is one), `typing` (`true`: a key click for each key typed, where the clip is heard), `typingVolume` (`0.5`, 0 to 1), `effects` (`true`: the `sounds` and the music page's effects), `effectsVolume` (`0.8`, 0 to 1) |
+| `audio` | `enabled` (`true`), `muteSpedUp` (`true`: sped-up clips are silent), `cleanup` (`true`: the cleaned-up mic plays, where there is one), `typing` (`true`: a key click for each key typed, where the clip is heard), `typingVolume` (`0.5`, 0 to 1), `effects` (`true`: the `sounds` and the music page's effects), `effectsVolume` (`0.8`, 0 to 1), `system` (`true`: the computer's sound, `sources.system`, where the clip is heard), `systemVolume` (`0.8`, 0 to 1), `systemDuck` (`12`: dB it goes down under speech, as the music; 0 to 40, 0 leaves it) |
 | `transition` | `enabled` (`true`: a crossfade between scenes), `duration` (`0.3` s, up to 2) |
 | `motionBlur` | `0.25`: how long a frame's shutter is open, as a share of the frame (0 off, `0.25` light, `0.5` a film camera's, `1` strong); the screen smears along a zoom's moves and the pointer along its path, in clips up to 2× fast; masks cover every place they pass |
 | `watermark` | `enabled` (`false`), `image` (a path; without it the brand's logo, `theme.logo`), `text` (shown without an image; without it the brand's name), `corner` (`bottom-right`, `bottom-left`, `top-left`, `top-right`), `size` (`0.06`: its height as a share of the short side, 0.02 to 0.3), `opacity` (`0.7`, 0.1 to 1): a mark over the whole video, clear of the webcam bubble |

@@ -144,7 +144,7 @@ const [out] = await packager({
   icon: join(desktop, 'assets', process.platform === 'win32' ? 'icon.ico' : process.platform === 'darwin' ? 'icon.icns' : 'icon.png'),
   extraResource: [updateFeed],
   // the CLI and the native modules whole (with their package.json files), so Node resolves them
-  asar: { unpack: '**/{*.node,*.dll,cuttle-capture}', unpackDir: `{cli,${[...modules.keys()].map((name) => `node_modules/${name}`).join(',')}}` },
+  asar: { unpack: '**/{*.node,*.dll,cuttle-capture,cuttle-loopback.exe}', unpackDir: `{cli,${[...modules.keys()].map((name) => `node_modules/${name}`).join(',')}}` },
   prune: false,
   overwrite: true,
   quiet: true,

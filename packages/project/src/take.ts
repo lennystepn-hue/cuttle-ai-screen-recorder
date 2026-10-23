@@ -15,7 +15,7 @@ const TrackStartSchema = z.strictObject({
 
 /**
  * take.json, written by the recorder next to the take's tracks (e.g. `takes/1/take.json`). Export
- * reads it to line the webcam and the mic up with the screen track; events.jsonl is already in
+ * reads it to line the webcam, the mic and the system audio up with the screen track; events.jsonl is already in
  * screen-track seconds and needs no entry. (`TakeFile`, because `Take` is the recorder's result.)
  */
 export const TakeFileSchema = z.strictObject({
@@ -29,6 +29,8 @@ export const TakeFileSchema = z.strictObject({
     screen: TrackStartSchema,
     webcam: TrackStartSchema.optional(),
     mic: TrackStartSchema.optional(),
+    /** What the computer played: its apps' sound, beside the mic. */
+    system: TrackStartSchema.optional(),
   }),
 });
 

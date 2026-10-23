@@ -20,6 +20,8 @@ export interface RecordArgs {
   /** A camera name, or true for the first camera. */
   webcam?: string | true;
   mic?: string | true;
+  /** Record what the computer plays (`system.m4a`). */
+  systemAudio?: boolean;
   /** The folder Claude Code runs in, or true for the current folder. */
   untilClaude?: string | true;
   untilFile?: string;
@@ -81,6 +83,7 @@ export async function recordCommand(projectDir: string, args: RecordArgs, output
     source,
     ...(webcam !== undefined && { webcam }),
     ...(mic !== undefined && { mic }),
+    ...(args.systemAudio && { systemAudio: true }),
     stop: {
       ...(args.max !== undefined && { maxSeconds: args.max }),
       ...(args.untilFile !== undefined && { untilFile: args.untilFile }),

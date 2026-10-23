@@ -15,6 +15,8 @@ const SegmentSchema = z.strictObject({
   screen: TrackSchema,
   webcam: TrackSchema.optional(),
   mic: TrackSchema.optional(),
+  /** What the computer played (`system.m4a`), where the take records it. */
+  system: TrackSchema.optional(),
   /** Seconds of the screen file; missing while it records (after a crash, recover measures it). */
   duration: z.number().nonnegative().optional(),
 });

@@ -24,9 +24,10 @@ export interface AudioSegment {
   /** Length in output samples; segments are laid end to end. */
   samples: number;
   /**
-   * The mic stretch it plays, in samples of the mic lined up with the screen track; none means
-   * silence. `content`: output samples the clip fills (at most `samples`); the rest of the segment
-   * is padding up to the frame grid, after the fade-out.
+   * The stretch of the take's sound it plays (the mic and the system audio), in samples of each
+   * track lined up with the screen track; none means silence. `content`: output samples the clip
+   * fills (at most `samples`); the rest of the segment is padding up to the frame grid, after the
+   * fade-out.
    */
   mic?: { from: number; to: number; speed: number; content: number };
   /** Fade lengths in output samples at the segment's start and end. */
@@ -39,6 +40,8 @@ export interface AudioPlanOptions {
   look: Pick<Look, 'audio' | 'transition'>;
   /** Whether a mic track is exported (the project has one and `look.audio.enabled`). */
   mic: boolean;
+  /** Whether the system audio is exported (`sources.system`, `look.audio.system`). */
+  system?: boolean;
   /** Length of the exported video in seconds (frames / fps); the audio ends exactly there. */
   seconds: number;
 }
@@ -47,7 +50,7 @@ const toSamples = (seconds: number): number => Math.round(seconds * AUDIO_SAMPLE
 
 /**
  * Cuts the audio into segments on the same boundaries as the video. Clip scenes play their stretch
- * of the mic (sped up with the clip), unless the clip is sped up and `look.audio.muteSpedUp` is
+ * of the take's sound, the mic and the system audio (sped up with the clip), unless the clip is sped up and `look.audio.muteSpedUp` is
  * set; still and card scenes are silent. Clips joined by continuous cuts and heard at one speed
  * are one segment, so their sound runs on exactly as in one clip (one trim, one atempo). The last
  * segment runs to `seconds`, which can be up to one frame past the timeline. Cuts fade out and in
@@ -55,11 +58,11 @@ const toSamples = (seconds: number): number => Math.round(seconds * AUDIO_SAMPLE
  * crossfades; at a continuous cut where the sound changes speed or stops, only the 10 ms that keep
  * it from clicking.
  */
-export function planAudio({ spans, look, mic, seconds }: AudioPlanOptions): AudioSegment[] {
-  /** The speed a span plays the mic at; undefined when it is silent. */
+export function planAudio({ spans, look, mic, system = false, seconds }: AudioPlanOptions): AudioSegment[] {
+  /** The speed a span plays the take's sound at; undefined when it is silent. */
   const soundOf = (span: SceneSpan): number | undefined => {
     const scene = span.scene;
-    const audible = mic && look.audio.enabled && scene.type === 'clip' && !(look.audio.muteSpedUp && scene.speed > 1);
+    const audible = (mic || system) && look.audio.enabled && scene.type === 'clip' && !(look.audio.muteSpedUp && scene.speed > 1);
     return audible && scene.type === 'clip' ? scene.speed : undefined;
   };
   const half = (a: SceneSpan, b: SceneSpan): number => crossfadeHalf(a, b, look.transition);
@@ -110,38 +113,51 @@ export function atempoChain(speed: number): string[] {
   return chain;
 }
 
+/** The tracks the export's audio is made from, by their input number in the mux command. */
+export interface AudioInputs {
+  /** The mic, and how many seconds after the screen track it started (negative: before). */
+  mic?: { input: number; offset: number };
+  /**
+   * What the computer played, likewise, at `volume`, and lowered under speech by `duck` (its gain:
+   * an ffmpeg expression of the output's time `t`, `duckExpression`).
+   */
+  system?: { input: number; offset: number; volume: number; duck?: string };
+  /** The typing sounds' track (on the output timeline already), mixed in at its level. */
+  typing?: number;
+  /**
+   * The soundtrack instead (stereo: the music, the sounds and the typing clicks), mixed with the
+   * take's sound and then limited, so the sum cannot clip.
+   */
+  sound?: number;
+}
+
 /**
- * The ffmpeg `-filter_complex` graph that turns the mic (input `micInput`) into the export's audio,
- * labelled `[aout]`: 48 kHz stereo, exactly the sum of the segments' samples long. `micOffset` is
- * how many seconds after the screen track the mic started (negative: before); the mic is shifted
- * once so its time 0 is the screen track's time 0. Without mic segments the graph is silence only.
- * `typingInput`: the typing sounds' track (on the output timeline already), mixed in at its level.
- * `soundInput`: the soundtrack instead (stereo: the music, the sounds and the typing clicks), mixed
- * with the mic and then limited, so the sum cannot clip.
+ * One track of the take, cut into the segments: shifted once so its time 0 is the screen track's,
+ * split per audible segment, each stretch trimmed, sped up and faded like its clip; silence in the
+ * others. Adds the filters to `filters` and returns the segments' labels (`[s0]`… for `out` "s").
  */
-export function audioFilterGraph(segments: readonly AudioSegment[], micOffset = 0, micInput = 1, typingInput?: number, soundInput?: number): string {
-  const filters: string[] = [];
-  const micSegments = segments.filter((segment) => segment.mic !== undefined).length;
-  if (micSegments > 0) {
-    const shift = toSamples(micOffset);
+function trackChains(filters: string[], segments: readonly AudioSegment[], track: { input: number; offset: number } | undefined, split: string, out: string, layout: 'mono' | 'stereo'): string {
+  const audible = track ? segments.filter((segment) => segment.mic !== undefined).length : 0;
+  if (track && audible > 0) {
+    const shift = toSamples(track.offset);
     const align =
       shift > 0 ? [`adelay=delays=${shift}S:all=1`] : shift < 0 ? [`atrim=start_sample=${-shift}`, 'asetpts=N/SR/TB'] : [];
-    const outputs = Array.from({ length: micSegments }, (_, i) => `[m${i}]`).join('');
+    const outputs = Array.from({ length: audible }, (_, i) => `[${split}${i}]`).join('');
     filters.push(
-      [`[${micInput}:a]aresample=${AUDIO_SAMPLE_RATE}`, 'aformat=sample_fmts=fltp:channel_layouts=mono', ...align, `asplit=${micSegments}${outputs}`].join(','),
+      [`[${track.input}:a]aresample=${AUDIO_SAMPLE_RATE}`, `aformat=sample_fmts=fltp:channel_layouts=${layout}`, ...align, `asplit=${audible}${outputs}`].join(','),
     );
   }
-  let micIndex = 0;
+  let index = 0;
   segments.forEach((segment, i) => {
     const chain: string[] = [];
-    if (segment.mic) {
+    if (track && segment.mic) {
       const { from, to, speed, content } = segment.mic;
       const tempo = atempoChain(speed);
-      chain.push(`[m${micIndex++}]atrim=start_sample=${from}:end_sample=${to}`, 'asetpts=N/SR/TB');
+      chain.push(`[${split}${index++}]atrim=start_sample=${from}:end_sample=${to}`, 'asetpts=N/SR/TB');
       // atempo comes up short: feed it silence past the clip, then cut its output to the clip's length.
       if (tempo.length > 0) chain.push(`apad=pad_len=${ATEMPO_FLUSH}`, ...tempo, `atrim=end_sample=${content}`, 'asetpts=N/SR/TB');
       chain.push(
-        // Pads a mic that ends early (or started late) and the last clip up to the frame grid;
+        // Pads a track that ends early (or started late) and the last clip up to the frame grid;
         // without input frames apad's timestamps are unset, so they are rebuilt after the trim or
         // concat fails ("Invalid data found").
         'apad',
@@ -154,29 +170,56 @@ export function audioFilterGraph(segments: readonly AudioSegment[], micOffset = 
       if (fadeIn > 0) chain.push(`afade=t=in:ss=0:ns=${fadeIn}`);
       if (fadeOut > 0) chain.push(`afade=t=out:ss=${content - fadeOut}:ns=${fadeOut}`);
     } else {
-      chain.push(`anullsrc=r=${AUDIO_SAMPLE_RATE}:cl=mono`, `atrim=end_sample=${segment.samples}`);
+      chain.push(`anullsrc=r=${AUDIO_SAMPLE_RATE}:cl=${layout}`, `atrim=end_sample=${segment.samples}`);
     }
-    filters.push(`${chain.join(',')}[s${i}]`);
+    filters.push(`${chain.join(',')}[${out}${i}]`);
   });
-  const inputs = segments.map((_, i) => `[s${i}]`).join('');
-  if (soundInput !== undefined) {
-    const total = segments.reduce((sum, segment) => sum + segment.samples, 0);
-    filters.push(
-      `${inputs}concat=n=${segments.length}:v=0:a=1,pan=stereo|c0=c0|c1=c0[voice]`,
-      [`[${soundInput}:a]aresample=${AUDIO_SAMPLE_RATE}`, 'aformat=sample_fmts=fltp:channel_layouts=stereo', 'apad', `atrim=end_sample=${total}`, 'asetpts=N/SR/TB[sound]'].join(','),
-      // added as they are, then kept below full scale (at four times the rate, so peaks between samples count)
-      `[voice][sound]amix=inputs=2:duration=first:normalize=0,aresample=${AUDIO_SAMPLE_RATE * 4},alimiter=limit=${LIMIT}:attack=1:release=60:level=false,aresample=${AUDIO_SAMPLE_RATE}[aout]`,
-    );
-    return filters.join(';');
-  }
-  if (typingInput === undefined) {
-    filters.push(`${inputs}concat=n=${segments.length}:v=0:a=1,pan=stereo|c0=c0|c1=c0[aout]`);
-    return filters.join(';');
-  }
+  return segments.map((_, i) => `[${out}${i}]`).join('');
+}
+
+/** Sums its inputs as they are, then keeps the sum below full scale (at four times the rate, so peaks between samples count). */
+const LIMITED_MIX = (inputs: number) =>
+  `amix=inputs=${inputs}:duration=first:normalize=0,aresample=${AUDIO_SAMPLE_RATE * 4},alimiter=limit=${LIMIT}:attack=1:release=60:level=false,aresample=${AUDIO_SAMPLE_RATE}[aout]`;
+
+/**
+ * The ffmpeg `-filter_complex` graph that turns the take's sound into the export's audio, labelled
+ * `[aout]`: 48 kHz stereo, exactly the sum of the segments' samples long. Each track of the take
+ * plays its stretch in each audible segment (`trackChains`); without a mic, the voice is silence.
+ * The system audio, the typing sounds and the soundtrack are mixed in as `inputs` says.
+ */
+export function audioFilterGraph(segments: readonly AudioSegment[], inputs: AudioInputs = {}): string {
+  const filters: string[] = [];
   const total = segments.reduce((sum, segment) => sum + segment.samples, 0);
+  const n = segments.length;
+  const voice = trackChains(filters, segments, inputs.mic, 'm', 's', 'mono');
+  const soundtrack = (input: number) =>
+    [`[${input}:a]aresample=${AUDIO_SAMPLE_RATE}`, 'aformat=sample_fmts=fltp:channel_layouts=stereo', 'apad', `atrim=end_sample=${total}`, 'asetpts=N/SR/TB[sound]'].join(',');
+  const clicks = (input: number, then = '') =>
+    [`[${input}:a]aresample=${AUDIO_SAMPLE_RATE}`, 'aformat=sample_fmts=fltp:channel_layouts=mono', 'apad', `atrim=end_sample=${total}`, `asetpts=N/SR/TB${then}[keys]`].join(',');
+  if (inputs.system) {
+    const { volume, duck } = inputs.system;
+    const system = trackChains(filters, segments, inputs.system, 'y', 'z', 'stereo');
+    filters.push(
+      `${voice}concat=n=${n}:v=0:a=1,pan=stereo|c0=c0|c1=c0[voice]`,
+      `${system}concat=n=${n}:v=0:a=1,volume=${volume}${duck ? `,volume=eval=frame:volume='${duck}'` : ''}[system]`,
+    );
+    const extra = inputs.sound !== undefined ? '[sound]' : inputs.typing !== undefined ? '[keys]' : '';
+    if (inputs.sound !== undefined) filters.push(soundtrack(inputs.sound));
+    else if (inputs.typing !== undefined) filters.push(clicks(inputs.typing, ',pan=stereo|c0=c0|c1=c0'));
+    filters.push(`[voice][system]${extra}${LIMITED_MIX(extra ? 3 : 2)}`);
+    return filters.join(';');
+  }
+  if (inputs.sound !== undefined) {
+    filters.push(`${voice}concat=n=${n}:v=0:a=1,pan=stereo|c0=c0|c1=c0[voice]`, soundtrack(inputs.sound), `[voice][sound]${LIMITED_MIX(2)}`);
+    return filters.join(';');
+  }
+  if (inputs.typing === undefined) {
+    filters.push(`${voice}concat=n=${n}:v=0:a=1,pan=stereo|c0=c0|c1=c0[aout]`);
+    return filters.join(';');
+  }
   filters.push(
-    `${inputs}concat=n=${segments.length}:v=0:a=1[base]`,
-    [`[${typingInput}:a]aresample=${AUDIO_SAMPLE_RATE}`, 'aformat=sample_fmts=fltp:channel_layouts=mono', 'apad', `atrim=end_sample=${total}`, 'asetpts=N/SR/TB[keys]'].join(','),
+    `${voice}concat=n=${n}:v=0:a=1[base]`,
+    clicks(inputs.typing),
     // added as they are: amix would otherwise halve both
     '[base][keys]amix=inputs=2:duration=first:normalize=0,pan=stereo|c0=c0|c1=c0[aout]',
   );
@@ -195,9 +238,11 @@ export interface MuxArgsOptions {
   video: string;
   /** The mic file, when the graph uses it. */
   mic?: string;
-  /** The typing sounds' track, when the graph mixes it in (the input after the mic). */
+  /** The system audio's file, when the graph uses it (the input after the mic). */
+  system?: string;
+  /** The typing sounds' track, when the graph mixes it in (the input after the mic and the system audio). */
   typing?: string;
-  /** The soundtrack (music, sounds, typing), when the graph mixes it in (the input after the mic). */
+  /** The soundtrack (music, sounds, typing), when the graph mixes it in (the input after the mic and the system audio). */
   sound?: string;
   graph: string;
   /** A file holding `graph`, used instead of the inline graph when given. */
@@ -208,8 +253,8 @@ export interface MuxArgsOptions {
 }
 
 /** ffmpeg arguments that add the audio (and the chapters) to the video without re-encoding it: AAC 48 kHz, moov at the front. */
-export function muxArgs({ video, mic, typing, sound, graph, graphFile, chapters, out }: MuxArgsOptions): string[] {
-  const inputs = 1 + [mic, typing, sound].filter((input) => input !== undefined).length;
+export function muxArgs({ video, mic, system, typing, sound, graph, graphFile, chapters, out }: MuxArgsOptions): string[] {
+  const inputs = 1 + [mic, system, typing, sound].filter((input) => input !== undefined).length;
   return [
     '-hide_banner',
     '-nostdin',
@@ -219,6 +264,7 @@ export function muxArgs({ video, mic, typing, sound, graph, graphFile, chapters,
     '-i',
     video,
     ...(mic ? ['-i', mic] : []),
+    ...(system ? ['-i', system] : []),
     ...(typing ? ['-i', typing] : []),
     ...(sound ? ['-i', sound] : []),
     ...(chapters ? ['-i', chapters] : []),

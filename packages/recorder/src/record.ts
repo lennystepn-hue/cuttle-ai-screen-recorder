@@ -1,7 +1,7 @@
-import { closeSync, existsSync, mkdirSync, openSync, readdirSync, rmSync, statSync, writeFileSync, writeSync } from 'node:fs';
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync, writeSync } from 'node:fs';
 import { join, relative, resolve, sep } from 'node:path';
 import { MARKERS_VERSION, SEGMENTS_VERSION, TAKE_VERSION, takeTime, type Marker, type MarkersFile, type Segment, type SegmentsFile, type TakeFile } from '@cuttle/project';
-import { SILENCE_SECONDS, freezeEnd, freezeStart, micArgs, screenArgs, silenceStart, webcamArgs } from './args';
+import { SILENCE_SECONDS, freezeEnd, freezeStart, micArgs, screenArgs, silenceStart, systemArgs, webcamArgs } from './args';
 import { claudeTranscriptDir, watchClaude, type ClaudeSignal } from './claude';
 import { cameraModeFor, devicesFor, windowsFor } from './devices';
 import { RecorderError } from './errors';
@@ -12,6 +12,7 @@ import { startInput, type InputSource } from './input';
 import { levelMeter, wholeSamples } from './level';
 import { FPS as JOIN_FPS, joinSegments, mediaInfo, renameWhenFree } from './join';
 import { areaGeometry, checkDevice, deviceClock, micInput, micLatency, platformFor, resolveArea, screenFilter, screenInput, screenLatency, webcamInput, wholeWindow, type CameraMode, type Platform, type ScreenArea } from './sources';
+import { systemAudioMissing, systemFeeder, systemInput } from './system-audio';
 import { hasWindowCapture, relayInput, testWindowFeeder, windowFeeder } from './window-capture';
 import { WINDOW_GATE_MS, windowGate } from './window-gate';
 import type { Bounds, RawInput, RecordOptions, Recording, RecorderEvent, StopOptions, StopReason, Take } from './types';
@@ -25,6 +26,8 @@ export const CLAUDE_TAIL_SECONDS = 2;
  * in its transcript: a server it started never ends.
  */
 export const CLAUDE_BACKGROUND_SECONDS = 60;
+/** Seconds the computer's sound may take to start before the take goes on without it. */
+const SYSTEM_START_SECONDS = 10;
 /** Seconds a track may take to deliver its first frame or sample (a DirectShow device can be slow to open, macOS may ask for access first). */
 const START_TIMEOUT_SECONDS = 20;
 const FILE_POLL_MS = 200;
@@ -32,7 +35,7 @@ const IDLE_POLL_MS = 200;
 
 /** A take is joined from at most this many pieces (each adds to one ffmpeg command line). */
 export const MAX_SEGMENTS = 100;
-const FILES = { screen: 'screen.mp4', webcam: 'webcam.mp4', mic: 'mic.m4a', events: 'events.jsonl', markers: 'markers.json', take: 'take.json', segments: 'segments.json' };
+const FILES = { screen: 'screen.mp4', webcam: 'webcam.mp4', mic: 'mic.m4a', system: 'system.m4a', events: 'events.jsonl', markers: 'markers.json', take: 'take.json', segments: 'segments.json' };
 /** How often maxSeconds is checked against the take's time (which stands still while paused). */
 const MAX_POLL_MS = 50;
 
@@ -241,13 +244,21 @@ interface Tracks {
   screen: CaptureProcess;
   webcam?: CaptureProcess;
   mic?: CaptureProcess;
-  /** Rejects with the first capture that fails; never resolves. */
+  /** What the computer plays: one that fails is left out with a warning, the take goes on. */
+  system?: CaptureProcess;
+  /** Rejects with the first capture that fails (but the system audio's); never resolves. */
   failed: Promise<never>;
   /** This screen process's freeze detection (a new one starts unfrozen). */
   frozen: boolean;
 }
 
-const all = (tracks: Tracks) => [tracks.screen, tracks.webcam, tracks.mic].filter((capture): capture is CaptureProcess => capture !== undefined);
+const all = (tracks: Tracks) => [tracks.screen, tracks.webcam, tracks.mic, tracks.system].filter((capture): capture is CaptureProcess => capture !== undefined);
+
+/** Stops every track of `tracks`; the system audio's own failure was said already. */
+const stopAll = (tracks: Tracks) => Promise.all(all(tracks).map((capture) => (capture === tracks.system ? capture.stop().catch(() => {}) : capture.stop())));
+
+/** The tracks besides the screen, in take.json's and segments.json's order. */
+const OTHER_TRACKS = ['webcam', 'mic', 'system'] as const;
 
 /** A track's file in segment `k` of a paused take: `screen.2.mp4`. */
 const numbered = (file: string, k: number) => file.replace(/\.(mp4|m4a)$/, `.${k}.$1`);
@@ -368,6 +379,12 @@ async function recordTake({ options, control, platform, area, byItself, cameraMo
   if (platform === 'macos' && !helper && (options.hideWindowsOf?.length ?? 0) > 0) {
     reporter.warn("Cuttle's own windows show in this take: the capture helper is missing (it is built by pnpm install with Xcode's command line tools)");
   }
+  // what the computer plays: the helper's samples, or the test backend's tone
+  const systemFeed = options.systemAudio && platform !== 'test' ? systemFeeder(platform, area, options.hideWindowsOf ?? []) : undefined;
+  const recordsSystem = options.systemAudio === true && (platform === 'test' || systemFeed !== undefined);
+  if (options.systemAudio && !recordsSystem) reporter.warn(systemAudioMissing(platform));
+  /** The system audio failed (it is left out from there, and said once). */
+  let systemFailed = false;
   /** The capture processes of segment `k` (the first writes the take's own file names). */
   const spawnTracks = (k: number): Tracks => {
     const file = (name: string) => path(k === 1 ? name : numbered(name, k));
@@ -401,10 +418,17 @@ async function recordTake({ options, control, platform, area, byItself, cameraMo
       samples(chunk);
     };
     const mic = options.mic === undefined ? undefined : spawnCapture('mic', micArgs(micInput(platform, options.mic), file(FILES.mic), !ownStamps), undefined, sound);
+    const system = recordsSystem && !systemFailed ? spawnCapture('system', systemArgs(systemInput(platform), file(FILES.system), platform === 'test'), systemFeed) : undefined;
+    // the system audio is not worth the take: one that fails is said and left out, the rest records on
+    void system?.exited.catch((error: Error) => {
+      if (systemFailed || control.reason !== undefined) return;
+      systemFailed = true;
+      reporter.warn(`the computer's sound stopped recording (${error.message.replace(/\s*\n\s*/g, ' ')}); the take goes on without it`);
+    });
     // Rejects with the first capture that fails; `exited` only resolves after stop() was called.
     const failed: Promise<never> = Promise.race([screen, webcam, mic].filter((capture) => capture !== undefined).map((capture) => capture.exited)).then(() => new Promise<never>(() => {}));
     failed.catch(() => {});
-    const tracks: Tracks = { screen, ...(webcam && { webcam }), ...(mic && { mic }), failed, frozen: false };
+    const tracks: Tracks = { screen, ...(webcam && { webcam }), ...(mic && { mic }), ...(system && { system }), failed, frozen: false };
     captures.push(...all(tracks));
     reporter.emit({ type: 'processes', pids: all(tracks).flatMap((capture) => [capture.pid, capture.feederPid]).filter((pid): pid is number => pid !== undefined) });
     // A freeze that starts at 0 means the screen has not changed yet: untilIdleSeconds waits for one
@@ -435,15 +459,26 @@ async function recordTake({ options, control, platform, area, byItself, cameraMo
     if (stamped === undefined) return { tracks, segment: undefined };
     // the first frame shows the screen as it was a moment before ffmpeg stamped it
     const screenAt = stamped - screenLatency(platform, helper !== undefined);
-    const starts: { webcam?: number; mic?: number } = {};
+    const starts: { webcam?: number; mic?: number; system?: number } = {};
     void tracks.webcam?.started.then((at) => (starts.webcam = toWall(at)), () => {});
     void tracks.mic?.started.then((at) => (starts.mic = toWall(at)), () => {});
-    const others = [tracks.webcam && 'webcam', tracks.mic && 'mic'].filter(Boolean).join(' and ');
-    if (others !== '') await startedWithin(Promise.race([Promise.all([tracks.webcam?.started, tracks.mic?.started]), tracks.failed, control.stopped()]), others);
+    // the system audio's helper stamps its start on the wall clock (the test backend's ffmpeg too)
+    void tracks.system?.started.then((at) => (starts.system = at), () => {});
+    const others = [tracks.webcam && 'webcam', tracks.mic && 'mic', tracks.system && "computer's sound"].filter(Boolean).join(' and ');
+    // a system audio that cannot start is said (above) and left out; one that hangs is not waited for long
+    const system = tracks.system && Promise.race([tracks.system.started.catch(() => undefined), sleep(SYSTEM_START_SECONDS * 1000)]);
+    if (others !== '') await startedWithin(Promise.race([Promise.all([tracks.webcam?.started, tracks.mic?.started, system]), tracks.failed, control.stopped()]), others);
     const begun = { ...starts };
     const name = (file: string) => (k === 1 ? file : numbered(file, k));
     for (const track of ['webcam', 'mic'] as const) {
       if (tracks[track] && begun[track] === undefined) reporter.warn(`the ${track} had not started when the recording was stopped; it is left out of the take`);
+    }
+    if (tracks.system && begun.system === undefined && control.reason === undefined) {
+      // it never said its start: stopped and left out, here and in the segments after a pause
+      if (!systemFailed) reporter.warn(`the computer's sound did not start within ${SYSTEM_START_SECONDS} s; the take goes on without it`);
+      systemFailed = true;
+      const file = path(name(FILES.system));
+      void tracks.system.stop().catch(() => {}).then(() => removeQuietly(file));
     }
     return {
       tracks,
@@ -452,13 +487,14 @@ async function recordTake({ options, control, platform, area, byItself, cameraMo
         ...(begun.webcam !== undefined && { webcam: { file: name(FILES.webcam), start: begun.webcam } }),
         // the mic's stamp is when its first buffer arrived: its first sample came that much earlier
         ...(begun.mic !== undefined && { mic: { file: name(FILES.mic), start: begun.mic - micLatency(platform) } }),
+        ...(begun.system !== undefined && { system: { file: name(FILES.system), start: begun.system } }),
       },
     };
   };
 
   /** Removes the files of `tracks` that `segment` does not list (they had not started). */
   const removeUnlisted = (k: number, segment: Segment | undefined) => {
-    for (const [track, file] of [['screen', FILES.screen], ['webcam', FILES.webcam], ['mic', FILES.mic]] as const) {
+    for (const [track, file] of [['screen', FILES.screen], ['webcam', FILES.webcam], ['mic', FILES.mic], ['system', FILES.system]] as const) {
       if (!segment?.[track]) removeQuietly(path(k === 1 ? file : numbered(file, k)));
     }
   };
@@ -510,6 +546,7 @@ async function recordTake({ options, control, platform, area, byItself, cameraMo
         screen: { file: FILES.screen, start: screenAt },
         ...(begun.webcam && { webcam: { file: FILES.webcam, start: begun.webcam.start } }),
         ...(begun.mic && { mic: { file: FILES.mic, start: begun.mic.start } }),
+        ...(begun.system && { system: { file: FILES.system, start: begun.system.start } }),
       },
     } satisfies TakeFile);
     capturing = true;
@@ -586,7 +623,7 @@ async function recordTake({ options, control, platform, area, byItself, cameraMo
       const pausedAt = now();
       capturing = false;
       clearTimeout(claudeTimer);
-      await Promise.all(all(tracks).map((capture) => capture.stop()));
+      await stopAll(tracks);
       running = false;
       const segment = segments.at(-1)!;
       // in whole frames, so the joined screen is exactly as long as its pieces
@@ -595,7 +632,7 @@ async function recordTake({ options, control, platform, area, byItself, cameraMo
       if (!paused) {
         // the first pause: the first segment's files get their number too
         paused = true;
-        for (const track of ['screen', 'webcam', 'mic'] as const) {
+        for (const track of ['screen', ...OTHER_TRACKS] as const) {
           const entry = segment[track];
           if (!entry) continue;
           renameWhenFree(path(entry.file), path(numbered(entry.file, 1)));
@@ -636,7 +673,7 @@ async function recordTake({ options, control, platform, area, byItself, cameraMo
     capturing = false;
     finish();
     if (running) {
-      await Promise.all(all(tracks).map((capture) => capture.stop()));
+      await stopAll(tracks);
       removeUnlisted(k, segments.at(-1));
     }
     writer.close();
@@ -644,12 +681,15 @@ async function recordTake({ options, control, platform, area, byItself, cameraMo
     if (markersFailed) saveMarkers();
     const last = segments.at(-1)!;
     if (paused && last.duration === undefined) last.duration = await lengthOf(last.screen.file, now() - last.screen.start);
-    const has = paused ? await joinTake() : { webcam: last.webcam !== undefined, mic: last.mic !== undefined };
+    // a system audio that failed before its first sample was written has nothing to keep
+    if (systemFailed) await dropEmptySystem();
+    const has = paused ? await joinTake() : { webcam: last.webcam !== undefined, mic: last.mic !== undefined, system: last.system !== undefined };
     return {
       dir: rel(dir),
       screen: rel(path(FILES.screen)),
       ...(has.webcam && { webcam: rel(path(FILES.webcam)) }),
       ...(has.mic && { mic: rel(path(FILES.mic)) }),
+      ...(has.system && { system: rel(path(FILES.system)) }),
       events: rel(path(FILES.events)),
       markers: rel(path(FILES.markers)),
       screenSize: size,
@@ -676,12 +716,29 @@ async function recordTake({ options, control, platform, area, byItself, cameraMo
     closeEvents();
   }
 
+  /** Leaves out of the segments a system audio file without a sound in it (its capture failed at once). */
+  async function dropEmptySystem(): Promise<void> {
+    for (const segment of segments) {
+      if (!segment.system) continue;
+      const heard = await mediaInfo(path(segment.system.file), 'a').catch(() => undefined);
+      if (heard && heard.seconds > 0) continue;
+      removeQuietly(path(segment.system.file));
+      delete segment.system;
+    }
+    if (!paused && !segments[0]!.system) {
+      // take.json said it would be there
+      const take = JSON.parse(readFileSync(path(FILES.take), 'utf8')) as TakeFile;
+      delete take.tracks.system;
+      writeJson(path(FILES.take), take);
+    }
+  }
+
   /**
    * Joins the segments into the take's own files, lined up (a new take.json says they start
    * together), marks segments.json joined, and removes the segments' files.
    */
-  async function joinTake(): Promise<{ webcam: boolean; mic: boolean }> {
-    const has = await joinSegments(dir, segments, { screen: FILES.screen, webcam: FILES.webcam, mic: FILES.mic });
+  async function joinTake(): Promise<{ webcam: boolean; mic: boolean; system: boolean }> {
+    const has = await joinSegments(dir, segments, { screen: FILES.screen, webcam: FILES.webcam, mic: FILES.mic, system: FILES.system });
     const start = segments[0]!.screen.start;
     writeJson(path(FILES.take), {
       version: TAKE_VERSION,
@@ -690,10 +747,11 @@ async function recordTake({ options, control, platform, area, byItself, cameraMo
         screen: { file: FILES.screen, start },
         ...(has.webcam && { webcam: { file: FILES.webcam, start } }),
         ...(has.mic && { mic: { file: FILES.mic, start } }),
+        ...(has.system && { system: { file: FILES.system, start } }),
       },
     } satisfies TakeFile);
     writeSegments(true);
-    for (const segment of segments) for (const track of ['screen', 'webcam', 'mic'] as const) if (segment[track]) removeQuietly(path(segment[track].file));
+    for (const segment of segments) for (const track of ['screen', ...OTHER_TRACKS] as const) if (segment[track]) removeQuietly(path(segment[track].file));
     removeQuietly(path('segments.txt'));
     return has;
   }

@@ -29,7 +29,8 @@ for (const kind of ['editor', 'pill', 'picker', 'hud', 'prompter', 'countdown', 
 }
 await build({ configFile: at('vite.renderer.config.ts') });
 await build({ configFile: at('../../packages/export/electron/vite.page.config.ts'), build: { outDir: at('dist/main/export-page') } });
-// macOS: the screen capture helper next to the recorder's bundle (nothing elsewhere)
+// the capture helpers next to the recorder's bundle: macOS's screen and sound, Windows' sound (each nothing elsewhere)
 execFileSync(process.execPath, [at('../../packages/recorder/native/build-macos.mjs'), at('dist/main')], { stdio: 'inherit' });
+execFileSync(process.execPath, [at('../../packages/recorder/native/build-windows.mjs'), at('dist/main')], { stdio: 'inherit' });
 execFileSync(process.execPath, [at('../../packages/motion-kit/scripts/copy.mjs'), at('dist/main/motion-kit')], { stdio: 'inherit' });
 console.log('built apps/desktop/dist');

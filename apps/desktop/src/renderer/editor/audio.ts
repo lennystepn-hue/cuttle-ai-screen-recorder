@@ -1,6 +1,7 @@
-// The mic in the preview: decoded in chunks a few seconds ahead of the playhead and scheduled on the
-// AudioContext, whose clock the video follows.
+// The take's sound in the preview (the mic, the computer's sound): decoded in chunks a few seconds
+// ahead of the playhead and scheduled on the AudioContext, whose clock the video follows.
 import { AudioBufferSink } from 'mediabunny';
+import { duckEnvelope } from '@cuttle/export/music-duck';
 import type { CuttleProject } from '@cuttle/project';
 import { isContinuousCut, type SceneSpan } from '@cuttle/timeline';
 import type { AudioSource } from './media';
@@ -16,9 +17,10 @@ export function audible(project: CuttleProject, speed: number): boolean {
 }
 
 /**
- * Plays the clips' sound from output time `from`: each audible clip's stretch of the mic, at the
- * clip's speed (the preview's pitch changes with it; the export keeps the pitch with atempo).
- * `contextStart` is the AudioContext time at which output time `from` plays.
+ * Plays the clips' sound from output time `from`: each audible clip's stretch of a track of the take
+ * (`mic`: the mic, or the computer's sound), at the clip's speed (the preview's pitch changes with it;
+ * the export keeps the pitch with atempo), into `output`. `contextStart` is the AudioContext time at
+ * which output time `from` plays.
  */
 export class AudioSchedule {
   private readonly nodes = new Set<AudioScheduledSourceNode>();
@@ -33,6 +35,7 @@ export class AudioSchedule {
     private readonly spans: readonly SceneSpan[],
     private readonly from: number,
     private readonly contextStart: number,
+    private readonly output: AudioNode = context.destination,
   ) {
     this.done = this.run().catch(() => {});
   }
@@ -68,7 +71,7 @@ export class AudioSchedule {
       const micEnd = scene.to - this.mic.offset;
       if (micEnd <= 0) continue;
       const gain = this.context.createGain();
-      gain.connect(this.context.destination);
+      gain.connect(this.output);
       this.gains.add(gain);
       const fadeIn = this.when(outStart);
       const fadeOut = this.when(span.end);
@@ -129,4 +132,29 @@ export class AudioSchedule {
   finished(): Promise<void> {
     return this.done;
   }
+}
+
+/** The duck's gain is set this often (seconds): its ramps last a quarter second and more. */
+const DUCK_STEP = 0.05;
+
+/**
+ * The computer's sound's level from output time `from` to `end`, as the export mixes it: its volume,
+ * and down under `speech` by `look.audio.systemDuck`. Connected to the destination; the caller
+ * plays the track into it and disconnects it.
+ */
+export function systemLevel(context: AudioContext, project: CuttleProject, speech: readonly { start: number; end: number }[], from: number, end: number, contextStart: number): GainNode {
+  const { systemVolume, systemDuck } = project.look.audio;
+  const gain = context.createGain();
+  gain.gain.value = systemVolume;
+  gain.connect(context.destination);
+  const start = Math.max(context.currentTime, contextStart);
+  const offset = from + (start - contextStart);
+  const steps = Math.ceil((end - offset) / DUCK_STEP) + 1;
+  if (speech.length > 0 && systemDuck > 0 && steps > 1) {
+    const envelope = duckEnvelope(speech, systemDuck);
+    const curve = new Float32Array(steps);
+    for (let i = 0; i < steps; i++) curve[i] = systemVolume * envelope(offset + i * DUCK_STEP);
+    gain.gain.setValueCurveAtTime(curve, start, (steps - 1) * DUCK_STEP);
+  }
+  return gain;
 }

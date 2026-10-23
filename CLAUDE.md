@@ -36,6 +36,12 @@ Cuttle runs on **Windows and macOS**. A change made on one has to keep working o
 - **Files**: Windows refuses to replace a read-only or open file; POSIX renames over it. Windows
   compares paths ignoring case. macOS's temporary folder is behind a link (`/var` is
   `/private/var`): tests compare real paths.
+- **The computer's sound** (`--system-audio`, `system-audio.ts`): macOS through the capture
+  helper's `audio` (ScreenCaptureKit: the display's sound without Cuttle's processes, or a window's
+  app alone), Windows through `native/windows/loopback.cs` (`cuttle-loopback.exe`, WASAPI's loopback
+  of the default output device: everything it plays), built by `native/build-windows.mjs` with
+  .NET Framework's C# compiler (C# 5). Both write 48 kHz stereo float, silence where nothing played,
+  and stamp their first sample on the wall clock; a change to that protocol changes both.
 - **Whisper**: Windows transcribes with ffmpeg's `whisper` filter (Gyan's builds have it); no macOS
   ffmpeg does, so `speech/whisper.ts` runs whisper.cpp's `whisper-cli` with the filter's settings
   there (`whisperEngine()`). A change to how whisper runs changes both.

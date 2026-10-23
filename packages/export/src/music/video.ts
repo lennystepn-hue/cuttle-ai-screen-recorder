@@ -1,9 +1,8 @@
 import type { CuttleProject, InputEvent, Marker, TranscriptWord } from '@cuttle/project';
 import { applyCaptionFixes, captionWords, keyPresses, occurrences, sceneSpans, totalDuration, type SceneSpan } from '@cuttle/timeline';
+import { speechSpans } from './duck';
 import type { SoundCue, VideoData } from './runtime';
 
-/** Words closer than this (seconds) are one stretch of speech. */
-const SPEECH_GAP = 0.6;
 /** Key presses closer than this are one (a page needs no more than 30 a second). */
 const KEY_GAP = 1 / 30;
 
@@ -56,12 +55,7 @@ export function videoData(project: CuttleProject, inputs: VideoInputs): VideoDat
   const sparse: number[] = [];
   for (const t of keys) if (sparse.length === 0 || t - sparse.at(-1)! >= KEY_GAP) sparse.push(t);
   const words = captionWords(applyCaptionFixes(inputs.words, project.captions.fixes), spans).map(({ t, end, text }) => ({ t, end, text }));
-  const speech: VideoData['speech'] = [];
-  for (const word of words) {
-    const last = speech.at(-1);
-    if (last && word.t - last.end < SPEECH_GAP) last.end = Math.max(last.end, word.end);
-    else speech.push({ start: word.t, end: word.end });
-  }
+  const speech: VideoData['speech'] = speechSpans(project, inputs.words, spans);
   const markers: VideoData['markers'] = [];
   for (const marker of inputs.markers) {
     for (const t of shown(spans, marker.t)) markers.push({ t, kind: marker.kind, ...(marker.label !== undefined && { label: marker.label }) });

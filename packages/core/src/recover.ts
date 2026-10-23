@@ -21,7 +21,7 @@ export interface RecoverResult {
   backup?: string;
 }
 
-const FILES = { screen: 'screen.mp4', webcam: 'webcam.mp4', mic: 'mic.m4a', events: 'events.jsonl', markers: 'markers.json', take: 'take.json', segments: 'segments.json', transcript: 'transcript.json', cleanMic: 'mic.clean.m4a' };
+const FILES = { screen: 'screen.mp4', webcam: 'webcam.mp4', mic: 'mic.m4a', system: 'system.m4a', events: 'events.jsonl', markers: 'markers.json', take: 'take.json', segments: 'segments.json', transcript: 'transcript.json', cleanMic: 'mic.clean.m4a' };
 
 /**
  * Recovers a take (a folder relative to the project, e.g. takes/3): makes it usable after
@@ -46,7 +46,8 @@ export async function recoverTake(projectDir: string, takeDir: string): Promise<
   if (seconds <= 0) throw new CoreError('invalid-media', `${path(FILES.screen)} is missing or has no readable video; nothing to recover`);
   const webcam = existsSync(path(FILES.webcam)) && (await streamSeconds(path(FILES.webcam), 'v')) > 0;
   const mic = existsSync(path(FILES.mic)) && (await streamSeconds(path(FILES.mic), 'a')) > 0;
-  for (const [ok, name] of [[webcam, FILES.webcam], [mic, FILES.mic]] as const) {
+  const system = existsSync(path(FILES.system)) && (await streamSeconds(path(FILES.system), 'a')) > 0;
+  for (const [ok, name] of [[webcam, FILES.webcam], [mic, FILES.mic], [system, FILES.system]] as const) {
     if (!ok && existsSync(path(name))) repaired.push(`left out ${name}: it has nothing readable`);
   }
 
@@ -90,11 +91,12 @@ export async function recoverTake(projectDir: string, takeDir: string): Promise<
         screen: { file: FILES.screen, start: screenStart },
         ...(webcam && { webcam: { file: FILES.webcam, start: starts.webcam ?? screenStart } }),
         ...(mic && { mic: { file: FILES.mic, start: starts.mic ?? screenStart } }),
+        ...(system && { system: { file: FILES.system, start: starts.system ?? screenStart } }),
       },
     };
     await writeFile(path(FILES.take), `${JSON.stringify(take, null, 2)}\n`);
     const what = backup === undefined ? 'take.json was missing' : `take.json was broken (old file: ${relative(dir, backup)})`;
-    const guessed = (webcam && starts.webcam === undefined) || (mic && starts.mic === undefined);
+    const guessed = (webcam && starts.webcam === undefined) || (mic && starts.mic === undefined) || (system && starts.system === undefined);
     repaired.push(
       starts.screen === undefined
         ? `${what}: written with the tracks starting together at an unknown time${webcam || mic ? ' (webcam and mic may be off by up to a second)' : ''}`
@@ -111,6 +113,7 @@ export async function recoverTake(projectDir: string, takeDir: string): Promise<
       screen: source(FILES.screen),
       ...(webcam && { webcam: source(FILES.webcam) }),
       ...(mic && { mic: source(FILES.mic) }),
+      ...(system && { system: source(FILES.system) }),
       events: source(FILES.events),
       markers: source(FILES.markers),
       ...(existsSync(path(FILES.transcript)) && { transcript: source(FILES.transcript) }),
@@ -124,7 +127,7 @@ export async function recoverTake(projectDir: string, takeDir: string): Promise<
     project: file.path,
     take: rel.split(sep).join('/'),
     seconds,
-    tracks: ['screen', ...(webcam ? ['webcam'] : []), ...(mic ? ['mic'] : [])],
+    tracks: ['screen', ...(webcam ? ['webcam'] : []), ...(mic ? ['mic'] : []), ...(system ? ['system'] : [])],
     repaired,
     keptEdit: keepEdit,
     ...(backup && { backup }),
@@ -150,7 +153,7 @@ async function joinPaused(dir: string, repaired: string[]): Promise<void> {
       continue;
     }
     const kept: Segment = { ...segment, duration: segment.duration ?? seconds };
-    for (const [track, stream] of [['webcam', 'v'], ['mic', 'a']] as const) {
+    for (const [track, stream] of [['webcam', 'v'], ['mic', 'a'], ['system', 'a']] as const) {
       const entry = kept[track];
       if (entry && (await streamSeconds(join(dir, entry.file), stream)) <= 0) {
         delete kept[track];
@@ -160,7 +163,7 @@ async function joinPaused(dir: string, repaired: string[]): Promise<void> {
     segments.push(kept);
   }
   if (segments.length === 0) return;
-  const has = await joinSegments(dir, segments, { screen: FILES.screen, webcam: FILES.webcam, mic: FILES.mic });
+  const has = await joinSegments(dir, segments, { screen: FILES.screen, webcam: FILES.webcam, mic: FILES.mic, system: FILES.system });
   const start = segments[0]!.screen.start;
   const take: TakeFile = {
     version: TAKE_VERSION,
@@ -168,23 +171,24 @@ async function joinPaused(dir: string, repaired: string[]): Promise<void> {
       screen: { file: FILES.screen, start },
       ...(has.webcam && { webcam: { file: FILES.webcam, start } }),
       ...(has.mic && { mic: { file: FILES.mic, start } }),
+      ...(has.system && { system: { file: FILES.system, start } }),
     },
   };
   await writeFile(join(dir, FILES.take), `${JSON.stringify(take, null, 2)}\n`);
   await writeFile(manifest, `${JSON.stringify({ ...parsed.segments, segments, joined: true }, null, 2)}\n`);
   // the pieces, also those a resume started but the manifest never listed (a crash): their files go;
   // one that cannot be removed now (held) is left, the take is joined all the same
-  const pieces = (await readdir(dir).catch(() => [] as string[])).filter((name) => /^(screen|webcam|mic)\.\d+\.(mp4|m4a)$/.test(name));
+  const pieces = (await readdir(dir).catch(() => [] as string[])).filter((name) => /^(screen|webcam|mic|system)\.\d+\.(mp4|m4a)$/.test(name));
   for (const name of [...pieces, 'segments.txt']) await rm(join(dir, name), { force: true }).catch(() => {});
   repaired.push(`joined the ${segments.length} segments of the paused take`);
 }
 
 /** The track start times in a take.json that fails the schema but is still JSON. */
-function readableStarts(text: string | undefined): Partial<Record<'screen' | 'webcam' | 'mic', number>> {
+function readableStarts(text: string | undefined): Partial<Record<'screen' | 'webcam' | 'mic' | 'system', number>> {
   try {
     const tracks = (JSON.parse(text ?? '') as { tracks?: Record<string, { start?: unknown } | undefined> }).tracks ?? {};
-    const starts: Partial<Record<'screen' | 'webcam' | 'mic', number>> = {};
-    for (const track of ['screen', 'webcam', 'mic'] as const) {
+    const starts: Partial<Record<'screen' | 'webcam' | 'mic' | 'system', number>> = {};
+    for (const track of ['screen', 'webcam', 'mic', 'system'] as const) {
       const start = tracks[track]?.start;
       if (typeof start === 'number' && Number.isFinite(start) && start >= 0) starts[track] = start;
     }

@@ -7,6 +7,7 @@ import { applyCaptionFixes, captionCues, captionWords, sceneSpans, stepChapters,
 import { app } from 'electron';
 import { INLINE_GRAPH_LIMIT, audioFilterGraph, muxArgs, planAudio } from '../audio';
 import { chapterMetadata } from '../chapters';
+import { duckExpression, speechSpans } from '../music/duck';
 import { ExportError } from '../errors';
 import { withFormat, type ExportFormat } from '../formats';
 import { CHANNELS, type EncoderPreference, type ExportJob, type PageResult, type PageStillsSuccess, type PageSuccess } from '../job';
@@ -196,13 +197,13 @@ async function checkOutput(out: string, inputs: readonly string[]): Promise<void
   }
 }
 
-/** A mic that ffmpeg cannot read fails here (exit 1), not after minutes of rendering. */
-async function checkMic(path: string, signal: AbortSignal | undefined): Promise<void> {
+/** A mic (or system audio, `what`) that ffmpeg cannot read fails here (exit 1), not after minutes of rendering. */
+async function checkMic(path: string, signal: AbortSignal | undefined, what = 'mic recording (sources.mic)'): Promise<void> {
   try {
     await runFfmpeg(['-hide_banner', '-nostdin', '-v', 'error', '-i', path, '-map', '0:a:0', '-frames:a', '1', '-f', 'null', '-'], signal);
   } catch (error) {
     if (error instanceof ExportError && error.code !== 'render') throw error;
-    throw new ExportError('invalid-media', `mic recording (sources.mic) has no readable audio: ${path}\n${(error as Error).message}`, {
+    throw new ExportError('invalid-media', `${what} has no readable audio: ${path}\n${(error as Error).message}`, {
       cause: error,
     });
   }
@@ -249,6 +250,7 @@ export async function exportProject(opts: ExportOptions): Promise<ExportResult> 
   for (const format of subtitles) await checkOutput(subtitlePath(out, format), sources.inputs);
   await checkFfmpeg();
   if (sources.mic) await checkMic(sources.mic.path, signal);
+  if (sources.system) await checkMic(sources.system.path, signal, "the computer's sound (sources.system)");
   throwIfCancelled();
   await sweepStale(out);
   const project = withFormat(sources.project, opts.format);
@@ -329,8 +331,10 @@ export async function exportProject(opts: ExportOptions): Promise<ExportResult> 
     const audioStarted = performance.now();
     const seconds = page.frames / project.output.fps;
     const spans = sceneSpans(project.scenes, project.cuts);
-    const segments = planAudio({ spans, look: project.look, mic: sources.mic !== undefined, seconds });
-    const usesMic = segments.some((segment) => segment.mic !== undefined);
+    const segments = planAudio({ spans, look: project.look, mic: sources.mic !== undefined, system: sources.system !== undefined, seconds });
+    const audible = segments.some((segment) => segment.mic !== undefined);
+    const usesMic = audible && sources.mic !== undefined;
+    const usesSystem = audible && sources.system !== undefined;
     // the typing sounds: a track of their own on the video's timeline, mixed in after the mic
     const clicks = typingClicks(spans, sources.keys ?? [], project.look.audio);
     // with music or sounds, one stereo soundtrack holds them and the typing clicks; else the clicks alone
@@ -357,15 +361,35 @@ export async function exportProject(opts: ExportOptions): Promise<ExportResult> 
       typing = join(work, 'typing.wav');
       await writeTypingTrack(typing, clicks, project.look.audio.typingVolume, seconds);
     }
-    const extra = usesMic ? 2 : 1;
-    const graph = audioFilterGraph(segments, sources.mic?.offset ?? 0, 1, typing ? extra : undefined, sound ? extra : undefined);
+    // the inputs after the video: the mic, the computer's sound, then the typing or the soundtrack
+    let input = 1;
+    const micInput = usesMic ? input++ : undefined;
+    const systemInput = usesSystem ? input++ : undefined;
+    const graph = audioFilterGraph(segments, {
+      ...(micInput !== undefined && sources.mic && { mic: { input: micInput, offset: sources.mic.offset } }),
+      ...(systemInput !== undefined &&
+        sources.system && {
+          system: {
+            input: systemInput,
+            offset: sources.system.offset,
+            volume: project.look.audio.systemVolume,
+            // down under speech, as the music
+            duck: duckExpression(sources.transcript ? speechSpans(project, sources.transcript, spans) : [], project.look.audio.systemDuck),
+          },
+        }),
+      ...(typing && { typing: input }),
+      ...(sound && { sound: input }),
+    });
     const graphFile = graph.length > INLINE_GRAPH_LIMIT ? join(work, 'audio.graph') : undefined;
     if (graphFile) await writeFile(graphFile, graph);
     // the script's steps as the video's chapters, where the take reached them
     const chapters = stepChapters(project.script, take.markers, spans);
     const chapterFile = chapters.length > 0 ? join(work, 'chapters.txt') : undefined;
     if (chapterFile) await writeFile(chapterFile, chapterMetadata(chapters));
-    await runFfmpeg(muxArgs({ video, mic: usesMic ? sources.mic?.path : undefined, typing, sound, graph, graphFile, ...(chapterFile && { chapters: chapterFile }), out: partial }), signal);
+    await runFfmpeg(
+      muxArgs({ video, mic: usesMic ? sources.mic?.path : undefined, system: usesSystem ? sources.system?.path : undefined, typing, sound, graph, graphFile, ...(chapterFile && { chapters: chapterFile }), out: partial }),
+      signal,
+    );
     throwIfCancelled();
     try {
       await rename(partial, out);

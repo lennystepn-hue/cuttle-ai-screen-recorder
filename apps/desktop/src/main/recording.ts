@@ -164,7 +164,7 @@ async function choicesNow(devices?: Pick<Devices, 'cameras' | 'mics'>): Promise<
   const keep = (name: string | undefined, list: string[] | undefined) => (name && (!list || list.includes(name)) ? name : undefined);
   const camera = keep(saved.camera, devices?.cameras);
   const mic = keep(saved.mic, devices?.mics);
-  return { stop: saved.stop, ...(camera && { camera }), ...(mic && { mic }), ...(claudeFolder && { claudeFolder }) };
+  return { stop: saved.stop, ...(camera && { camera }), ...(mic && { mic }), ...(saved.systemAudio && { systemAudio: true }), ...(claudeFolder && { claudeFolder }) };
 }
 
 const countdownSeconds = async () => COUNTDOWN ?? (await loadSettings()).countdown;
@@ -291,6 +291,7 @@ function openPicker(
         settings.record = { ...settings.record, ...next, stop: next.stop };
         if (next.camera === undefined) delete settings.record.camera;
         if (next.mic === undefined) delete settings.record.mic;
+        if (!next.systemAudio) delete settings.record.systemAudio;
       });
       for (const other of pickers) {
         if (other.setup) other.setup.choices = next;
@@ -740,6 +741,7 @@ async function record(target: PickedTarget, display: PickerDisplay, displays: Pi
             source,
             ...(choices.camera && { webcam: choices.camera }),
             ...(choices.mic && { mic: choices.mic }),
+            ...(choices.systemAudio && { systemAudio: true }),
             stop: stopOptionsFor(choices),
             countdownSeconds: countdownFor,
             deadZones: deadZones(),

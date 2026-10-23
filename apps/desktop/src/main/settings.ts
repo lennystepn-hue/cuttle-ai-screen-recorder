@@ -52,7 +52,13 @@ const SettingsSchema = z.object({
   updates: z.boolean().catch(true).default(true),
   /** The picker bar's choices, kept between recordings (the camera and mic are the defaults in the settings). */
   record: z
-    .object({ camera: z.string().optional(), mic: z.string().optional(), stop: z.enum(['none', 'claude', 'idle']).default('none'), claudeFolder: z.string().optional() })
+    .object({
+      camera: z.string().optional(),
+      mic: z.string().optional(),
+      systemAudio: z.boolean().optional(),
+      stop: z.enum(['none', 'claude', 'idle']).default('none'),
+      claudeFolder: z.string().optional(),
+    })
     .catch({ stop: 'none' as const })
     .default({ stop: 'none' as const }),
 });

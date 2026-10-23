@@ -7,6 +7,7 @@ import { parseProject } from '@cuttle/project';
 import { sceneSpans, typingClicks } from '@cuttle/timeline';
 import { describe, expect, it } from 'vitest';
 import { audioFilterGraph, planAudio } from '../../src/audio';
+import { duckExpression } from '../../src/music/duck';
 import { ffmpegPath } from '../../src/main/ffmpeg';
 import { writeTypingTrack } from '../../src/main/typing-track';
 import { writeSoundTrack } from '../../src/main/soundtrack';
@@ -22,7 +23,7 @@ function render(scenes: unknown[], seconds: number, look: Record<string, unknown
   const parsed = parseProject({ version: 1, sources: { screen: 's.mp4', mic: 'm.m4a' }, scenes, look });
   if (!parsed.ok) throw new Error(JSON.stringify(parsed.issues));
   const segments = planAudio({ spans: sceneSpans(parsed.project.scenes), look: parsed.project.look, mic: true, seconds });
-  const graph = audioFilterGraph(segments, 0, 0);
+  const graph = audioFilterGraph(segments, { mic: { input: 0, offset: 0 } });
   const result = spawnSync(
     ffmpegPath(),
     ['-v', 'error', '-f', 'lavfi', '-i', mic, '-filter_complex', graph, '-map', '[aout]', '-f', 'f32le', '-'],
@@ -98,7 +99,7 @@ describe.runIf(hasFfmpeg)('export audio through ffmpeg', () => {
       const at = Math.round(clicks[0]!.at * 48_000);
       const mix = (inputs: string[], mic: boolean, typingInput: number) => {
         const segments = planAudio({ spans, look: parsed.project.look, mic, seconds: 3 });
-        const result = spawnSync(ffmpegPath(), ['-v', 'error', ...inputs, '-filter_complex', audioFilterGraph(segments, 0, 0, typingInput), '-map', '[aout]', '-f', 'f32le', '-'], {
+        const result = spawnSync(ffmpegPath(), ['-v', 'error', ...inputs, '-filter_complex', audioFilterGraph(segments, { mic: { input: 0, offset: 0 }, ...(typingInput !== undefined && { typing: typingInput }) }), '-map', '[aout]', '-f', 'f32le', '-'], {
           maxBuffer: 64 * 1024 * 1024,
           windowsHide: true,
         });
@@ -138,7 +139,7 @@ describe.runIf(hasFfmpeg)('export audio through ffmpeg', () => {
       const wav = join(dir, 'sound.wav');
       await writeSoundTrack(wav, { seconds: 3, stems: { rate: 48_000, music, effects: new Float32Array(frames * 2) } as MusicStems, music: { volume: 1, duck: 0 }, effectsVolume: 1 });
       const segments = planAudio({ spans, look: parsed.project.look, mic: true, seconds: 3 });
-      const result = spawnSync(ffmpegPath(), ['-v', 'error', '-f', 'lavfi', '-i', SINE, '-i', wav, '-filter_complex', audioFilterGraph(segments, 0, 0, undefined, 1), '-map', '[aout]', '-f', 'f32le', '-'], {
+      const result = spawnSync(ffmpegPath(), ['-v', 'error', '-f', 'lavfi', '-i', SINE, '-i', wav, '-filter_complex', audioFilterGraph(segments, { mic: { input: 0, offset: 0 }, sound: 1 }), '-map', '[aout]', '-f', 'f32le', '-'], {
         maxBuffer: 64 * 1024 * 1024,
         windowsHide: true,
       });
@@ -156,5 +157,26 @@ describe.runIf(hasFfmpeg)('export audio through ffmpeg', () => {
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
+  });
+
+  it("mixes the computer's sound in stereo at its volume, and lowers it under speech as the music", () => {
+    const parsed = parseProject({ version: 1, sources: { screen: 's.mp4', system: 'y.m4a' }, scenes: [{ type: 'clip', from: 0, to: 4 }], look: { transition: { enabled: false } } });
+    if (!parsed.ok) throw new Error('invalid');
+    const segments = planAudio({ spans: sceneSpans(parsed.project.scenes), look: parsed.project.look, mic: false, system: true, seconds: 4 });
+    // speech from 2 to 3 s: 12 dB down (a quarter) there, ramping down before it and up after it
+    const graph = audioFilterGraph(segments, { system: { input: 0, offset: 0, volume: 0.5, duck: duckExpression([{ start: 2, end: 3 }], 12) } });
+    const result = spawnSync(ffmpegPath(), ['-v', 'error', '-f', 'lavfi', '-i', 'aevalsrc=0.4|0.2:s=48000:d=10', '-filter_complex', graph, '-map', '[aout]', '-f', 'f32le', '-'], {
+      maxBuffer: 64 * 1024 * 1024,
+      windowsHide: true,
+    });
+    if (result.status !== 0) throw new Error(result.stderr.toString());
+    const stereo = new Float32Array(result.stdout.buffer, result.stdout.byteOffset, result.stdout.byteLength / 4);
+    expect(stereo.length).toBe(4 * 48_000 * 2);
+    const at = (seconds: number, channel: number) => stereo[Math.round(seconds * 48_000) * 2 + channel]!;
+    // both ears as recorded, at half
+    expect(at(1, 0)).toBeCloseTo(0.2, 3);
+    expect(at(1, 1)).toBeCloseTo(0.1, 3);
+    expect(at(2.5, 0)).toBeCloseTo(0.2 * 10 ** (-12 / 20), 2);
+    expect(at(3.9, 0)).toBeCloseTo(0.2, 3);
   });
 });

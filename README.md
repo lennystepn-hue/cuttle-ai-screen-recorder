@@ -60,7 +60,7 @@ made that way: nine pages and a score, no camera, no editor. See [Motion videos,
   </tr>
   <tr>
     <td valign="top"><b>Make it look designed.</b> Backgrounds (gradients, animated ones, your wallpaper), window frames from macOS to a phone, cursor styles, keycaps of the shortcuts you press, a webcam bubble you move and reshape after the take, brand kits, watermarks, motion titles and music written for the video.</td>
-    <td valign="top"><b>Fillers and pauses, gone.</b> Your voice is transcribed on your computer with Whisper. Filler words and long pauses are cut where the picture rests, subtitles come word by word (or karaoke), and the export writes SRT and VTT.</td>
+    <td valign="top"><b>Fillers and pauses, gone.</b> Your voice is transcribed on your computer with Whisper. Filler words and long pauses are cut where the picture rests, subtitles come word by word (or karaoke), and the export writes SRT and VTT. No voice of your own? A narration speaks your text, with neural voices that run on your computer (English, German, French, Spanish) or your ElevenLabs voice by its ID.</td>
   </tr>
   <tr>
     <td><img src="docs/media/feature-claude-code.jpg" alt="cuttle record --until-claude, with Claude's prompt, work and answer as markers" /></td>
@@ -365,6 +365,8 @@ cuttle init demo && cd demo
 cuttle devices                       # monitors, windows, cameras, microphones
 cuttle record --mic --until-claude   # stops when Claude Code in this folder has answered, background work included (or Ctrl+C)
 cuttle record --mic --system-audio   # the computer's sound too, beside the mic
+cuttle voice use de_DE-thorsten-medium && cuttle voice add "Das ist Cuttle." --at 2   # a narration, spoken on this computer
+cuttle voice render                  # speaks the lines (21 MB voice, downloaded once: cuttle voice download)
 cuttle import phone.mp4 --to 40      # or a video made elsewhere as the take (30 fps, BT.709), its sound as the mic
 cuttle suggest                       # scenes: quiet start and end trimmed, idle cut, waiting sped up, zooms on the answer and on clicks
 cuttle preview                       # 12 stills and a contact sheet in preview/

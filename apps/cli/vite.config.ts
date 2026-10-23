@@ -21,7 +21,7 @@ export default defineConfig({
         cuttle: fileURLToPath(new URL('./src/bin.ts', import.meta.url)),
         electron: fileURLToPath(new URL('./src/electron/bootstrap.ts', import.meta.url)),
       },
-      external: ['electron', 'koffi', 'uiohook-napi'],
+      external: ['electron', 'koffi', 'uiohook-napi', 'sherpa-onnx-node'],
       // Shared chunks stay next to the entries: export finds export-page/ relative to its own file.
       output: { format: 'es', entryFileNames: '[name].mjs', chunkFileNames: '[name]-[hash].mjs' },
     },

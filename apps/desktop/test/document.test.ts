@@ -117,6 +117,31 @@ describe('the document', () => {
     expect(describeChange(project(raw), project(without))).toBe('1 scene removed · 1 sound removed');
   });
 
+  it('edits the narration: its voice and level, its lines added, changed and taken out (with their scene), each with an id', () => {
+    let next = applyCommand(base, { type: 'voiceover', fields: { voice: { provider: 'local', id: 'de_DE-thorsten-medium' }, volume: 1.5 } }, limits);
+    expect(next.voiceover).toEqual({ voice: { provider: 'local', id: 'de_DE-thorsten-medium' }, volume: 1 });
+    next = applyCommand(next, { type: 'add-voice-line', item: { text: 'Hallo', at: 0.5, scene: 's3' } }, limits);
+    next = applyCommand(next, { type: 'add-voice-line', item: { text: 'Zweite', at: 1 }, index: 0 }, limits);
+    expect((next.voiceover as { lines: { id: string; text: string }[] }).lines.map((line) => [line.id, line.text])).toEqual([
+      ['v2', 'Zweite'],
+      ['v1', 'Hallo'],
+    ]);
+    expect(describeChange(project(base), project(next))).toBe('2 lines of narration added');
+    next = applyCommand(next, { type: 'voice-line', id: 'v1', fields: { text: 'Hallo du', at: -2 } }, limits);
+    expect((next.voiceover as { lines: Record<string, unknown>[] }).lines[1]).toMatchObject({ id: 'v1', text: 'Hallo du', at: 0 });
+    // the card it was in goes, and the line with it
+    const without = applyCommand(next, { type: 'delete', list: 'scenes', id: 's3' }, limits);
+    expect((without.voiceover as { lines: { id: string }[] }).lines.map((line) => line.id)).toEqual(['v2']);
+    next = applyCommand(next, { type: 'voice-line', id: 'v2', fields: null }, limits);
+    expect((next.voiceover as { lines: { id: string }[] }).lines.map((line) => line.id)).toEqual(['v1']);
+    expect(() => applyCommand(next, { type: 'voice-line', id: 'v9', fields: { text: 'x' } }, limits)).toThrow(DocumentError);
+    // a line is empty while it is written (it speaks nothing yet)
+    expect((applyCommand(next, { type: 'voice-line', id: 'v1', fields: { text: '' } }, limits).voiceover as { lines: { text: string }[] }).lines[0]!.text).toBe('');
+    // lines written without an id get one
+    const named = ensureIds({ ...base, voiceover: { voice: { id: 'en_US-amy-medium' }, lines: [{ text: 'a', at: 0 }, { id: 'v1', text: 'b', at: 1 }] } });
+    expect((named.voiceover as { lines: { id: string }[] }).lines.map((line) => line.id)).toEqual(['v2', 'v1']);
+  });
+
   it('sets the music: fields merged, levels kept in range, and removed', () => {
     let next = applyCommand(base, { type: 'music', fields: { src: 'music/pulse/index.html' } }, limits);
     expect(next.music).toEqual({ src: 'music/pulse/index.html' });

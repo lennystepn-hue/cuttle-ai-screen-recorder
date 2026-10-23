@@ -184,6 +184,31 @@ describe('ProjectSchema', () => {
     expect(pathsOf({ ...minimal, look: { cursor: { style: 'laser' } } })).toContain('look.cursor.style');
   });
 
+  it('reads a narration: its voice, its lines with their defaults, and refuses a line without text or a voice', () => {
+    const narrated = ProjectSchema.parse({
+      ...minimal,
+      scenes: [{ type: 'card', id: 'c1', title: 'A', duration: 2 }],
+      voiceover: { voice: { id: 'de_DE-thorsten-medium' }, lines: [{ id: 'v1', text: 'Hallo', at: 0.5, scene: 'c1' }, { text: '', at: 1, file: 'audio/take.m4a' }] },
+    });
+    expect(narrated.voiceover).toEqual({
+      voice: { provider: 'local', id: 'de_DE-thorsten-medium', speed: 1 },
+      volume: 1,
+      captions: true,
+      lines: [
+        { id: 'v1', text: 'Hallo', at: 0.5, scene: 'c1', volume: 1, enabled: true },
+        { text: '', at: 1, file: 'audio/take.m4a', volume: 1, enabled: true },
+      ],
+    });
+    expect(ProjectSchema.parse(minimal).voiceover).toEqual({ volume: 1, captions: true, lines: [] });
+    expect(pathsOf({ ...minimal, voiceover: { lines: [{ text: 'Hi', at: 0 }] } })).toEqual(['voiceover.lines.0.voice']);
+    // a line being written is empty, and needs no voice yet
+    expect(pathsOf({ ...minimal, voiceover: { lines: [{ text: ' ', at: 0 }] } })).toEqual([]);
+    expect(pathsOf({ ...minimal, voiceover: { voice: { id: 'x', provider: 'azure' }, lines: [] } })).toEqual(['voiceover.voice.provider']);
+    expect(pathsOf({ ...minimal, voiceover: { voice: { id: 'x' }, lines: [{ text: 'a', at: 0, scene: 'nope' }] } })).toEqual(['voiceover.lines.0.scene']);
+    // a line's id is unique in the whole project
+    expect(pathsOf({ ...minimal, scenes: [{ type: 'card', id: 'v1', title: 'A', duration: 1 }], voiceover: { voice: { id: 'x' }, lines: [{ id: 'v1', text: 'a', at: 0 }] } })).toEqual(['voiceover.lines.0.id']);
+  });
+
   it('reads the key badges and refuses an unknown choice and a size out of range', () => {
     expect(ProjectSchema.parse({ ...minimal, look: { keys: { show: 'keys', position: 'top', size: 1.5 } } }).look.keys).toEqual({ enabled: true, show: 'keys', position: 'top', size: 1.5 });
     expect(pathsOf({ ...minimal, look: { keys: { show: 'letters', position: 'center', size: 3 } } })).toEqual(['look.keys.show', 'look.keys.position', 'look.keys.size']);

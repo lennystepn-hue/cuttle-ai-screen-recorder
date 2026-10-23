@@ -1,10 +1,11 @@
 // The take's sound in the preview (the mic, the computer's sound): decoded in chunks a few seconds
-// ahead of the playhead and scheduled on the AudioContext, whose clock the video follows.
+// ahead of the playhead and scheduled on the AudioContext, whose clock the video follows; and the
+// narration's spoken lines, each decoded whole.
 import { AudioBufferSink } from 'mediabunny';
 import { duckEnvelope } from '@cuttle/export/music-duck';
-import type { CuttleProject } from '@cuttle/project';
-import { isContinuousCut, type SceneSpan } from '@cuttle/timeline';
-import type { AudioSource } from './media';
+import { voiceLineKey, voiceRenderFiles, type CuttleProject } from '@cuttle/project';
+import { isContinuousCut, narrationCues, type SceneSpan } from '@cuttle/timeline';
+import { mediaUrl, type AudioSource } from './media';
 
 /** Audio is scheduled this far ahead of the clock. */
 const AHEAD_SECONDS = 2.5;
@@ -157,4 +158,71 @@ export function systemLevel(context: AudioContext, project: CuttleProject, speec
     gain.gain.setValueCurveAtTime(curve, start, (steps - 1) * DUCK_STEP);
   }
   return gain;
+}
+
+/** The narration's sounds decoded for an AudioContext, by their key (a key's sound never changes). */
+const decodedLines = new WeakMap<AudioContext, Map<string, Promise<AudioBuffer | undefined>>>();
+
+/** A spoken line's sound as a buffer of `context`, decoded once; undefined when it cannot be read. */
+function lineBuffer(context: AudioContext, key: string): Promise<AudioBuffer | undefined> {
+  let byKey = decodedLines.get(context);
+  if (!byKey) decodedLines.set(context, (byKey = new Map()));
+  let buffer = byKey.get(key);
+  if (!buffer) {
+    buffer = fetch(mediaUrl(voiceRenderFiles(key).sound))
+      .then((response) => (response.ok ? response.arrayBuffer() : Promise.reject(new Error(`HTTP ${response.status}`))))
+      .then((bytes) => context.decodeAudioData(bytes))
+      .catch(() => undefined);
+    byKey.set(key, buffer);
+    // one that could not be read is tried again next time
+    void buffer.then((decoded) => decoded ?? byKey.delete(key));
+  }
+  return buffer;
+}
+
+/**
+ * Plays the narration from output time `from`: each spoken line (`spoken` has its key) where it
+ * plays on the video, at its and the narration's volume, from where the clock is when it already began.
+ */
+export class NarrationSchedule {
+  private readonly nodes: AudioNode[] = [];
+  private readonly sources: AudioBufferSourceNode[] = [];
+  private stopped = false;
+
+  constructor(context: AudioContext, project: CuttleProject, spans: readonly SceneSpan[], spoken: (key: string) => boolean, from: number, contextStart: number) {
+    if (!project.look.audio.enabled) return;
+    for (const cue of narrationCues(project, spans).cues) {
+      const key = voiceLineKey(project.voiceover, cue.line);
+      if (!spoken(key)) continue;
+      void lineBuffer(context, key).then((buffer) => {
+        if (!buffer || this.stopped || cue.at + buffer.duration <= from) return;
+        const at = contextStart + (cue.at - from);
+        const start = Math.max(context.currentTime, at);
+        const offset = start - at;
+        if (offset >= buffer.duration) return;
+        const source = context.createBufferSource();
+        source.buffer = buffer;
+        const gain = context.createGain();
+        gain.gain.value = cue.line.volume * project.voiceover.volume;
+        source.connect(gain).connect(context.destination);
+        source.start(start, offset);
+        this.sources.push(source);
+        this.nodes.push(source, gain);
+      });
+    }
+  }
+
+  stop(): void {
+    this.stopped = true;
+    for (const source of this.sources) {
+      try {
+        source.stop();
+      } catch {
+        // not started yet
+      }
+    }
+    for (const node of this.nodes) node.disconnect();
+    this.sources.length = 0;
+    this.nodes.length = 0;
+  }
 }

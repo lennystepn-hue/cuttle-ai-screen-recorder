@@ -8,6 +8,7 @@ import { app } from 'electron';
 import { INLINE_GRAPH_LIMIT, audioFilterGraph, muxArgs, planAudio } from '../audio';
 import { chapterMetadata } from '../chapters';
 import { duckExpression, speechSpans } from '../music/duck';
+import { placeNarration, writeNarrationTrack } from './narration';
 import { ExportError } from '../errors';
 import { withFormat, type ExportFormat } from '../formats';
 import { CHANNELS, type EncoderPreference, type ExportJob, type PageResult, type PageStillsSuccess, type PageSuccess } from '../job';
@@ -244,7 +245,8 @@ export async function exportProject(opts: ExportOptions): Promise<ExportResult> 
   for (const warning of sources.warnings) console.warn(`warning: ${warning}`);
   await checkOutput(out, sources.inputs);
   const subtitles = [...new Set(opts.subtitles ?? [])];
-  if (subtitles.length > 0 && !sources.transcript) {
+  const narrated = sources.narration !== undefined && sources.narration.length > 0 && sources.project.voiceover.captions;
+  if (subtitles.length > 0 && !sources.transcript && !narrated) {
     throw new ExportError('missing-file', 'subtitle files need the take\'s transcript (sources.transcript): run "cuttle transcribe" first');
   }
   for (const format of subtitles) await checkOutput(subtitlePath(out, format), sources.inputs);
@@ -254,6 +256,12 @@ export async function exportProject(opts: ExportOptions): Promise<ExportResult> 
   throwIfCancelled();
   await sweepStale(out);
   const project = withFormat(sources.project, opts.format);
+  // the narration on the video: its lines, and their words for the captions, the mix and the duck
+  const narration = sources.narration ? placeNarration(project, sceneSpans(project.scenes, project.cuts), sources.narration) : undefined;
+  for (const index of narration?.left ?? []) {
+    const line = project.voiceover.lines[index]!;
+    console.warn(`warning: the narration's line ${line.id ?? `#${index + 1}`} plays nowhere: ${line.scene !== undefined ? 'it starts after its scene ends' : 'no clip shows its second'}`);
+  }
   const job: ExportJob = {
     kind: 'video',
     project,
@@ -262,6 +270,7 @@ export async function exportProject(opts: ExportOptions): Promise<ExportResult> 
     events: sources.events,
     ...(sources.shortcuts && { shortcuts: sources.shortcuts }),
     ...(sources.transcript && { transcript: sources.transcript }),
+    ...(narration && narration.words.length > 0 && { narration: narration.words }),
     ...(opts.captions !== undefined && { captions: opts.captions }),
     stills: sources.stills,
     backgroundImage: sources.backgroundImage,
@@ -284,7 +293,8 @@ export async function exportProject(opts: ExportOptions): Promise<ExportResult> 
   const motion = sources.motion && sources.motionTake ? new MotionHost(project, sources.motion, sources.motionTake) : undefined;
   // the music and sounds render beside the frames, in a page of their own; checked here, so a missing
   // music page fails before the frames, and planned again with the sounds the motion pages ask for
-  const take = sources.motionTake ?? (await motionTake(projectDir, project));
+  // the take as the music sees it, with the narration's words (spoken where they play)
+  const take = { ...(sources.motionTake ?? (await motionTake(projectDir, project))), ...(narration && { narration: narration.words }) };
   await planSoundtrack(projectDir, project, take);
   let soundtrack: Promise<{ plan: SoundtrackPlan; stems: MusicStems } | undefined> | undefined;
   try {
@@ -335,6 +345,8 @@ export async function exportProject(opts: ExportOptions): Promise<ExportResult> 
     const audible = segments.some((segment) => segment.mic !== undefined);
     const usesMic = audible && sources.mic !== undefined;
     const usesSystem = audible && sources.system !== undefined;
+    const narrationFile = narration && narration.placed.length > 0 && project.look.audio.enabled ? join(work, 'narration.wav') : undefined;
+    if (narrationFile) await writeNarrationTrack(narrationFile, narration!.placed, seconds);
     // the typing sounds: a track of their own on the video's timeline, mixed in after the mic
     const clicks = typingClicks(spans, sources.keys ?? [], project.look.audio);
     // with music or sounds, one stereo soundtrack holds them and the typing clicks; else the clicks alone
@@ -365,6 +377,8 @@ export async function exportProject(opts: ExportOptions): Promise<ExportResult> 
     let input = 1;
     const micInput = usesMic ? input++ : undefined;
     const systemInput = usesSystem ? input++ : undefined;
+    const narrationInput = narrationFile ? input++ : undefined;
+    const speech = speechSpans(project, sources.transcript ?? [], spans, narration?.words ?? []);
     const graph = audioFilterGraph(segments, {
       ...(micInput !== undefined && sources.mic && { mic: { input: micInput, offset: sources.mic.offset } }),
       ...(systemInput !== undefined &&
@@ -373,10 +387,11 @@ export async function exportProject(opts: ExportOptions): Promise<ExportResult> 
             input: systemInput,
             offset: sources.system.offset,
             volume: project.look.audio.systemVolume,
-            // down under speech, as the music
-            duck: duckExpression(sources.transcript ? speechSpans(project, sources.transcript, spans) : [], project.look.audio.systemDuck),
+            // down under speech (the take's and the narration's), as the music
+            duck: duckExpression(speech, project.look.audio.systemDuck),
           },
         }),
+      ...(narrationInput !== undefined && { narration: narrationInput }),
       ...(typing && { typing: input }),
       ...(sound && { sound: input }),
     });
@@ -387,7 +402,18 @@ export async function exportProject(opts: ExportOptions): Promise<ExportResult> 
     const chapterFile = chapters.length > 0 ? join(work, 'chapters.txt') : undefined;
     if (chapterFile) await writeFile(chapterFile, chapterMetadata(chapters));
     await runFfmpeg(
-      muxArgs({ video, mic: usesMic ? sources.mic?.path : undefined, system: usesSystem ? sources.system?.path : undefined, typing, sound, graph, graphFile, ...(chapterFile && { chapters: chapterFile }), out: partial }),
+      muxArgs({
+        video,
+        mic: usesMic ? sources.mic?.path : undefined,
+        system: usesSystem ? sources.system?.path : undefined,
+        narration: narrationFile,
+        typing,
+        sound,
+        graph,
+        graphFile,
+        ...(chapterFile && { chapters: chapterFile }),
+        out: partial,
+      }),
       signal,
     );
     throwIfCancelled();
@@ -397,10 +423,11 @@ export async function exportProject(opts: ExportOptions): Promise<ExportResult> 
       throw new ExportError('render', `could not replace ${out} (is it open in a player?): ${(error as Error).message}`, { cause: error });
     }
     const written: string[] = [];
-    if (subtitles.length > 0 && sources.transcript) {
-      // as subtitles, whatever the burned-in style: two lines a cue, on the video's timeline
+    if (subtitles.length > 0) {
+      // as subtitles, whatever the burned-in style: two lines a cue, on the video's timeline, the narration's words with the take's
       const spans = sceneSpans(project.scenes, project.cuts);
-      const cues = captionCues(captionWords(applyCaptionFixes(sources.transcript, project.captions.fixes), spans), 'subtitle');
+      const spoken = sources.transcript ? captionWords(applyCaptionFixes(sources.transcript, project.captions.fixes), spans) : [];
+      const cues = captionCues([...spoken, ...(narrated && narration ? narration.words : [])].sort((a, b) => a.t - b.t), 'subtitle');
       for (const format of subtitles) {
         const path = subtitlePath(out, format);
         await writeFile(path, format === 'srt' ? toSrt(cues) : toVtt(cues));

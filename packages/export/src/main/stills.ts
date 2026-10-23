@@ -1,6 +1,7 @@
 import { mkdir, readdir, rename, rm, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import type { CuttleProject } from '@cuttle/project';
+import { sceneSpans } from '@cuttle/timeline';
 import { app } from 'electron';
 import { ExportError } from '../errors';
 import { withFormat, type ExportFormat } from '../formats';
@@ -8,6 +9,7 @@ import { CHANNELS, type PageStillsSuccess, type StillsJob } from '../job';
 import { cancelledError, defaultPageDir, runPage, watchdog, whenCancelled } from './export';
 import { FileHost } from './files';
 import { MotionHost, serveMotion, type MotionItemReport } from './motion-host';
+import { placeNarration } from './narration';
 import { loadSources, motionPages, motionTake } from './sources';
 import { openExportWindow, type ExportWindow } from './window';
 
@@ -79,13 +81,15 @@ export async function renderStills(opts: StillsOptions): Promise<StillsResult> {
   }
   await app.whenReady();
   const outDir = resolve(opts.outDir);
-  const sources = await loadSources(resolve(opts.projectDir));
+  const sources = await loadSources(resolve(opts.projectDir), { narration: 'spoken' });
   for (const warning of sources.warnings) console.warn(`warning: ${warning}`);
   if (opts.signal?.aborted) throw cancelledError();
   const project = withFormat(opts.project ? opts.project(sources.project) : sources.project, opts.format);
   const motionFiles = opts.project ? await motionPages(resolve(opts.projectDir), project) : sources.motion;
   const take = motionFiles ? (sources.motionTake ?? (await motionTake(resolve(opts.projectDir), project))) : undefined;
   const columns = opts.sheet ? Math.max(1, Math.round(opts.sheet.columns ?? DEFAULT_SHEET_COLUMNS)) : undefined;
+  // the narration's words, for the captions the stills show
+  const narration = sources.narration ? placeNarration(project, sceneSpans(project.scenes, project.cuts), sources.narration) : undefined;
   const job: StillsJob = {
     kind: 'stills',
     project,
@@ -94,6 +98,7 @@ export async function renderStills(opts: StillsOptions): Promise<StillsResult> {
     events: sources.events,
     ...(sources.shortcuts && { shortcuts: sources.shortcuts }),
     ...(sources.transcript && { transcript: sources.transcript }),
+    ...(narration && narration.words.length > 0 && { narration: narration.words }),
     stills: sources.stills,
     backgroundImage: sources.backgroundImage,
     watermarkImage: sources.watermarkImage,

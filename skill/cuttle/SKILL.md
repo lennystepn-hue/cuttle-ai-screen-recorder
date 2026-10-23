@@ -177,6 +177,17 @@ video as pages. Read [motion.md](motion.md) and [music.md](music.md) first.
 
 A recorded take can join later: `cuttle record` adds clips to the same project, and your pages stay.
 
+**A narration** finishes a video written in code, or a take the user did not want to speak over.
+Write it with the user (what each scene says, in their language and tone), then:
+`cuttle -C "<project>" --json voice use de_DE-thorsten-medium` (`voice list` shows the voices on
+this computer, a woman's and a man's in English, German, French and Spanish; ask before
+`voice download <name>`, 21 MB once), or `voice use <voice ID> --elevenlabs` when the user has an
+ElevenLabs account (`ELEVENLABS_API_KEY`; `voice list --elevenlabs` lists their voices). Add a
+line per scene: `cuttle -C "<project>" --json voice add "<text>" --scene <id> --at 0.3`, or
+`--file <recording>` for a voice made elsewhere (Higgsfield, another TTS, a studio take). Then
+`voice render`: it says each line's length and where it plays; a line longer than its scene runs
+into the next (it says so): shorten the text or lengthen the scene. The music ducks under it.
+
 ## 3. Edit
 
 ```bash
@@ -345,6 +356,10 @@ than 10 s). Give the user the lines when the video goes to YouTube.
 - `suggest` found no Claude markers: pass `--claude "<demo folder>"`.
 - `model-missing` (or the note "the mic was not transcribed"): no speech model is downloaded; ask
   the user before `cuttle models download small`.
+- `voice-missing`: the narration's voice is not on this computer; ask the user before
+  `cuttle voice download <name>` (21 MB). `voice-key`: ElevenLabs has no key, or refused it: ask
+  the user for theirs (`ELEVENLABS_API_KEY`), never write it into a file. `voice`: the voice failed
+  on a line (ElevenLabs' message says why: a voice ID that does not exist, credits).
 - `ffmpeg-old`: nothing here can transcribe: ffmpeg has no whisper filter (before 8.0, or built
   without whisper, as every macOS ffmpeg is) and whisper.cpp's `whisper-cli` is not installed. Ask
   the user to run `winget upgrade Gyan.FFmpeg` (macOS: `brew install whisper-cpp`).

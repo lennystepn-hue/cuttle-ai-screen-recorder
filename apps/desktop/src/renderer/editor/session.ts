@@ -8,7 +8,7 @@ import type { ExportEnd, ExportProgress, ExportTarget, MediaState, MotionStatusV
 import type { OverlayKind } from '../../shared/timeline-model';
 import { bridge } from '../bridge';
 import { beforeClose, dismissToast, edit, flush, offerUndoRestart, openDocument, outsideChange, redo, toast, undo, type DocState } from './doc';
-import { ensureMedia, openProjectMedia, openVideo, type EditorMedia } from './media';
+import { ensureMedia, openProjectMedia, openVideo, unspokenLines, type EditorMedia } from './media';
 import { Player, type PlayerState } from './player';
 import type { Soundtrack } from './soundtrack';
 import { createStore } from './store';
@@ -35,7 +35,7 @@ export interface EditorState {
   player: PlayerState;
   selection?: Selection;
   tool: Tool;
-  tab: 'selection' | 'auto' | 'transcript' | 'look';
+  tab: 'selection' | 'auto' | 'transcript' | 'voice' | 'look';
   /** The part of the look that is open (one at a time; none once it is closed). */
   lookSection?: LookSection;
   /** The inspector's Advanced fields are open (they stay so from one selection to the next). */
@@ -69,6 +69,8 @@ export interface EditorState {
   soundStatus: SoundStatusView;
   /** The soundtrack rendered last (it plays while a newer one renders). */
   soundtrack?: Soundtrack;
+  /** The narration: its lines being spoken, or why they could not be (a voice to download, ElevenLabs' key). */
+  voiceStatus: { state: 'idle' | 'speaking' | 'failed'; message?: string };
 }
 
 export const store = createStore<EditorState>({
@@ -89,6 +91,7 @@ export const store = createStore<EditorState>({
   motionStatus: [],
   motionFiles: 0,
   soundStatus: { state: 'none', errors: [], console: [], skipped: [] },
+  voiceStatus: { state: 'idle' },
 });
 
 let player: Player | undefined;
@@ -154,6 +157,8 @@ export async function openSession(canvas: HTMLCanvasElement): Promise<void> {
     player.setSoundtrack(store.get().soundtrack);
     await player.seek(0);
     followDocument();
+    // lines written while the editor was closed (by Claude, the CLI) are spoken now
+    if (unspokenLines(media, shownProject()!).length > 0) speakSoon();
     bridge.on('media:state', (state) => void applyMediaState(state));
     void applyMediaState(await bridge.invoke('media:state'));
     bridge.on('export:progress', (progress) => store.set({ exportProgress: progress }));
@@ -247,8 +252,57 @@ function followDocument(): void {
       if (last !== next) return;
       player.update(next, { redrawOnly: added });
       if (added) store.set({ media: { ...media } });
+      // lines written or changed are spoken once the typing rests
+      if (unspokenLines(media, next).length > 0) speakSoon();
     });
   });
+}
+
+/** What a failed request says, without Electron's "Error invoking remote method …: Error:" before it. */
+const messageOf = (error: unknown) => (error instanceof Error ? error.message : String(error)).replace(/^Error invoking remote method '[^']+': (\w*Error: )?/, '');
+
+/** Lines are spoken this long after the last edit (typing a line speaks it once, at its end). */
+const SPEAK_AFTER_MS = 800;
+let speakTimer: ReturnType<typeof setTimeout> | undefined;
+let speaking = false;
+let speakAgain = false;
+
+/** Speaks the narration's lines not spoken yet, soon. */
+export function speakSoon(): void {
+  clearTimeout(speakTimer);
+  speakTimer = setTimeout(() => void speakNow(), SPEAK_AFTER_MS);
+}
+
+/**
+ * Has the main process speak the lines not spoken yet (of the project as edited here), then reads
+ * them: the player plays them and the captions show their words. One run at a time; an edit while it
+ * speaks runs it again after.
+ */
+async function speakNow(): Promise<void> {
+  if (speaking) return void (speakAgain = true);
+  speaking = true;
+  try {
+    do {
+      speakAgain = false;
+      const { doc, media } = store.get();
+      if (!doc || !media || unspokenLines(media, doc.project).length === 0) break;
+      store.set({ voiceStatus: { state: 'speaking' } });
+      try {
+        await bridge.invoke('voice:speak', { raw: doc.raw });
+      } catch (error) {
+        store.set({ voiceStatus: { state: 'failed', message: messageOf(error) } });
+        break;
+      }
+      store.set({ voiceStatus: { state: 'idle' } });
+      const project = shownProject();
+      if (project && player && (await ensureMedia(media, project))) {
+        player.update(project, { redrawOnly: true });
+        store.set({ media: { ...media } });
+      }
+    } while (speakAgain);
+  } finally {
+    speaking = false;
+  }
 }
 
 /** What the end-to-end check drives and reads (only with `?check=1`). */

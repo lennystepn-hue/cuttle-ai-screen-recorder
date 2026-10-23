@@ -3,11 +3,14 @@ export const ID_PREFIXES = { scenes: 's', zooms: 'z', masks: 'm', texts: 't', ov
 
 export type IdList = keyof typeof ID_PREFIXES;
 
-/** The ids a project's items use, its script's steps' too; the project may be parsed or as written (unchecked). */
-export function usedIds(project: Partial<Record<IdList | 'script', unknown>>): Set<string> {
+/** The prefix of the ids Cuttle gives the narration's new lines (`voiceover.lines`). */
+export const LINE_ID_PREFIX = 'v';
+
+/** The ids a project's items use, its script's steps' and its narration's lines' too; the project may be parsed or as written (unchecked). */
+export function usedIds(project: Partial<Record<IdList | 'script' | 'voiceover', unknown>>): Set<string> {
   const ids = new Set<string>();
-  for (const list of [...(Object.keys(ID_PREFIXES) as IdList[]), 'script' as const]) {
-    const items = project[list];
+  const lines = (project.voiceover as { lines?: unknown } | undefined)?.lines;
+  for (const items of [...[...(Object.keys(ID_PREFIXES) as IdList[]), 'script' as const].map((list) => project[list]), lines]) {
     if (!Array.isArray(items)) continue;
     for (const item of items) {
       const id = (item as { id?: unknown } | null)?.id;
@@ -17,10 +20,11 @@ export function usedIds(project: Partial<Record<IdList | 'script', unknown>>): S
   return ids;
 }
 
-/** A new id for an item of `list`: its prefix and the smallest number not in `taken`, which it is added to. */
-export function newId(list: IdList, taken: Set<string>): string {
+/** A new id for an item of `list` (`voiceover` for a line of the narration): its prefix and the smallest number not in `taken`, which it is added to. */
+export function newId(list: IdList | 'voiceover', taken: Set<string>): string {
+  const prefix = list === 'voiceover' ? LINE_ID_PREFIX : ID_PREFIXES[list];
   for (let n = 1; ; n++) {
-    const id = `${ID_PREFIXES[list]}${n}`;
+    const id = `${prefix}${n}`;
     if (!taken.has(id)) {
       taken.add(id);
       return id;

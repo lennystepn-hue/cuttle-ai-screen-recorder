@@ -3,10 +3,10 @@
 // scrubbed one frame at a time.
 import { createRenderer, type DrawnText, type EngineAssets, type FrameSources, type Renderer } from '@cuttle/engine';
 import { planStills } from '@cuttle/export/frame-plan';
-import type { CuttleProject } from '@cuttle/project';
-import { createTimeline, crossfadeHalf, pageTransition, type RenderState, type Timeline } from '@cuttle/timeline';
+import { voiceLineKey, type CuttleProject } from '@cuttle/project';
+import { createTimeline, crossfadeHalf, narrationCues, narrationWords, pageTransition, sceneSpans, type CaptionWord, type RenderState, type Timeline } from '@cuttle/timeline';
 import { speechSpans } from '@cuttle/export/music-duck';
-import { AudioSchedule, systemLevel } from './audio';
+import { AudioSchedule, NarrationSchedule, systemLevel } from './audio';
 import { TypingSchedule } from './typing-audio';
 import { FrameGrabber, KeyFrames, PlaybackFrames, type HeldFrame, type PlaybackVideo } from './frames';
 import { watermarkFile, type EditorMedia, type VideoSource } from './media';
@@ -82,6 +82,8 @@ export class Player {
   private playToken = 0;
   private context: AudioContext | undefined;
   private audio: AudioSchedule | undefined;
+  /** The narration's lines while playing. */
+  private narration: NarrationSchedule | undefined;
   /** The computer's sound while playing, and its level (its volume and the duck under speech). */
   private system: { schedule: AudioSchedule; level: GainNode } | undefined;
   /** The typing sounds while playing (also without a mic). */
@@ -193,12 +195,20 @@ export class Player {
   }
 
   private makeTimeline(): Timeline {
+    const narration = this.narrationWords();
     return createTimeline(this.project, {
       screenSize: this.media.screen.size,
       ...(this.media.cursor && { cursor: this.media.cursor }),
       ...(this.media.shortcuts && { shortcuts: this.media.shortcuts }),
       ...(this.media.transcript && { transcript: this.media.transcript.words }),
+      ...(narration.length > 0 && { narration }),
     });
+  }
+
+  /** The narration's spoken words where they play (output seconds), for the captions and the duck. */
+  private narrationWords(): CaptionWord[] {
+    const spans = sceneSpans(this.project.scenes, this.project.cuts);
+    return narrationWords(narrationCues(this.project, spans).cues, (cue) => this.media.narration.get(voiceLineKey(this.project.voiceover, cue.line))?.words);
   }
 
   private makeRenderer(): Renderer {
@@ -452,10 +462,13 @@ export class Player {
     void this.run(token, from);
   }
 
-  private stopSystem(): void {
+  /** Stops the computer's sound and the narration (the mic, the typing and the soundtrack stop on their own). */
+  private stopLayers(): void {
     this.system?.schedule.stop();
     this.system?.level.disconnect();
     this.system = undefined;
+    this.narration?.stop();
+    this.narration = undefined;
   }
 
   pause(): void {
@@ -463,7 +476,7 @@ export class Player {
     this.playToken++;
     this.audio?.stop();
     this.audio = undefined;
-    this.stopSystem();
+    this.stopLayers();
     this.typing?.stop();
     this.typing = undefined;
     this.sound?.stop();
@@ -512,8 +525,10 @@ export class Player {
     this.motion.startPlaying();
     try {
       if (this.media.mic) this.audio = new AudioSchedule(context, this.media.mic, this.project, this.timeline.spans, from, contextStart);
+      this.narration = new NarrationSchedule(context, this.project, this.timeline.spans, (key) => this.media.narration.has(key), from, contextStart);
       if (this.media.system && this.project.look.audio.system) {
-        const speech = this.media.transcript ? speechSpans(this.project, this.media.transcript.words, this.timeline.spans) : [];
+        // down under speech: the take's words and the narration's
+        const speech = speechSpans(this.project, this.media.transcript?.words ?? [], this.timeline.spans, this.narrationWords());
         const level = systemLevel(context, this.project, speech, from, this.duration, contextStart);
         this.system = { schedule: new AudioSchedule(context, this.media.system, this.project, this.timeline.spans, from, contextStart, level), level };
       }
@@ -565,7 +580,7 @@ export class Player {
         this.clockNow = undefined;
         this.audio?.stop();
         this.audio = undefined;
-        this.stopSystem();
+        this.stopLayers();
         this.typing?.stop();
         this.typing = undefined;
         this.sound?.stop();

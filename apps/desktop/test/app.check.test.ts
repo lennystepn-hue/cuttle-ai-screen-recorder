@@ -1746,6 +1746,35 @@ describe.runIf(enabled)('the Cuttle app', () => {
     expect(written.sources.mic).toBe('takes/1/mic.m4a');
   }, 120_000);
 
+  it('speaks the narration: a recording made elsewhere plays as a line (converted by the media worker); a line written asks for its voice', async () => {
+    const dir = join(root, 'narrated');
+    makeSpokenFixture(dir, SPOKEN);
+    // another tool's voice: the spoken fixture's sound as a file, a line 1 s into the take
+    mkdirSync(join(dir, 'audio'), { recursive: true });
+    cpSync(join(dir, 'takes', '1', 'mic.m4a'), join(dir, 'audio', 'line.m4a'));
+    const path = join(dir, 'cuttle.json');
+    const raw = JSON.parse(readFileSync(path, 'utf8')) as Record<string, unknown>;
+    writeFileSync(path, JSON.stringify({ ...raw, voiceover: { lines: [{ id: 'v1', text: 'Cuttle records your screen', at: 1, file: 'audio/line.m4a' }] } }, null, 2));
+    const saved = () => JSON.parse(readFileSync(path, 'utf8')) as { voiceover?: { voice?: Record<string, unknown>; lines?: { id: string; text: string }[] } };
+    const page = await openEditor(dir);
+    await click(page, '#tab-voice');
+    // converted and timed in the media worker: the line says how long it is and where it plays
+    await expect.poll(() => page.locator('[data-testid=voice-line-v1] em').first().textContent(), { timeout: 60_000 }).toMatch(/^\d+\.\d s · plays at /);
+    expect(readdirSync(join(dir, 'voiceover')).filter((name) => name.endsWith('.wav'))).toHaveLength(1);
+    // a line added at the playhead brings a voice; written, it is spoken with it, which is not on this computer yet
+    await click(page, '[data-testid=voice-add]');
+    await page.waitForSelector('[data-testid=voice-text-v2]');
+    await page.fill('[data-testid=voice-text-v2]', 'Hello there');
+    await page.press('[data-testid=voice-text-v2]', 'Tab');
+    await expect.poll(() => saved().voiceover?.lines?.map((line) => [line.id, line.text])).toEqual([
+      ['v1', 'Cuttle records your screen'],
+      ['v2', 'Hello there'],
+    ]);
+    expect(saved().voiceover?.voice).toEqual({ provider: 'local', id: 'en_US-amy-medium' });
+    await expect.poll(() => page.locator('[data-testid=voice-problem]').textContent(), { timeout: 60_000 }).toContain('not downloaded');
+    await page.waitForSelector('[data-testid=voice-download]');
+  }, 120_000);
+
   it('shows the transcript (a click goes to a word, a fix reads in the subtitles, Delete cuts words and Restore brings them back), styles the subtitles, and exports them as .srt', async () => {
     const dir = join(root, 'subtitled');
     makeSpokenFixture(dir, SPOKEN);

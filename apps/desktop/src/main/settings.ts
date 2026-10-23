@@ -50,6 +50,11 @@ const SettingsSchema = z.object({
     .default({ read: true, words: [] }),
   /** Check for a new version once a day and download it (updates.ts). */
   updates: z.boolean().catch(true).default(true),
+  /**
+   * The narration's voices: ElevenLabs' API key, encrypted with the system's keychain (Electron's
+   * safeStorage: the Keychain on macOS, DPAPI on Windows), as base64; never in a project.
+   */
+  voice: z.object({ elevenLabsKey: z.string().optional() }).catch({}).default({}),
   /** The picker bar's choices, kept between recordings (the camera and mic are the defaults in the settings). */
   record: z
     .object({

@@ -3719,3 +3719,32 @@ button.chip-status:hover {
     display: none;
   }
 }
+/* the Voice tab: the narration's voice, and its lines one under another */
+.voice-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
+.voice-line {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border-radius: 10px;
+  background: var(--raised);
+  border: 1px solid var(--line);
+}
+.voice-line textarea {
+  width: 100%;
+  min-height: 52px;
+  resize: vertical;
+}
+.voice-line-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.hint.warn {
+  color: var(--warn);
+}

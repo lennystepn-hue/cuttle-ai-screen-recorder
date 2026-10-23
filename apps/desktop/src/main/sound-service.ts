@@ -5,11 +5,12 @@ import { createHash } from 'node:crypto';
 import { watch, type FSWatcher } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { isAbsolute, relative, resolve, sep } from 'node:path';
-import { motionPages, motionSoundCues, motionTake, planSoundtrack, renderSoundtrack, type MusicStems, type PageSoundCache } from '@cuttle/export';
+import { loadNarration, motionPages, motionSoundCues, motionTake, placeNarration, planSoundtrack, renderSoundtrack, type MusicStems, type PageSoundCache } from '@cuttle/export';
 import { declaredParams } from '@cuttle/export/motion-params';
 import { MUSIC_TEMPLATES } from '@cuttle/motion-kit';
 import { copyTemplate } from '@cuttle/motion-kit/files';
 import { parseProject } from '@cuttle/project';
+import { sceneSpans } from '@cuttle/timeline';
 import type { MotionParams, SoundStatusView, SoundtrackAnswer } from '../shared/ipc';
 
 /** An edit waits this long for the next before the soundtrack renders (a drag, typing a param). */
@@ -62,6 +63,11 @@ export class EditorSound {
     this.schedule();
   }
 
+  /** Plans the soundtrack again for the project shown: lines of the narration were spoken (the music goes down under them). */
+  replan(): void {
+    this.schedule();
+  }
+
   private schedule(): void {
     clearTimeout(this.timer);
     this.timer = setTimeout(() => void this.render(), SETTLE_MS);
@@ -84,7 +90,10 @@ export class EditorSound {
       const parsed = parseProject(shown.raw);
       if (!parsed.ok) return;
       const project = parsed.project;
-      const take = await motionTake(this.dir, project);
+      // with the narration's spoken words: the music goes down under them too
+      const lines = await loadNarration(this.dir, project, true).catch(() => []);
+      const narration = placeNarration(project, sceneSpans(project.scenes, project.cuts), lines).words;
+      const take = { ...(await motionTake(this.dir, project)), ...(narration.length > 0 && { narration }) };
       // a page that is missing shows in the motion preview; the others' sounds play
       const pages = await motionPages(this.dir, project).catch(() => undefined);
       const asked = await motionSoundCues(project, pages, take, { cache: this.pageSounds, changes: this.pageChanges });

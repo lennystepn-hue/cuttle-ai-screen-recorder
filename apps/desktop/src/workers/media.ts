@@ -3,7 +3,8 @@
 // the main process queues them.
 import { spawn, type ChildProcess } from 'node:child_process';
 import { rename, rm, writeFile } from 'node:fs/promises';
-import { applyLengthFit, applyPrivacy, applySpeechEdits, ffmpegPath, probeScreen, readScreenTake, streamSeconds, suggestProject, transcribeTake } from '@cuttle/core';
+import { applyLengthFit, applyPrivacy, applySpeechEdits, ffmpegPath, probeScreen, readProjectFile, readScreenTake, renderVoiceover, streamSeconds, suggestProject, transcribeTake } from '@cuttle/core';
+import { parseProject } from '@cuttle/project';
 import { templatePage } from '@cuttle/motion-kit/files';
 import {
   PEAKS_SAMPLE_RATE,
@@ -142,6 +143,23 @@ async function run(id: number, job: MediaJob): Promise<JobResult | undefined> {
     case 'fit-length': {
       const fit = await applyLengthFit(job.input, job.seconds);
       return { target: fit.target, before: fit.before, length: fit.length, reached: fit.reached, written: fit.written };
+    }
+    case 'voice': {
+      const controller = new AbortController();
+      controllers.set(id, controller);
+      try {
+        const parsed = job.project === undefined ? undefined : parseProject(job.project);
+        if (parsed && !parsed.ok) throw new Error(`the project is not valid: ${parsed.issues[0]?.path}: ${parsed.issues[0]?.message}`);
+        const project = parsed?.ok ? parsed.project : (await readProjectFile(job.input)).project;
+        const lines = await renderVoiceover(job.input, project, {
+          signal: controller.signal,
+          ...(job.elevenLabsKey && { elevenLabsKey: job.elevenLabsKey }),
+          onLine: (_line, _index, done, total) => reply({ id, progress: done / total }),
+        });
+        return { spoken: lines.filter((line) => line.fresh).length, lines: lines.length };
+      } finally {
+        controllers.delete(id);
+      }
     }
     case 'peaks': {
       const seconds = await streamSeconds(job.input, 'a');

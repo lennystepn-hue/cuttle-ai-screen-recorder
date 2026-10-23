@@ -9,6 +9,7 @@ export { checkMusic, type MusicCheckOptions, type MusicCheckResult } from './mai
 export { planSoundtrack, renderSoundtrack, type SoundtrackPlan } from './main/soundtrack';
 export type { MusicStems } from './main/music';
 export { motionPages, motionTake } from './main/sources';
+export { loadNarration, placeNarration, type NarrationLine, type PlacedLine } from './main/narration';
 export { motionSoundCues, type ItemSounds, type PageSoundCache } from './main/motion-sounds';
 export type { MusicInfo } from './music/runtime';
 export type { SoundtrackReport } from './main/export';

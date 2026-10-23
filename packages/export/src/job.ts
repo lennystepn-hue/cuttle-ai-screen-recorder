@@ -65,6 +65,8 @@ export interface ExportJob {
   shortcuts?: Shortcut[];
   /** The take's transcript (source seconds), for the captions; present when the project has one. */
   transcript?: TranscriptWord[];
+  /** The narration's words (output seconds), for the captions; present when it has lines that play. */
+  narration?: { t: number; end: number; text: string }[];
   /** Burn the captions in (default: the project's `captions.enabled`). */
   captions?: boolean;
   /** Scene index → image of a still scene. */

@@ -44,3 +44,8 @@ export { keepInProject } from './keep-file';
 export { PALETTE_RULES, imagePalette, paletteOf, takePalette } from './palette';
 export { importWallpaper, wallpaperFile } from './wallpaper';
 export { parseRegWallpaper } from './wallpaper-win32';
+export { DEFAULT_VOICE, LOCAL_VOICES, downloadVoice, localVoice, removeVoice, untar, voiceDir, voiceFiles, voiceInstalled, voiceUrl, type LocalVoice } from './voice/voices';
+export { ELEVENLABS_MODEL, elevenLabsKey, elevenLabsVoices, speakElevenLabs, wordsFromCharacters } from './voice/elevenlabs';
+export { speakLocal } from './voice/local';
+export { spokenWords, spreadWords } from './voice/words';
+export { VOICE_RATE, readRender, renderVoiceover, type RenderedLine, type VoiceoverOptions } from './voice/render';

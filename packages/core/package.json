@@ -9,6 +9,7 @@
   "dependencies": {
     "@cuttle/project": "workspace:*",
     "@cuttle/recorder": "workspace:*",
-    "@cuttle/timeline": "workspace:*"
+    "@cuttle/timeline": "workspace:*",
+    "sherpa-onnx-node": "1.13.8"
   }
 }

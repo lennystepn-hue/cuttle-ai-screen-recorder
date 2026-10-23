@@ -30,11 +30,12 @@ import {
   backgroundTone,
   isColouredBackground,
   SOLID_DEFAULT,
+  voiceLineKey,
 } from '@cuttle/project';
 import type { ParamDeclaration } from '@cuttle/export/motion-params';
-import { sceneSpans, type SceneSpan } from '@cuttle/timeline';
+import { narrationCues, sceneSpans, type SceneSpan } from '@cuttle/timeline';
 import type { Command, ListName } from '../../shared/document';
-import { MEDIA_ORIGIN, type BrandView, type MotionParams, type MotionStatusView, type SoundStatusView } from '../../shared/ipc';
+import { MEDIA_ORIGIN, type BrandView, type MotionParams, type MotionStatusView, type SoundStatusView, type VoiceState } from '../../shared/ipc';
 import { formatDuration, formatSource, formatSpeed, formatTime } from '../../shared/format';
 import {
   BACKGROUND_NAMES,
@@ -94,6 +95,7 @@ const TABS = [
   { id: 'selection', name: 'Selection' },
   { id: 'auto', name: 'Auto' },
   { id: 'transcript', name: 'Transcript' },
+  { id: 'voice', name: 'Voice' },
   { id: 'look', name: 'Look' },
 ] as const;
 
@@ -131,7 +133,7 @@ export function Inspector() {
       </div>
       <div className="panel-body" id="inspector-panel" role="tabpanel" aria-labelledby={`tab-${tab}`}>
         <fieldset className="panel-fields" disabled={broken}>
-          {tab === 'selection' ? <SelectionPanel /> : tab === 'auto' ? <AutoPanel /> : tab === 'transcript' ? <TranscriptPanel /> : <LookPanel />}
+          {tab === 'selection' ? <SelectionPanel /> : tab === 'auto' ? <AutoPanel /> : tab === 'transcript' ? <TranscriptPanel /> : tab === 'voice' ? <VoicePanel /> : <LookPanel />}
         </fieldset>
       </div>
     </aside>
@@ -1330,6 +1332,186 @@ function SoundDetails({ project, id }: { project: CuttleProject; id: string }) {
         <Toggle checked={sound.enabled} label="Play the sound" onChange={(on) => set('sounds', id, { enabled: on ? undefined : false }, on ? 'Sound on' : 'Sound off')} testId="sound-enabled" />
       </Row>
     </>
+  );
+}
+
+// ---- the narration -------------------------------------------------------------------------------
+
+/** The voices this computer has and whether ElevenLabs has a key, read again after a download or a key. */
+function useVoiceState(): [VoiceState | undefined, () => void] {
+  const [state, setState] = useState<VoiceState>();
+  const [asked, setAsked] = useState(0);
+  useEffect(() => {
+    let live = true;
+    bridge.invoke('voice:state').then(
+      (read) => live && setState(read),
+      () => {},
+    );
+    return () => {
+      live = false;
+    };
+  }, [asked]);
+  return [state, () => setAsked((count) => count + 1)];
+}
+
+const megabytes = (bytes: number) => `${Math.round(bytes / 1e6)} MB`;
+
+/** What the request's failure says, without Electron's prefix. */
+const failure = (error: unknown) => (error instanceof Error ? error.message : String(error)).replace(/^Error invoking remote method '[^']+': (\w*Error: )?/, '');
+
+/**
+ * The narration: who speaks it (a voice on this computer, downloaded once, or ElevenLabs' by its
+ * voice ID with the account's key, kept in the keychain), how fast and loud, its subtitles, and its
+ * lines, each at a moment of the video. Lines are spoken as they are written (into voiceover/).
+ */
+function VoicePanel() {
+  const project = useStore(store, (state) => state.doc?.project);
+  const status = useStore(store, (state) => state.voiceStatus);
+  const media = useStore(store, (state) => state.media);
+  const [voices, reread] = useVoiceState();
+  const [problem, setProblem] = useState<string>();
+  const [key, setKey] = useState('');
+  // ElevenLabs chosen before its voice ID is written: shown, not saved yet (a voice needs its ID)
+  const [chosen, setChosen] = useState<'local' | 'elevenlabs'>();
+  if (!project) return null;
+  const { voiceover } = project;
+  const voice = voiceover.voice;
+  const provider = chosen ?? voice?.provider ?? 'local';
+  const local = voices?.local.find((each) => each.name === voice?.id);
+  const narration = (fields: Record<string, unknown>, label: string) => edit([{ type: 'voiceover', fields }], label);
+  const setVoice = (fields: Record<string, unknown>, label: string) => narration({ voice: { ...voice, ...fields } }, label);
+  const download = (name: string) => {
+    setProblem(undefined);
+    const done = bridge.invoke('voice:download', name).then(
+      () => reread(),
+      (error) => setProblem(failure(error)),
+    );
+    // the list says it downloads at once
+    void Promise.resolve().then(reread);
+    return done;
+  };
+  const saveKey = () =>
+    bridge.invoke('voice:key', key.trim() === '' ? null : key.trim()).then(
+      () => {
+        setKey('');
+        reread();
+      },
+      (error) => setProblem(failure(error)),
+    );
+  const spans = sceneSpans(project.scenes, project.cuts);
+  const placed = new Map(narrationCues(project, spans).cues.map((cue) => [cue.index, cue.at]));
+  const addLine = () => {
+    const place = playheadPlace();
+    if (!place) return;
+    const scene = project.scenes[place.index];
+    const where = place.source !== undefined ? { at: Math.round(place.source * 100) / 100 } : { at: Math.round((place.t - place.span.start) * 100) / 100, ...(scene?.id !== undefined && { scene: scene.id }) };
+    // the first line brings a voice: one on this computer, downloaded if there is one
+    const first: Command[] = voiceover.voice ? [] : [{ type: 'voiceover', fields: { voice: { provider: 'local', id: voices?.local.find((each) => each.installed)?.name ?? 'en_US-amy-medium' } } }];
+    edit([...first, { type: 'add-voice-line', item: { text: '', ...where } }], 'Add a line');
+  };
+  return (
+    <div className="voice-panel">
+      <Section title="Voice" testId="voice-voice">
+        <Row label="Speaks with">
+          <StyledSelect
+            value={provider}
+            options={[
+              { value: 'local', label: 'A voice on this computer' },
+              { value: 'elevenlabs', label: 'ElevenLabs' },
+            ]}
+            onChange={(next) => {
+              if (next === (voice?.provider ?? 'local')) return setChosen(undefined);
+              if (next === 'elevenlabs') return setChosen('elevenlabs');
+              setChosen(undefined);
+              setVoice({ provider: 'local', id: voices?.local.find((each) => each.installed)?.name ?? 'en_US-amy-medium', model: undefined, stability: undefined, similarity: undefined, style: undefined }, 'Change the narration\'s voice');
+            }}
+            label="Speaks with"
+            testId="voice-provider"
+          />
+        </Row>
+        {provider === 'local' ? (
+          <>
+            <Row label="Voice" note={local ? `${local.language}${local.installed ? '' : ` · ${megabytes(local.bytes)} to download`}` : undefined}>
+              <StyledSelect
+                value={voice?.id}
+                options={(voices?.local ?? []).map((each) => ({ value: each.name, label: `${each.label} · ${each.language}${each.installed ? '' : ' ↓'}` }))}
+                onChange={(name) => setVoice({ provider: 'local', id: name }, 'Change the narration\'s voice')}
+                label="Voice"
+                testId="voice-local"
+              />
+            </Row>
+            {local && !local.installed && (
+              <button type="button" className="ghost small" disabled={voices?.downloading.includes(local.name)} onClick={() => void download(local.name)} data-testid="voice-download">
+                {voices?.downloading.includes(local.name) ? 'Downloading…' : `Download ${local.label} (${megabytes(local.bytes)})`}
+              </button>
+            )}
+          </>
+        ) : (
+          <>
+            <Row label="Voice ID" note="as ElevenLabs' voice library shows it">
+              <TextInput
+                value={voice?.provider === 'elevenlabs' ? voice.id : ''}
+                placeholder="21m00Tcm4TlvDq8ikWAM"
+                onCommit={(id) => {
+                  if (id.trim() === '') return;
+                  setChosen(undefined);
+                  setVoice({ provider: 'elevenlabs', id: id.trim() }, 'Change the narration\'s voice');
+                }}
+                testId="voice-eleven-id"
+              />
+            </Row>
+            <Row label="Model">
+              <TextInput value={voice?.model ?? ''} placeholder="eleven_multilingual_v2" onCommit={(model) => setVoice({ model: model.trim() || undefined }, 'Change the voice\'s model')} />
+            </Row>
+            <Row label="API key" note={voices?.elevenLabs ? 'kept in this computer\'s keychain' : 'not set'}>
+              <input type="password" value={key} placeholder={voices?.elevenLabs ? '••••••••' : 'your ElevenLabs API key'} onChange={(event) => setKey(event.target.value)} onKeyDown={(event) => event.key === 'Enter' && void saveKey()} aria-label="ElevenLabs API key" data-testid="voice-eleven-key" />
+            </Row>
+            <button type="button" className="ghost small" onClick={() => void saveKey()} disabled={key.trim() === '' && !voices?.elevenLabs}>
+              {key.trim() === '' ? 'Forget the key' : 'Keep the key'}
+            </button>
+          </>
+        )}
+        {voice && (
+          <Row label="Speed">
+            <RangeInput value={Math.round(voice.speed * 100)} min={50} max={200} label="Speed" toCommand={(value) => ({ type: 'voiceover', fields: { voice: { ...voice, speed: value / 100 } } })} commitLabel="Voice speed" testId="voice-speed" />
+          </Row>
+        )}
+        <Row label="Volume">
+          <RangeInput value={Math.round(voiceover.volume * 100)} min={0} max={100} label="Narration volume" toCommand={(value) => ({ type: 'voiceover', fields: { volume: value / 100 } })} commitLabel="Narration volume" testId="voice-volume" />
+        </Row>
+        <Row label="Subtitles" inline note="its words, with the mic's">
+          <Toggle checked={voiceover.captions} label="The narration's subtitles" onChange={(on) => narration({ captions: on ? undefined : false }, on ? 'Narration subtitles on' : 'Narration subtitles off')} testId="voice-captions" />
+        </Row>
+      </Section>
+      <Section title="Lines" testId="voice-lines">
+        {voiceover.lines.length === 0 && <p className="hint">No lines yet. Write what the video says: each line plays where you put it, spoken on this computer or by ElevenLabs.</p>}
+        {voiceover.lines.map((line, index) => {
+          const id = line.id ?? `#${index + 1}`;
+          const scene = line.scene !== undefined ? project.scenes.find((item) => item.id === line.scene) : undefined;
+          const spoken = media?.narration.get(voiceLineKey(voiceover, line));
+          const at = placed.get(index);
+          const said = !line.enabled ? 'off' : spoken ? `${spoken.seconds.toFixed(1)} s${at !== undefined ? ` · plays at ${formatTime(at)}` : ' · plays nowhere'}` : status.state === 'speaking' ? 'speaking…' : 'not spoken yet';
+          return (
+            <div className="voice-line" key={line.id ?? index} data-testid={`voice-line-${id}`}>
+              <TextInput value={line.text} multiline placeholder="What the narration says here" onCommit={(text) => line.id && edit([{ type: 'voice-line', id: line.id, fields: { text } }], 'Edit a line')} testId={`voice-text-${id}`} />
+              <Row label={scene ? `Into ${scene.label ?? scene.id}` : 'At, in the take'} compact note={said}>
+                <NumberInput unit="s" value={line.at} min={0} step={0.05} onCommit={(value) => line.id && edit([{ type: 'voice-line', id: line.id, fields: { at: value } }], 'Move a line')} testId={`voice-at-${id}`} />
+              </Row>
+              <div className="voice-line-actions">
+                <Toggle checked={line.enabled} label="Speak the line" onChange={(on) => line.id && edit([{ type: 'voice-line', id: line.id, fields: { enabled: on ? undefined : false } }], on ? 'Line on' : 'Line off')} testId={`voice-enabled-${id}`} />
+                <button type="button" className="ghost small" onClick={() => line.id && edit([{ type: 'voice-line', id: line.id, fields: null }], 'Delete a line')}>
+                  Delete
+                </button>
+              </div>
+            </div>
+          );
+        })}
+        <button type="button" className="ghost small" onClick={addLine} data-testid="voice-add">
+          Add a line at the playhead
+        </button>
+      </Section>
+      {(problem ?? (status.state === 'failed' ? status.message : undefined)) && <p className="hint warn" data-testid="voice-problem">{problem ?? status.message}</p>}
+    </div>
   );
 }
 

@@ -23,6 +23,7 @@ import { APP_ORIGIN, assetPath, bundlePath, serveApp, serveMedia } from './proto
 import { cutIfPending, recut, startPicking, takesBusy, undoRestart } from './recording';
 import { deletableTakes, sizeText, trashName } from '../shared/takes';
 import { addRecent, loadSettings, motionSetting, updateSettings } from './settings';
+import { downloadAppVoice, speakNarration, storeElevenLabsKey, voiceState } from './voice';
 import { openSettings } from './settings-window';
 import { fitProjectLength } from './length';
 import { maskPrivacy } from './privacy';
@@ -256,6 +257,15 @@ async function editorWindow(dir: string, key: string, file: ProjectFile, release
     'sound:params': (src) => sound.params(src),
     'sound:reload': () => sound.reload(),
     'sound:add-template': async (template) => ({ src: await sound.addTemplate(template) }),
+    'voice:state': () => voiceState(),
+    'voice:download': (name) => downloadAppVoice(name),
+    'voice:key': (key) => storeElevenLabsKey(key),
+    'voice:speak': async ({ raw }) => {
+      const report = await speakNarration(dir, raw);
+      // the music goes down under the lines just spoken
+      if (report.spoken > 0) sound.replan();
+      return report;
+    },
     'project:import-image': async ({ purpose }) => {
       const chosen =
         CHECK_IMAGE ??

@@ -1,5 +1,5 @@
 import type { CuttleProject, Mask, Rect } from '@cuttle/project';
-import { applyCaptionFixes, captionAt, captionCues, captionWords, type ActiveCaption, type CaptionCue, type SpokenWord } from './captions';
+import { applyCaptionFixes, captionAt, captionCues, captionWords, type ActiveCaption, type CaptionCue, type CaptionWord, type SpokenWord } from './captions';
 import { cursorAt, type CursorFrame, type CursorTrack } from './cursor';
 import { clamp, type Curve } from './easing';
 import { keyBadgeAt, keyGroups, type KeyBadge, type Shortcut } from './keys';
@@ -91,6 +91,8 @@ export interface TimelineOptions {
   cursor?: CursorTrack;
   /** The take's transcript (source seconds), for the captions. */
   transcript?: readonly SpokenWord[];
+  /** The narration's words (output seconds, `narrationWords`), for the captions while `voiceover.captions` is on. */
+  narration?: readonly CaptionWord[];
   /** Show the captions (default: `captions.enabled`); an export without them passes false. */
   captions?: boolean;
   /** The take's shortcuts (events.jsonl's `shortcut`, source seconds), for their badges. */
@@ -118,7 +120,10 @@ export function createTimeline(project: CuttleProject, opts: TimelineOptions): T
   cuts.sort((a, b) => a - b);
   const full: Rect = [0, 0, opts.screenSize.width, opts.screenSize.height];
   const { captions } = project;
-  const cues = opts.transcript ? captionCues(captionWords(applyCaptionFixes(opts.transcript, captions.fixes), spans), captions.style) : [];
+  const spoken = opts.transcript ? captionWords(applyCaptionFixes(opts.transcript, captions.fixes), spans) : [];
+  const narrated = project.voiceover.captions ? (opts.narration ?? []) : [];
+  const words = narrated.length > 0 ? [...spoken, ...narrated].sort((a, b) => a.t - b.t) : spoken;
+  const cues = words.length > 0 ? captionCues(words, captions.style) : [];
   const showCaptions = (opts.captions ?? captions.enabled) && cues.length > 0;
   const keys = project.look.keys.enabled && opts.shortcuts ? keyGroups(opts.shortcuts, project.look.keys.show) : [];
 

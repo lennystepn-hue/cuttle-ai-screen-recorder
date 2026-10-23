@@ -217,6 +217,21 @@ moment, and not where it is cut), or `scene` (a scene's id) with `at` seconds in
 `volume` (`0.8`), `enabled` (`true`), and an `id` (`a1`) and `label`. Motion pages add their own
 sounds as they render (`cuttle.sound`, motion.md); those are not in `sounds`.
 
+`voiceover` is the narration: lines of text a voice speaks, as a track of their own (the music and
+the computer's sound go down under it, and its words are subtitles with the mic's).
+`voice` speaks every line that names none: `provider` (`local`: a voice on this computer, by its
+name from `cuttle voice list`, e.g. `en_US-amy-medium`, `de_DE-thorsten-medium`; or `elevenlabs`:
+`id` is the voice ID ElevenLabs' voice library shows, e.g. `21m00Tcm4TlvDq8ikWAM`, with `model`
+(`eleven_multilingual_v2` when left out), `stability`, `similarity` and `style` from 0 to 1), `id`,
+`speed` (`1`, 0.5 to 2; ElevenLabs speaks 0.7 to 1.2). `volume` (`1`), `captions` (`true`: its
+words in the subtitles). `lines`: each has `text` (up to 2000 characters), `at` and `scene` as a
+sound has them (source seconds where a clip shows them, or seconds into a scene), its own `voice`,
+`file` (a recording made elsewhere, another tool's voice or a studio take, plays instead; `text` is
+then what it says, for the subtitles), `volume` (`1`), `enabled` (`true`), an `id` (`v1`) and a
+`label`. A line is spoken once into `voiceover/<key>.wav` with its words in `<key>.json`; a changed
+text or voice is spoken again. `cuttle voice render` speaks what is missing (`render` does it
+first); ElevenLabs needs `ELEVENLABS_API_KEY` (the app keeps its key in the system's keychain).
+
 ## Motion pages
 
 A motion scene, overlay or transition is a web page in the project folder, usually `motion/<name>/index.html`

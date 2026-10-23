@@ -52,7 +52,13 @@ export type Command =
   /** Sets fields of the music (`undefined` removes a field); `null` removes the music. */
   | { type: 'music'; fields: Item | null }
   /** Sets fields of the theme, the project's brand (`undefined` removes a field); `replace`: `fields` are the whole theme (a brand kit applied). */
-  | { type: 'theme'; fields: Item; replace?: boolean };
+  | { type: 'theme'; fields: Item; replace?: boolean }
+  /** Sets fields of the narration (`voice`, `volume`, `captions`; `undefined` removes a field). */
+  | { type: 'voiceover'; fields: Item }
+  /** Sets fields of a line of the narration (`undefined` removes a field); `null` takes the line out. */
+  | { type: 'voice-line'; id: string; fields: Item | null }
+  /** Adds a line to the narration (at `index`, else last); an id is given when it has none. */
+  | { type: 'add-voice-line'; item: Item; index?: number };
 
 /** A command that cannot run: its item is gone (`gone`) or the result is not a valid project (`invalid`). */
 export class DocumentError extends Error {
@@ -81,11 +87,21 @@ const clampNumber = (value: number, min: number, max: number) => Math.min(Math.m
 /** Gives every scene, overlay and cut without an id one (`s3`, `z1` …); returns the same object when all have one. */
 export function ensureIds(raw: Raw): Raw {
   const lists = (['scenes', 'zooms', 'masks', 'texts', 'overlays', 'cuts', 'sounds'] as const).filter((list) => items(raw, list).some((item) => typeof item.id !== 'string'));
-  if (lists.length === 0) return raw;
+  const lines = (raw.voiceover as Item | undefined)?.lines;
+  const unnamed = Array.isArray(lines) && (lines as Item[]).some((line) => typeof line.id !== 'string');
+  if (lists.length === 0 && !unnamed) return raw;
   const next = structuredClone(raw);
   const taken = usedIds(next);
   for (const list of lists) for (const item of items(next, list)) if (typeof item.id !== 'string') item.id = newId(list, taken);
+  if (unnamed) for (const line of voiceLines(next)) if (typeof line.id !== 'string') line.id = newId('voiceover', taken);
   return next;
+}
+
+/** The narration's lines, as written (made where there are none yet). */
+function voiceLines(raw: Raw): Item[] {
+  const voiceover = (raw.voiceover && typeof raw.voiceover === 'object' ? raw.voiceover : (raw.voiceover = {})) as Item;
+  if (!Array.isArray(voiceover.lines)) voiceover.lines = [];
+  return voiceover.lines as Item[];
 }
 
 function setFields(item: Item, fields: Item): void {
@@ -293,8 +309,12 @@ export function applyCommand(raw: Raw, command: Command, limits: EditLimits = {}
     case 'delete': {
       const { index } = find(next, command.list, command.id);
       list(command.list).splice(index, 1);
-      // a scene takes the sounds placed in it along
+      // a scene takes the sounds and the narration's lines placed in it along
       if (command.list === 'scenes' && Array.isArray(next.sounds)) next.sounds = (next.sounds as Item[]).filter((sound) => sound.scene !== command.id);
+      if (command.list === 'scenes' && next.voiceover && typeof next.voiceover === 'object') {
+        const voiceover = next.voiceover as Item;
+        if (Array.isArray(voiceover.lines)) voiceover.lines = (voiceover.lines as Item[]).filter((line) => line.scene !== command.id);
+      }
       break;
     }
     case 'duplicate': {
@@ -338,6 +358,30 @@ export function applyCommand(raw: Raw, command: Command, limits: EditLimits = {}
         if (typeof music.volume === 'number') music.volume = round(clampNumber(music.volume, 0, 1));
         if (typeof music.duck === 'number') music.duck = round(clampNumber(music.duck, 0, 40));
       }
+      break;
+    }
+    case 'voiceover': {
+      const voiceover = (next.voiceover && typeof next.voiceover === 'object' ? next.voiceover : (next.voiceover = {})) as Item;
+      setFields(voiceover, structuredClone(command.fields));
+      if (typeof voiceover.volume === 'number') voiceover.volume = round(clampNumber(voiceover.volume, 0, 1));
+      break;
+    }
+    case 'voice-line': {
+      const lines = voiceLines(next);
+      const index = lines.findIndex((line) => line.id === command.id);
+      if (index < 0) throw new DocumentError('gone', `line ${command.id} is not in the narration any more`);
+      if (command.fields === null) lines.splice(index, 1);
+      else {
+        setFields(lines[index]!, structuredClone(command.fields));
+        if (typeof lines[index]!.at === 'number') lines[index]!.at = round(Math.max(0, Number(lines[index]!.at)));
+      }
+      break;
+    }
+    case 'add-voice-line': {
+      const lines = voiceLines(next);
+      const taken = usedIds(next);
+      const wanted = typeof command.item.id === 'string' && !taken.has(command.item.id) ? command.item.id : newId('voiceover', taken);
+      lines.splice(command.index === undefined ? lines.length : clampNumber(command.index, 0, lines.length), 0, { ...structuredClone(command.item), id: wanted });
       break;
     }
     case 'theme': {
@@ -484,6 +528,10 @@ function changeParts(before: CuttleProject, after: CuttleProject): string[] {
     if (changed) parts.push(`${noun(list, changed)} changed`);
   }
   if (JSON.stringify(before.music) !== JSON.stringify(after.music)) parts.push(!before.music ? 'music added' : !after.music ? 'the music removed' : 'the music changed');
+  if (JSON.stringify(before.voiceover) !== JSON.stringify(after.voiceover)) {
+    const lines = after.voiceover.lines.length - before.voiceover.lines.length;
+    parts.push(lines > 0 ? `${lines === 1 ? 'a line' : `${lines} lines`} of narration added` : lines < 0 ? `${-lines === 1 ? 'a line' : `${-lines} lines`} of narration removed` : 'the narration changed');
+  }
   if (JSON.stringify(before.look) !== JSON.stringify(after.look)) parts.push('the look changed');
   if (JSON.stringify(before.theme) !== JSON.stringify(after.theme)) parts.push('the brand changed');
   if (JSON.stringify(before.autoEdits) !== JSON.stringify(after.autoEdits)) parts.push('the automatic edits changed');

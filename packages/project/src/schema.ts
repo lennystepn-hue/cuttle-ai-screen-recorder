@@ -475,6 +475,59 @@ const SoundSchema = z.strictObject({
   enabled: z.boolean().default(true),
 });
 
+/** Where a narration's voice comes from: a voice on this computer, or ElevenLabs' by its ID. */
+export const VOICE_PROVIDERS = ['local', 'elevenlabs'] as const;
+/** A line of narration holds at most this many characters (a paragraph); the narration this many lines. */
+export const VOICE_LINE_MAX = 2000;
+export const VOICE_MAX_LINES = 200;
+
+/**
+ * A voice that speaks the narration: a local one by its name (`cuttle voice list`, e.g.
+ * `de_DE-thorsten-medium`), or ElevenLabs' by its voice ID (`21m00Tcm4TlvDq8ikWAM`, as their voice
+ * library shows it) with its model and settings.
+ */
+export const VoiceSchema = z.strictObject({
+  provider: z.enum(VOICE_PROVIDERS).default('local'),
+  id: z.string().min(1).max(200),
+  /** How fast it speaks. */
+  speed: z.number().min(0.5).max(2).default(1),
+  /** ElevenLabs: the model (`eleven_multilingual_v2` when left out). */
+  model: z.string().min(1).max(100).optional(),
+  /** ElevenLabs' voice settings, 0 to 1: steadier, closer to the voice, more style. */
+  stability: z.number().min(0).max(1).optional(),
+  similarity: z.number().min(0).max(1).optional(),
+  style: z.number().min(0).max(1).optional(),
+});
+
+/**
+ * A line of the narration: its text, where it starts (as a sound: `at` in source seconds where the
+ * clips show it, or seconds into `scene`), spoken by its own `voice` or the narration's. `file`: a
+ * recording made elsewhere (another tool's voice, a studio take) plays instead; its `text` is then
+ * what it says, for the subtitles (optional).
+ */
+const VoiceLineSchema = z.strictObject({
+  ...named,
+  /** Empty while it is being written: it speaks nothing until it has text (or a file). */
+  text: z.string().max(VOICE_LINE_MAX).default(''),
+  at: seconds,
+  scene: z.string().regex(ID_PATTERN).optional(),
+  voice: VoiceSchema.optional(),
+  file: z.string().min(1).optional(),
+  volume: z.number().min(0).max(1).default(1),
+  enabled: z.boolean().default(true),
+});
+
+/** The narration: lines spoken by a voice, as a track of their own; the music and the computer's sound go down under it. */
+const VoiceoverSchema = z.strictObject({
+  /** The voice of every line that names none. */
+  voice: VoiceSchema.optional(),
+  /** Its volume, 0 to 1. */
+  volume: z.number().min(0).max(1).default(1),
+  /** Its words as subtitles, with the mic's. */
+  captions: z.boolean().default(true),
+  lines: z.array(VoiceLineSchema).max(VOICE_MAX_LINES).default([]),
+});
+
 /** A step's title is a few words (the prompter's heading); its note a few sentences; a script holds this many steps. */
 export const STEP_TITLE_MAX = 80;
 export const STEP_NOTE_MAX = 1000;
@@ -511,6 +564,7 @@ export const ProjectSchema = z
     cuts: z.array(CutSchema).default([]),
     music: MusicSchema.optional(),
     sounds: z.array(SoundSchema).default([]),
+    voiceover: VoiceoverSchema.prefault({}),
     autoEdits: AutoEditsSchema.prefault({}),
     captions: CaptionsSchema.prefault({}),
     privacy: PrivacySchema.prefault({}),
@@ -519,17 +573,29 @@ export const ProjectSchema = z
   // Runs once everything else is valid (see the note above BackgroundSchema).
   .superRefine((project, ctx) => {
     const seen = new Map<string, string>();
-    for (const list of ['scenes', 'zooms', 'masks', 'texts', 'overlays', 'cuts', 'sounds', 'script'] as const) {
-      project[list].forEach((item: { id?: string }, index) => {
+    const lists: [string[], readonly { id?: string }[]][] = [
+      ...(['scenes', 'zooms', 'masks', 'texts', 'overlays', 'cuts', 'sounds', 'script'] as const).map((list): [string[], readonly { id?: string }[]] => [[list], project[list]]),
+      [['voiceover', 'lines'], project.voiceover.lines],
+    ];
+    for (const [path, items] of lists) {
+      items.forEach((item, index) => {
         if (item.id === undefined) return;
         const first = seen.get(item.id);
-        if (first === undefined) seen.set(item.id, `${list}[${index}]`);
-        else ctx.addIssue({ code: 'custom', message: `the id "${item.id}" is already used by ${first}`, path: [list, index, 'id'] });
+        if (first === undefined) seen.set(item.id, `${path.join('.')}[${index}]`);
+        else ctx.addIssue({ code: 'custom', message: `the id "${item.id}" is already used by ${first}`, path: [...path, index, 'id'] });
       });
     }
     project.sounds.forEach((sound, index) => {
       if (sound.scene !== undefined && !project.scenes.some((scene) => scene.id === sound.scene)) {
         ctx.addIssue({ code: 'custom', message: `no scene has the id "${sound.scene}"`, path: ['sounds', index, 'scene'] });
+      }
+    });
+    project.voiceover.lines.forEach((line, index) => {
+      if (line.scene !== undefined && !project.scenes.some((scene) => scene.id === line.scene)) {
+        ctx.addIssue({ code: 'custom', message: `no scene has the id "${line.scene}"`, path: ['voiceover', 'lines', index, 'scene'] });
+      }
+      if (line.file === undefined && line.text.trim() !== '' && line.voice === undefined && project.voiceover.voice === undefined) {
+        ctx.addIssue({ code: 'custom', message: 'a line needs a voice: its own, or voiceover.voice', path: ['voiceover', 'lines', index, 'voice'] });
       }
     });
   });
@@ -591,6 +657,11 @@ export type MotionOverlay = CuttleProject['overlays'][number];
 export type SceneTransition = NonNullable<Scene['transition']>;
 export type Music = NonNullable<CuttleProject['music']>;
 export type Sound = CuttleProject['sounds'][number];
+/** The narration, a line of it, and a voice that speaks it. */
+export type Voiceover = CuttleProject['voiceover'];
+export type VoiceLine = Voiceover['lines'][number];
+export type Voice = z.output<typeof VoiceSchema>;
+export type VoiceProvider = (typeof VOICE_PROVIDERS)[number];
 export type ScriptStep = CuttleProject['script'][number];
 export type StepMotion = (typeof STEP_MOTIONS)[number];
 export type Zoom = CuttleProject['zooms'][number];

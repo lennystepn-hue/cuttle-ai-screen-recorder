@@ -58,6 +58,18 @@ describe('cuttle music', () => {
     expect(project(dir).music).toMatchObject({ src: 'music/mine/index.html', params: {}, enabled: true });
   });
 
+  it("sets the stems' levels: one silent, one louder, back as composed; refuses a level out of range", async () => {
+    const dir = temp();
+    await cli('--json', '-C', dir, 'music', 'new', 'pulse');
+    await cli('--json', '-C', dir, 'music', 'set', '--stem', 'drums=0', '--stem', 'bass=1.5');
+    expect(project(dir).music).toMatchObject({ stems: { drums: 0, bass: 1.5 } });
+    // as composed: left out, and with none left the field goes
+    await cli('--json', '-C', dir, 'music', 'set', '--stem', 'drums=1', '--stem', 'bass=');
+    expect(project(dir).music).not.toHaveProperty('stems');
+    expect((await cli('--json', '-C', dir, 'music', 'set', '--stem', 'drums=3')).json).toMatchObject({ error: { code: 'usage' } });
+    expect((await cli('--json', '-C', dir, 'music', 'set', '--stem', 'Drums=0.5')).json).toMatchObject({ error: { code: 'usage' } });
+  });
+
   it('refuses what it cannot do', async () => {
     const dir = temp();
     expect((await cli('--json', '-C', dir, 'music', 'new', 'polka')).json).toMatchObject({ error: { code: 'usage' } });

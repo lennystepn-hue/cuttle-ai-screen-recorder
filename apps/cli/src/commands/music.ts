@@ -60,6 +60,8 @@ export interface MusicSetArgs {
   duck?: number;
   /** `name=value` pairs for the page's params ("" removes one). */
   param?: string[];
+  /** `name=level` pairs for the music's stems (0 silent, 1 as composed, up to 2; "" as composed). */
+  stem?: string[];
   on?: boolean;
   off?: boolean;
   src?: string;
@@ -102,6 +104,22 @@ export async function musicSetCommand(projectDir: string, args: MusicSetArgs, ou
     }
     music.params = params;
   }
+  if (args.stem?.length) {
+    const stems = { ...((music.stems as Record<string, number> | undefined) ?? {}) };
+    for (const pair of args.stem) {
+      const at = pair.indexOf('=');
+      const name = at > 0 ? pair.slice(0, at) : '';
+      const text = pair.slice(at + 1);
+      if (!/^[a-z][a-z0-9-]*$/.test(name)) throw new CliError('usage', `--stem ${pair}: write name=level (drums=0.5), the name in lower case`);
+      const level = Number(text);
+      if (text !== '' && !(Number.isFinite(level) && level >= 0 && level <= 2)) throw new CliError('usage', `--stem ${pair}: a level from 0 (silent) to 2, 1 as composed`);
+      // as composed: left out
+      if (text === '' || level === 1) delete stems[name];
+      else stems[name] = level;
+    }
+    if (Object.keys(stems).length > 0) music.stems = stems;
+    else delete music.stems;
+  }
   file.raw.music = music;
   await writeProjectFile(file, 'music set');
   output.result({ music }, () => `music: ${JSON.stringify(music)}`);
@@ -115,6 +133,8 @@ export interface MusicCheckReport {
   seconds: number;
   src?: string;
   info: { bpm?: number; key?: string; sections?: unknown[] } | null;
+  /** The music's stems, whose levels `music set --stem` sets. */
+  stems: string[];
   loudness: { lufs: number | null; truePeak: number | null };
   parts: { name: string; start: number; end: number; energy?: number; musicDb: number; effectsDb: number }[];
   cuts: { t: number; hit: boolean; riseDb: number }[];
@@ -149,6 +169,7 @@ export async function musicCheckCommand(projectDir: string, args: { src?: string
     [
       `${result.src ?? 'the sounds'}: ${result.seconds.toFixed(1)} s${result.info?.bpm ? `, ${result.info.bpm} BPM` : ''}${result.info?.key ? `, ${result.info.key}` : ''}`,
       `loudness ${result.loudness.lufs ?? '?'} LUFS, true peak ${result.loudness.truePeak ?? '?'} dBFS (music and sounds alone)`,
+      ...(result.stems.length > 0 ? [`stems: ${result.stems.join(', ')} (music set --stem name=level)`] : []),
       ...result.parts.map((part) => `  ${part.start.toFixed(1).padStart(6)}–${part.end.toFixed(1).padEnd(6)} ${part.name.padEnd(12)} ${part.energy !== undefined ? `energy ${part.energy}  ` : ''}music ${part.musicDb} dB, effects ${part.effectsDb} dB`),
       `scene changes: ${result.cuts.filter((cut) => cut.hit).length} of ${result.cuts.length} hit${result.cuts.some((cut) => !cut.hit) ? ` (none at ${result.cuts.filter((cut) => !cut.hit).map((cut) => `${cut.t.toFixed(2)} s`).join(', ')})` : ''}`,
       `wav    ${result.out}`,

@@ -555,6 +555,11 @@ const MusicSchema = z.strictObject({
   volume: z.number().min(0).max(1).default(0.8),
   /** How far it goes down under speech, in dB (0: it does not). */
   duck: z.number().min(0).max(40).default(12),
+  /**
+   * Each stem's level as the page names them (the kit's `drums`, `bass`, `keys`, `pads`, `lead`):
+   * 1 as composed, 0 silent, up to 2; a stem left out plays as composed.
+   */
+  stems: z.record(z.string().regex(/^[a-z][a-z0-9-]*$/, 'a stem is named in lower-case letters, digits and dashes'), z.number().min(0).max(2)).optional(),
   enabled: z.boolean().default(true),
 });
 

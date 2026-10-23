@@ -73,9 +73,11 @@ default 12) set it in the mix without a new render of the page.
 
 - **`cuttle.music(compose)`** is called once with `audio`: `context` (an `OfflineAudioContext` as
   long as the video), `music` and `effects` (stereo buses: the music goes down under speech, the
-  effects never), `video`, `params`, `duration`, `at(t, fn)` and `random()` (seeded: the same music
-  on every render; `Math.random` is seeded too). Return `{ bpm, key, sections }`: `music check`
-  shows them. `cuttle.ready(promise)` holds the composition until samples have loaded.
+  effects never), `video`, `params`, `duration`, `at(t, fn)`, `random()` (seeded: the same music
+  on every render; `Math.random` is seeded too) and `level(name)` (a stem's level from the project,
+  1 as composed: multiply the stem's bus by it, and the editor shows it in its mixer). Return
+  `{ bpm, key, sections }`: `music check` shows them. `cuttle.ready(promise)` holds the
+  composition until samples have loaded.
 - **Make nodes when they play, not up front.** Every connected node costs time on every 128 samples
   of the render, started or not, so a track that makes all its nodes first renders ten times
   slower. `audio.at(t, fn)` runs `fn` shortly before the render reaches `t`; the kit's instruments
@@ -101,7 +103,9 @@ All in output seconds, as the video plays them:
 - **`song(audio, { bpm, offset, key, mode, swing, reverb, brightness, delay })`**: the grid
   (`s.time(bar, beat)` with swing, `s.bars(from, to)`, `s.barAt(t)`, `s.beat`, `s.bar`), the buses
   `s.drums`, `s.bassBus`, `s.keys`, `s.pads`, `s.lead` (each with reverb and delay sends) into a
-  glue compressor and a limiter, `s.bus({ gain, pan, reverb, delay, lowpass, highpass })` for more,
+  glue compressor and a limiter; they are the music's stems (`drums`, `bass`, `keys`, `pads`,
+  `lead`), each at the level the project gives it. `s.bus({ name, gain, pan, reverb, delay, lowpass,
+  highpass })` for more (a `name` makes it a stem too),
   and `s.duck(bus, times, { depth, release })` to pump a bus on the kicks.
 - **Drums** (`.hit(t, velocity)`): `kick`, `snare`, `clap`, `hat` (`{ open: true }`), `shaker`,
   `tom` (`.hit(t, velocity, note)`), `rim`, `crash`, `ride`.

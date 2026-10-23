@@ -34,6 +34,8 @@ export interface SoundtrackPlan {
   /** The music page (absolute), when the project has music that plays. */
   page?: string;
   params: Record<string, unknown>;
+  /** Each stem's level (`music.stems`). */
+  stems: Record<string, number>;
   network: boolean;
   seed: number;
   sounds: { at: number; sound: string; url?: string; volume: number }[];
@@ -87,6 +89,7 @@ export async function planSoundtrack(
     video: videoData(project, inputs),
     ...(page && { page }),
     params,
+    stems: music?.stems ?? {},
     network: music?.network ?? false,
     seed: motionSeed(music?.src ?? 'sounds'),
     sounds: cues,
@@ -101,7 +104,7 @@ export async function renderSoundtrack(projectDir: string, plan: SoundtrackPlan,
     root: projectDir,
     network: plan.network,
     ...(options.kitDir && { kitDir: options.kitDir }),
-    init: { duration: plan.video.duration, rate: AUDIO_SAMPLE_RATE, params: plan.params, seed: plan.seed, video: plan.video, sounds: plan.sounds },
+    init: { duration: plan.video.duration, rate: AUDIO_SAMPLE_RATE, params: plan.params, stems: plan.stems, seed: plan.seed, video: plan.video, sounds: plan.sounds },
   });
   stems.result.skipped.push(...plan.skipped);
   return stems;

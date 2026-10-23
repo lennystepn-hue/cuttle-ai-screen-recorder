@@ -2393,7 +2393,7 @@ describe.runIf(enabled)('the Cuttle app', () => {
     makeMotionFixture(dir);
     const page = await openEditor(dir);
     await page.waitForFunction(() => '__cuttleCheck' in window);
-    type Sound = { status: { state: string; key?: string; info?: { bpm?: number; sections?: unknown[] } | null; errors: string[] }; track?: string; seconds: number };
+    type Sound = { status: { state: string; key?: string; info?: { bpm?: number; sections?: unknown[] } | null; stems?: string[]; errors: string[] }; track?: string; seconds: number };
     const seekTo = (t: number) => page.evaluate((time) => (window as unknown as Hooked).__cuttleCheck.seek(time), t);
     const now = () => page.evaluate(() => (window as unknown as Hooked).__cuttleCheck.state() as CheckState & { sound: Sound });
     const saved = () => JSON.parse(readFileSync(join(dir, 'cuttle.json'), 'utf8')) as { music?: { src: string; volume?: number; params?: Record<string, unknown> }; sounds?: { id: string; sound: string; at: number; scene?: string }[] };
@@ -2425,6 +2425,17 @@ describe.runIf(enabled)('the Cuttle app', () => {
     await expect.poll(() => saved().music?.params).toEqual({ bpm: 100 });
     await expect.poll(async () => (await now()).sound.status.info?.bpm, { timeout: 90_000 }).toBe(100);
     await expect.poll(async () => (await now()).sound.track, { timeout: 20_000 }).not.toBe(first.track);
+    // its stems in a mixer: the drums off, kept in the project, the music rendered again without them
+    expect((await now()).sound.status.stems).toEqual(['drums', 'bass', 'keys', 'pads', 'lead']);
+    const withDrums = (await now()).sound.status.key;
+    await page.locator('[data-testid=music-stem-drums]').evaluate((element) => {
+      const input = element as HTMLInputElement;
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, '0');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    await expect.poll(() => (saved().music as { stems?: Record<string, number> } | undefined)?.stems).toEqual({ drums: 0 });
+    await expect.poll(async () => { const { status } = (await now()).sound; return status.state === 'ready' && status.key !== withDrums; }, { timeout: 90_000 }).toBe(true);
 
     // it plays with the video: the music and the effects start (the param's field gives the keys back first)
     await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());

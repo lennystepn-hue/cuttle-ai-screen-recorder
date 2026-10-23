@@ -305,10 +305,11 @@ export async function runCli(argv: readonly string[], streams?: Streams): Promis
     .option('--volume <0-1>', 'its level', (value: string) => fraction(value))
     .option('--duck <dB>', 'how far it goes down under speech (0: not at all)', (value: string) => decibels(value))
     .option('--param <name=value...>', 'a param of the page (name= removes it)', (value: string, previous: string[] = []) => [...previous, value])
+    .option('--stem <name=level...>', "a stem's level: drums, bass, keys, pads, lead (music check lists them), 0 silent to 2, 1 as composed", (value: string, previous: string[] = []) => [...previous, value])
     .option('--src <page>', 'another page in the project')
     .option('--on', 'play it')
     .option('--off', 'leave it out')
-    .action(action((output, project, options: { volume?: number; duck?: number; param?: string[]; src?: string; on?: boolean; off?: boolean }) => musicSetCommand(project, options, output)));
+    .action(action((output, project, options: { volume?: number; duck?: number; param?: string[]; stem?: string[]; src?: string; on?: boolean; off?: boolean }) => musicSetCommand(project, options, output)));
   music
     .command('check')
     .description('render the music and sounds alone: a WAV, a sheet of the waveforms over the scenes, loudness, hits on the scene changes, errors')

@@ -112,6 +112,8 @@ export interface SoundtrackReport {
   info: MusicStems['result']['info'];
   /** Each stem's highest sample before its level. */
   peaks: MusicStems['result']['peaks'];
+  /** The music's own stems (drums, bass, …): their levels are `music.stems`. */
+  stems: string[];
   nodes: number;
   renderMs: number;
   /** Sounds that could not play. */
@@ -127,6 +129,7 @@ export function soundtrackReport(projectDir: string, plan: SoundtrackPlan, stems
     ...(plan.page && { src: relativeSrc(projectDir, plan.page) }),
     info: result.info,
     peaks: result.peaks,
+    stems: result.stems,
     nodes: result.nodes,
     renderMs: result.renderMs,
     skipped: result.skipped,

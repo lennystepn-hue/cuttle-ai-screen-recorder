@@ -64,6 +64,8 @@ export interface MusicInit {
   duration: number;
   rate: number;
   params: Record<string, unknown>;
+  /** Each stem's level (`music.stems`): what `level` answers. */
+  stems?: Record<string, number>;
   seed: number;
   video: VideoData;
   sounds: SoundCue[];
@@ -85,6 +87,11 @@ export interface MusicAudio {
   at(t: number, fn: () => void): void;
   /** A seeded random in [0, 1): the same music on every render. */
   random(): number;
+  /**
+   * The level the project gives the stem `name` (`music.stems`; 1 as composed, 0 silent, up to 2):
+   * the page multiplies the stem's bus by it. Each stem asked for is one the editor mixes.
+   */
+  level(name: string): number;
 }
 
 /** What a page may tell about its music (shown by `cuttle music check`). */
@@ -120,6 +127,8 @@ export interface MusicRenderResult {
   info: MusicInfo | null;
   /** Sounds of the project that could not play (an unknown name, a file that does not decode). */
   skipped: string[];
+  /** The music's stems: what the page asked `level` for, in order. */
+  stems: string[];
 }
 
 export function musicRuntime(init: MusicInit): void {
@@ -204,6 +213,7 @@ export function musicRuntime(init: MusicInit): void {
         }
       }
     };
+    const stems: string[] = [];
     const audio: MusicAudio = {
       context,
       music,
@@ -211,6 +221,11 @@ export function musicRuntime(init: MusicInit): void {
       video: init.video,
       params: init.params,
       duration: init.duration,
+      level: (name) => {
+        if (!stems.includes(name)) stems.push(name);
+        const level = init.stems?.[name];
+        return typeof level === 'number' && Number.isFinite(level) ? Math.min(2, Math.max(0, level)) : 1;
+      },
       at: (t, fn) => {
         // during the render, what is due before the next stop is made at once
         if (t < made) {
@@ -310,6 +325,7 @@ export function musicRuntime(init: MusicInit): void {
       renderMs: Math.round(done - built),
       info,
       skipped,
+      stems,
     };
   };
 

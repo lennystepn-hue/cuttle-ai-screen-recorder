@@ -448,13 +448,16 @@ export function song(audio, { bpm = 120, offset = 0, key = 'C', mode = 'minor', 
       for (let b = Math.ceil(this.barAt(from) - 1e-6); this.time(b) < to - 1e-6; b++) out.push({ bar: b, t: this.time(b) });
       return out;
     },
-    /** A bus into the master: its level, pan, sends (0–1), and filters. */
-    bus({ gain = 1, pan = 0, reverb: wet = 0.15, delay: echo = 0, lowpass, highpass } = {}) {
+    /**
+     * A bus into the master: its level, pan, sends (0–1), and filters. A `name` makes it a stem of
+     * the music, its level set in the editor (`audio.level`): its sends go with it.
+     */
+    bus({ name, gain = 1, pan = 0, reverb: wet = 0.15, delay: echo = 0, lowpass, highpass } = {}) {
       const input = amp(ctx, 1);
       let last = input;
       if (highpass) last = last.connect(filter(ctx, 'highpass', highpass));
       if (lowpass) last = last.connect(filter(ctx, 'lowpass', lowpass));
-      const level = amp(ctx, gain);
+      const level = amp(ctx, gain * (name && audio.level ? audio.level(name) : 1));
       const duck = amp(ctx, 1);
       last.connect(duck).connect(level);
       const out = pan ? level.connect(panner(ctx, pan)) : level;
@@ -471,11 +474,11 @@ export function song(audio, { bpm = 120, offset = 0, key = 'C', mode = 'minor', 
       }
     },
   };
-  s.drums = s.bus({ gain: 0.9, reverb: 0.08 });
-  s.bassBus = s.bus({ gain: 0.8, reverb: 0 });
-  s.keys = s.bus({ gain: 0.7, reverb: 0.25, delay: 0.12 });
-  s.pads = s.bus({ gain: 0.55, reverb: 0.4, highpass: 140 });
-  s.lead = s.bus({ gain: 0.6, reverb: 0.25, delay: 0.2 });
+  s.drums = s.bus({ name: 'drums', gain: 0.9, reverb: 0.08 });
+  s.bassBus = s.bus({ name: 'bass', gain: 0.8, reverb: 0 });
+  s.keys = s.bus({ name: 'keys', gain: 0.7, reverb: 0.25, delay: 0.12 });
+  s.pads = s.bus({ name: 'pads', gain: 0.55, reverb: 0.4, highpass: 140 });
+  s.lead = s.bus({ name: 'lead', gain: 0.6, reverb: 0.25, delay: 0.2 });
   return s;
 }
 

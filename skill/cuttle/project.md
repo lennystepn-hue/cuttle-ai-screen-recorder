@@ -236,7 +236,10 @@ to `false` is not made again.
 (`music/<name>/index.html`; [music.md](music.md) is the guide). `src`, `params` (`{ "name": value }`
 for the page), `volume` (`0.8`, 0 to 1), `duck` (`12`: dB it goes down under speech; 0 not at all),
 `network` (`false`) and `enabled` (`true`). It is rendered as long as the video and follows every
-edit. Without `music` the video has none.
+edit. Without `music` the video has none. `stems` sets each of its stems' level (`{ "drums": 0.5 }`:
+the kit's `drums`, `bass`, `keys`, `pads` and `lead`, or what a page of its own names; 1 as composed,
+0 silent, up to 2; a stem left out plays as composed): `music check` lists them, `music set --stem
+drums=0.5` sets one.
 
 `sounds` are single sounds at moments: `sound` (a built-in sound, `cuttle sound list`, or a file of
 the project: WAV, MP3, M4A, OGG, FLAC), `at` (source seconds: it plays wherever the video shows that

@@ -3,25 +3,7 @@
 import { EXPORT_FORMATS } from '@cuttle/export/formats';
 import { BUILT_IN_SOUNDS, MOTION_TEMPLATES, MUSIC_TEMPLATES } from '@cuttle/motion-kit';
 import { bridge } from '../bridge';
-import {
-  addCard,
-  addMask,
-  addMotion,
-  addMusic,
-  addSound,
-  addPage,
-  addZoom,
-  autoZoomClicks,
-  cycleSpeed,
-  deleteSelection,
-  duplicateSelection,
-  overlayBlocked,
-  selectedOrCurrentClip,
-  setSpeed,
-  showRawTake,
-  split,
-  templateLabel,
-} from './actions';
+import { addAnnotation, addCard, addMask, addMotion, addMusic, addPage, addSound, addZoom, autoZoomClicks, cycleSpeed, deleteSelection, duplicateSelection, overlayBlocked, selectedOrCurrentClip, setSpeed, showRawTake, split, templateLabel } from './actions';
 import { redo, undo } from './doc';
 import { showInspector, toggleInspector } from './layout';
 import { currentPlayer, openExport, select, setFormat, setTool, store } from './session';
@@ -61,6 +43,7 @@ export function editorCommands(): EditorCommand[] {
     { id: 'auto-zoom', name: 'Zoom on clicks: add zooms where you clicked', keywords: 'auto zoom clicks automatic follow', group: 'Add', run: autoZoomClicks },
     { id: 'add-mask', name: 'Add a mask at the playhead', group: 'Add', run: () => addMask(), blocked: () => overlayBlocked() },
     { id: 'add-caption', name: 'Add a caption at the playhead (type it on the video)', group: 'Add', run: () => setTool('caption'), blocked: () => overlayBlocked() },
+    { id: 'add-annotation', name: 'Add an annotation at the playhead (an arrow, a box…)', keywords: 'annotate arrow box highlight spotlight magnifier', group: 'Add', run: () => addAnnotation(), blocked: () => overlayBlocked() },
     { id: 'add-card', name: 'Add a title card', group: 'Add', run: addCard },
     { id: 'add-page', name: 'Add a page (an image)…', group: 'Add', run: () => void addPage() },
     ...MOTION_TEMPLATES.map(
@@ -94,6 +77,7 @@ export function editorCommands(): EditorCommand[] {
     { id: 'tool-zoom', name: 'Zoom tool: draw a zoom on the video', keys: 'Z', group: 'Tools', run: () => setTool('zoom'), blocked: () => overlayBlocked() },
     { id: 'tool-mask', name: 'Mask tool: draw a mask on the video', keys: 'M', group: 'Tools', run: () => setTool('mask'), blocked: () => overlayBlocked() },
     { id: 'tool-caption', name: 'Caption tool: type a caption on the video', keys: 'T', group: 'Tools', run: () => setTool('caption'), blocked: () => overlayBlocked() },
+    { id: 'tool-annotate', name: 'Annotate tool: draw an arrow, a box, a highlight, a spotlight or a magnifier', keywords: 'annotate arrow box ellipse circle highlight spotlight magnifier draw point', keys: 'A', group: 'Tools', run: () => setTool('annotate'), blocked: () => overlayBlocked() },
     { id: 'tool-crop', name: 'Crop tool: draw the part of the screen a clip shows', keywords: 'crop trim tabs taskbar', keys: 'C', group: 'Tools', run: () => setTool('crop'), blocked: () => overlayBlocked() },
     { id: 'play', name: 'Play or pause', keys: 'Space', group: 'Play', run: () => player?.toggle() },
     { id: 'back', name: 'A second back', keys: 'J', group: 'Play', run: () => void player?.seek(player.current().t - 1) },

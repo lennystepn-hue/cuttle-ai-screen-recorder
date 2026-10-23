@@ -49,10 +49,11 @@ const LANES: { kind: OverlayKind; name: string; list: OverlayList }[] = [
   { kind: 'zoom', name: 'Zoom', list: 'zooms' },
   { kind: 'mask', name: 'Mask', list: 'masks' },
   { kind: 'caption', name: 'Caption', list: 'texts' },
+  { kind: 'annotation', name: 'Draw', list: 'annotations' },
   { kind: 'motion', name: 'Motion', list: 'overlays' },
   { kind: 'sound', name: 'Sound', list: 'sounds' },
 ];
-const NOUN: Record<OverlayKind, string> = { zoom: 'zoom', mask: 'mask', caption: 'caption', motion: 'motion overlay', sound: 'sound' };
+const NOUN: Record<OverlayKind, string> = { zoom: 'zoom', mask: 'mask', caption: 'caption', annotation: 'annotation', motion: 'motion overlay', sound: 'sound' };
 const TICKS = [0.1, 0.2, 0.5, 1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 1800];
 const MAX_PPS = 400;
 /** A pointer that moves less than this between down and up clicked (selects); more drags. */
@@ -104,13 +105,14 @@ function layoutOf(model: TimelineModel | undefined, shown: Shown): Layout {
     zoom: laneHeight(model, 'zoom'),
     mask: laneHeight(model, 'mask'),
     caption: laneHeight(model, 'caption'),
+    annotation: laneHeight(model, 'annotation'),
     motion: laneHeight(model, 'motion'),
     sound: laneHeight(model, 'sound', shown.pageSounds),
     music: model?.music ? BASE_ROWS.music : 0,
     mic: shown.mic ? BASE_ROWS.mic : 0,
     input: shown.input ? BASE_ROWS.input : 0,
   };
-  const order = ['markers', 'ruler', 'video', 'zoom', 'mask', 'caption', 'motion', 'sound', 'music', 'mic', 'input'] as const;
+  const order = ['markers', 'ruler', 'video', 'zoom', 'mask', 'caption', 'annotation', 'motion', 'sound', 'music', 'mic', 'input'] as const;
   const tops = {} as Layout['tops'];
   let y = 0;
   for (const row of order) {

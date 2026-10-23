@@ -76,6 +76,7 @@ interface Written {
   zooms: { id: string; at: number; duration: number; rect: number[] }[];
   masks: { id: string; from: number; to: number; rect: number[]; style?: string; label?: string }[];
   texts: { id: string; text: string; position?: string }[];
+  annotations?: { id: string; kind: string; at: number; rect?: number[]; from?: number[]; to?: number[]; text?: string }[];
 }
 
 const electronPath = (): string => createRequire(import.meta.url)('electron') as unknown as string;
@@ -660,6 +661,43 @@ describe.runIf(enabled)('the Cuttle app', () => {
     await choose('[data-testid=speed]', '2×');
     await savedWhen((file) => file.scenes.find((scene) => scene.id === 's2')!.speed === 2);
 
+    await undoAll();
+    expect(readFileSync(projectFile(), 'utf8')).toBe(original);
+  }, 30_000);
+
+  it('draws annotations in the source view: a box over what the drag covers, an arrow along it; the inspector sets a callout', async () => {
+    const original = readFileSync(projectFile(), 'utf8');
+    await seek(1);
+    await editor.keyboard.press('a');
+    await editor.waitForSelector('[data-testid=source-view]');
+    // what the tool draws, picked in the inspector
+    await click(editor, '[data-testid=annotate-box]');
+    await drag('[data-testid=source-view]', [200, 80], { from: [0.3, 0.3] });
+    await savedWhen((file) => (file.annotations?.length ?? 0) === 1);
+    const box = onDisk().annotations![0]!;
+    expect(box).toMatchObject({ id: 'n1', kind: 'box' });
+    expect(box.at).toBeCloseTo(1, 1);
+    expect(box.rect![2]! / box.rect![3]!).toBeGreaterThan(1.5);
+    await editor.waitForSelector('.source-box.annotation.selected');
+    await editor.fill('[data-testid=annotation-text]', 'Look here');
+    await editor.press('[data-testid=annotation-text]', 'Enter');
+    await savedWhen((file) => file.annotations![0]!.text === 'Look here');
+    // an arrow: from where the drag starts to where it ends (the keys are the editor's once the field is left)
+    await editor.locator('[data-testid=annotation-text]').blur();
+    await editor.keyboard.press('Escape');
+    await editor.keyboard.press('a');
+    await click(editor, '[data-testid=annotate-arrow]');
+    await drag('[data-testid=source-view]', [150, -100], { from: [0.4, 0.7] });
+    await savedWhen((file) => file.annotations!.length === 2);
+    const arrow = onDisk().annotations![1]!;
+    expect(arrow).toMatchObject({ id: 'n2', kind: 'arrow' });
+    expect(arrow.to![0]! - arrow.from![0]!).toBeGreaterThan(50);
+    expect(arrow.to![1]!).toBeLessThan(arrow.from![1]!);
+    await editor.waitForSelector('.source-arrow.selected');
+    await shot('08-annotations');
+    // the video draws them: no error at the playhead
+    await editor.keyboard.press('Escape');
+    expect((await state()).error).toBeUndefined();
     await undoAll();
     expect(readFileSync(projectFile(), 'utf8')).toBe(original);
   }, 30_000);

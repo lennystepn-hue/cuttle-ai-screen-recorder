@@ -161,6 +161,15 @@ words masked wherever the screen shows them (`suggest --mask` adds to them).
 `position` (`top`, `center`, `bottom`) and `enabled` (`true`). A `top` text sits over the window's
 title bar; `bottom` keeps the title visible. Texts fade in and out over 0.25 output seconds.
 
+`annotations` mark things on the screen's content, in source px, where the clips show `at` to
+`at + duration` (source seconds): `kind` (`arrow` from `from` to `to`, each `[x, y]`; `box`,
+`ellipse`, `highlight` a highlighter stroke, `spotlight` the rest of the screen darker, `magnifier`
+a round lens `zoom` times larger (`2`, 1.5 to 4); each of these takes `rect`), `text` (a callout
+beside it), `color` (the brand's accent when left out), `enabled` (`true`), `id` (`n1`) and
+`label`. Each draws itself in over 0.45 output seconds (an arrow grows, a box traces itself) and fades
+out over 0.3; it moves with the content under zooms. A magnifier hides what masks hide.
+`cuttle annotate <kind> --at <s> --rect x,y,w,h` (or `--from x,y --to x,y`) adds one.
+
 `overlays` are motion pages over the video: `src`, `at` and `duration` (source seconds, as a
 text's), `params`, `network`, `motionBlur` and `enabled` (`true`). A page covers the whole output with its
 transparency (a lower third, a callout, a logo), over the clip, its zooms, masks, cursor and texts,

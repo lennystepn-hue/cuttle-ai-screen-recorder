@@ -31,6 +31,8 @@ import {
   isColouredBackground,
   SOLID_DEFAULT,
   voiceLineKey,
+  ANNOTATION_KINDS,
+  type AnnotationKind,
 } from '@cuttle/project';
 import type { ParamDeclaration } from '@cuttle/export/motion-params';
 import { narrationCues, sceneSpans, type SceneSpan } from '@cuttle/timeline';
@@ -51,33 +53,9 @@ import {
   TEXT_STYLE_NAMES,
   WEBCAM_SHAPE_NAMES,
 } from '../../shared/names';
-import { motionName, outputTimesOf, soundName } from '../../shared/timeline-model';
+import { ANNOTATION_NAMES, motionName, outputTimesOf, soundName } from '../../shared/timeline-model';
 import { BUILT_IN_SOUNDS } from '@cuttle/motion-kit';
-import {
-  BackgroundIcon,
-  BrandIcon,
-  CameraIcon,
-  CardIcon,
-  CheckIcon,
-  ChevronIcon,
-  CloseIcon,
-  CopyIcon,
-  CropIcon,
-  FilmIcon,
-  KeysIcon,
-  MaskIcon,
-  MotionIcon,
-  PageIcon,
-  SelectIcon,
-  SoundIcon,
-  SplitIcon,
-  SubtitlesIcon,
-  TextIcon,
-  TrashIcon,
-  WatermarkIcon,
-  WindowIcon,
-  ZoomIcon,
-} from '../icons';
+import { BackgroundIcon, BrandIcon, CameraIcon, CardIcon, CheckIcon, ChevronIcon, CloseIcon, CopyIcon, CropIcon, FilmIcon, KeysIcon, MaskIcon, MotionIcon, PageIcon, SelectIcon, SoundIcon, SplitIcon, SubtitlesIcon, TextIcon, TrashIcon, WatermarkIcon, WindowIcon, ZoomIcon, AnnotateIcon } from '../icons';
 import { bridge } from '../bridge';
 import { Select as StyledSelect } from '../Select';
 import { shortcut } from '../keys';
@@ -231,7 +209,7 @@ function Advanced({ children, note }: { children: ReactNode; note?: string }) {
 }
 
 /** "Draw on the video" with the tool's picture and key: the tool that draws this kind of area. */
-function DrawOn({ tool }: { tool: 'zoom' | 'mask' | 'crop' }) {
+function DrawOn({ tool }: { tool: 'zoom' | 'mask' | 'crop' | 'annotate' }) {
   const { Icon, keys, name } = START_TOOLS.find((item) => item.tool === tool)!;
   return (
     <button type="button" className="ghost small draw-on" onClick={() => setTool(tool)} title={`${name} tool (${keys}): drag on the screen`}>
@@ -792,6 +770,7 @@ const START_TOOLS: { tool: Tool; Icon: ComponentType<{ size?: number }>; name: s
   { tool: 'zoom', Icon: ZoomIcon, name: 'Zoom', keys: 'Z', what: 'show a part close up' },
   { tool: 'mask', Icon: MaskIcon, name: 'Mask', keys: 'M', what: 'hide a password, an address' },
   { tool: 'caption', Icon: TextIcon, name: 'Caption', keys: 'T', what: 'type on the video' },
+  { tool: 'annotate', Icon: AnnotateIcon, name: 'Annotate', keys: 'A', what: 'point at something' },
   { tool: 'crop', Icon: CropIcon, name: 'Crop', keys: 'C', what: 'leave out tabs and bars' },
 ];
 
@@ -825,12 +804,30 @@ function StartHere() {
   );
 }
 
+/** The Annotate tool: what it draws (one of the six), and how. */
+function AnnotateHint() {
+  const kind = useStore(store, (state) => state.annotationKind);
+  return (
+    <div className="annotate-hint">
+      <p className="hint">Annotate tool: pick what to draw, then drag on the screen ({kind === 'arrow' ? 'from where the arrow starts to what it points at' : 'over what it marks'}). It starts at the playhead and lasts 3 s. Esc goes back.</p>
+      <div className="seg full annotate-kinds" role="group" aria-label="What the Annotate tool draws">
+        {ANNOTATION_KINDS.map((each) => (
+          <button key={each} type="button" aria-pressed={kind === each} onClick={() => store.set({ annotationKind: each })} data-testid={`annotate-${each}`}>
+            {ANNOTATION_NAMES[each]}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 /** What the empty inspector says: how to start with the tool in hand. */
 const HINTS: Record<Tool, ReactNode> = {
   select: <StartHere />,
   zoom: <p className="hint">Zoom tool: drag on the screen over what the video should show close up. It starts at the playhead and lasts 3 s. Esc goes back.</p>,
   mask: <p className="hint">Mask tool: drag on the screen over what the video must not show (a password, an address). It lasts from the playhead to the end of the clip. Esc goes back.</p>,
   caption: <p className="hint">Caption tool: type the caption in the bar and press Enter; it shows at the playhead for 3 s. Esc goes back.</p>,
+  annotate: <AnnotateHint />,
   crop: <p className="hint">Crop tool: drag on the screen over the part the clip should show, leaving out tabs, bars or a taskbar. The window takes its shape. Esc goes back.</p>,
 };
 
@@ -1035,7 +1032,7 @@ function Details({ project, selection }: { project: CuttleProject; selection: Se
   }
 
   /** An overlay's place: where the video shows it (read) and its length there. */
-  const timing = (list: 'zooms' | 'texts' | 'masks' | 'overlays', from: number, to: number) => {
+  const timing = (list: 'zooms' | 'texts' | 'masks' | 'annotations' | 'overlays', from: number, to: number) => {
     const stretch = stretchOf(project, selection, from, to);
     const speed = stretch?.speed ?? 1;
     const label = NOUNS[list];
@@ -1058,7 +1055,7 @@ function Details({ project, selection }: { project: CuttleProject; selection: Se
   };
 
   /** Where an overlay starts in the take (a mask: where it starts and ends), for Advanced. */
-  const inTake = (list: 'zooms' | 'texts' | 'masks' | 'overlays', from: number, to: number) =>
+  const inTake = (list: 'zooms' | 'texts' | 'masks' | 'annotations' | 'overlays', from: number, to: number) =>
     list === 'masks' ? (
       <div className="grid2">
         <Row label="From">
@@ -1093,7 +1090,7 @@ function Details({ project, selection }: { project: CuttleProject; selection: Se
 
   const pixels = (list: 'zooms' | 'masks', rect: Rect) => <AreaFields rect={rect} onCommit={(next) => set(list, id, { rect: next }, `Change the ${NOUNS[list]} area`)} />;
 
-  const enabled = (list: 'zooms' | 'masks' | 'texts' | 'overlays', on: boolean) => (
+  const enabled = (list: 'zooms' | 'masks' | 'texts' | 'annotations' | 'overlays', on: boolean) => (
     <Row label="Show" inline>
       <em>{on ? 'On' : 'Off: kept, not in the video'}</em>
       <Toggle checked={on} label={`Show the ${NOUNS[list]}`} onChange={(value) => set(list, id, { enabled: value ? undefined : false }, value ? `Turn ${NOUNS[list]} on` : `Turn ${NOUNS[list]} off`)} />
@@ -1166,6 +1163,58 @@ function Details({ project, selection }: { project: CuttleProject; selection: Se
       />
     );
   }
+  if (selection.kind === 'annotation') {
+    const annotation = project.annotations.find((item) => item.id === id)!;
+    const name = annotation.label ?? ANNOTATION_NAMES[annotation.kind];
+    // a kind changed from an arrow to one with an area (or back) takes a shape from what it had
+    const changeKind = (kind: AnnotationKind) => {
+      if (kind === annotation.kind) return;
+      const from = annotation.from ?? [annotation.rect![0], annotation.rect![1] + annotation.rect![3]];
+      const to = annotation.to ?? [annotation.rect![0] + annotation.rect![2] / 2, annotation.rect![1]];
+      const shape =
+        kind === 'arrow'
+          ? { from: annotation.from ?? from, to: annotation.to ?? to, rect: undefined }
+          : { rect: annotation.rect ?? ([Math.min(from[0], to[0]), Math.min(from[1], to[1]), Math.max(8, Math.abs(to[0] - from[0])), Math.max(8, Math.abs(to[1] - from[1]))] as Rect), from: undefined, to: undefined };
+      set('annotations', id, { kind, ...shape }, `Make it ${ANNOTATION_NAMES[kind].toLowerCase()}`);
+    };
+    return (
+      <>
+        <Head icon={<AnnotateIcon />} color="var(--annotation)" name={name} />
+        <Row label="Label">
+          <TextInput value={annotation.label ?? ''} placeholder={ANNOTATION_NAMES[annotation.kind]} onCommit={(value) => set('annotations', id, { label: value.trim() || undefined }, 'Rename annotation')} />
+        </Row>
+        <Section title="Mark">
+          <Row label="Kind">
+            <Select value={annotation.kind} options={ANNOTATION_KINDS} names={ANNOTATION_NAMES} onChange={changeKind} testId="annotation-kind" />
+          </Row>
+          <Row label="Callout" note="a few words beside it">
+            <TextInput value={annotation.text ?? ''} placeholder="None" onCommit={(text) => set('annotations', id, { text: text.trim() || undefined }, 'Change the callout')} testId="annotation-text" />
+          </Row>
+          <Row label="Colour" note={annotation.color ? undefined : "the brand's accent"}>
+            <ColorInput
+              value={annotation.color ?? project.theme.accent ?? project.look.cursor.color}
+              label="Annotation colour"
+              upper
+              hex
+              toCommand={(color) => ({ type: 'set', list: 'annotations', id, fields: { color } })}
+            />
+          </Row>
+          {annotation.kind === 'magnifier' && (
+            <Row label="Magnifies">
+              <RangeInput value={Math.round(annotation.zoom * 10)} min={15} max={40} label="Magnifies" toCommand={(value) => ({ type: 'set', list: 'annotations', id, fields: { zoom: value / 10 } })} commitLabel="Magnify" format={(value) => `${(value / 10).toFixed(1)}×`} testId="annotation-zoom" />
+            </Row>
+          )}
+          <DrawOn tool="annotate" />
+        </Section>
+        {timing('annotations', annotation.at, annotation.at + annotation.duration)}
+        {enabled('annotations', annotation.enabled)}
+        <Advanced note={ADVANCED_NOTE}>
+          {inTake('annotations', annotation.at, annotation.at + annotation.duration)}
+          {annotation.rect && <AreaFields rect={annotation.rect} onCommit={(rect) => set('annotations', id, { rect }, 'Change the annotation area')} />}
+        </Advanced>
+      </>
+    );
+  }
   if (selection.kind === 'sound') return <SoundDetails project={project} id={id} />;
   const text = project.texts.find((item) => item.id === id)!;
   return (
@@ -1198,7 +1247,7 @@ function Details({ project, selection }: { project: CuttleProject; selection: Se
 }
 
 /** What each list's items are called in the names of their changes. */
-const NOUNS = { zooms: 'zoom', masks: 'mask', texts: 'caption', overlays: 'motion overlay' } as const;
+const NOUNS = { zooms: 'zoom', masks: 'mask', texts: 'caption', annotations: 'annotation', overlays: 'motion overlay' } as const;
 
 const ADVANCED_NOTE = 'Seconds into the take and pixels of the screen, as cuttle.json has them.';
 

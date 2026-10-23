@@ -14,10 +14,10 @@ import { currentPlayer, documentProject, select, setTool, store, type Selection,
 export const NEW_OVERLAY_SECONDS = 3;
 export const SPEEDS = [1, 2, 4, 8, 12, 20] as const;
 
-export const LIST_OF: Record<Exclude<Selection['kind'], 'music'>, ListName> = { scene: 'scenes', zoom: 'zooms', mask: 'masks', caption: 'texts', motion: 'overlays', cut: 'cuts', crop: 'scenes', sound: 'sounds' };
+export const LIST_OF: Record<Exclude<Selection['kind'], 'music'>, ListName> = { scene: 'scenes', zoom: 'zooms', mask: 'masks', caption: 'texts', annotation: 'annotations', motion: 'overlays', cut: 'cuts', crop: 'scenes', sound: 'sounds' };
 /** What people call a scene of each type. */
 const SCENE_NOUNS: Record<Scene['type'], string> = { clip: 'clip', still: 'page', card: 'card', motion: 'motion scene' };
-const NAMES: Record<ListName, string> = { scenes: 'scene', zooms: 'zoom', masks: 'mask', texts: 'caption', overlays: 'motion overlay', cuts: 'cut', sounds: 'sound' };
+const NAMES: Record<ListName, string> = { scenes: 'scene', zooms: 'zoom', masks: 'mask', texts: 'caption', annotations: 'annotation', overlays: 'motion overlay', cuts: 'cut', sounds: 'sound' };
 
 /** Where the playhead is: its scene and, in a clip, the source second it shows. */
 export interface PlayheadPlace {
@@ -143,7 +143,7 @@ function addAndSelect(command: Extract<Command, { type: 'add' }>, kind: Selectio
 }
 
 const itemIds = (project: CuttleProject | undefined) =>
-  project ? [...project.scenes, ...project.zooms, ...project.masks, ...project.texts, ...project.overlays].map((item) => item.id!).filter(Boolean) : [];
+  project ? [...project.scenes, ...project.zooms, ...project.masks, ...project.texts, ...project.annotations, ...project.overlays].map((item) => item.id!).filter(Boolean) : [];
 
 /** A zoom at the playhead: 3 output seconds (so it rests at full zoom for a while), on the middle half of the screen; then the source view to place it. */
 export function addZoom(rect?: number[]): void {
@@ -190,6 +190,27 @@ export function autoZoomClicks(): void {
 export function cropClip(rect: number[], id = selectedOrCurrentClip()?.id): void {
   if (!id) return toast('Select a clip, or move the playhead onto one, to crop it.', { tone: 'warning' });
   if (edit([{ type: 'set', list: 'scenes', id, fields: { crop: { rect } } }], 'Crop clip')) select({ kind: 'crop', id });
+}
+
+/**
+ * An annotation of the kind the Annotate tool draws (`annotationKind`) at the playhead, 3 output
+ * seconds long: over `rect`, or an arrow from `from` to `to` (source px); without them, in the
+ * middle of the screen. Then the source view to place it.
+ */
+export function addAnnotation(at?: { rect?: number[]; from?: number[]; to?: number[] }): void {
+  const blocked = overlayBlocked();
+  if (blocked) return toast(blocked, { tone: 'warning' });
+  const place = playheadPlace()!;
+  const clip = place.clip!;
+  const screen = screenSize();
+  const kind = store.get().annotationKind;
+  const duration = Math.min(NEW_OVERLAY_SECONDS * clip.speed, clip.to - place.source!);
+  const shape =
+    kind === 'arrow'
+      ? { from: at?.from ?? [screen.width * 0.3, screen.height * 0.65], to: at?.to ?? [screen.width * 0.45, screen.height * 0.5] }
+      : { rect: at?.rect ?? [screen.width * 0.4, screen.height * 0.4, screen.width * 0.2, screen.height * 0.15] };
+  addAndSelect({ type: 'add', list: 'annotations', item: { kind, at: place.source!, duration, ...shape } }, 'annotation', 'Add annotation');
+  setTool('annotate');
 }
 
 /** A mask from the playhead to the clip's end; then the source view to place it. */
@@ -343,7 +364,7 @@ export async function chooseImage(purpose: 'still' | 'background' | 'logo' | 'wa
 }
 
 /** What selecting an item of each list selects. */
-const KIND_OF: Record<ListName, Selection['kind']> = { scenes: 'scene', zooms: 'zoom', masks: 'mask', texts: 'caption', overlays: 'motion', cuts: 'cut', sounds: 'sound' };
+const KIND_OF: Record<ListName, Selection['kind']> = { scenes: 'scene', zooms: 'zoom', masks: 'mask', texts: 'caption', annotations: 'annotation', overlays: 'motion', cuts: 'cut', sounds: 'sound' };
 
 /** Selects an item and moves the playhead to where the video first shows it (the toast's "Show"). */
 export function reveal(list: ListName, id: string): void {

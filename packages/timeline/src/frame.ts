@@ -1,4 +1,4 @@
-import type { CuttleProject, Mask, Rect } from '@cuttle/project';
+import type { Annotation, CuttleProject, Mask, Rect } from '@cuttle/project';
 import { applyCaptionFixes, captionAt, captionCues, captionWords, type ActiveCaption, type CaptionCue, type CaptionWord, type SpokenWord } from './captions';
 import { cursorAt, type CursorFrame, type CursorTrack } from './cursor';
 import { clamp, type Curve } from './easing';
@@ -46,6 +46,8 @@ export interface SceneFrame {
   aspect?: number;
   masks: Mask[];
   texts: ActiveText[];
+  /** Clip scenes: the annotations it shows (none: left out), in the project's order. */
+  annotations?: ActiveAnnotation[];
   /** Clip scenes: the motion overlays it shows, in the project's order (drawn over the whole frame). */
   overlays: ActiveOverlay[];
   badge?: string;
@@ -53,6 +55,22 @@ export interface SceneFrame {
   /** Clip scenes: the badge of the shortcut pressed now (`look.keys`). */
   keys?: KeyBadge;
 }
+
+/** An annotation on a frame: how far it has drawn itself in (0 to 1, eased) and how faded it is. */
+export interface ActiveAnnotation {
+  annotation: Annotation;
+  /** Its place in the project's `annotations`. */
+  index: number;
+  progress: number;
+  opacity: number;
+}
+
+/** An annotation draws itself in over this long, and fades out over this long (output seconds). */
+export const ANNOTATION_IN_SECONDS = 0.45;
+export const ANNOTATION_OUT_SECONDS = 0.3;
+
+const easeOutCubic = (x: number) => 1 - (1 - x) ** 3;
+const withAnnotations = (annotations: ActiveAnnotation[]) => (annotations.length > 0 ? { annotations } : {});
 
 /** A scene's transition page while it plays: the scene it goes into, and where its clock is. */
 export interface ActiveTransition {
@@ -131,6 +149,7 @@ export function createTimeline(project: CuttleProject, opts: TimelineOptions): T
   const zoomShown = new Map(project.zooms.map((zoom) => [zoom, occurrences(spans, zoom.at, zoom.at + zoom.duration)]));
   const textShown = new Map(project.texts.map((text) => [text, occurrences(spans, text.at, text.at + text.duration)]));
   const overlayShown = project.overlays.map((overlay) => occurrences(spans, overlay.at, overlay.at + overlay.duration));
+  const annotationShown = project.annotations.map((annotation) => occurrences(spans, annotation.at, annotation.at + annotation.duration));
   const round = (seconds: number) => Math.round(seconds * 1e6) / 1e6;
   /** How long a frame's shutter is open (output seconds): the motion blur's share of a frame. */
   const shutter = project.look.motionBlur / project.output.fps;
@@ -190,6 +209,16 @@ export function createTimeline(project: CuttleProject, opts: TimelineOptions): T
       aspect: screen[2] / screen[3],
       masks: activeMasks(project.masks, sourceTime),
       texts: activeTexts(project.texts, sourceTime, (text) => amount(textShown.get(text), TEXT_FADE_SECONDS, 'linear')),
+      ...withAnnotations(
+        project.annotations.flatMap((annotation, index) => {
+          const occurrence = annotation.enabled ? annotationShown[index]?.[span.index] : undefined;
+          if (!occurrence || shownAt < occurrence.start - 1e-9 || shownAt >= occurrence.end - 1e-9) return [];
+          // it draws itself in where the video shows its start, and fades where it shows its end
+          const progress = occurrence.rampIn ? easeOutCubic(clamp((shownAt - occurrence.start) / ANNOTATION_IN_SECONDS, 0, 1)) : 1;
+          const opacity = occurrence.rampOut ? clamp((occurrence.end - shownAt) / ANNOTATION_OUT_SECONDS, 0, 1) : 1;
+          return [{ annotation, index, progress, opacity }];
+        }),
+      ),
       // a motion overlay's clock runs in output seconds from where its stretch starts showing
       overlays: project.overlays.flatMap((overlay, index) => {
         const occurrence = overlay.enabled ? overlayShown[index]?.[span.index] : undefined;

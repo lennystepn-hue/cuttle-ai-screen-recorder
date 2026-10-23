@@ -683,6 +683,7 @@ button.chip-status:hover {
 .dot.zoom { --kind: var(--zoom); }
 .dot.mask { --kind: var(--mask); }
 .dot.caption { --kind: var(--caption); }
+.dot.annotation { --kind: var(--annotation); }
 .dot.card { --kind: var(--card); }
 .dot.still { --kind: var(--still); }
 .dot.motion { --kind: var(--motion); }
@@ -783,6 +784,7 @@ button.chip-status:hover {
 .lane-name.zoom { --kind: var(--zoom); }
 .lane-name.mask { --kind: var(--mask); }
 .lane-name.caption { --kind: var(--caption); }
+.lane-name.annotation { --kind: var(--annotation); }
 .lane-name.motion { --kind: var(--motion); }
 .lane-name.sound { --kind: var(--sound); }
 .lane-name.music { --kind: var(--music); }
@@ -969,6 +971,11 @@ button.chip-status:hover {
   background: color-mix(in srgb, var(--mask) 15%, transparent);
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--mask) 50%, transparent);
   color: var(--mask);
+}
+.item.annotation {
+  background: color-mix(in srgb, var(--annotation) 14%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--annotation) 50%, transparent);
+  color: var(--annotation);
 }
 .item.caption {
   background: color-mix(in srgb, var(--caption) 13%, transparent);
@@ -1456,6 +1463,10 @@ button.chip-status:hover {
   background: color-mix(in srgb, var(--mask) 16%, transparent);
   color: var(--mask);
 }
+.tools [data-testid='tool-annotate'][aria-pressed='true'] {
+  background: color-mix(in srgb, var(--annotation) 16%, transparent);
+  color: var(--annotation);
+}
 .tools [data-testid='tool-caption'][aria-pressed='true'] {
   background: color-mix(in srgb, var(--caption) 14%, transparent);
   color: var(--caption);
@@ -1656,6 +1667,11 @@ button.chip-status:hover {
   box-shadow:
     0 0 0 1.5px var(--zoom),
     0 0 0 4px color-mix(in srgb, var(--zoom) 16%, transparent);
+}
+.source-box.annotation {
+  box-shadow:
+    0 0 0 1.5px var(--annotation),
+    0 0 0 4px color-mix(in srgb, var(--annotation) 16%, transparent);
 }
 .source-box.mask {
   box-shadow: 0 0 0 1.5px var(--mask);
@@ -3747,4 +3763,46 @@ button.chip-status:hover {
 }
 .hint.warn {
   color: var(--warn);
+}
+/* an arrow in the source view: its line (a wider, clear line takes the press) and, selected, its ends to drag */
+.source-arrows {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+}
+.source-arrow {
+  pointer-events: auto;
+  cursor: move;
+}
+.source-arrow line {
+  stroke: var(--annotation);
+  stroke-width: 2.5;
+  stroke-linecap: round;
+}
+.source-arrow line.hit {
+  stroke: transparent;
+  stroke-width: 16;
+}
+.source-arrow.selected line:not(.hit) {
+  stroke-width: 3.5;
+}
+.source-arrow circle {
+  fill: var(--annotation);
+  stroke: #fff;
+  stroke-width: 1.5;
+  cursor: grab;
+}
+.source-arrow.drawing {
+  pointer-events: none;
+}
+.source-arrow.drawing line {
+  stroke-dasharray: 6 4;
+}
+/* the Annotate tool: what it draws */
+.annotate-kinds {
+  flex-wrap: wrap;
+  margin-top: 10px;
 }

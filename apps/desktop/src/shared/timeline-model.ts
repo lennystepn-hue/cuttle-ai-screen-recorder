@@ -1,9 +1,12 @@
 // What the editor's timeline draws, in output seconds: pure, so it is tested without a window.
-import { isFact, type AutoKind, type CuttleProject, type InputEvent, type Marker, type MarkerKind } from '@cuttle/project';
+import { isFact, type AnnotationKind, type AutoKind, type CuttleProject, type InputEvent, type Marker, type MarkerKind } from '@cuttle/project';
 import { occurrences, outputTimesOf, type SceneSpan } from '@cuttle/timeline';
 import { formatDuration } from './format';
 
-export type OverlayKind = 'zoom' | 'mask' | 'caption' | 'motion' | 'sound';
+export type OverlayKind = 'zoom' | 'mask' | 'caption' | 'annotation' | 'motion' | 'sound';
+
+/** What people call each kind of annotation. */
+export const ANNOTATION_NAMES: Record<AnnotationKind, string> = { arrow: 'Arrow', box: 'Box', ellipse: 'Ellipse', highlight: 'Highlight', spotlight: 'Spotlight', magnifier: 'Magnifier' };
 
 /** How long a sound's chip is on the timeline (output seconds): a sound is a moment. */
 export const SOUND_CHIP_SECONDS = 0.5;
@@ -284,6 +287,7 @@ export function timelineModel(project: CuttleProject, spans: readonly SceneSpan[
       zoom: lane('zoom', project.zooms, spans, (zoom) => [zoom.at, zoom.at + zoom.duration], () => 'Zoom', (zoom) => (zoom.moves ?? []).map((move) => move.at)),
       mask: lane('mask', project.masks, spans, (mask) => [mask.from, mask.to], () => 'Mask', (mask) => (mask.moves ?? []).map((move) => move.at)),
       caption: lane('caption', project.texts, spans, (text) => [text.at, text.at + text.duration], (text) => text.text),
+      annotation: lane('annotation', project.annotations, spans, (annotation) => [annotation.at, annotation.at + annotation.duration], (annotation) => (annotation.text ? `${ANNOTATION_NAMES[annotation.kind]}: ${annotation.text}` : ANNOTATION_NAMES[annotation.kind])),
       motion: lane('motion', project.overlays, spans, (overlay) => [overlay.at, overlay.at + overlay.duration], (overlay) => motionName(overlay.src)),
       sound: soundLane(project, spans, spans.at(-1)?.end ?? 0),
     },
@@ -406,7 +410,7 @@ export function waveformColumns(peaks: Peaks, spans: readonly SceneSpan[], from:
 
 const count = (n: number, one: string) => `${n} ${one}${n === 1 ? '' : 's'}`;
 /** What people call an overlay of each lane. */
-const OVERLAY_NOUNS: Record<OverlayKind, string> = { zoom: 'zoom', mask: 'mask', caption: 'caption', motion: 'motion overlay', sound: 'sound' };
+const OVERLAY_NOUNS: Record<OverlayKind, string> = { zoom: 'zoom', mask: 'mask', caption: 'caption', annotation: 'annotation', motion: 'motion overlay', sound: 'sound' };
 const list = (items: readonly string[]) => (items.length < 2 ? items.join('') : `${items.slice(0, -1).join(', ')} and ${items.at(-1)}`);
 
 /**
@@ -419,7 +423,7 @@ export function exportChecks(project: CuttleProject, spans: readonly SceneSpan[]
   const checks: string[] = [];
   const off = project.masks.filter((mask) => !mask.enabled).length;
   if (off > 0) checks.push(`${count(off, 'mask')} ${off === 1 ? 'is off: what it covers shows' : 'are off: what they cover shows'} in the video.`);
-  const cut = (['zoom', 'mask', 'caption', 'motion', 'sound'] as const).filter((kind) => model.lanes[kind].cutOut > 0);
+  const cut = (['zoom', 'mask', 'caption', 'annotation', 'motion', 'sound'] as const).filter((kind) => model.lanes[kind].cutOut > 0);
   const cutTotal = cut.reduce((sum, kind) => sum + model.lanes[kind].cutOut, 0);
   if (cutTotal > 0) {
     checks.push(`${list(cut.map((kind) => count(model.lanes[kind].cutOut, OVERLAY_NOUNS[kind])))} ${cutTotal === 1 ? 'is cut out: no clip shows it' : 'are cut out: no clip shows them'}.`);

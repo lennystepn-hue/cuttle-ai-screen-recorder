@@ -58,6 +58,8 @@ export const SplitIcon = icon(
   </>,
 );
 /** A crop: two corner brackets crossing. */
+/** An arrow drawn on the screen (the Annotate tool). */
+export const AnnotateIcon = icon(<path d="M2.5 13.5 12 4M12 4H7.5M12 4v4.5" />);
 export const CropIcon = icon(<path d="M4.5 1.5v10h10M1.5 4.5h10v10" />);
 export const FitIcon = icon(<path d="M2.5 6V3.5a1 1 0 0 1 1-1H6M10 2.5h2.5a1 1 0 0 1 1 1V6M13.5 10v2.5a1 1 0 0 1-1 1H10M6 13.5H3.5a1 1 0 0 1-1-1V10" />);
 export const FolderIcon = icon(<path d="M2 4.5h4l1.5 1.5H14v6.5a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1z" />);

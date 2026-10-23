@@ -303,7 +303,8 @@ Then refine `cuttle.json` ([project.md](project.md)) and preview again:
   colours, `background --wallpaper` puts the desktop's wallpaper behind the window, softened;
   `flow`, `bokeh` and `dots` move quietly. The frame fits what was recorded: `windows-dark`, `terminal`,
   `browser-dark`, or `iphone` and `android` around a phone-shaped take or page; `look.watermark` puts the
-  brand's logo in a corner. Add a `texts` caption where a step is not obvious. Typing clicks softly, a click per key where the clip
+  brand's logo in a corner. Add a `texts` caption where a step is not obvious, coming in with
+  `"enter": "pop"`, `"slide"`, `"typewriter"` or `"words"` where it should draw the eye (project.md). Typing clicks softly, a click per key where the clip
   is heard (`look.audio.typing`, `typingVolume`); switch it off when the user wants a quiet video.
   The shortcuts pressed show as keycaps (`⌘ ⇧ P`, `Ctrl Z ×3`; `look.keys`): `show: "keys"` adds
   Esc, Enter and the arrows for a keyboard-driven tutorial, `enabled: false` hides them.

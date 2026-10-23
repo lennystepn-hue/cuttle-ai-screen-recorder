@@ -1,5 +1,5 @@
 import type { CardScene, CuttleProject, FrameStyle, Rect, Scene, StillScene, TextOverlay } from '@cuttle/project';
-import type { ActiveCaption, ActiveText, KeyBadge, RenderState, SceneFrame } from '@cuttle/timeline';
+import { textAnimationSeconds, type ActiveCaption, type ActiveText, type KeyBadge, type RenderState, type SceneFrame } from '@cuttle/timeline';
 import type { EngineAssets } from './assets';
 import { CAPTION_LOOKS, drawCaption } from './captions';
 import { drawKeys } from './keys';
@@ -13,10 +13,11 @@ import { MaskPass } from './passes/masks';
 import { drawAnnotations } from './annotations';
 import { SpritePass } from './passes/sprite';
 import { WebcamPass } from './passes/webcam';
+import { textMotion, type TextMotion } from './text-motion';
 import { WindowPass } from './passes/window';
 import type { FrameChrome } from './presets/frames';
-import { BADGE_STYLE, CARD_SUBTITLE_STYLE, CARD_TITLE_STYLE, TEXT_LABELS, watermarkStyle } from './presets/labels';
-import { SpriteCache } from './sprites';
+import { BADGE_STYLE, CARD_SUBTITLE_STYLE, CARD_TITLE_STYLE, TEXT_LABELS, watermarkStyle, type LabelStyle } from './presets/labels';
+import { SpriteCache, type Sprite } from './sprites';
 import { frameLayout } from './view';
 
 /** A motion page's frame: premultiplied RGBA, top row first (drawn over the whole output). */
@@ -103,6 +104,8 @@ const STILL_MATTE: [number, number, number] = [1, 1, 1];
 const CARD_MAX_WIDTH = 0.84;
 /** Gap between a card's title and subtitle boxes, in units. */
 const CARD_GAP = 12;
+/** A card's subtitle comes in this long after its title (seconds). */
+const CARD_SUBTITLE_DELAY = 0.2;
 /** Share of the output width that text overlays may use. */
 const TEXT_MAX_WIDTH = 0.8;
 /** Share of the content width that the speed badge may use. */
@@ -196,14 +199,23 @@ export function createRenderer(canvas: HTMLCanvasElement | OffscreenCanvas, proj
 
   /** `avoid`: rects the texts move clear of (the webcam bubble, the badge). */
   function drawTexts(texts: readonly ActiveText[], avoid: readonly Rect[]): void {
-    for (const { overlay, opacity } of texts) {
-      if (opacity <= 0) continue;
+    for (const { overlay, opacity, enter, exit } of texts) {
+      const motion = textMotion(overlay.enter ?? 'fade', overlay.exit ?? 'fade', { enter, exit, fade: opacity }, overlay.text, unit);
+      if (motion.opacity <= 0) continue;
       const style = TEXT_LABELS[overlay.style];
-      const sprite = sprites.label(overlay.text, style, unit, output.width * TEXT_MAX_WIDTH);
-      const [x, y] = placeOverlay(output, sprite.box, overlay.position, style.align, avoid);
-      spritePass.drawSprite(sprite, x, y, opacity);
-      drawn.push({ overlay, rect: [x, y, sprite.box.width, sprite.box.height] });
+      const maxWidth = output.width * TEXT_MAX_WIDTH;
+      // placed as its whole text: it comes in and goes out where it stays
+      const whole = sprites.label(overlay.text, style, unit, maxWidth);
+      const [x, y] = placeOverlay(output, whole.box, overlay.position, style.align, avoid);
+      spritePass.drawSprite(labelPart(overlay.text, style, maxWidth, motion) ?? whole, x, y + Math.round(motion.dy), motion.opacity, motion.scale);
+      drawn.push({ overlay, rect: [x, y, whole.box.width, whole.box.height] });
     }
+  }
+
+  /** The part of a label a motion shows (some letters, some of its box, blurred); none: all of it. */
+  function labelPart(text: string, style: LabelStyle, maxWidth: number, motion: TextMotion): Sprite | undefined {
+    if (motion.reveal === undefined && motion.sweep === undefined && !(motion.blur > 0)) return undefined;
+    return sprites.label(text, style, unit, maxWidth, { reveal: motion.reveal, sweep: motion.sweep, blur: motion.blur });
   }
 
   function drawClip(layer: SceneFrame, sources: FrameSources): void {
@@ -288,16 +300,23 @@ export function createRenderer(canvas: HTMLCanvasElement | OffscreenCanvas, proj
     if (chrome) windowPass.drawOver(layout, chrome);
   }
 
-  function drawCard(scene: CardScene): void {
+  /** A title card, its title coming in from the scene's start (`local` seconds in), its subtitle a moment later. */
+  function drawCard(scene: CardScene, local: number): void {
     const maxWidth = output.width * CARD_MAX_WIDTH;
     const title = sprites.label(scene.title, CARD_TITLE_STYLE, unit, maxWidth);
     const subtitle = scene.subtitle ? sprites.label(scene.subtitle, CARD_SUBTITLE_STYLE, unit, maxWidth) : undefined;
     const gap = Math.round(CARD_GAP * unit);
+    const draw = (sprite: Sprite, text: string, style: LabelStyle, y: number, since: number) => {
+      const x = Math.round((output.width - sprite.box.width) / 2);
+      if (!scene.enter) return spritePass.drawSprite(sprite, x, y, 1);
+      const motion = textMotion(scene.enter, scene.enter, { enter: since / textAnimationSeconds(scene.enter, text), exit: 0 }, text, unit);
+      if (motion.opacity > 0) spritePass.drawSprite(labelPart(text, style, maxWidth, motion) ?? sprite, x, y + Math.round(motion.dy), motion.opacity, motion.scale);
+    };
     let y = Math.round((output.height - title.box.height - (subtitle ? gap + subtitle.box.height : 0)) / 2);
-    spritePass.drawSprite(title, Math.round((output.width - title.box.width) / 2), y, 1);
-    if (subtitle) {
+    draw(title, scene.title, CARD_TITLE_STYLE, y, local);
+    if (subtitle && scene.subtitle) {
       y += title.box.height + gap;
-      spritePass.drawSprite(subtitle, Math.round((output.width - subtitle.box.width) / 2), y, 1);
+      draw(subtitle, scene.subtitle, CARD_SUBTITLE_STYLE, y, local - CARD_SUBTITLE_DELAY);
     }
   }
 
@@ -326,7 +345,7 @@ export function createRenderer(canvas: HTMLCanvasElement | OffscreenCanvas, proj
     const scene = scenes[layer.sceneIndex];
     if (!scene) throw new Error(`render: the project has no scene ${layer.sceneIndex}`);
     background.draw(t);
-    if (scene.type === 'card') drawCard(scene);
+    if (scene.type === 'card') drawCard(scene, layer.local);
     else if (scene.type === 'clip') drawClip(layer, sources);
     else if (scene.type === 'still') drawStill(layer, scene, sources);
     else {

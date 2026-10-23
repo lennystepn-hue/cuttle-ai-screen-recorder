@@ -30,9 +30,12 @@ export class SpritePass {
     drawRect(this.gl, this.shader, rect, this.output);
   }
 
-  /** Draws a label sprite with its box's top-left corner at (`x`, `y`). */
-  drawSprite(sprite: Sprite, x: number, y: number, opacity: number): void {
-    this.draw(sprite.texture, [x - sprite.margin, y - sprite.margin, sprite.width, sprite.height], opacity);
+  /** Draws a label sprite with its box's top-left corner at (`x`, `y`), `scale`d around the box's middle. */
+  drawSprite(sprite: Sprite, x: number, y: number, opacity: number, scale = 1): void {
+    if (scale === 1) return this.draw(sprite.texture, [x - sprite.margin, y - sprite.margin, sprite.width, sprite.height], opacity);
+    const cx = x + sprite.box.width / 2;
+    const cy = y + sprite.box.height / 2;
+    this.draw(sprite.texture, [cx - (sprite.width / 2) * scale, cy - (sprite.height / 2) * scale, sprite.width * scale, sprite.height * scale], opacity);
   }
 
   dispose(): void {

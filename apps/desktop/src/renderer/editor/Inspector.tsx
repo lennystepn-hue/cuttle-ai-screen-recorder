@@ -14,6 +14,8 @@ import {
   type MoveEase,
   CAMERA_LAYOUTS,
   type CameraLayout,
+  TEXT_ANIMATIONS,
+  type TextAnimation,
   FRAME_STYLES,
   MASK_STYLES,
   STILL_MOTIONS,
@@ -1133,6 +1135,15 @@ function Details({ project, selection }: { project: CuttleProject; selection: Se
           <Row label="Subtitle">
             <TextInput value={scene.subtitle ?? ''} placeholder="none" onCommit={(value) => set('scenes', id, { subtitle: value.trim() || undefined }, 'Change subtitle')} />
           </Row>
+          <Row label="Comes in" note="the subtitle a moment after the title">
+            <Select
+              value={scene.enter ?? 'none'}
+              options={CARD_ENTERS}
+              names={CARD_ENTER_NAMES}
+              onChange={(enter) => set('scenes', id, { enter: enter === 'none' ? undefined : enter }, `Title comes in: ${CARD_ENTER_NAMES[enter].toLowerCase()}`)}
+              testId="card-enter"
+            />
+          </Row>
         </Section>
         {sceneTiming(
           <Row label="Length" compact>
@@ -1367,6 +1378,12 @@ function Details({ project, selection }: { project: CuttleProject; selection: Se
           <Row label="Position">
             <Select value={text.position} options={TEXT_POSITIONS} names={POSITION_NAMES} onChange={(position) => set('texts', id, { position }, 'Move caption')} />
           </Row>
+          <Row label="Comes in">
+            <Select value={text.enter ?? 'fade'} options={TEXT_ANIMATIONS} names={TEXT_ANIMATION_NAMES} onChange={(enter) => set('texts', id, { enter: enter === 'fade' ? undefined : enter }, `Caption comes in: ${TEXT_ANIMATION_NAMES[enter].toLowerCase()}`)} testId="caption-enter" />
+          </Row>
+          <Row label="Goes out">
+            <Select value={text.exit ?? 'fade'} options={TEXT_ANIMATIONS} names={TEXT_ANIMATION_NAMES} onChange={(exit) => set('texts', id, { exit: exit === 'fade' ? undefined : exit }, `Caption goes out: ${TEXT_ANIMATION_NAMES[exit].toLowerCase()}`)} testId="caption-exit" />
+          </Row>
         </div>
       </Section>
       {enabled('texts', text.enabled)}
@@ -1379,6 +1396,12 @@ function Details({ project, selection }: { project: CuttleProject; selection: Se
     </>
   );
 }
+
+/** The ways a caption comes in and goes out, as people say them. */
+const TEXT_ANIMATION_NAMES: Record<TextAnimation, string> = { fade: 'Fade', pop: 'Pop', slide: 'Slide', blur: 'Blur', typewriter: 'Typewriter', words: 'Word by word', sweep: 'Sweep' };
+/** How a title card's title comes in: as the captions can, or there from the start. */
+const CARD_ENTERS = ['none', ...TEXT_ANIMATIONS] as const;
+const CARD_ENTER_NAMES: Record<(typeof CARD_ENTERS)[number], string> = { none: 'There from the start', ...TEXT_ANIMATION_NAMES };
 
 /** What each list's items are called in the names of their changes. */
 const NOUNS = { zooms: 'zoom', masks: 'mask', texts: 'caption', annotations: 'annotation', cameras: 'camera layout', overlays: 'motion overlay' } as const;

@@ -4,7 +4,7 @@
 import { createRenderer, type DrawnText, type EngineAssets, type FrameSources, type Renderer } from '@cuttle/engine';
 import { planStills } from '@cuttle/export/frame-plan';
 import { voiceLineKey, type CuttleProject } from '@cuttle/project';
-import { createTimeline, crossfadeHalf, narrationCues, narrationWords, pageTransition, sceneSpans, type CaptionWord, type RenderState, type Timeline } from '@cuttle/timeline';
+import { translatedWords, createTimeline, crossfadeHalf, narrationCues, narrationWords, pageTransition, sceneSpans, type CaptionWord, type RenderState, type Timeline } from '@cuttle/timeline';
 import { speechSpans } from '@cuttle/export/music-duck';
 import { AudioSchedule, NarrationSchedule, systemLevel } from './audio';
 import { TypingSchedule } from './typing-audio';
@@ -201,6 +201,7 @@ export class Player {
       ...(this.media.cursor && { cursor: this.media.cursor }),
       ...(this.media.shortcuts && { shortcuts: this.media.shortcuts }),
       ...(this.media.transcript && { transcript: this.media.transcript.words }),
+      ...(this.media.translation && this.project.captions.language === this.media.translation.language && { translated: translatedWords(this.media.translation.sentences) }),
       ...(narration.length > 0 && { narration }),
     });
   }

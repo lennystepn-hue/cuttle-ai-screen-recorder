@@ -143,3 +143,13 @@ export {
 export { BRAND_VERSION, BrandKitSchema, parseBrandKitJson, type BrandKit, type BrandKitParseResult } from './brand';
 export { BACKGROUND_FIELDS, BACKGROUND_PALETTES, SOLID_DEFAULT, backgroundColors, isColouredBackground, switchBackground } from './backgrounds';
 export { backgroundTone, darkTone } from './theme';
+export {
+  LANGUAGE_CODE,
+  TRANSLATION_VERSION,
+  TranslationFileSchema,
+  parseTranslationJson,
+  translationPath,
+  type TranslatedSentence,
+  type TranslationFile,
+  type TranslationParseResult,
+} from './translation';

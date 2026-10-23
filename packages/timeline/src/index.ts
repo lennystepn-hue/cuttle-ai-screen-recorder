@@ -32,6 +32,8 @@ export {
   captionAt,
   captionCues,
   captionWords,
+  sentencesOf,
+  translatedWords,
   toSrt,
   toVtt,
   type ActiveCaption,

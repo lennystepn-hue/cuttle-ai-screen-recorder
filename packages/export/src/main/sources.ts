@@ -1,6 +1,6 @@
 import { readFile, stat } from 'node:fs/promises';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
-import { parseEventsJsonl, parseMarkersJson, parseProjectJson, parseTakeJson, parseTranscriptJson, trackOffset, type CuttleProject, type InputEvent, type TakeFile, type TranscriptWord, showsCamera, speaks } from '@cuttle/project';
+import { parseEventsJsonl, parseMarkersJson, parseProjectJson, parseTakeJson, parseTranscriptJson, trackOffset, type CuttleProject, type InputEvent, type TakeFile, type TranscriptWord, type TranslatedSentence, parseTranslationJson, showsCamera, speaks } from '@cuttle/project';
 import { shortcutsOf, type Shortcut } from '@cuttle/timeline';
 import { ExportError } from '../errors';
 import { loadNarration, type NarrationLine } from './narration';
@@ -30,6 +30,8 @@ export interface ProjectSources {
   shortcuts?: Shortcut[];
   /** The take's transcript (source seconds), for captions and subtitle files. */
   transcript?: TranscriptWord[];
+  /** The subtitles' translations (`captions.translations`), language → its sentences, for the picture and the subtitle files. */
+  translations?: Record<string, TranslatedSentence[]>;
   stills: Record<number, string>;
   backgroundImage?: string;
   /** The watermark's image, when it is on: its own, else the brand's logo. */
@@ -210,6 +212,17 @@ export async function loadSources(projectDir: string, options: { narration?: 'wh
     const parsed = text === undefined ? undefined : parseTranscriptJson(text);
     if (parsed?.ok) result.transcript = parsed.transcript.words;
     else result.warnings.push(`${sources.transcript} ${parsed ? 'is invalid' : 'cannot be read'}: no captions`);
+  }
+  for (const [language, file] of Object.entries(project.captions.translations ?? {})) {
+    const path = resolve(projectDir, file);
+    const text = await readFile(path, 'utf8').catch(() => undefined);
+    const parsed = text === undefined ? undefined : parseTranslationJson(text);
+    if (parsed?.ok) {
+      result.translations = { ...result.translations, [language]: parsed.translation.sentences };
+      result.inputs.push(path);
+    } else if (project.captions.language === language) {
+      throw new ExportError('invalid-project', `the subtitles in the picture are the ${language} translation, but ${file} ${parsed ? `is invalid: ${parsed.issues.map((issue) => `${issue.path}: ${issue.message}`).join('; ')}` : 'cannot be read'}`);
+    } else result.warnings.push(`${file} ${parsed ? 'is invalid' : 'cannot be read'}: no ${language} subtitles`);
   }
   for (const [index, scene] of project.scenes.entries()) {
     if (scene.type !== 'still') continue;

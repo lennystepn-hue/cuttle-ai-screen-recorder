@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { parseProject, type CuttleProjectInput } from '@cuttle/project';
-import { applyCaptionFixes, captionAt, captionCues, captionWords, toSrt, toVtt, type CaptionWord, type SpokenWord } from '../src/captions';
+import { applyCaptionFixes, captionAt, captionCues, captionWords, sentencesOf, toSrt, toVtt, translatedWords, type CaptionWord, type SpokenWord } from '../src/captions';
 import { createTimeline } from '../src/frame';
 import { sceneSpans } from '../src/time';
 
@@ -97,5 +97,43 @@ describe('captions in the timeline', () => {
     expect(off.frameAt(1.5).caption).toBeUndefined();
     expect(createTimeline(project(), { screenSize: SCREEN, transcript, captions: false }).frameAt(1.5).caption).toBeUndefined();
     expect(createTimeline(project(), { screenSize: SCREEN }).cues).toEqual([]);
+  });
+});
+
+describe('subtitles in another language', () => {
+  const spoken: SpokenWord[] = [
+    { t: 0.5, end: 0.8, text: 'Hallo' },
+    { t: 0.8, end: 1.3, text: 'zusammen.' },
+    { t: 1.4, end: 1.7, text: 'Wie' },
+    { t: 1.7, end: 2.0, text: 'geht’s?' },
+    { t: 3.5, end: 3.9, text: 'Gut' },
+  ];
+
+  it('cuts the transcript into sentences at their end marks and at pauses', () => {
+    expect(sentencesOf(spoken)).toEqual([
+      { at: 0.5, end: 1.3, text: 'Hallo zusammen.' },
+      { at: 1.4, end: 2.0, text: 'Wie geht’s?' },
+      { at: 3.5, end: 3.9, text: 'Gut' },
+    ]);
+  });
+
+  it('spreads each translated sentence over the time its original took, by the length of its words', () => {
+    const words = translatedWords([
+      { at: 0.5, end: 1.3, text: 'Hello everyone.' },
+      { at: 1.4, end: 2.0, text: '' },
+    ]);
+    expect(words.map((word) => word.text)).toEqual(['Hello', 'everyone.']);
+    expect(words[0]!.t).toBe(0.5);
+    expect(words[1]!.end).toBeCloseTo(1.3, 9);
+    // "Hello " is 6 of 16 letters
+    expect(words[0]!.end).toBeCloseTo(0.5 + (6 / 16) * 0.8, 9);
+  });
+
+  it('shows the translation in the picture, without the fixes of the spoken words', () => {
+    const parsed = parseProject({ version: 1, sources: { screen: 's.mp4', transcript: 't.json' }, scenes: [{ type: 'clip', from: 0, to: 5 }], captions: { fixes: [{ at: 0.5, end: 1.3, text: 'Servus' }] } });
+    if (!parsed.ok) throw new Error(JSON.stringify(parsed.issues));
+    const translated = translatedWords([{ at: 0.5, end: 1.3, text: 'Hello everyone.' }]);
+    const shown = createTimeline(parsed.project, { screenSize: { width: 1920, height: 1080 }, transcript: spoken, translated }).frameAt(1).caption;
+    expect(shown?.cue.lines.flat().map((word) => word.text)).toEqual(['Hello', 'everyone.']);
   });
 });

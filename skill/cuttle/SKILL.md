@@ -349,6 +349,11 @@ Then refine `cuttle.json` ([project.md](project.md)) and preview again:
 cuttle -C "<project>" --json render --format 16:9
 ```
 
+For subtitles in another language, translate them yourself:
+`cuttle -C "<project>" --json transcript --translate de` writes `subtitles/de.json` with each
+sentence's `source` and an empty `text`: write every `text` in that language (what a person would
+say there, about as long as the original), then `cuttle -C "<project>" --json captions set
+--translation de` (add `--show de` for the picture). The export writes `export.de.srt` and so on.
 With a transcript, `--srt` and `--vtt` also write the subtitles next to the video, and
 `--no-captions` leaves them out of the picture. Where the video goes sets its loudness:
 `--loudness youtube` (-14 LUFS: YouTube, Spotify, TikTok, Instagram), `podcast` (-16) or `broadcast`

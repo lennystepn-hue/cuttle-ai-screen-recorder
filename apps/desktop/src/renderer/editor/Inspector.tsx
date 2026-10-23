@@ -2033,7 +2033,16 @@ function ParamField({ param, value, set: isSet, toCommand }: { param: ParamDecla
 // ---- the look ------------------------------------------------------------------------------------
 
 const look = (path: string[], value: unknown, label: string) => edit([{ type: 'look', path, value } as Command], label);
-const caption = (field: 'enabled' | 'style' | 'position' | 'size' | 'color', value: unknown, label: string) => edit([{ type: 'captions', field, value }], label);
+const caption = (field: 'enabled' | 'style' | 'position' | 'size' | 'color' | 'language', value: unknown, label: string) => edit([{ type: 'captions', field, value }], label);
+
+/** A language's name in English (`de` → German), else its code. */
+const languageName = (code: string): string => {
+  try {
+    return new Intl.DisplayNames(['en'], { type: 'language' }).of(code) ?? code;
+  } catch {
+    return code;
+  }
+};
 
 /**
  * A colour well: the video follows the picker while it moves, and the colour is one step to undo
@@ -2650,6 +2659,17 @@ function LookPanel() {
                 <Select value={captions.position} options={TEXT_POSITIONS} names={POSITION_NAMES} onChange={(position) => caption('position', position, 'Subtitles position')} testId="captions-position" />
               </Row>
             </div>
+            {captions.translations && Object.keys(captions.translations).length > 0 && (
+              <Row label="Language" note="the files beside the video come in every language">
+                <StyledSelect
+                  value={captions.language ?? ''}
+                  options={[{ value: '', label: 'As spoken' }, ...Object.keys(captions.translations).map((code) => ({ value: code, label: `${languageName(code)} (${code})` }))]}
+                  onChange={(code) => caption('language', code === '' ? undefined : code, `Subtitles in ${code === '' ? 'the spoken language' : languageName(code)}`)}
+                  label="Subtitles language"
+                  testId="captions-language"
+                />
+              </Row>
+            )}
             <div className="grid2">
               <Row label="Size">
                 <NumberInput unit="×" value={captions.size} min={0.5} max={2} step={0.1} onCommit={(size) => caption('size', size, 'Subtitles size')} testId="captions-size" />

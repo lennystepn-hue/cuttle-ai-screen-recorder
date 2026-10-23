@@ -2127,6 +2127,26 @@ describe.runIf(enabled)('the Cuttle app', () => {
     const srt = readFileSync(join(dir, 'out', 'export.srt'), 'utf8');
     expect(srt.startsWith('1\n00:00:00,100 --> ')).toBe(true);
     expect(srt).toContain('Cuttle!');
+    // in German too: the sentences to translate from the CLI, each one written, taken in
+    await page.keyboard.press('Escape');
+    const cli = (...args: string[]) => JSON.parse(spawnSync('node', [CLI, '--json', '-C', dir, ...args], { encoding: 'utf8', timeout: 60_000 }).stdout) as Record<string, unknown>;
+    expect(cli('transcript', '--translate', 'de')).toMatchObject({ file: 'subtitles/de.json', language: 'de' });
+    const german = JSON.parse(readFileSync(join(dir, 'subtitles', 'de.json'), 'utf8')) as { sentences: { text: string }[] };
+    german.sentences.forEach((sentence, i) => (sentence.text = `Übersetzt ${i + 1}`));
+    writeFileSync(join(dir, 'subtitles', 'de.json'), JSON.stringify(german));
+    expect(cli('captions', 'set', '--translation', 'de')).toMatchObject({ captions: { translations: { de: 'subtitles/de.json' } } });
+    // the picture in German, picked in the Look tab
+    await page.waitForSelector('[data-testid=captions-language]');
+    await chooseIn(page, '[data-testid=captions-language]', 'German (de)');
+    await expect.poll(() => (saved().captions as { language?: string } | undefined)?.language).toBe('de');
+    // the export writes every language's file
+    await page.keyboard.press('Control+E');
+    await page.waitForSelector('[data-testid=export-sheet]');
+    await page.waitForSelector('[data-testid=export-srt][aria-pressed=true]');
+    await click(page, '[data-testid=export-start]');
+    await page.waitForFunction(() => document.querySelector('[data-testid=export-file] small')?.textContent?.includes('.srt'), undefined, { timeout: 120_000 });
+    expect(readFileSync(join(dir, 'out', 'export.de.srt'), 'utf8')).toContain('Übersetzt 1');
+    expect(readFileSync(join(dir, 'out', 'export.srt'), 'utf8')).toContain('Cuttle!');
     await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find((window) => window.getTitle() === 'subtitled · Cuttle')?.close());
   }, 180_000);
 

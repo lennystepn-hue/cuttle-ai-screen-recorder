@@ -1,7 +1,7 @@
 import { mkdir, readdir, rename, rm, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import type { CuttleProject } from '@cuttle/project';
-import { sceneSpans } from '@cuttle/timeline';
+import { translatedWords, sceneSpans } from '@cuttle/timeline';
 import { app } from 'electron';
 import { ExportError } from '../errors';
 import { withFormat, type ExportFormat } from '../formats';
@@ -101,6 +101,7 @@ export async function renderStills(opts: StillsOptions): Promise<StillsResult> {
     events: sources.events,
     ...(sources.shortcuts && { shortcuts: sources.shortcuts }),
     ...(sources.transcript && { transcript: sources.transcript }),
+    ...(project.captions.language && sources.translations?.[project.captions.language] && { translated: translatedWords(sources.translations[project.captions.language]!) }),
     ...(narration && narration.words.length > 0 && { narration: narration.words }),
     stills: sources.stills,
     backgroundImage: sources.backgroundImage,

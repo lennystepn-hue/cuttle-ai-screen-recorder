@@ -1,5 +1,8 @@
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { dirname, join } from 'node:path';
 import { CoreError, readProjectFile, readTranscript } from '@cuttle/core';
-import { applyCaptionFixes, captionCues, captionWords, sceneSpans, toSrt, toVtt } from '@cuttle/timeline';
+import { LANGUAGE_CODE, TRANSLATION_VERSION, parseTranslationJson, translationPath } from '@cuttle/project';
+import { applyCaptionFixes, captionCues, captionWords, sceneSpans, sentencesOf, toSrt, toVtt } from '@cuttle/timeline';
 import type { Output } from '../output';
 
 export interface TranscriptArgs {
@@ -50,3 +53,52 @@ export async function transcriptCommand(projectDir: string, args: TranscriptArgs
   output.result(view, () => `${text}\n(${words.length} words, ${transcript.language}, ${cues.length} captions in the video)`);
   return view;
 }
+
+/** What `transcript --translate` wrote: the file to fill and how much of it is still to translate. */
+export interface TranslationStart {
+  file: string;
+  language: string;
+  sentences: number;
+  /** Sentences still without a translation. */
+  missing: number;
+  /** What the person (or Claude) does next. */
+  next: string;
+}
+
+/**
+ * `cuttle transcript --translate <language>`: the transcript's sentences (the fixes applied), each
+ * on its original timing, written to `subtitles/<language>.json` with an empty `text` to translate
+ * into; a sentence already translated there keeps its translation. `captions set --translation`
+ * takes the file back.
+ */
+export async function translateCommand(projectDir: string, language: string, output: Output): Promise<TranslationStart> {
+  if (!LANGUAGE_CODE.test(language)) throw new CoreError('usage', `"${language}" is not a language code: de, en, pt-BR`);
+  const file = await readProjectFile(projectDir);
+  const { sources, captions } = file.project;
+  if (sources.transcript === undefined) throw new CoreError('usage', 'the project has no transcript: run "cuttle transcribe" first');
+  const { transcript, note } = await readTranscript(file.dir, sources.transcript);
+  if (!transcript) throw new CoreError('invalid-project', note ?? `${sources.transcript} cannot be read`);
+  const relative = captions.translations?.[language] ?? translationPath(language);
+  const path = join(file.dir, relative);
+  // what was translated before stays, where the sentence did not change
+  const before = await readFile(path, 'utf8').then(parseTranslationJson, () => undefined);
+  const kept = before?.ok ? before.translation.sentences : [];
+  const sentences = sentencesOf(applyCaptionFixes(transcript.words, captions.fixes)).map((sentence) => {
+    const same = kept.find((old) => Math.abs(old.at - sentence.at) < 0.01 && old.source === sentence.text);
+    return { at: round(sentence.at), end: round(sentence.end), source: sentence.text, text: same?.text ?? '' };
+  });
+  await mkdir(dirname(path), { recursive: true });
+  await writeFile(path, `${JSON.stringify({ version: TRANSLATION_VERSION, language, sentences }, null, 2)}\n`);
+  const missing = sentences.filter((sentence) => sentence.text.trim() === '').length;
+  const result: TranslationStart = {
+    file: relative,
+    language,
+    sentences: sentences.length,
+    missing,
+    next: `write each sentence's "text" in ${language} (as it would be said, about as long as the original), then: cuttle captions set --translation ${language}`,
+  };
+  output.result(result, () => `${relative}: ${sentences.length} sentences, ${missing} to translate\nnext: ${result.next}`);
+  return result;
+}
+
+const round = (seconds: number) => Math.round(seconds * 1000) / 1000;

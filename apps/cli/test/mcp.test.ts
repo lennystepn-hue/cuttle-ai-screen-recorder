@@ -69,7 +69,7 @@ describe('cuttle mcp', () => {
   it("maps each tool's input to a command and options the CLI has", async () => {
     for (const tool of COMMAND_TOOLS) {
       const argv = tool.argv(everything(tool.input) as Record<string, never>);
-      const words = argv.slice(0, argv[0] === 'motion' || argv[0] === 'music' || argv[0] === 'sound' || argv[0] === 'voice' || argv[0] === 'brand' ? 2 : 1);
+      const words = argv.slice(0, ['motion', 'music', 'sound', 'voice', 'brand', 'captions'].includes(argv[0]!) ? 2 : 1);
       const help = await runCommand([...words, '--help']);
       const text = String((help.result as { output?: string }).output ?? JSON.stringify(help.result));
       expect(text, tool.name).toContain(`cuttle ${words.join(' ')}`);

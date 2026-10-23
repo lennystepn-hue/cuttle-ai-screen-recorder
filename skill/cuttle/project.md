@@ -198,7 +198,13 @@ stretch, across cuts and speed-ups; a clip shown twice shows it twice.
 `position` (`bottom`, `top`, `center`), `size` (`1`, 0.5 to 2), `color` (`#D97757`), and `fixes`:
 `[{ "at", "end", "text" }]`, the words spoken in `[at, end)` (source seconds) read as `text`, `""`
 for none. Take `at` and `end` from the words in transcript.json. Words in sped-up clips and in
-cuts have no subtitle.
+cuts have no subtitle. `translations` (`{ "de": "subtitles/de.json" }`) are the subtitles in other
+languages, and `language` (one of them; left out: as spoken) is the one the picture shows. A
+translation's file holds the transcript's sentences on their timing, `{ "at", "end", "source",
+"text" }` (source seconds, `text` the translation): `cuttle transcript --translate de` writes it with
+every `text` empty, `cuttle captions set --translation de` takes it in once each is written, and
+`--show de` puts it in the picture. Each sentence's words are spread over its time by their length;
+the export writes `<name>.<language>.srt` beside `<name>.srt`.
 
 `cuts` take a stretch out of whatever clip covers it, without splitting the clip: `from` and `to`
 (source seconds) and `enabled` (`true`). The video jumps there (no crossfade); zooms, masks and

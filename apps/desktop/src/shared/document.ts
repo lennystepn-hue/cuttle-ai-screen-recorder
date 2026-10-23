@@ -44,7 +44,7 @@ export type Command =
   /** Switches a kind of automatic edit on or off (`autoEdits`). */
   | { type: 'auto-edits'; kind: keyof AutoEdits; value: boolean }
   /** Sets a field of the captions (the subtitles from the transcript). */
-  | { type: 'captions'; field: 'enabled' | 'style' | 'position' | 'size' | 'color'; value: unknown }
+  | { type: 'captions'; field: 'enabled' | 'style' | 'position' | 'size' | 'color' | 'language'; value: unknown }
   /** The words spoken in [at, end) read as `text` ("" for none); `undefined` takes the fixes there away. */
   | { type: 'caption-fix'; at: number; end: number; text: string | undefined }
   /** Replaces every scene (Show raw take). */

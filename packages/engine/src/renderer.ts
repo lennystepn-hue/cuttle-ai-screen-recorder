@@ -90,6 +90,11 @@ export interface RendererOptions {
   backgroundImage?: ImageBitmap;
   /** The watermark's image (its own, else the brand's logo); without it a watermark shows its text. */
   watermarkImage?: ImageBitmap;
+  /**
+   * Frames with transparency instead of the background (an export for another editor): the canvas
+   * keeps its alpha, premultiplied; what the look puts on the background (a window's shadow) falls on nothing.
+   */
+  transparent?: boolean;
 }
 
 function hasPixels(source: TexImageSource): boolean {
@@ -128,8 +133,9 @@ export function createRenderer(canvas: HTMLCanvasElement | OffscreenCanvas, proj
   canvas.width = output.width;
   canvas.height = output.height;
   // HTMLCanvasElement.getContext has the same signature for 'webgl2'.
+  const transparent = options.transparent ?? false;
   const context = (canvas as OffscreenCanvas).getContext('webgl2', {
-    alpha: false,
+    alpha: transparent,
     antialias: false,
     depth: false,
     stencil: false,
@@ -344,7 +350,7 @@ export function createRenderer(canvas: HTMLCanvasElement | OffscreenCanvas, proj
   function drawLayer(layer: SceneFrame, sources: FrameSources, t: number): void {
     const scene = scenes[layer.sceneIndex];
     if (!scene) throw new Error(`render: the project has no scene ${layer.sceneIndex}`);
-    background.draw(t);
+    if (!transparent) background.draw(t);
     if (scene.type === 'card') drawCard(scene, layer.local);
     else if (scene.type === 'clip') drawClip(layer, sources);
     else if (scene.type === 'still') drawStill(layer, scene, sources);
@@ -363,7 +369,7 @@ export function createRenderer(canvas: HTMLCanvasElement | OffscreenCanvas, proj
     gl.viewport(0, 0, output.width, output.height);
     gl.enable(gl.BLEND);
     gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
-    gl.clearColor(0, 0, 0, 1);
+    gl.clearColor(0, 0, 0, transparent ? 0 : 1);
   }
 
 /** The watermark over everything, last, in its corner. */
@@ -405,7 +411,7 @@ export function createRenderer(canvas: HTMLCanvasElement | OffscreenCanvas, proj
       // a transition page's frame takes the place of the two layers' crossfade
       const between = state.transition ? sources.transitions?.get(state.transition.key) : undefined;
       if (between) {
-        background.draw(state.t);
+        if (!transparent) background.draw(state.t);
         drawMotion(between, `transition into scene ${state.transition!.sceneIndex}`);
         const caption = state.caption ? drawCaptionOver(state.caption) : undefined;
         if (state.keys) drawKeysOver(state.keys, caption);

@@ -78,6 +78,7 @@ async function handle(request: ElectronRequest): Promise<unknown> {
         ...(request.captions !== undefined && { captions: request.captions }),
         ...(request.subtitles && { subtitles: subtitleFormats(request.subtitles) }),
         ...(request.loudness !== undefined && { loudness: request.loudness as LoudnessTarget }),
+        ...(request.transparent && { transparent: true }),
         signal: cancel.signal,
         onProgress: progress('frames', request.quiet),
       });
@@ -90,6 +91,7 @@ async function handle(request: ElectronRequest): Promise<unknown> {
         ...exportFormat(request.format),
         ...(request.sheet && { sheet: request.sheet }),
         ...(request.motion && { project: (project: CuttleProject) => motionCheckProject(project, request.motion!) }),
+        ...(request.transparent && { transparent: true }),
         signal: cancel.signal,
         onProgress: progress('stills', request.quiet),
       });

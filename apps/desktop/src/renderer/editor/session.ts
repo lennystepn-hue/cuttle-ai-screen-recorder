@@ -4,7 +4,7 @@ import { loadEngineAssets, type EngineAssets } from '@cuttle/engine';
 import { withFormat, type ExportFormat } from '@cuttle/export/formats';
 import type { CuttleProject, AnnotationKind } from '@cuttle/project';
 import type { Command, EditLimits } from '../../shared/document';
-import type { ExportEnd, ExportProgress, ExportTarget, MediaState, MotionStatusView, ProjectInfo, ProjectStatus, SoundStatusView } from '../../shared/ipc';
+import type { ExportEnd, ExportFileKind, ExportProgress, ExportTarget, MediaState, MotionStatusView, ProjectInfo, ProjectStatus, SoundStatusView } from '../../shared/ipc';
 import type { OverlayKind } from '../../shared/timeline-model';
 import { bridge } from '../bridge';
 import { beforeClose, dismissToast, edit, flush, offerUndoRestart, openDocument, outsideChange, redo, toast, undo, type DocState } from './doc';
@@ -471,6 +471,7 @@ export async function startExport(
   formats: ExportTarget[],
   encoder: 'auto' | 'hardware' | 'software',
   subtitles: { captions?: boolean; files?: ('srt' | 'vtt')[] } = {},
+  file: ExportFileKind = 'mp4',
 ): Promise<void> {
   store.set({ exporting: true, exportEnd: undefined, exportProgress: undefined, exportStarted: Date.now() });
   try {
@@ -478,6 +479,7 @@ export async function startExport(
     await bridge.invoke('export:start', {
       formats,
       encoder,
+      ...(file !== 'mp4' && { file }),
       ...(subtitles.captions !== undefined && { captions: subtitles.captions }),
       ...(subtitles.files && subtitles.files.length > 0 && { subtitles: subtitles.files }),
     });

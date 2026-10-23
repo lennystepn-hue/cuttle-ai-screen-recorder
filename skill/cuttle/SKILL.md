@@ -358,7 +358,11 @@ commands. It writes `out/16x9.mp4` (or `-o <file>`); the JSON has the frames, th
 encoder (`stats`). For 9:16, check `preview --format 9:16` first. Render every format the user
 wants in one run, `render --format 16:9 --format 9:16 --format 1:1` (each to `out/<format>.mp4`,
 the JSON's `videos`): the sound is made once for all of them, faster than one render each.
-`render --all <folder>` renders every project in a folder (`projects` in the JSON). Tell the user the file's path and length. Do not upload it anywhere.
+`render --all <folder>` renders every project in a folder (`projects` in the JSON).
+For another editor (Premiere, Final Cut, Resolve, CapCut), `render --alpha` renders without the
+background, with transparency: VP9 with alpha in `out/<format>.webm`, or ProRes 4444 with
+`-o title.mov`. A lower third or a title alone is a project whose only scene is its page (a page
+with a transparent background); `preview --alpha` shows the stills as they come out. Tell the user the file's path and length. Do not upload it anywhere.
 
 With a script, the video file has the steps as its chapters (`chapters` in the JSON, output
 seconds). `cuttle -C "<project>" --json chapters` gives them as lines for a YouTube description

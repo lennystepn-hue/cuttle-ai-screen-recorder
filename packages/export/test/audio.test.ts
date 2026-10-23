@@ -1,7 +1,7 @@
 import { parseProject, type CuttleProject, type CuttleProjectInput } from '@cuttle/project';
 import { sceneSpans } from '@cuttle/timeline';
 import { describe, expect, it } from 'vitest';
-import { atempoChain, audioFilterGraph, encodeArgs, mixArgs, muxArgs, planAudio } from '../src/audio';
+import { alphaMuxArgs, atempoChain, audioFilterGraph, encodeArgs, mixArgs, muxArgs, planAudio } from '../src/audio';
 
 function project(input: Omit<CuttleProjectInput, 'version' | 'sources'>): CuttleProject {
   const parsed = parseProject({ version: 1, sources: { screen: 's.mp4', mic: 'm.m4a' }, ...input });
@@ -198,6 +198,18 @@ describe('muxArgs', () => {
 
   it('takes the chapters from their metadata file, the input after the sound', () => {
     expect(muxArgs({ video: 'v.mp4', audio: 'sound.m4a', chapters: 'c.txt', out: 'o.mp4' }).join(' ')).toContain('-i v.mp4 -i sound.m4a -i c.txt -map 0:v:0 -map 1:a:0 -map_chapters 2 -c copy');
+  });
+});
+
+describe('alphaMuxArgs', () => {
+  it('copies a transparent WebM and adds Opus, or makes ProRes 4444 with its alpha and PCM in a MOV', () => {
+    expect(alphaMuxArgs({ video: 'v.webm', audio: 'mix.wav', container: 'webm', out: 'o.webm' }).join(' ')).toBe(
+      '-hide_banner -nostdin -loglevel error -y -i v.webm -i mix.wav -map 0:v:0 -map 1:a:0 -c:v copy -c:a libopus -b:a 160k -ar 48000 -f webm o.webm',
+    );
+    const mov = alphaMuxArgs({ video: 'v.webm', audio: 'mix.wav', master: 'volume=2dB', container: 'mov', out: 'o.mov' }).join(' ');
+    // libvpx's decoder reads VP9's alpha; ffmpeg's own does not
+    expect(mov).toContain('-y -c:v libvpx-vp9 -i v.webm -i mix.wav');
+    expect(mov).toContain('-af volume=2dB -c:v prores_ks -profile:v 4444 -pix_fmt yuva444p10le -vendor apl0 -c:a pcm_s16le -ar 48000 -f mov o.mov');
   });
 });
 

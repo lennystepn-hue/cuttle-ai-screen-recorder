@@ -1,5 +1,5 @@
 import type { Output as OutputSettings } from '@cuttle/project';
-import { CanvasSource, Mp4OutputFormat, Output, Quality, StreamTarget, type StreamTargetChunk } from 'mediabunny';
+import { CanvasSource, Mp4OutputFormat, Output, Quality, StreamTarget, WebMOutputFormat, type StreamTargetChunk } from 'mediabunny';
 import { avcCodecString, videoBitrate } from '../codec';
 import type { EncoderPreference } from '../job';
 import { host, PageError } from './host';
@@ -71,6 +71,38 @@ export async function createVideoOutput(canvas: OffscreenCanvas, settings: Outpu
   return {
     codec,
     hardwareAcceleration,
+    bitrate,
+    add: (timestamp, duration) => source.add(timestamp, duration),
+    finalize: () => output.finalize(),
+    cancel: () => output.cancel(),
+  };
+}
+
+/**
+ * VP9 with its alpha (the canvas's transparency) plus a WebM muxer, for a video another editor lays
+ * over its own (`transparent`). VP9 keeps the alpha beside each frame; software encodes it, on every
+ * system. The WebM streams to the main process as the MP4 does.
+ */
+export async function createAlphaOutput(canvas: OffscreenCanvas, settings: OutputSettings): Promise<VideoOutput> {
+  const bitrate = videoBitrate(settings.width, settings.height, settings.fps);
+  const writable = new WritableStream<StreamTargetChunk>({ write: (chunk) => host().write(chunk.data, chunk.position) });
+  const output = new Output({
+    format: new WebMOutputFormat(),
+    target: new StreamTarget(writable, { chunked: true, chunkSize: WRITE_CHUNK_BYTES }),
+  });
+  const source = new CanvasSource(canvas, {
+    codec: 'vp9',
+    quality: new Quality({ bitrate, bitrateMode: 'variable' }),
+    keyFrameInterval: KEY_FRAME_INTERVAL,
+    latencyMode: 'quality',
+    hardwareAcceleration: 'prefer-software',
+    alpha: 'keep',
+  });
+  output.addVideoTrack(source, { frameRate: settings.fps });
+  await output.start();
+  return {
+    codec: 'vp9',
+    hardwareAcceleration: 'prefer-software',
     bitrate,
     add: (timestamp, duration) => source.add(timestamp, duration),
     finalize: () => output.finalize(),

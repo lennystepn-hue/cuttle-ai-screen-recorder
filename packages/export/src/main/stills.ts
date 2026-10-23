@@ -29,6 +29,8 @@ export interface StillsOptions {
   clean?: boolean;
   /** Also writes `sheet.png`: every still, smaller, in a grid with its time (default 4 columns). */
   sheet?: { columns?: number };
+  /** Stills with transparency, no background (what a transparent export shows). */
+  transparent?: boolean;
   /** Called after each rendered frame. */
   onProgress?: (done: number, total: number) => void;
   /** Folder of the export page bundle; defaults to `export-page` next to the bundle that contains this code. */
@@ -93,6 +95,7 @@ export async function renderStills(opts: StillsOptions): Promise<StillsResult> {
   const job: StillsJob = {
     kind: 'stills',
     project,
+    ...(opts.transparent && { transparent: true }),
     ...(sources.screen && { screen: sources.screen }),
     webcam: sources.webcam,
     events: sources.events,

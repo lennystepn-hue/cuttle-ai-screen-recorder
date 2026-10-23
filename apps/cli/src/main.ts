@@ -236,8 +236,9 @@ export async function runCli(argv: readonly string[], streams?: Streams): Promis
     .option('--sheet', 'also a contact sheet of the stills')
     .option('--format <format>', '16:9, 1:1 or 9:16 (default: the project output)')
     .option('-o, --out <dir>', 'folder for the PNGs (default: preview/ in the project)')
+    .option('--alpha', 'with transparency, no background (as render --alpha)')
     .action(
-      action((output, project, options: { at?: number[]; masks?: boolean; sheet?: boolean; format?: string; out?: string }) =>
+      action((output, project, options: { at?: number[]; masks?: boolean; sheet?: boolean; format?: string; out?: string; alpha?: boolean }) =>
         withSignal(output, (signal) => previewCommand(project, options, output, signal)),
       ),
     );
@@ -508,8 +509,9 @@ export async function runCli(argv: readonly string[], streams?: Streams): Promis
     .option('--srt', 'also write the captions as <name>.srt next to the video')
     .option('--vtt', 'also write the captions as <name>.vtt next to the video')
     .option('--loudness <target>', "bring the sound to a platform's loudness: youtube (-14 LUFS: YouTube, Spotify, TikTok, Instagram), podcast (-16), broadcast (-23) or off (default: the project's look.audio.loudness)")
+    .option('--alpha', 'with transparency, no background, for another editor: VP9 with alpha in out/<format>.webm, or ProRes 4444 with -o <file>.mov')
     .action(
-      action((output, project, options: { format?: string[]; out?: string; all?: string; encoder?: string; captions: boolean; srt?: boolean; vtt?: boolean; loudness?: string }) =>
+      action((output, project, options: { format?: string[]; out?: string; all?: string; encoder?: string; captions: boolean; srt?: boolean; vtt?: boolean; loudness?: string; alpha?: boolean }) =>
         withSignal<unknown>(output, (signal) => (options.all !== undefined ? renderAllCommand(options.all, options, output, signal) : renderCommand(project, options, output, signal))),
       ),
     );

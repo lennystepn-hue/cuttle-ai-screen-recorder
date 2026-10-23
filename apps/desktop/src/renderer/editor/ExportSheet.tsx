@@ -5,7 +5,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { EXPORT_FORMATS } from '@cuttle/export/formats';
 import { formatBytes, formatDuration, formatTime } from '../../shared/format';
-import type { ExportTarget } from '../../shared/ipc';
+import type { ExportFileKind, ExportTarget } from '../../shared/ipc';
 import { sceneSpans, stepChapters, youtubeChapters, type Chapter } from '@cuttle/timeline';
 import { exportChecks } from '../../shared/timeline-model';
 import { bridge } from '../bridge';
@@ -19,6 +19,8 @@ import { useStore } from './store';
 import { FORMATS, ownFormat, targetName } from './targets';
 
 const ENCODERS = { auto: 'Automatic', hardware: 'Graphics card', software: 'Processor' } as const;
+/** The files an export writes, as people know them. */
+const FILES: Record<ExportFileKind, string> = { mp4: 'MP4', webm: 'WebM, transparent', mov: 'ProRes 4444 (MOV), transparent' };
 /** The loudness targets as people know them (`LOUDNESS`). */
 const LOUDNESS_NAMES: Record<LoudnessTarget, string> = {
   off: 'As mixed',
@@ -51,6 +53,8 @@ export function ExportSheet() {
   const targets = useMemo<ExportTarget[]>(() => ['project', ...FORMATS.filter((name) => name !== own)], [own]);
   const [chosen, setChosen] = useState<ExportTarget[]>([]);
   const [encoder, setEncoder] = useState<keyof typeof ENCODERS>('auto');
+  // an MP4, or a transparent video for another editor
+  const [file, setFile] = useState<ExportFileKind>('mp4');
   // subtitles: burned in as the project has them (Look tab), and the files beside the video
   const [burned, setBurned] = useState<'in' | 'off'>('in');
   const [subtitleFiles, setSubtitleFiles] = useState<('srt' | 'vtt')[]>([]);
@@ -69,11 +73,11 @@ export function ExportSheet() {
   useEffect(() => {
     if (!open || chosen.length === 0) return setFiles([]);
     let current = true;
-    void bridge.invoke('export:targets', chosen).then((answer) => current && setFiles(answer));
+    void bridge.invoke('export:targets', { formats: chosen, file }).then((answer) => current && setFiles(answer));
     return () => {
       current = false;
     };
-  }, [open, chosen, end]);
+  }, [open, chosen, end, file]);
 
   // Focus stays in the sheet while it is open: it goes back where it was when the sheet closes (the
   // Export button when that is gone, as the title bar's export chip is) ...
@@ -155,6 +159,18 @@ export function ExportSheet() {
                   </button>
                 );
               })}
+            </div>
+            <div className="row">
+              File
+              <Select
+                value={file}
+                options={(Object.entries(FILES) as [ExportFileKind, string][]).map(([value, name]) => ({ value, label: name }))}
+                onChange={setFile}
+                label="File"
+                variant="compact"
+                testId="export-file-kind"
+                title="A transparent video has no background: for Premiere, Final Cut, Resolve or CapCut to lay over its own"
+              />
             </div>
             <div className="row">
               Encoder
@@ -244,7 +260,7 @@ export function ExportSheet() {
               <button
                 className="primary"
                 disabled={chosen.length === 0}
-                onClick={() => void startExport(chosen, encoder, transcribed ? { captions: burned === 'in', files: subtitleFiles } : {})}
+                onClick={() => void startExport(chosen, encoder, transcribed ? { captions: burned === 'in', files: subtitleFiles } : {}, file)}
                 data-testid="export-start"
                 data-autofocus
               >

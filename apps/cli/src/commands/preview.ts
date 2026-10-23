@@ -15,6 +15,8 @@ export interface PreviewArgs {
   format?: string;
   /** Folder for the PNGs (default preview/ in the project). */
   out?: string;
+  /** Stills with transparency, no background (what `render --alpha` shows). */
+  alpha?: boolean;
 }
 
 /** What @cuttle/export's renderStills returns. */
@@ -58,7 +60,7 @@ export async function previewCommand(projectDir: string, args: PreviewArgs, outp
   output.info(`rendering ${times.length} still(s) into ${outDir} …`);
   const result = await runInElectron<PreviewResult>(
     // its progress comes over the IPC channel (to stderr, and to `cuttle mcp`'s client)
-    { command: 'preview', projectDir: file.dir, outDir, times, quiet: true, clean: args.out === undefined, ...(args.format !== undefined && { format: args.format }), ...(sheet && { sheet: edges.length > 0 && at.length === 0 ? { columns: 4 } : {} }) },
+    { command: 'preview', projectDir: file.dir, outDir, times, quiet: true, clean: args.out === undefined, ...(args.format !== undefined && { format: args.format }), ...(args.alpha && { transparent: true }), ...(sheet && { sheet: edges.length > 0 && at.length === 0 ? { columns: 4 } : {} }) },
     signal,
     (label, done, total) => output.info(`${label} ${done}/${total}`),
   );

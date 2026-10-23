@@ -1,22 +1,24 @@
 import { stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { exportProjects, ExportError, type EncoderPreference } from '@cuttle/export';
-import type { ExportEnd, ExportFile, ExportProgress, ExportTarget, SUBTITLE_FILES } from '../shared/ipc';
+import type { ExportEnd, ExportFile, ExportFileKind, ExportProgress, ExportTarget, SUBTITLE_FILES } from '../shared/ipc';
 import { bundlePath } from './protocols';
 import { speakNarration } from './voice';
 
 type Format = ExportTarget;
 
-/** How a run exports: the encoder, whether the subtitles are burned in, and the subtitle files beside each video. */
+/** How a run exports: the encoder, the file, whether the subtitles are burned in, and the subtitle files beside each video. */
 export interface ExportSettings {
   encoder: EncoderPreference;
+  /** An MP4 (default), or a transparent WebM (VP9 with alpha) or MOV (ProRes 4444). */
+  file?: ExportFileKind;
   captions?: boolean;
   subtitles?: readonly (typeof SUBTITLE_FILES)[number][];
 }
 
 /** The file a format is exported to, inside the project's `out/`, named as the CLI names it (`export.mp4` for the project's own size). */
-export function exportPath(projectDir: string, format: Format): string {
-  return join(projectDir, 'out', `${format === 'project' ? 'export' : format.replace(':', 'x')}.mp4`);
+export function exportPath(projectDir: string, format: Format, file: ExportFileKind = 'mp4'): string {
+  return join(projectDir, 'out', `${format === 'project' ? 'export' : format.replace(':', 'x')}.${file}`);
 }
 
 /** Progress events at most this often. */
@@ -49,7 +51,8 @@ export class ExportRun {
     try {
       const results = await exportProjects({
         projectDir,
-        targets: formats.map((format) => ({ ...(format !== 'project' && { format }), out: exportPath(projectDir, format) })),
+        targets: formats.map((format) => ({ ...(format !== 'project' && { format }), out: exportPath(projectDir, format, settings.file) })),
+        ...(settings.file && settings.file !== 'mp4' && { transparent: true }),
         encoder: settings.encoder,
         ...(settings.captions !== undefined && { captions: settings.captions }),
         ...(settings.subtitles && settings.subtitles.length > 0 && { subtitles: settings.subtitles }),

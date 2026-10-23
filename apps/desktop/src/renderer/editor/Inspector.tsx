@@ -865,6 +865,19 @@ function sceneStretch(spans: readonly SceneSpan[], index: number): { start: numb
 }
 
 function SelectionPanel() {
+  const tool = useStore(store, (state) => state.tool);
+  const selected = useStore(store, (state) => state.selection !== undefined);
+  // the Annotate tool's picker stays on top while the tool is in hand, over what is selected
+  if (tool !== 'annotate' || !selected) return <SelectedPanel />;
+  return (
+    <>
+      <AnnotateHint />
+      <SelectedPanel />
+    </>
+  );
+}
+
+function SelectedPanel() {
   const selection = useStore(store, (state) => state.selection);
   const tool = useStore(store, (state) => state.tool);
   // a drag in progress shows here as it goes

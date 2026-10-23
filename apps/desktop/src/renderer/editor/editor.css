@@ -3806,3 +3806,7 @@ button.chip-status:hover {
   flex-wrap: wrap;
   margin-top: 10px;
 }
+/* over a selected item: apart from its settings */
+.annotate-hint:not(:last-child) {
+  margin-bottom: 18px;
+}

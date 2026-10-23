@@ -405,7 +405,8 @@ export const sourceViewShown = (state: EditorState): boolean =>
 /** Picks a tool; Esc goes back to Select. Zoom, Mask, Crop and Annotate show the source view. */
 export function setTool(tool: Tool): void {
   dismissWarning();
-  store.set({ tool });
+  // the Annotate tool's picker (what it draws) is in the selection's tab
+  store.set({ tool, ...(tool === 'annotate' && { tab: 'selection' as const }) });
 }
 
 /** Opens the export sheet: on the running export or one that ended unseen, else on a new one. */

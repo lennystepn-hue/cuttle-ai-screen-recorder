@@ -17,7 +17,8 @@ export const APP_ORIGIN = 'app://cuttle';
  */
 export const CSP = [
   "default-src 'self'",
-  "script-src 'self'",
+  // the webcam's segmenter compiles its WebAssembly (MediaPipe, bundled)
+  "script-src 'self' 'wasm-unsafe-eval'",
   "style-src 'self'",
   "img-src 'self' data: blob: cuttle-media:",
   "media-src 'self' blob: cuttle-media:",

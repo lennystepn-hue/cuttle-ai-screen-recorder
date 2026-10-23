@@ -13,6 +13,7 @@ import { itemsCommand, type ItemsArgs } from './commands/items';
 import { zoomPathCommand, type ZoomPathArgs } from './commands/zoom-path';
 import { openCommand } from './commands/open';
 import { watchCommand } from './commands/watch';
+import { webcamBackgroundCommand } from './commands/webcam';
 import { motionAddCommand, motionCheckCommand, motionNewCommand, motionTemplatesCommand } from './commands/motion';
 import { musicCheckCommand, musicNewCommand, musicSetCommand, musicTemplatesCommand, soundAddCommand, soundListCommand } from './commands/music';
 import { previewCommand } from './commands/preview';
@@ -454,6 +455,14 @@ export async function runCli(argv: readonly string[], streams?: Streams): Promis
     .option('--duration <seconds>', 'how long, in source seconds (default 3)', positive)
     .option('--label <text>', 'a name for it')
     .action(action((output, project, layout: string, options: CameraArgs) => cameraCommand(project, layout, options, output)));
+
+  program
+    .command('webcam')
+    .description("the webcam's look beyond the bubble's place and size")
+    .command('background <mode>')
+    .description('what shows behind the person (a model finds them in each frame, on this computer): keep (the room), blur, color (--color) or remove (only the person, no bubble)')
+    .option('--color <hex>', 'the colour behind the person, with color (default #26262B)')
+    .action(action((output, project, mode: string, options: { color?: string }) => webcamBackgroundCommand(project, mode, options, output)));
 
   const sound = program.command('sound').description('sounds at moments of the video: built-in effects or files of the project');
   sound

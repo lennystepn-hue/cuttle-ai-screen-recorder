@@ -139,6 +139,16 @@ const CursorSchema = z.strictObject({
   smoothing: z.number().min(0).max(1).default(0.5),
 });
 
+/**
+ * What shows behind the person in the camera: the room as filmed, blurred, a colour, or nothing (the
+ * person alone, without the bubble's shape, ring and shadow). A segmentation model finds the person
+ * in each frame, on this computer.
+ */
+export const WEBCAM_BACKGROUNDS = ['keep', 'blur', 'color', 'remove'] as const;
+export type WebcamBackground = (typeof WEBCAM_BACKGROUNDS)[number];
+/** The colour behind the person with `background: "color"` and no `backgroundColor`. */
+export const WEBCAM_FILL = '#26262b';
+
 const WebcamSchema = z.strictObject({
   enabled: z.boolean().default(false),
   shape: z.enum(WEBCAM_SHAPES).default('circle'),
@@ -155,6 +165,10 @@ const WebcamSchema = z.strictObject({
   shadow: z.boolean().default(true),
   /** The camera's picture flipped left to right, as a mirror shows a face. */
   mirror: z.boolean().default(false),
+  /** What shows behind the person (`WEBCAM_BACKGROUNDS`), in the bubble and in every camera layout; without it the room as filmed. */
+  background: z.enum(WEBCAM_BACKGROUNDS).optional(),
+  /** The colour behind the person with `background: "color"` (default a dark grey). */
+  backgroundColor: hexColor.optional(),
 });
 
 const AudioSchema = z.strictObject({

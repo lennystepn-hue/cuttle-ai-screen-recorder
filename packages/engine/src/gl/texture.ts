@@ -33,6 +33,16 @@ export function uploadPixels(gl: WebGL2RenderingContext, texture: WebGLTexture, 
   gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, pixels.width, pixels.height, 0, gl.RGBA, gl.UNSIGNED_BYTE, pixels.data);
 }
 
+/** Uploads one byte a pixel (a mask), top row first, into the red channel. */
+export function uploadMask(gl: WebGL2RenderingContext, texture: WebGLTexture, mask: { width: number; height: number; data: Uint8Array }): void {
+  gl.bindTexture(gl.TEXTURE_2D, texture);
+  gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+  gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
+  gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.R8, mask.width, mask.height, 0, gl.RED, gl.UNSIGNED_BYTE, mask.data);
+  gl.pixelStorei(gl.UNPACK_ALIGNMENT, 4);
+}
+
 /** Pixel size of anything `texImage2D` accepts. */
 export function sourceSize(source: TexImageSource): Size {
   if ('displayWidth' in source) return { width: source.displayWidth, height: source.displayHeight }; // VideoFrame

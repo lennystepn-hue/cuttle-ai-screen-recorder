@@ -22,8 +22,11 @@ import {
   TEXT_POSITIONS,
   TEXT_STYLES,
   THEME_FONTS,
+  WEBCAM_BACKGROUNDS,
   WEBCAM_CORNERS,
+  WEBCAM_FILL,
   WEBCAM_SHAPES,
+  type WebcamBackground,
   type AutoEdits,
   type AutoKind,
   type CuttleProject,
@@ -2453,7 +2456,7 @@ function LookPanel() {
     camera: !sources.webcam
       ? 'No webcam in this take'
       : webcam.enabled
-        ? `${WEBCAM_SHAPE_NAMES[webcam.shape]} · ${webcam.position ? 'moved' : CORNER_NAMES[webcam.corner].toLowerCase()} · ${Math.round(webcam.size * 100)} %`
+        ? `${WEBCAM_SHAPE_NAMES[webcam.shape]} · ${webcam.position ? 'moved' : CORNER_NAMES[webcam.corner].toLowerCase()} · ${Math.round(webcam.size * 100)} %${webcam.background && webcam.background !== 'keep' ? ` · ${BEHIND_NAMES[webcam.background].toLowerCase()}` : ''}`
         : 'Off',
     subtitles: captions.enabled ? CAPTION_STYLE_NAMES[captions.style] : sources.transcript ? 'Off' : 'Not transcribed yet',
     sound: current.audio.enabled
@@ -2634,6 +2637,7 @@ function LookPanel() {
         ) : (
           <p className="hint">Off. Switched on, the webcam shows as a bubble over the video.</p>
         )}
+        {sources.webcam && <BehindFields webcam={webcam} />}
         {sources.webcam && (
           <Row label="From the playhead" note="for 3 s, then back: a lane of its own on the timeline">
             <div className="seg full" role="group" aria-label="Camera layouts">
@@ -2876,6 +2880,31 @@ function CameraFields({ webcam }: { webcam: CuttleProject['look']['webcam'] }) {
           </button>
         ))}
       </div>
+    </>
+  );
+}
+
+const BEHIND_NAMES: Record<WebcamBackground, string> = { keep: 'The room', blur: 'Blurred', color: 'A colour', remove: 'Removed' };
+const BEHIND_NOTES: Record<WebcamBackground, string> = {
+  keep: 'as the camera filmed it',
+  blur: 'the room soft, you sharp',
+  color: 'a colour instead of the room',
+  remove: 'only you, without the bubble',
+};
+
+/** What shows behind the person in the camera, in the bubble and in every camera layout. */
+function BehindFields({ webcam }: { webcam: CuttleProject['look']['webcam'] }) {
+  const behind = webcam.background ?? 'keep';
+  return (
+    <>
+      <Row label="Behind you" note={BEHIND_NOTES[behind]}>
+        <Select value={behind} options={WEBCAM_BACKGROUNDS} names={BEHIND_NAMES} onChange={(value) => look(['webcam', 'background'], value === 'keep' ? undefined : value, `Behind you: ${BEHIND_NAMES[value].toLowerCase()}`)} testId="webcam-background" />
+      </Row>
+      {behind === 'color' && (
+        <Row label="Colour behind">
+          <ColorInput value={webcam.backgroundColor ?? WEBCAM_FILL} path={['webcam', 'backgroundColor']} label="The colour behind you" upper hex />
+        </Row>
+      )}
     </>
   );
 }

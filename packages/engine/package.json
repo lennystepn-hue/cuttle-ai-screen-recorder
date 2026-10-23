@@ -4,11 +4,13 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./segment-files": "./src/segment-files.ts"
   },
   "dependencies": {
     "@cuttle/project": "workspace:*",
     "@cuttle/timeline": "workspace:*",
-    "@fontsource/inter": "^5.3.0"
+    "@fontsource/inter": "^5.3.0",
+    "@mediapipe/tasks-vision": "1.1.1"
   }
 }

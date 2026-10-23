@@ -83,7 +83,19 @@ export interface ExportJob {
   watermarkImage?: string;
   /** Present when the project has motion scenes or overlays. */
   motion?: MotionPages;
+  /**
+   * The webcam's segmenter (MediaPipe's loader script and WebAssembly, the model), files beside the
+   * export page; present when the camera shows with a background other than the room (`look.webcam.background`).
+   */
+  segmenter?: SegmenterPaths;
   encoder: EncoderPreference;
+}
+
+/** The segmenter's files, absolute paths the page reads through its host. */
+export interface SegmenterPaths {
+  loader: string;
+  wasm: string;
+  model: string;
 }
 
 /**

@@ -6,6 +6,7 @@ import { host, PageError } from './host';
 import { loadImage } from './images';
 import { openVideo, type VideoFile } from './media';
 import { SceneSources } from './scene-sources';
+import { pageSegmenter } from './segmenter';
 import { createAlphaOutput, createVideoOutput } from './video-output';
 
 /** Seconds before a scene first shows that its decoders start. */
@@ -58,10 +59,11 @@ interface Rendering {
  */
 async function withRendering<T>(job: PageJob, makePlan: (timeline: Timeline) => FramePlan, lookahead: number, body: (rendering: Rendering) => Promise<T>): Promise<T> {
   const { project } = job;
-  const [assets, screen, webcam] = await Promise.all([
+  const [assets, screen, webcam, segmenter] = await Promise.all([
     loadEngineAssets(),
     job.screen ? openVideo(job.screen, 'the screen recording') : undefined,
     job.webcam ? openVideo(job.webcam.path, 'the webcam recording') : undefined,
+    job.segmenter ? pageSegmenter(job.segmenter) : undefined,
   ]);
   const canvas = new OffscreenCanvas(1, 1);
   let background: ImageBitmap | undefined;
@@ -84,7 +86,7 @@ async function withRendering<T>(job: PageJob, makePlan: (timeline: Timeline) => 
     const plan = makePlan(timeline);
     if (job.backgroundImage) background = await loadImage(job.backgroundImage, probeMaxTextureSize(), 'the background image');
     if (job.watermarkImage) watermark = await loadImage(job.watermarkImage, probeMaxTextureSize(), 'the watermark image');
-    renderer = createRenderer(canvas, project, { assets, screenSize, backgroundImage: background, ...(watermark && { watermarkImage: watermark }), ...(job.transparent && { transparent: true }) });
+    renderer = createRenderer(canvas, project, { assets, screenSize, backgroundImage: background, ...(watermark && { watermarkImage: watermark }), ...(job.transparent && { transparent: true }), ...(segmenter && { segmenter: () => segmenter }) });
     const gl = canvas.getContext('webgl2')!;
     const maxTextureSize = gl.getParameter(gl.MAX_TEXTURE_SIZE) as number;
     sources = new SceneSources(

@@ -296,6 +296,13 @@ export const COMMAND_TOOLS: readonly CommandTool[] = [
     argv: (input) => ['camera', input.layout, '--at', String(input.at), ...option('duration', input.duration), ...option('label', input.label)],
   }),
   tool({
+    name: 'webcam_background',
+    title: 'Behind the person',
+    description: 'What shows behind the person in the camera, in the bubble and every camera layout: keep (the room as filmed), blur, color (with color, a hex) or remove (only the person, without the bubble). A model finds the person in each frame, on this computer.',
+    input: { project, mode: z.enum(['keep', 'blur', 'color', 'remove']), color: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional() },
+    argv: (input) => ['webcam', 'background', input.mode, ...option('color', input.color)],
+  }),
+  tool({
     name: 'open_in_editor',
     title: 'Open in the editor',
     description: "Shows the project in the Cuttle app's editor (Windows and macOS, the app installed), which then follows every change to its files: for the person to watch the video take shape or fine-tune it by hand.",

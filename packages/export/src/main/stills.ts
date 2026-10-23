@@ -8,6 +8,7 @@ import { withFormat, type ExportFormat } from '../formats';
 import { CHANNELS, type PageStillsSuccess, type StillsJob } from '../job';
 import { cancelledError, defaultPageDir, runPage, watchdog, whenCancelled } from './export';
 import { FileHost } from './files';
+import { segmenterPaths } from './segmenter';
 import { MotionHost, serveMotion, type MotionItemReport } from './motion-host';
 import { placeNarration } from './narration';
 import { loadSources, motionPages, motionTake } from './sources';
@@ -92,6 +93,7 @@ export async function renderStills(opts: StillsOptions): Promise<StillsResult> {
   const columns = opts.sheet ? Math.max(1, Math.round(opts.sheet.columns ?? DEFAULT_SHEET_COLUMNS)) : undefined;
   // the narration's words, for the captions the stills show
   const narration = sources.narration ? placeNarration(project, sceneSpans(project.scenes, project.cuts), sources.narration) : undefined;
+  const segmenter = segmenterPaths(project, opts.pageDir ?? defaultPageDir());
   const job: StillsJob = {
     kind: 'stills',
     project,
@@ -107,6 +109,7 @@ export async function renderStills(opts: StillsOptions): Promise<StillsResult> {
     backgroundImage: sources.backgroundImage,
     watermarkImage: sources.watermarkImage,
     ...(motionFiles && { motion: motionFiles }),
+    ...(segmenter && { segmenter }),
     times: opts.times,
     ...(columns !== undefined && { sheet: { columns } }),
   };
@@ -122,7 +125,8 @@ export async function renderStills(opts: StillsOptions): Promise<StillsResult> {
 
   const cancel = whenCancelled(opts.signal);
   const guard = watchdog();
-  const images = [...Object.values(sources.stills), ...[sources.backgroundImage, sources.watermarkImage].filter((path): path is string => path !== undefined)];
+  // the segmenter's files are read whole, as the images are
+  const images = [...Object.values(sources.stills), ...[sources.backgroundImage, sources.watermarkImage].filter((path): path is string => path !== undefined), ...(segmenter ? Object.values(segmenter) : [])];
   // Reads only: stills mode writes PNGs through writeStill, never into a video file.
   const host = new FileHost([...(sources.screen ? [sources.screen] : []), ...(sources.webcam ? [sources.webcam.path] : [])], join(outDir, '.unused'), images);
   let window: ExportWindow | undefined;

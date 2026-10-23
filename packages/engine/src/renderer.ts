@@ -1,10 +1,11 @@
-import type { CardScene, CuttleProject, FrameStyle, Rect, Scene, StillScene, TextOverlay } from '@cuttle/project';
+import { WEBCAM_FILL, type CardScene, type CuttleProject, type FrameStyle, type Rect, type Scene, type StillScene, type TextOverlay } from '@cuttle/project';
 import { textAnimationSeconds, type ActiveCaption, type ActiveText, type KeyBadge, type RenderState, type SceneFrame } from '@cuttle/timeline';
 import type { EngineAssets } from './assets';
 import { CAPTION_LOOKS, drawCaption } from './captions';
+import { hexToRgb } from './color';
 import { drawKeys } from './keys';
 import { createRenderTarget, deleteRenderTarget, type RenderTarget } from './gl/target';
-import { createTexture, sourceSize, uploadPixels, uploadTexture } from './gl/texture';
+import { createTexture, sourceSize, uploadMask, uploadPixels, uploadTexture } from './gl/texture';
 import { blurSamples, cameraPlace, placeBadge, placeOverlay, stillCrop, unitFor, uvRect, watermarkRect, webcamRect, type Size, type WindowLayout } from './layout';
 import { BackgroundPass } from './passes/background';
 import { ContentPass } from './passes/content';
@@ -12,7 +13,8 @@ import { CursorPass } from './passes/cursor';
 import { MaskPass } from './passes/masks';
 import { drawAnnotations } from './annotations';
 import { SpritePass } from './passes/sprite';
-import { WebcamPass } from './passes/webcam';
+import { WebcamPass, type WebcamBehind } from './passes/webcam';
+import type { PersonMask, Segmenter } from './segment';
 import { textMotion, type TextMotion } from './text-motion';
 import { WindowPass } from './passes/window';
 import type { FrameChrome } from './presets/frames';
@@ -95,6 +97,11 @@ export interface RendererOptions {
    * keeps its alpha, premultiplied; what the look puts on the background (a window's shadow) falls on nothing.
    */
   transparent?: boolean;
+  /**
+   * Finds the person in a webcam frame, for `look.webcam.background` (`loadSegmenter`); asked each
+   * frame, so it may come once loaded. Without it the room shows as filmed.
+   */
+  segmenter?: () => Segmenter | undefined;
 }
 
 function hasPixels(source: TexImageSource): boolean {
@@ -177,6 +184,15 @@ export function createRenderer(canvas: HTMLCanvasElement | OffscreenCanvas, proj
   const cursor = own(new CursorPass(gl, output, options.assets));
   const webcam = own(new WebcamPass(gl, output));
   const webcamTexture = texture(true);
+  // where the person is in each webcam frame, for what shows behind them (once per frame: a paused
+  // editor draws the same frame again)
+  const behindMode = look.webcam.background ?? 'keep';
+  const fill = hexToRgb(look.webcam.backgroundColor ?? WEBCAM_FILL);
+  // by the frame's timestamp: a webcam frame shown in two output frames (60 fps over a 30 fps camera,
+  // a still editor) is segmented once; a few kept for the two cameras of a crossfade
+  const personMasks = new Map<unknown, PersonMask | null>();
+  let personTexture: WebGLTexture | undefined;
+  let personFrame: unknown;
   const stillTexture = texture(true);
   const motionTexture = texture(false);
   const fullFrame: Rect = [0, 0, output.width, output.height];
@@ -193,6 +209,26 @@ export function createRenderer(canvas: HTMLCanvasElement | OffscreenCanvas, proj
     watermarkTexture = texture(true);
     uploadTexture(gl, watermarkTexture, options.watermarkImage, true);
   }
+  /** What shows behind the person in `camera`, when the look asks and the segmenter has them. */
+  const behind = (camera: TexImageSource): WebcamBehind | undefined => {
+    if (behindMode === 'keep') return undefined;
+    const segment = options.segmenter?.();
+    if (!segment) return undefined;
+    const key = 'timestamp' in camera && typeof camera.timestamp === 'number' ? camera.timestamp : camera;
+    let mask = personMasks.get(key);
+    if (mask === undefined) {
+      mask = segment(camera) ?? null;
+      personMasks.set(key, mask);
+      if (personMasks.size > 4) personMasks.delete(personMasks.keys().next().value);
+    }
+    if (!mask) return undefined;
+    personTexture ??= texture(false);
+    if (personFrame !== key) {
+      uploadMask(gl, personTexture, mask);
+      personFrame = key;
+    }
+    return { mode: behindMode, mask: personTexture, color: fill };
+  };
   let layerTarget: RenderTarget | undefined;
   let disposed = false;
   let drawn: DrawnText[] = [];
@@ -258,7 +294,7 @@ export function createRenderer(canvas: HTMLCanvasElement | OffscreenCanvas, proj
     const camera = place.opacity > 0 ? sources.webcams.get(layer.index) : undefined;
     if (camera && hasPixels(camera)) {
       uploadTexture(gl, webcamTexture, camera, true);
-      webcam.draw(webcamTexture, sourceSize(camera), look.webcam, place);
+      webcam.draw(webcamTexture, sourceSize(camera), look.webcam, place, behind(camera));
     }
     // The badge is placed first so the texts can move clear of it; it is drawn on top of them.
     const badge = layer.badge ? sprites.label(layer.badge, BADGE_STYLE, unit, layout.content[2] * BADGE_MAX_WIDTH) : undefined;

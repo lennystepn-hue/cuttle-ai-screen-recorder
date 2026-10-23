@@ -129,6 +129,7 @@ cuttle motion new code-typing                # a file typing itself, with syntax
 cuttle motion new end-card                   # your logo, a line, the URL typing itself
 cuttle music new pulse                       # a score for this video (pulse, drift, lofi, bright, cinematic)
 cuttle motion check motion/title/index.html  # its frames, a contact sheet, what the page threw
+cuttle watch                                 # each page saved checked again, as you write
 cuttle music check                           # the music alone: a WAV, its levels, the hits on the cuts
 cuttle render --format 9:16 --format 1:1     # out/9x16.mp4 and out/1x1.mp4 in one go; also 16:9
 ```

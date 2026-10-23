@@ -167,7 +167,9 @@ video as pages. Read [motion.md](motion.md) and [music.md](music.md) first.
    (`--first`, `--after <scene>` to place it, `--label` for the timeline;
    `--as transition --into <scene>` for a transition page of your own). Check it:
    `cuttle -C "<project>" --json motion check motion/<name>/index.html`, read the sheet, fix every
-   error, check again.
+   error, check again. While you write many pages, `cuttle -C "<project>" --json watch` (run in the
+   background) does the checking: each save reruns that page's check, the music page's or the
+   preview, and prints a line of JSON (`check`, `src`, `changed`, `errors` first, `result.sheet`).
 6. Write the music for these scenes (music.md): from a template you make your own, or a page from
    nothing that you make the music with `cuttle -C "<project>" --json music set --src music/<name>/index.html`.
    Hit the scene changes.

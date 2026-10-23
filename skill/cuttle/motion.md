@@ -58,6 +58,7 @@ Make it look like the work of a great motion designer, and like this video's, no
    frames into `preview/motion-<name>/` with a contact sheet, and lists the page's `errors` and
    `console`. A scene is checked on its own; an overlay over the video, where the video shows it.
    Read the sheet; fix every error; check single moments with `--at 0.4 --at 1.2` (seconds into it).
+   `cuttle -C "<project>" --json watch`, left running, checks each page again as you save it.
 4. Look at it in the video with `cuttle preview --at …`, and render.
 
 **With the project open in the Cuttle app,** the user watches you work: every page you save shows

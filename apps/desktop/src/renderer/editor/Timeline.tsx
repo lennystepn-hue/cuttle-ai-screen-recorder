@@ -36,7 +36,7 @@ import { edit, fitLength, preview } from './doc';
 import { beginGesture } from './gesture';
 import { mediaUrl } from './media';
 import type { MotionStrip } from './motion';
-import { currentPlayer, select, setTool, shownProject, store, type Selection } from './session';
+import { currentPlayer, select, setTool, shownProject, store, type Selection, selectMany, toggleSelect } from './session';
 import { useStore } from './store';
 
 const END_SPACE = 40;
@@ -141,6 +141,10 @@ export function Timeline() {
   useStore(store, (state) => state.format);
   const pps = useStore(store, (state) => state.pxPerSecond);
   const selection = useStore(store, (state) => state.selection);
+  const also = useStore(store, (state) => state.also);
+  const chosen = selection ? [selection, ...also] : [];
+  // a rubber band being drawn (Shift-drag on the lanes), in the content's px
+  const [band, setBand] = useState<{ left: number; top: number; width: number; height: number }>();
   const motionStatus = useStore(store, (state) => state.motionStatus);
   const pageSounds = useStore(store, (state) => state.soundStatus.pageSounds);
   const snapOn = useStore(store, (state) => state.snap);
@@ -299,6 +303,8 @@ export function Timeline() {
   const scrub = (event: ReactPointerEvent<HTMLElement>) => {
     if (event.button !== 0) return;
     const onLane = !(event.target as HTMLElement).closest('.ruler, .markers');
+    // Shift on the lanes: a rubber band, not the playhead
+    if (event.shiftKey && onLane) return drawBand(event);
     seekTo(timeAt(event.clientX));
     follow(
       event,
@@ -323,8 +329,13 @@ export function Timeline() {
     if (event.button !== 0 || !model || !project) return;
     event.stopPropagation();
     const edge = (event.target as HTMLElement).dataset.edge as 'start' | 'end' | undefined;
-    select({ kind: 'scene', id: block.id });
-    if (!edge) seekTo(timeAt(event.clientX));
+    const picked: Selection = { kind: 'scene', id: block.id };
+    // Shift-click: added to the selection, or taken out of it; Ctrl/⌘ the same on a click, while a
+    // Ctrl-drag still edits (without snapping)
+    if (event.shiftKey) return toggleSelect(picked);
+    const adding = event.ctrlKey || event.metaKey;
+    if (!adding) select(picked);
+    if (!edge && !adding) seekTo(timeAt(event.clientX));
     const scene = project.scenes[block.index]!;
     const others = targets({ scene: block.id });
     // where on the timeline the scene was taken (the ghost keeps that point under the pointer)
@@ -365,7 +376,8 @@ export function Timeline() {
       },
       (moved) => {
         setDrag({});
-        if (!moved) return;
+        if (!moved) return adding ? toggleSelect(picked) : undefined;
+        if (adding) select(picked);
         if (edge) {
           if (commands) edit(commands, scene.type === 'clip' ? 'Trim clip' : `Change the length of the ${scene.type === 'still' ? 'page' : scene.type === 'motion' ? 'motion scene' : 'card'}`);
           else preview(undefined);
@@ -376,14 +388,100 @@ export function Timeline() {
     );
   };
 
+  /**
+   * Moves every selected overlay by the same output time, each in source seconds at the speed of the
+   * clip that shows it (scenes and cuts stay); one step to undo.
+   */
+  const moveSelected = (event: ReactPointerEvent<HTMLElement>, clicked: () => void) => {
+    if (!model || !project) return;
+    const lists: Partial<Record<Selection['kind'], OverlayList>> = Object.fromEntries(LANES.map((lane) => [lane.kind, lane.list]));
+    const moving = chosen.flatMap((item) => {
+      const list = lists[item.kind];
+      const block = list && model.lanes[item.kind as OverlayKind].blocks.find((candidate) => candidate.id === item.id);
+      if (!list || !block) return [];
+      const scene = spans[block.span]?.scene;
+      // a sound in a scene counts in the scene's seconds
+      const speed = scene?.type === 'clip' && !(item.kind === 'sound' && (project.sounds.find((sound) => sound.id === item.id)?.scene !== undefined)) ? scene.speed : 1;
+      return [{ list, id: item.id, speed }];
+    });
+    let commands: Command[] | undefined;
+    follow(
+      event,
+      (dx) => {
+        const deltaOut = Math.round((dx / pps) * fps) / fps;
+        commands = moving.map(({ list, id, speed }) => ({ type: 'shift', list, id, by: deltaOut * speed }));
+        preview(commands);
+      },
+      (moved) => {
+        if (!moved || !commands) {
+          preview(undefined);
+          return clicked();
+        }
+        edit(commands, `Move ${moving.length} items`);
+      },
+    );
+  };
+
+  /** A Shift-drag on the lanes: the items the band touches are selected together (Esc: none). */
+  const drawBand = (event: ReactPointerEvent<HTMLElement>) => {
+    const content = event.currentTarget;
+    const origin = content.getBoundingClientRect();
+    const start = { x: event.clientX - origin.left, y: event.clientY - origin.top };
+    const rect = (at: PointerEvent) => {
+      const x = at.clientX - origin.left;
+      const y = at.clientY - origin.top;
+      return { left: Math.min(start.x, x), top: Math.min(start.y, y), width: Math.abs(x - start.x), height: Math.abs(y - start.y) };
+    };
+    let box: ReturnType<typeof rect> | undefined;
+    const move = (moved: PointerEvent) => {
+      // either way: a band can go across the lanes at one time
+      if (!box && Math.hypot(moved.clientX - event.clientX, moved.clientY - event.clientY) < DRAG_PX) return;
+      box = rect(moved);
+      setBand(box);
+    };
+    const stop = () => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+      window.removeEventListener('pointercancel', up);
+      setBand(undefined);
+    };
+    const ended = beginGesture('timeline', stop);
+    const up = () => {
+      stop();
+      ended();
+      if (!box) return;
+      const touched: Selection[] = [];
+      for (const element of content.querySelectorAll<HTMLElement>('[data-kind][data-id]')) {
+        const at = element.getBoundingClientRect();
+        const [left, top] = [at.left - origin.left, at.top - origin.top];
+        if (left < box.left + box.width && left + at.width > box.left && top < box.top + box.height && top + at.height > box.top) {
+          const item = { kind: element.dataset.kind as Selection['kind'], id: element.dataset.id! };
+          if (!touched.some((each) => each.kind === item.kind && each.id === item.id)) touched.push(item);
+        }
+      }
+      selectMany(touched);
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+    window.addEventListener('pointercancel', up);
+  };
+
   /** A press on an overlay block: select it; its edges change its length, its body moves it (Alt: a copy). */
   const pressOverlay = (event: ReactPointerEvent<HTMLElement>, block: OverlayBlock, list: OverlayList) => {
     if (event.button !== 0 || !project) return;
     event.stopPropagation();
     const edge = ((event.target as HTMLElement).dataset.edge as 'start' | 'end' | undefined) ?? 'move';
     const copy = event.altKey && edge === 'move';
-    select({ kind: block.kind, id: block.id, start: block.start, end: block.end });
-    if (edge === 'move') seekTo(timeAt(event.clientX));
+    const picked: Selection = { kind: block.kind, id: block.id, start: block.start, end: block.end };
+    // Shift-click: added to the selection, or taken out of it; Ctrl/⌘ the same on a click, while a
+    // Ctrl-drag still moves it (without snapping)
+    if (event.shiftKey) return toggleSelect(picked);
+    const adding = event.ctrlKey || event.metaKey;
+    const clicked = () => (adding ? toggleSelect(picked) : select(picked));
+    // its body, dragged while it is one of several selected: they all move along (a click: it alone)
+    if (edge === 'move' && !copy && chosen.length > 1 && isSelected(chosen, block.kind, block.id)) return moveSelected(event, clicked);
+    if (!adding) select(picked);
+    if (edge === 'move' && !adding) seekTo(timeAt(event.clientX));
     const item = project[list].find((candidate) => candidate.id === block.id);
     const scene = spans[block.span]?.scene;
     // a sound in a scene moves inside it, in output seconds
@@ -399,13 +497,17 @@ export function Timeline() {
           preview(moves);
         },
         (moved) => {
-          if (!moved || !moves) return preview(undefined);
+          if (!moved || !moves) {
+            preview(undefined);
+            return adding && clicked();
+          }
+          if (adding) select(picked);
           edit(moves, copy ? 'Duplicate sound' : 'Move sound');
         },
       );
       return;
     }
-    if (!item || scene?.type !== 'clip') return;
+    if (!item || scene?.type !== 'clip') return adding && clicked();
     const range = overlayRange(item as { from?: number; to?: number; at?: number; duration?: number });
     const others = targets({ overlay: block.id });
     let commands: Command[] | undefined;
@@ -430,7 +532,11 @@ export function Timeline() {
       },
       (moved) => {
         setDrag({});
-        if (!moved || !commands) return preview(undefined);
+        if (!moved || !commands) {
+          preview(undefined);
+          return adding && clicked();
+        }
+        if (adding) select(picked);
         const noun = NOUN[block.kind];
         edit(commands, copy ? `Duplicate ${noun}` : edge === 'move' ? `Move ${noun}` : `Change the length of the ${noun}`);
       },
@@ -497,6 +603,7 @@ export function Timeline() {
         </div>
         <div className="tl-scroll" ref={scroller} data-testid="timeline">
           <div className="tl-content" style={{ width: width + END_SPACE, height: layout.total }} onPointerDown={scrub}>
+            {band && <div className="tl-band" style={band} data-testid="timeline-band" />}
             {model && project && model.scenes.length === 0 && (
               <span className="lane-hint" style={{ top: tops.video + heights.video / 2, left: 10 }}>
                 The video's scenes show here once Cuttle cuts the take
@@ -508,14 +615,14 @@ export function Timeline() {
                 <Ruler duration={duration} pps={pps} view={view} top={tops.ruler} />
                 <div className="tl-row" style={{ position: 'absolute', top: tops.video, height: heights.video, left: 0, right: 0 }}>
                   {model.scenes.map((scene) => (
-                    <Scene key={scene.id} scene={scene} project={project} pps={pps} view={view} selected={isSelected(selection, 'scene', scene.id)} moving={drag.ghost?.id === scene.id} onPointerDown={(event) => pressScene(event, scene)} />
+                    <Scene key={scene.id} scene={scene} project={project} pps={pps} view={view} selected={isSelected(chosen, 'scene', scene.id)} moving={drag.ghost?.id === scene.id} onPointerDown={(event) => pressScene(event, scene)} />
                   ))}
                   {/* where cuts take a stretch out: a notch; an off cut, faint, where it would cut */}
                   {model.cuts.map((notch) => (
                     <button
                       key={`${notch.ids.join('+')}@${notch.t}`}
                       type="button"
-                      className={`cut-notch${notch.enabled ? '' : ' off'}${notch.ids.some((id) => isSelected(selection, 'cut', id)) ? ' selected' : ''}`}
+                      className={`cut-notch${notch.enabled ? '' : ' off'}${notch.ids.some((id) => isSelected(chosen, 'cut', id)) ? ' selected' : ''}`}
                       style={{ left: notch.t * pps }}
                       title={`${notch.title}${notch.ids.length > 1 ? ` and ${notch.ids.length - 1} more` : ''}${notch.enabled ? '' : ' (off: the video plays it)'} · click to select`}
                       aria-label={`${notch.enabled ? 'Cut' : 'Cut, off'}: ${notch.title}`}
@@ -540,12 +647,13 @@ export function Timeline() {
                         <button
                           // by the overlay and which of its blocks: a block keeps its element while it is dragged
                           key={`${block.id}#${blocks.slice(0, index).filter((other) => other.id === block.id).length}`}
-                          className={`item ${lane.kind}${block.enabled ? '' : ' off'}${isSelected(selection, lane.kind, block.id) ? ' selected' : ''}${hovered === block.id ? ' linked' : ''}${failed ? ' failed' : ''}`}
+                          className={`item ${lane.kind}${block.enabled ? '' : ' off'}${isSelected(chosen, lane.kind, block.id) ? ' selected' : ''}${hovered === block.id ? ' linked' : ''}${failed ? ' failed' : ''}`}
                           onPointerEnter={() => setHovered(block.id)}
                           onPointerLeave={() => setHovered((id) => (id === block.id ? undefined : id))}
                           style={{ left: blockLeft, width: blockWidth, top: LANE_PAD + 2 + block.row * ROW }}
                           title={`${block.title}${block.enabled ? '' : ' (off: not in the video)'} · drag to move${lane.kind === 'sound' ? '' : ', edges to change the length'}, Alt to copy, Del to delete`}
                           data-id={block.id}
+                          data-kind={lane.kind}
                           onPointerDown={(event) => pressOverlay(event, block, lane.list)}
                           onKeyDown={(event) => event.key === 'Enter' && select({ kind: lane.kind, id: block.id, start: block.start, end: block.end })}
                         >
@@ -578,7 +686,7 @@ export function Timeline() {
                       ))}
                   </div>
                 ))}
-                <MusicLane model={model} top={tops.music} height={heights.music} pps={pps} view={view} duration={duration} selected={isSelected(selection, 'music', 'music')} />
+                <MusicLane model={model} top={tops.music} height={heights.music} pps={pps} view={view} duration={duration} selected={isSelected(chosen, 'music', 'music')} />
                 <ColumnsCanvas
                   top={tops.mic}
                   height={heights.mic}
@@ -639,7 +747,7 @@ export function Timeline() {
   );
 }
 
-const isSelected = (selection: Selection | undefined, kind: Selection['kind'], id: string) => selection?.kind === kind && selection.id === id;
+const isSelected = (selected: readonly Selection[], kind: Selection['kind'], id: string) => selected.some((item) => item.kind === kind && item.id === id);
 
 /** The rendered music's peaks: this many a second (as the main process makes them). */
 const MUSIC_PEAKS_RATE = 50;
@@ -1052,6 +1160,7 @@ function Scene(props: { scene: SceneBlock; project: CuttleProject; pps: number; 
       style={{ left, width: Math.max(4, width - 2) }}
       title={failed ? `${name} · its page cannot draw: ${failed.failure ?? 'it failed'}` : `${name} · ${scene.detail} · drag to move, edges to trim`}
       data-id={scene.id}
+      data-kind="scene"
       onPointerDown={onPointerDown}
       onKeyDown={(event) => event.key === 'Enter' && select({ kind: 'scene', id: scene.id })}
     >

@@ -73,9 +73,9 @@ interface Check {
 /** cuttle.json as the checks read it back. */
 interface Written {
   scenes: { id: string; type: string; from?: number; to?: number; speed?: number }[];
-  zooms: { id: string; at: number; duration: number; rect: number[] }[];
+  zooms: { id: string; at: number; duration: number; rect: number[]; enabled?: boolean }[];
   masks: { id: string; from: number; to: number; rect: number[]; style?: string; label?: string }[];
-  texts: { id: string; text: string; position?: string }[];
+  texts: { id: string; text: string; position?: string; at?: number; enabled?: boolean }[];
   annotations?: { id: string; kind: string; at: number; rect?: number[]; from?: number[]; to?: number[]; text?: string }[];
 }
 
@@ -250,18 +250,18 @@ describe.runIf(enabled)('the Cuttle app', () => {
     return { stats, playing };
   };
   /** Pointer events on an element (a window that is never shown gets no real mouse). */
-  const press = (selector: string, moveBy = 0) =>
+  const press = (selector: string, moveBy = 0, keys: { shiftKey?: boolean; ctrlKey?: boolean } = {}) =>
     editor.evaluate(
-      ({ selector, moveBy }) => {
+      ({ selector, moveBy, keys }) => {
         const element = document.querySelector(selector)!;
         const box = element.getBoundingClientRect();
-        const at = (type: string, x: number) => element.dispatchEvent(new PointerEvent(type, { bubbles: true, clientX: x, clientY: box.top + box.height / 2, button: 0, pointerId: 7 }));
+        const at = (type: string, x: number) => element.dispatchEvent(new PointerEvent(type, { bubbles: true, clientX: x, clientY: box.top + box.height / 2, button: 0, pointerId: 7, ...keys }));
         const x = box.left + Math.min(20, box.width / 2);
         at('pointerdown', x);
         if (moveBy) for (let step = 1; step <= 8; step++) at('pointermove', x + (moveBy * step) / 8);
         at('pointerup', x + moveBy);
       },
-      { selector, moveBy },
+      { selector, moveBy, keys },
     );
   /** A screenshot of the editor (CUTTLE_CHECK_SHOTS): Electron's capturePage, which works on a window never shown. */
   const shot = async (name: string) => {
@@ -698,6 +698,55 @@ describe.runIf(enabled)('the Cuttle app', () => {
     // the video draws them: no error at the playhead
     await editor.keyboard.press('Escape');
     expect((await state()).error).toBeUndefined();
+    await undoAll();
+    expect(readFileSync(projectFile(), 'utf8')).toBe(original);
+  }, 30_000);
+
+  it('selects several items on the timeline (Shift- and Ctrl-click, a rubber band): moved, switched off and deleted together, each one step to undo', async () => {
+    const original = readFileSync(projectFile(), 'utf8');
+    const selected = () => editor.locator('.item.selected, .scene.selected').count();
+    await press('.item.zoom');
+    await press('.item.caption', 0, { shiftKey: true });
+    expect(await selected()).toBe(2);
+    await editor.waitForSelector('[data-testid=many-details]');
+    expect(await editor.locator('[data-testid=many-details] .name').textContent()).toBe('2 items');
+    expect(await editor.locator('.many-kinds').textContent()).toBe('1 caption, 1 zoom');
+    // one of them dragged: both move by the same time
+    await drag('.item.caption', [40, 0]);
+    await savedWhen((file) => file.zooms[0]!.at > 8.8 + 0.1 && file.texts[0]!.at! > 0.5 + 0.1);
+    const moved = onDisk();
+    expect(moved.zooms[0]!.at - 8.8).toBeCloseTo(moved.texts[0]!.at! - 0.5, 3);
+    expect((await doc()).undo).toBe('Move 2 items');
+    // a Ctrl-click takes one out, and puts it back
+    await press('.item.zoom', 0, { ctrlKey: true });
+    expect(await selected()).toBe(1);
+    await press('.item.zoom', 0, { ctrlKey: true });
+    expect(await selected()).toBe(2);
+    await click(editor, '[data-testid=many-enabled]');
+    await savedWhen((file) => file.zooms[0]!.enabled === false && file.texts[0]!.enabled === false);
+    expect((await doc()).undo).toBe('Turn 2 items off');
+    await editor.keyboard.press('Delete');
+    await savedWhen((file) => file.zooms.length === 0 && file.texts.length === 0);
+    expect((await doc()).undo).toBe('Delete 2 items');
+    // one step brings both back
+    await editor.keyboard.press('Control+Z');
+    await savedWhen((file) => file.zooms.length === 1 && file.texts.length === 1);
+    // a Shift-drag on the lanes: what the band touches
+    await editor.evaluate(() => {
+      const content = document.querySelector('.tl-content')!;
+      const [caption, zoom] = ['.item.caption', '.item.zoom'].map((selector) => document.querySelector(selector)!.getBoundingClientRect());
+      const [from, to] = [{ x: caption!.left + 2, y: Math.min(caption!.top, zoom!.top) + 2 }, { x: zoom!.left + 4, y: Math.max(caption!.bottom, zoom!.bottom) - 2 }];
+      const fire = (type: string, x: number, y: number) => (type === 'pointerdown' ? content : window).dispatchEvent(new PointerEvent(type, { bubbles: true, clientX: x, clientY: y, button: 0, pointerId: 7, shiftKey: true }));
+      fire('pointerdown', from.x, from.y);
+      for (let step = 1; step <= 8; step++) fire('pointermove', from.x + ((to.x - from.x) * step) / 8, from.y + ((to.y - from.y) * step) / 8);
+      fire('pointerup', to.x, to.y);
+    });
+    await editor.waitForSelector('.item.caption.selected');
+    expect(await editor.locator('.item.zoom.selected').count()).toBe(1);
+    expect(await selected()).toBeGreaterThanOrEqual(2);
+    await shot('08-multi-select');
+    await editor.keyboard.press('Escape');
+    expect(await selected()).toBe(0);
     await undoAll();
     expect(readFileSync(projectFile(), 'utf8')).toBe(original);
   }, 30_000);

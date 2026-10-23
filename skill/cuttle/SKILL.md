@@ -209,6 +209,10 @@ source seconds. It replaces every clip and the zooms it made before (tagged `aut
 cuts, stills, cards and zooms made by hand stay), so run it once, before your hand edits. Its clips and zooms have ids, and labels where Claude's markers say
 what they show ("Claude at work", "Answer"): keep them when you edit, and give items you add an
 unused id and a label (project.md).
+To change many items at once, pick them and act in one write:
+`cuttle -C "<project>" --json items --made click --between 30,60 --off` turns off the click zooms of
+that stretch (`--kind zoom,mask`, `--auto`, `--yours`, `--ids z3,m1` pick too; `--on`, `--delete`,
+`--shift -0.5` in source seconds). Without an action it lists what the filters pick.
 For a take recorded without `--until-claude`, add `--claude "<demo folder>"` to read the markers
 from Claude Code's transcript.
 

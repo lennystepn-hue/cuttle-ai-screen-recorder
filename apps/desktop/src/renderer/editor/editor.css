@@ -766,6 +766,15 @@ button.chip-status:hover {
 .tl-content {
   position: relative;
 }
+/* a rubber band (Shift-drag): what it touches is selected */
+.tl-band {
+  position: absolute;
+  z-index: 6;
+  pointer-events: none;
+  border: 1px solid var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  border-radius: 3px;
+}
 .tl-row {
   position: relative;
 }
@@ -3809,4 +3818,9 @@ button.chip-status:hover {
 /* over a selected item: apart from its settings */
 .annotate-hint:not(:last-child) {
   margin-bottom: 18px;
+}
+
+/* several items selected: what they are */
+.many-kinds {
+  margin: -4px 0 10px;
 }

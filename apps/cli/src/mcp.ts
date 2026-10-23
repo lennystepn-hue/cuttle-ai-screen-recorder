@@ -32,6 +32,23 @@ const on = (name: string, value: boolean | undefined): string[] => (value ? [`--
 /** `--no-<name>` when the input turns a default off. */
 const off = (name: string, value: boolean | undefined): string[] => (value === false ? [`--no-${name}`] : []);
 
+/** What `items` and `items_edit` pick the items by. */
+const ITEM_FILTERS = {
+  kind: z.array(z.enum(['zoom', 'mask', 'caption', 'annotation', 'motion', 'sound', 'cut'])).optional().describe('only these kinds'),
+  auto: z.boolean().optional().describe("true: only Cuttle's; false: only the ones not Cuttle's"),
+  made: z.string().optional().describe('only those Cuttle made for this: click, privacy, typing, dialog, notification, …'),
+  between: z.array(z.number()).length(2).optional().describe('only those touching these source seconds, from and to'),
+  ids: z.array(z.string()).optional(),
+};
+const itemFilters = (input: { kind?: string[]; auto?: boolean; made?: string; between?: number[]; ids?: string[] }): string[] => [
+  ...option('kind', input.kind?.join(',')),
+  ...on('auto', input.auto === true),
+  ...on('yours', input.auto === false),
+  ...option('made', input.made),
+  ...option('between', input.between?.join(',')),
+  ...option('ids', input.ids?.join(',')),
+];
+
 /** A tool that runs a cuttle command. */
 export interface CommandTool {
   name: string;
@@ -238,6 +255,21 @@ export const COMMAND_TOOLS: readonly CommandTool[] = [
       ...option('zoom', input.zoom),
       ...option('label', input.label),
     ],
+  }),
+  tool({
+    name: 'items',
+    title: 'List the items',
+    description: "The project's zooms, masks, captions, annotations, motion overlays, sounds and cuts with their ids, source seconds, on or off, and whether Cuttle made them (and for what), filtered by kind, maker, stretch or id.",
+    input: { project, ...ITEM_FILTERS },
+    readOnly: true,
+    argv: (input) => ['items', ...itemFilters(input)],
+  }),
+  tool({
+    name: 'items_edit',
+    title: 'Edit many items at once',
+    description: 'Turns on, turns off, deletes or moves (by source seconds, negative: earlier) every item the filters pick, in one write: all click zooms, every mask of a stretch. Give at least one filter; list them with items first.',
+    input: { project, ...ITEM_FILTERS, change: z.enum(['on', 'off', 'delete', 'shift']), by: z.number().optional().describe('shift: the source seconds to move them by') },
+    argv: (input) => ['items', ...itemFilters(input), ...(input.change === 'shift' ? option('shift', input.by ?? 0) : [`--${input.change}`])],
   }),
   tool({ name: 'sound_list', title: 'Built-in sounds', description: 'The built-in sounds (whoosh, click, pop, …).', input: {}, global: true, readOnly: true, argv: () => ['sound', 'list'] }),
   tool({

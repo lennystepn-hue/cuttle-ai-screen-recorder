@@ -8,6 +8,7 @@ import { fitCommand } from './commands/fit';
 import { frameCommand } from './commands/frame';
 import { importCommand, type ImportArgs } from './commands/import';
 import { init } from './commands/init';
+import { itemsCommand, type ItemsArgs } from './commands/items';
 import { motionAddCommand, motionCheckCommand, motionNewCommand, motionTemplatesCommand } from './commands/motion';
 import { musicCheckCommand, musicNewCommand, musicSetCommand, musicTemplatesCommand, soundAddCommand, soundListCommand } from './commands/music';
 import { previewCommand } from './commands/preview';
@@ -59,6 +60,12 @@ const speed = (value: string): number => {
 const degrees = (value: string): number => {
   const parsed = Number(value);
   if (!Number.isFinite(parsed) || parsed < 0 || parsed > 360) throw new InvalidArgumentError('expected degrees from 0 to 360');
+  return parsed;
+};
+/** Seconds either way: negative is earlier. */
+const signedSeconds = (value: string): number => {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) throw new InvalidArgumentError('expected seconds, negative to move earlier');
   return parsed;
 };
 const decibels = (value: string): number => {
@@ -403,6 +410,25 @@ export async function runCli(argv: readonly string[], streams?: Streams): Promis
     .option('--zoom <times>', 'a magnifier: how much it enlarges (1.5 to 4, default 2)', positive)
     .option('--label <text>', 'a name for it')
     .action(action((output, project, kind: string, options: AnnotateArgs) => annotateCommand(project, kind, options, output)));
+
+  program
+    .command('items')
+    .description("the zooms, masks, captions, annotations, motion overlays, sounds and cuts (source seconds), filtered; with --on, --off, --delete or --shift, all of them at once in one write")
+    .option('--kind <kinds...>', 'only these kinds: zoom, mask, caption, annotation, motion, sound, cut (comma-separated)')
+    .option('--auto', "only Cuttle's (made by suggest or the recording)")
+    .option('--yours', "only the ones not Cuttle's")
+    .option('--made <kind>', 'only those Cuttle made for this: click, privacy, typing, dialog, notification, …')
+    .option('--between <from,to...>', 'only those touching these source seconds')
+    .option('--ids <ids...>', 'only these (comma-separated)')
+    .option('--on', 'turn them on')
+    .option('--off', 'turn them off: kept, not in the video')
+    .option('--delete', 'delete them')
+    .option('--shift <seconds>', 'move them by these source seconds (negative: earlier)', signedSeconds)
+    .action(action((output, project, options: Omit<ItemsArgs, 'auto'> & { auto?: true; yours?: true }) => {
+      if (options.auto && options.yours) throw new CliError('usage', '--auto or --yours, not both');
+      const { yours, ...rest } = options;
+      return itemsCommand(project, { ...rest, ...(yours && { auto: false }) }, output);
+    }));
 
   const sound = program.command('sound').description('sounds at moments of the video: built-in effects or files of the project');
   sound

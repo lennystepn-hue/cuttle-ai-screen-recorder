@@ -257,6 +257,23 @@ needs `cuttle` on PATH (`pnpm cli:install`). Then ask Claude Code for a demo vid
 
 `@cuttle/sdk` builds a video in TypeScript (scenes, motion pages, music, the look) and renders it with the same engine: a release video per version, a video per customer. See [docs/sdk](docs/sdk/README.md).
 
+## On Linux, in CI and in Docker
+
+The CLI renders on Linux without a screen: videos written in code, with `render`, `preview`,
+`motion check` and `music check`. Electron draws in a virtual display (Xvfb) with Chromium's
+software GL, and encodes H.264 in software. Recording, the app and reading the screen stay on
+Windows and macOS.
+
+```bash
+# Ubuntu 24.04: ffmpeg, the virtual display, and the libraries Electron's Chromium loads
+sudo apt-get install ffmpeg xvfb xauth libnss3 libatk1.0-0t64 libatk-bridge2.0-0t64 libcups2t64 libgtk-3-0t64 libgbm1 libasound2t64 libxss1 libxshmfence1 libdrm2
+pnpm install && pnpm cli:install
+xvfb-run -a cuttle -C my-video render
+```
+
+The `Dockerfile` builds the same as an image: `docker build -t cuttle .`, then
+`docker run --rm -v "$PWD/my-video:/video" cuttle -C /video --json render`.
+
 ## With any agent (MCP)
 
 `cuttle mcp` is an MCP server over stdio: Claude Desktop, Claude Code, Cursor or any MCP client

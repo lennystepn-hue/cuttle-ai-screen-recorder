@@ -21,6 +21,11 @@
   <sub>▶ <a href="docs/media/cuttle-promo.mp4">Watch the whole 40-second video</a>. It was made with Cuttle itself: every frame is a web page written in code, the music too.</sub>
 </p>
 
+<p align="center">
+  <a href="docs/media/cuttle-0.2-features.mp4"><img src="docs/media/cuttle-0.2-features.jpg" width="880" alt="Nine scenes of the 0.2 video: zoom paths, camera layouts, annotations, sound, export, agents, code and the end card" /></a><br />
+  <sub>▶ <a href="docs/media/cuttle-0.2-features.mp4">What is new in 0.2, in 45 seconds</a>. Claude made it through <code>cuttle mcp</code>, as any agent can: nine pages, a score, one render.</sub>
+</p>
+
 ---
 
 A raw screen recording is mostly waiting: the pause before you start, the moments you look for a

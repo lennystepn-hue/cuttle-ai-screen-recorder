@@ -9,6 +9,8 @@ import { join, resolve } from 'node:path';
 import { copyTemplate } from '@cuttle/motion-kit/files';
 import { CURRENT_VERSION, parseProject, type CuttleProject, type CuttleProjectInput } from '@cuttle/project';
 
+export { newsOf } from './notes';
+
 type SceneInput = NonNullable<CuttleProjectInput['scenes']>[number];
 type OverlayInput = NonNullable<CuttleProjectInput['overlays']>[number];
 type TextInput = NonNullable<CuttleProjectInput['texts']>[number];

@@ -274,6 +274,27 @@ xvfb-run -a cuttle -C my-video render
 The `Dockerfile` builds the same as an image: `docker build -t cuttle .`, then
 `docker run --rm --init -v "$PWD/my-video:/video" cuttle -C /video --json render`.
 
+**A release video in GitHub Actions.** [`actions/release-video`](actions/release-video/action.yml)
+makes a video of what is new in a release from its notes (a title with the version, a card per
+bullet, an end card with the URL, music composed for it) and attaches the MP4s to the release. It
+runs on `ubuntu-latest`, `windows-latest` and `macos-latest`; Cuttle's own releases get one.
+
+```yaml
+on:
+  release:
+    types: [published]
+permissions:
+  contents: write
+jobs:
+  video:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: lennystepn-hue/cuttle-ai-screen-recorder/actions/release-video@main
+        with:
+          accent: '#D97757'        # the brand's colour
+          formats: 16:9 9:16
+```
+
 ## With any agent (MCP)
 
 `cuttle mcp` is an MCP server over stdio: Claude Desktop, Claude Code, Cursor or any MCP client

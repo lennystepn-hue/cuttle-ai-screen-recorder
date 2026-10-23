@@ -1,0 +1,72 @@
+# Cuttle's release video action (actions/release-video) on the three runner systems, when it or what
+# it builds on changes: the video of the app's current release notes, checked and kept as the run's
+# artifact, attached to no release.
+name: Release video
+
+on:
+  pull_request:
+    paths:
+      - actions/release-video/**
+      - packages/sdk/**
+      - apps/cli/src/electron-runner.ts
+      - .github/workflows/release-video.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-video-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  video:
+    name: release video ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: version
+        shell: bash
+        run: echo "version=$(node -p "require('./apps/desktop/package.json').version")" >> "$GITHUB_OUTPUT"
+
+      - id: video
+        uses: ./actions/release-video
+        with:
+          name: Cuttle
+          version: ${{ steps.version.outputs.version }}
+          notes-file: docs/releases/${{ steps.version.outputs.version }}.md
+          url: ${{ github.server_url }}/${{ github.repository }}
+          accent: '#D97757'
+          formats: 16:9 9:16
+          tag: ''
+
+      # both formats, H.264 and AAC, as long as the title, five cards and the end card
+      - name: the videos
+        shell: bash
+        env:
+          VIDEOS: ${{ steps.video.outputs.videos }}
+        run: |
+          node -e '
+            const { execFileSync } = require("node:child_process");
+            const videos = JSON.parse(process.env.VIDEOS);
+            if (videos.length !== 2) throw new Error(`two videos, not ${videos.length}`);
+            for (const video of videos) {
+              const probe = execFileSync("ffprobe", ["-v", "error", "-show_entries", "stream=codec_name,width,height:format=duration", "-of", "json", video], { encoding: "utf8" });
+              const { streams, format } = JSON.parse(probe);
+              console.log(video, streams.map((s) => s.codec_name + (s.width ? ` ${s.width}x${s.height}` : "")).join(", "), `${Number(format.duration).toFixed(1)} s`);
+              if (streams.map((s) => s.codec_name).join() !== "h264,aac") throw new Error(`${video}: ${probe}`);
+              if (Number(format.duration) < 15) throw new Error(`${video} is ${format.duration} s`);
+            }'
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: release-video-${{ runner.os }}
+          path: cuttle-release-video/out/*.mp4
+          if-no-files-found: ignore

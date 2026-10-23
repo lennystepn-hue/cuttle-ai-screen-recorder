@@ -39,6 +39,26 @@ jobs:
             gh release create "v$VERSION" --draft --target "$GITHUB_SHA" --title "Cuttle $VERSION" --notes-file "docs/releases/$VERSION.md"
           fi
 
+  # What is new in this version as a video, made by Cuttle's own action from the release notes and
+  # put on the draft beside the installers
+  video:
+    needs: draft
+    name: release video
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ./actions/release-video
+        with:
+          name: Cuttle
+          version: ${{ needs.draft.outputs.version }}
+          notes-file: docs/releases/${{ needs.draft.outputs.version }}.md
+          url: ${{ github.server_url }}/${{ github.repository }}
+          accent: '#D97757'
+          formats: 16:9 9:16
+          tag: v${{ needs.draft.outputs.version }}
+
   installers:
     needs: draft
     name: ${{ matrix.os }}

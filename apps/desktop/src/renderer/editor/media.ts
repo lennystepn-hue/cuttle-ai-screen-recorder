@@ -1,7 +1,7 @@
 // The project's media in the editor, read through the cuttle-media protocol (Range requests).
 import { ALL_FORMATS, Input, UrlSource, type InputAudioTrack, type InputVideoTrack, type VideoSinkDecoderOptions } from 'mediabunny';
 import { createCursorTrack, shortcutsOf, type CursorTrack, type Shortcut } from '@cuttle/timeline';
-import { parseEventsJsonl, parseMarkersJson, parseProject, parseTranscriptJson, type CuttleProject, type InputEvent, type Marker, type TranscriptFile } from '@cuttle/project';
+import { parseEventsJsonl, parseMarkersJson, parseProject, parseTranscriptJson, type CuttleProject, type InputEvent, type Marker, type TranscriptFile, parseVoiceRender, speaks, voiceLineKey, voiceRenderFiles, type VoiceRender } from '@cuttle/project';
 import { isSvg, svgBitmap } from '@cuttle/export/svg';
 import { plainIssue } from '../../shared/format';
 import { MEDIA_ORIGIN, type ProjectInfo } from '../../shared/ipc';
@@ -159,6 +159,8 @@ export interface EditorMedia {
   micPath?: string;
   /** What the computer played (`sources.system`), while the look plays it. */
   system?: AudioSource;
+  /** The narration's lines as spoken (`voiceover/<key>.json`), by their key: the player plays them, the captions show their words. */
+  narration: Map<string, VoiceRender>;
   events: InputEvent[];
   /** The pointer's track from the input events (drawn when the look's cursor is on). */
   cursor?: CursorTrack;
@@ -181,6 +183,12 @@ export interface EditorMedia {
   /** Sources tried and failed (not tried again), and warnings for people (a missing webcam file …). */
   failed: Set<string>;
   warnings: string[];
+}
+
+/** The keys of the narration's enabled lines the editor has no render of (not spoken yet, or not read yet). */
+export function unspokenLines(media: Pick<EditorMedia, 'narration'>, project: CuttleProject): string[] {
+  if (!project.look.audio.enabled) return [];
+  return project.voiceover.lines.filter(speaks).map((line) => voiceLineKey(project.voiceover, line)).filter((key) => !media.narration.has(key));
 }
 
 /** The watermark's image file, when it is on: its own, else the brand's logo. */
@@ -206,7 +214,7 @@ async function optional<T>(media: Pick<EditorMedia, 'warnings' | 'failed'>, key:
 export async function openProjectMedia(info: ProjectInfo, project: CuttleProject): Promise<EditorMedia> {
   const { sources } = project;
   const screen = await openVideo(sources.screen, 'The screen recording');
-  const media: EditorMedia = { screen, ...(info.scale !== undefined && { scale: info.scale }), events: [], markers: [], stills: new Map(), offsets: info.offsets, failed: new Set(), warnings: [] };
+  const media: EditorMedia = { screen, ...(info.scale !== undefined && { scale: info.scale }), events: [], markers: [], stills: new Map(), narration: new Map(), offsets: info.offsets, failed: new Set(), warnings: [] };
   if (sources.events) {
     const text = await optional(media, sources.events, async () => {
       const found = await fetchText(sources.events!);
@@ -302,6 +310,14 @@ export async function ensureMedia(media: EditorMedia, project: CuttleProject): P
       media.system = audio;
       added = true;
     }
+  }
+  // the narration's lines spoken since (a line not spoken yet is looked for again after the next edit)
+  for (const key of unspokenLines(media, project)) {
+    const text = await fetchText(voiceRenderFiles(key).render);
+    const parsed = text === undefined ? undefined : parseVoiceRender(text);
+    if (!parsed?.ok) continue;
+    media.narration.set(key, parsed.render);
+    added = true;
   }
   return added;
 }

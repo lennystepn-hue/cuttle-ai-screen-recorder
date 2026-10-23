@@ -6,15 +6,28 @@ import { applyCaptionFixes, captionWords, sceneSpans } from '@cuttle/timeline';
 /** Words closer than this (seconds) are one stretch of speech. */
 const SPEECH_GAP = 0.6;
 
-/** The stretches of the video with speech, in output seconds: its words (`captionWords`), closer than SPEECH_GAP joined. */
-export function speechSpans(project: CuttleProject, words: readonly TranscriptWord[], spans = sceneSpans(project.scenes, project.cuts)): { start: number; end: number }[] {
+/** The stretches with speech in words on the output timeline (any order): words closer than SPEECH_GAP joined. */
+export function speechOf(words: readonly { t: number; end: number }[]): { start: number; end: number }[] {
   const speech: { start: number; end: number }[] = [];
-  for (const word of captionWords(applyCaptionFixes(words, project.captions.fixes), spans)) {
+  for (const word of [...words].sort((a, b) => a.t - b.t)) {
     const last = speech.at(-1);
     if (last && word.t - last.end < SPEECH_GAP) last.end = Math.max(last.end, word.end);
     else speech.push({ start: word.t, end: word.end });
   }
   return speech;
+}
+
+/**
+ * The stretches of the video with speech, in output seconds: the take's words where the clips show
+ * them (`captionWords`), and the narration's (`narration`, output seconds already).
+ */
+export function speechSpans(
+  project: CuttleProject,
+  words: readonly TranscriptWord[],
+  spans = sceneSpans(project.scenes, project.cuts),
+  narration: readonly { t: number; end: number }[] = [],
+): { start: number; end: number }[] {
+  return speechOf([...captionWords(applyCaptionFixes(words, project.captions.fixes), spans), ...narration]);
 }
 
 /** The music goes down this long before speech starts, and comes back over this long after it ends (seconds). */

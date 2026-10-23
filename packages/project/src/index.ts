@@ -28,6 +28,10 @@ export {
   WEBCAM_CORNERS,
   WEBCAM_SHAPES,
   WINDOW_KINDS,
+  VOICE_LINE_MAX,
+  VOICE_MAX_LINES,
+  VOICE_PROVIDERS,
+  VoiceSchema,
   InputEventSchema,
   ProjectSchema,
   RectSchema,
@@ -47,6 +51,10 @@ export {
   type MotionOverlay,
   type Music,
   type Sound,
+  type Voice,
+  type VoiceLine,
+  type VoiceProvider,
+  type Voiceover,
   type ScriptStep,
   type StepMotion,
   type MotionScene,
@@ -95,6 +103,18 @@ export { parseEventsJsonl } from './events';
 export { ScreenTextFrameSchema, parseScreenTextJsonl, type ScreenTextFrame, type ScreenTextLine, type ScreenTextWord } from './screen-text';
 export { SEGMENTS_VERSION, SegmentsFileSchema, parseSegmentsJson, segmentOffsets, takeTime, type Segment, type SegmentsFile, type SegmentsFileParseResult } from './segments';
 export { TAKE_VERSION, TakeFileSchema, parseTakeJson, trackOffset, type TakeFile, type TakeFileParseResult, type TakeFileTrack } from './take';
+export {
+  VOICEOVER_DIR,
+  VOICE_RENDER_VERSION,
+  VoiceRenderSchema,
+  lineVoice,
+  parseVoiceRender,
+  speaks,
+  voiceLineKey,
+  voiceRenderFiles,
+  type VoiceRender,
+  type VoiceRenderParseResult,
+} from './voiceover';
 export {
   MARKERS_VERSION,
   MARKER_KINDS,

@@ -273,6 +273,16 @@ export interface MusicInfoView {
  * The editor's soundtrack (its music and sounds): `none` without music or sounds, `rendering` while it
  * renders (`key` is then the last one rendered, which plays meanwhile), `ready`, or `failed`.
  */
+/** The narration's voices as the editor offers them. */
+export interface VoiceState {
+  /** The voices on this computer, and which are downloaded. */
+  local: { name: string; label: string; language: string; bytes: number; installed: boolean }[];
+  /** Whether ElevenLabs has an API key (kept in the settings, or ELEVENLABS_API_KEY). */
+  elevenLabs: boolean;
+  /** The voices being downloaded now. */
+  downloading: string[];
+}
+
 export interface SoundStatusView {
   state: 'none' | 'rendering' | 'ready' | 'failed';
   /** The project version it is for. */
@@ -558,6 +568,15 @@ export const REQUESTS = {
   'sound:reload': z.undefined(),
   /** Copies a music template into the project's `music/` folder. */
   'sound:add-template': z.enum(MUSIC_TEMPLATE_NAMES),
+  'voice:state': z.undefined(),
+  /** Downloads a voice for this computer, by its name. */
+  'voice:download': z.string().regex(/^[a-z]{2}_[A-Z]{2}-[a-z0-9_]+-(x_low|low|medium|high)$/),
+  /** Keeps ElevenLabs' API key (encrypted with the system's keychain); null forgets it. */
+  'voice:key': z.string().max(200).nullable(),
+  /** Speaks the narration's lines not spoken yet: of cuttle.json as the editor has it. */
+  'voice:speak': z
+    .strictObject({ raw: z.record(z.string(), z.unknown()) })
+    .refine((value) => JSON.stringify(value.raw).length <= MAX_PROJECT_BYTES, 'the project is too large'),
 } as const;
 
 export type Request = keyof typeof REQUESTS;
@@ -670,6 +689,10 @@ export interface Responses {
   'sound:reload': void;
   /** The page's path in the project (`music/pulse/index.html`). */
   'sound:add-template': { src: string };
+  'voice:state': VoiceState;
+  'voice:download': void;
+  'voice:key': void;
+  'voice:speak': { spoken: number; lines: number };
 }
 
 /** A version of cuttle.json: as written, and the SHA-256 of its bytes. */

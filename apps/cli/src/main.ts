@@ -18,6 +18,7 @@ import { suggestCommand } from './commands/suggest';
 import { modelsDownloadCommand, modelsListCommand, modelsRemoveCommand } from './commands/models';
 import { transcribeCommand } from './commands/transcribe';
 import { transcriptCommand } from './commands/transcript';
+import { voiceAddCommand, voiceDownloadCommand, voiceListCommand, voiceRemoveCommand, voiceRenderCommand, voiceUseCommand, type VoiceAddArgs, type VoiceUseArgs } from './commands/voice';
 import { CliError, EXIT, toCliError } from './errors';
 import { createOutput, type Output, type Streams } from './output';
 
@@ -47,6 +48,11 @@ const collect = (value: string, previous: number[] = []): number[] => [...previo
 const fraction = (value: string): number => {
   const parsed = Number(value);
   if (!Number.isFinite(parsed) || parsed < 0 || parsed > 1) throw new InvalidArgumentError('expected a number from 0 to 1');
+  return parsed;
+};
+const speed = (value: string): number => {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed < 0.5 || parsed > 2) throw new InvalidArgumentError('expected a speed from 0.5 to 2');
   return parsed;
 };
 const degrees = (value: string): number => {
@@ -332,6 +338,47 @@ export async function runCli(argv: readonly string[], streams?: Streams): Promis
     .command('remove <name>')
     .description('remove a saved kit (projects keep what it set)')
     .action(action((output, _project, name: string) => brandRemoveCommand(name, output)));
+
+  const voice = program.command('voice').description("the narration: lines of text spoken by a voice on this computer or ElevenLabs' (by its voice ID), or recordings made elsewhere, at moments of the video");
+  voice
+    .command('list')
+    .description('the voices on this computer and which are downloaded; --elevenlabs: the voices of your ElevenLabs account')
+    .option('--elevenlabs', "the ElevenLabs account's voices (needs ELEVENLABS_API_KEY)")
+    .action(action((output, _project, options: { elevenlabs?: boolean }) => voiceListCommand(options, output)));
+  voice
+    .command('download <name>')
+    .description('download a voice once (about 21 MB), checked by its checksum')
+    .action(action((output, _project, name: string) => withSignal(output, (signal) => voiceDownloadCommand(name, output, signal))));
+  voice
+    .command('remove <name>')
+    .description('remove a downloaded voice')
+    .action(action((output, _project, name: string) => voiceRemoveCommand(name, output)));
+  const voiceSettings = (command: Command) =>
+    command
+      .option('--elevenlabs', "the id is an ElevenLabs voice ID (as their voice library shows it), not a voice on this computer")
+      .option('--speed <0.5-2>', 'how fast it speaks (default 1; ElevenLabs: 0.7 to 1.2)', speed)
+      .option('--model <id>', 'ElevenLabs: the model (default eleven_multilingual_v2)')
+      .option('--stability <0-1>', 'ElevenLabs: steadier', fraction)
+      .option('--similarity <0-1>', 'ElevenLabs: closer to the voice', fraction)
+      .option('--style <0-1>', 'ElevenLabs: more style', fraction);
+  voiceSettings(voice.command('use <id>').description('the narration\'s voice: a voice on this computer by its name (cuttle voice list), or ElevenLabs\' by its voice ID with --elevenlabs')).action(
+    action((output, project, id: string, options: VoiceUseArgs) => voiceUseCommand(project, id, options, output)),
+  );
+  voiceSettings(
+    voice
+      .command('add <text>')
+      .description('a line of the narration at a moment: source seconds (where the video shows it), or --scene seconds into a scene')
+      .requiredOption('--at <seconds>', 'source seconds, or seconds into --scene', seconds)
+      .option('--scene <id>', "a scene's id: --at counts from its start")
+      .option('--voice <id>', 'a voice for this line alone (with --elevenlabs: an ElevenLabs voice ID)')
+      .option('--file <path>', 'a recording made elsewhere (another tool\'s voice, a studio take) instead of a voice; the text is what it says, for the subtitles')
+      .option('--volume <0-1>', 'its level (default 1)', fraction)
+      .option('--label <text>', 'a name for it'),
+  ).action(action((output, project, text: string, options: VoiceAddArgs) => voiceAddCommand(project, text, options, output)));
+  voice
+    .command('render')
+    .description('speak every line not spoken yet (into voiceover/), and say where each plays and how long it is')
+    .action(action((output, project) => withSignal(output, (signal) => voiceRenderCommand(project, output, signal))));
 
   const sound = program.command('sound').description('sounds at moments of the video: built-in effects or files of the project');
   sound

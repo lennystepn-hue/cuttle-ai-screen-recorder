@@ -42,6 +42,10 @@ Cuttle runs on **Windows and macOS**. A change made on one has to keep working o
   of the default output device: everything it plays), built by `native/build-windows.mjs` with
   .NET Framework's C# compiler (C# 5). Both write 48 kHz stereo float, silence where nothing played,
   and stamp their first sample on the wall clock; a change to that protocol changes both.
+- **The narration's voices** (`core/src/voice/`): sherpa-onnx's Node addon (`sherpa-onnx-node`, an
+  N-API module with prebuilt binaries for both, kept outside the bundles like koffi) runs Piper's
+  voices offline; their archives unpack with the system's tar (Windows' own bsdtar in System32, not
+  Git's). ElevenLabs goes over HTTP. The app speaks in the media worker, never in the main process.
 - **Whisper**: Windows transcribes with ffmpeg's `whisper` filter (Gyan's builds have it); no macOS
   ffmpeg does, so `speech/whisper.ts` runs whisper.cpp's `whisper-cli` with the filter's settings
   there (`whisperEngine()`). A change to how whisper runs changes both.

@@ -39,6 +39,7 @@ export {
   type CaptionWord,
   type SpokenWord,
 } from './captions';
+export { narrationCues, narrationWords, type NarrationCue } from './narration';
 export { clickZooms, MAX_AREA, minZoomWidth, shownClicks, zoomRectFor, type ClickZoom, type ClipSpan, type ZoomScreen } from './click-zooms';
 export { TYPING_RULES, clickSamples, keyPresses, mixTyping, typingClicks, type KeyPress, type TypingClick } from './typing';
 export { HIGH, LENGTH_RULES, LOW, MIDDLE, fitLength, importance, type ImportanceInput, type LengthFit, type Level, type SourceSpan } from './importance';

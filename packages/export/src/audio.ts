@@ -122,6 +122,8 @@ export interface AudioInputs {
    * an ffmpeg expression of the output's time `t`, `duckExpression`).
    */
   system?: { input: number; offset: number; volume: number; duck?: string };
+  /** The narration's track (on the output timeline already, at its levels), mixed with the voice. */
+  narration?: number;
   /** The typing sounds' track (on the output timeline already), mixed in at its level. */
   typing?: number;
   /**
@@ -196,17 +198,30 @@ export function audioFilterGraph(segments: readonly AudioSegment[], inputs: Audi
     [`[${input}:a]aresample=${AUDIO_SAMPLE_RATE}`, 'aformat=sample_fmts=fltp:channel_layouts=stereo', 'apad', `atrim=end_sample=${total}`, 'asetpts=N/SR/TB[sound]'].join(',');
   const clicks = (input: number, then = '') =>
     [`[${input}:a]aresample=${AUDIO_SAMPLE_RATE}`, 'aformat=sample_fmts=fltp:channel_layouts=mono', 'apad', `atrim=end_sample=${total}`, `asetpts=N/SR/TB${then}[keys]`].join(',');
-  if (inputs.system) {
-    const { volume, duck } = inputs.system;
-    const system = trackChains(filters, segments, inputs.system, 'y', 'z', 'stereo');
-    filters.push(
-      `${voice}concat=n=${n}:v=0:a=1,pan=stereo|c0=c0|c1=c0[voice]`,
-      `${system}concat=n=${n}:v=0:a=1,volume=${volume}${duck ? `,volume=eval=frame:volume='${duck}'` : ''}[system]`,
-    );
-    const extra = inputs.sound !== undefined ? '[sound]' : inputs.typing !== undefined ? '[keys]' : '';
-    if (inputs.sound !== undefined) filters.push(soundtrack(inputs.sound));
-    else if (inputs.typing !== undefined) filters.push(clicks(inputs.typing, ',pan=stereo|c0=c0|c1=c0'));
-    filters.push(`[voice][system]${extra}${LIMITED_MIX(extra ? 3 : 2)}`);
+  if (inputs.system || inputs.narration !== undefined) {
+    // everything the video plays, summed and limited
+    const mix = ['[voice]'];
+    const system = inputs.system && trackChains(filters, segments, inputs.system, 'y', 'z', 'stereo');
+    filters.push(`${voice}concat=n=${n}:v=0:a=1,pan=stereo|c0=c0|c1=c0[voice]`);
+    if (inputs.system && system) {
+      const { volume, duck } = inputs.system;
+      filters.push(`${system}concat=n=${n}:v=0:a=1,volume=${volume}${duck ? `,volume=eval=frame:volume='${duck}'` : ''}[system]`);
+      mix.push('[system]');
+    }
+    if (inputs.narration !== undefined) {
+      filters.push(
+        [`[${inputs.narration}:a]aresample=${AUDIO_SAMPLE_RATE}`, 'aformat=sample_fmts=fltp:channel_layouts=mono', 'apad', `atrim=end_sample=${total}`, 'asetpts=N/SR/TB', 'pan=stereo|c0=c0|c1=c0[narration]'].join(','),
+      );
+      mix.push('[narration]');
+    }
+    if (inputs.sound !== undefined) {
+      filters.push(soundtrack(inputs.sound));
+      mix.push('[sound]');
+    } else if (inputs.typing !== undefined) {
+      filters.push(clicks(inputs.typing, ',pan=stereo|c0=c0|c1=c0'));
+      mix.push('[keys]');
+    }
+    filters.push(`${mix.join('')}${LIMITED_MIX(mix.length)}`);
     return filters.join(';');
   }
   if (inputs.sound !== undefined) {
@@ -240,6 +255,8 @@ export interface MuxArgsOptions {
   mic?: string;
   /** The system audio's file, when the graph uses it (the input after the mic). */
   system?: string;
+  /** The narration's track, when the graph mixes it in (the input after the system audio). */
+  narration?: string;
   /** The typing sounds' track, when the graph mixes it in (the input after the mic and the system audio). */
   typing?: string;
   /** The soundtrack (music, sounds, typing), when the graph mixes it in (the input after the mic and the system audio). */
@@ -253,8 +270,8 @@ export interface MuxArgsOptions {
 }
 
 /** ffmpeg arguments that add the audio (and the chapters) to the video without re-encoding it: AAC 48 kHz, moov at the front. */
-export function muxArgs({ video, mic, system, typing, sound, graph, graphFile, chapters, out }: MuxArgsOptions): string[] {
-  const inputs = 1 + [mic, system, typing, sound].filter((input) => input !== undefined).length;
+export function muxArgs({ video, mic, system, narration, typing, sound, graph, graphFile, chapters, out }: MuxArgsOptions): string[] {
+  const inputs = 1 + [mic, system, narration, typing, sound].filter((input) => input !== undefined).length;
   return [
     '-hide_banner',
     '-nostdin',
@@ -265,6 +282,7 @@ export function muxArgs({ video, mic, system, typing, sound, graph, graphFile, c
     video,
     ...(mic ? ['-i', mic] : []),
     ...(system ? ['-i', system] : []),
+    ...(narration ? ['-i', narration] : []),
     ...(typing ? ['-i', typing] : []),
     ...(sound ? ['-i', sound] : []),
     ...(chapters ? ['-i', chapters] : []),

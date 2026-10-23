@@ -150,6 +150,35 @@ describe.runIf(enabled)('cuttle in Electron', () => {
     }
   }, 240_000);
 
+  it('speaks the narration into the video: a recording made elsewhere as a line, its words in the subtitles', () => {
+    const file = join(project, 'cuttle.json');
+    const before = readFileSync(file, 'utf8');
+    try {
+      // a voice made elsewhere: a second of a 1 kHz tone, a line 1.5 s into the take
+      mkdirSync(join(project, 'audio'), { recursive: true });
+      spawnSync('ffmpeg', ['-v', 'error', '-f', 'lavfi', '-i', 'sine=frequency=1000:duration=1', '-y', join(project, 'audio', 'line.wav')]);
+      const added = cuttle('-C', project, 'voice', 'add', 'one two three', '--at', '1.5', '--file', 'audio/line.wav');
+      expect(added.code).toBe(0);
+      expect(added.json.line).toMatchObject({ id: 'v1', text: 'one two three', at: 1.5, file: 'audio/line.wav' });
+      // render speaks (converts) it first
+      const out = join(project, 'out', 'narrated.mp4');
+      const { code, json } = cuttle('-C', project, 'render', '-o', out, '--srt');
+      expect(code).toBe(0);
+      expect(json.subtitles).toEqual([join(project, 'out', 'narrated.srt')]);
+      const srt = readFileSync(join(project, 'out', 'narrated.srt'), 'utf8');
+      // from the tone's start (where the line plays), held a moment after it as captions are
+      expect(srt).toMatch(/^1\n00:00:01,5\d\d --> 00:00:0[23],\d{3}\none two three\n$/);
+      // the line is heard where it plays: the 1 kHz tone, over the test mic's 440 Hz
+      const tone = (from: number) =>
+        Number(/mean_volume: (-?[\d.]+) dB/.exec(spawnSync('ffmpeg', ['-v', 'info', '-ss', String(from), '-t', '0.5', '-i', out, '-af', 'bandpass=f=1000:width_type=q:w=20,bandpass=f=1000:width_type=q:w=20,volumedetect', '-f', 'null', '-'], { encoding: 'utf8' }).stderr)?.[1]);
+      expect(tone(1.8)).toBeGreaterThan(tone(0.5) + 20);
+      const rendered = cuttle('-C', project, 'voice', 'render');
+      expect(rendered.json).toMatchObject({ lines: [{ id: 'v1', spoken: false, at: 1.5 }], notes: [] });
+    } finally {
+      writeFileSync(file, before);
+    }
+  }, 240_000);
+
   it("writes the script's steps into the video as its chapters, where the take reached them", () => {
     const file = join(project, 'cuttle.json');
     const before = readFileSync(file, 'utf8');

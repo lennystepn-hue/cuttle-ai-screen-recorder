@@ -44,6 +44,10 @@ export const WINDOW_CHANNELS = {
       'sound:params',
       'sound:reload',
       'sound:add-template',
+      'voice:state',
+      'voice:download',
+      'voice:key',
+      'voice:speak',
     ],
     events: [
       'media:state',

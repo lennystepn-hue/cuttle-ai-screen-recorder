@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { exportProject, ExportError, type EncoderPreference } from '@cuttle/export';
 import type { ExportEnd, ExportFile, ExportProgress, ExportTarget, SUBTITLE_FILES } from '../shared/ipc';
 import { bundlePath } from './protocols';
+import { speakNarration } from './voice';
 
 type Format = ExportTarget;
 
@@ -37,6 +38,12 @@ export class ExportRun {
   private async run(projectDir: string, formats: readonly Format[], settings: ExportSettings, onProgress: (progress: ExportProgress) => void): Promise<ExportEnd> {
     const files: ExportFile[] = [];
     const started = Date.now();
+    // the narration's lines not spoken yet are spoken first (the export reads them from voiceover/)
+    try {
+      await speakNarration(projectDir);
+    } catch (error) {
+      return { state: 'failed', files, format: formats[0]!, code: 'voice', message: `the narration could not be spoken: ${error instanceof Error ? error.message : String(error)}` };
+    }
     for (const [position, format] of formats.entries()) {
       let last = 0;
       try {

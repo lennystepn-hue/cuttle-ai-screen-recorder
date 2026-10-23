@@ -21,7 +21,7 @@ const desktop = fileURLToPath(new URL('..', import.meta.url));
 const build = join(desktop, 'build');
 const stage = join(build, 'stage');
 const manifest = JSON.parse(readFileSync(join(desktop, 'package.json'), 'utf8'));
-const NATIVE = ['koffi', 'uiohook-napi'];
+const NATIVE = ['koffi', 'uiohook-napi', 'sherpa-onnx-node'];
 
 const cli = join(desktop, '..', 'cli', 'dist');
 const skill = join(desktop, '..', '..', 'skill', 'cuttle');

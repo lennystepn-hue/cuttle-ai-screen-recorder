@@ -2,6 +2,8 @@ import { join, resolve } from 'node:path';
 import { runInElectron } from '../electron-runner';
 import type { Output } from '../output';
 import { readProjectFile } from '@cuttle/core';
+import { speaks } from '@cuttle/project';
+import { voiceRenderCommand } from './voice';
 
 export interface RenderArgs {
   format?: string;
@@ -25,9 +27,14 @@ export interface RenderResult {
   stats: { gpu: string; codec: string; hardwareAcceleration: string; bitrate: number; totalMs: number } & Record<string, unknown>;
 }
 
+/** `output` without a result of its own: a step of another command says only how it goes. */
+const quietly = (output: Output): Output => ({ ...output, result: () => {} });
+
 /** `cuttle render`: the project as an MP4 (default out/<format>.mp4 in the project). */
 export async function renderCommand(projectDir: string, args: RenderArgs, output: Output, signal: AbortSignal): Promise<RenderResult> {
   const file = await readProjectFile(projectDir); // fails fast, before Electron starts, on a broken project
+  // the narration's lines not spoken yet are spoken first (the export reads them from voiceover/)
+  if (file.project.look.audio.enabled && file.project.voiceover.lines.some(speaks)) await voiceRenderCommand(file.dir, quietly(output), signal);
   const out = args.out ? resolve(args.out) : join(file.dir, 'out', `${(args.format ?? 'export').replace(':', 'x')}.mp4`);
   output.info(`rendering ${out} …`);
   const result = await runInElectron<RenderResult>(

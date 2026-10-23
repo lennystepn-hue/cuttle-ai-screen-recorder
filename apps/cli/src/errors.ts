@@ -25,6 +25,9 @@ const EXIT_CODES: Record<string, number> = {
   // @cuttle/core
   conflict: EXIT.usage,
   'model-missing': EXIT.usage,
+  'voice-missing': EXIT.usage,
+  'voice-key': EXIT.usage,
+  voice: EXIT.render,
   download: EXIT.device,
   'ffmpeg-old': EXIT.device,
   'ocr-missing': EXIT.device,

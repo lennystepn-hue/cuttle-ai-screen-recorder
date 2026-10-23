@@ -15,6 +15,7 @@
     "@cuttle/timeline": "workspace:*",
     "commander": "15.0.0",
     "koffi": "3.3.2",
+    "sherpa-onnx-node": "1.13.8",
     "uiohook-napi": "1.5.5"
   }
 }

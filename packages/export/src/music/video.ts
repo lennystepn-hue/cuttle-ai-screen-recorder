@@ -13,6 +13,8 @@ export interface VideoInputs {
   events: readonly InputEvent[];
   words: readonly TranscriptWord[];
   markers: readonly Marker[];
+  /** The narration's words, in output seconds (they are spoken where they are, not where clips show them). */
+  narration?: readonly { t: number; end: number; text: string }[];
 }
 
 /** Each output second where the clips show source second `t` (once per showing). */
@@ -54,8 +56,9 @@ export function videoData(project: CuttleProject, inputs: VideoInputs): VideoDat
   keys.sort((a, b) => a - b);
   const sparse: number[] = [];
   for (const t of keys) if (sparse.length === 0 || t - sparse.at(-1)! >= KEY_GAP) sparse.push(t);
-  const words = captionWords(applyCaptionFixes(inputs.words, project.captions.fixes), spans).map(({ t, end, text }) => ({ t, end, text }));
-  const speech: VideoData['speech'] = speechSpans(project, inputs.words, spans);
+  const narrated = inputs.narration ?? [];
+  const words = [...captionWords(applyCaptionFixes(inputs.words, project.captions.fixes), spans), ...narrated].map(({ t, end, text }) => ({ t, end, text })).sort((a, b) => a.t - b.t);
+  const speech: VideoData['speech'] = speechSpans(project, inputs.words, spans, narrated);
   const markers: VideoData['markers'] = [];
   for (const marker of inputs.markers) {
     for (const t of shown(spans, marker.t)) markers.push({ t, kind: marker.kind, ...(marker.label !== undefined && { label: marker.label }) });

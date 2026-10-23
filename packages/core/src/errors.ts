@@ -10,6 +10,12 @@ export type CoreErrorCode =
   | 'model-missing'
   /** A model download failed (network, size, checksum). */
   | 'download'
+  /** A narration's local voice is not downloaded. */
+  | 'voice-missing'
+  /** ElevenLabs is asked for and no API key is set (ELEVENLABS_API_KEY, or the app's settings). */
+  | 'voice-key'
+  /** A voice could not speak a line (the engine failed, ElevenLabs answered with an error). */
+  | 'voice'
   /** ffmpeg has no `whisper` filter (before 8.0, or a build without it). */
   | 'ffmpeg-old'
   /** The screen's text cannot be read here (neither Windows nor macOS, PowerShell refused, no OCR language, no cuttle-capture). */

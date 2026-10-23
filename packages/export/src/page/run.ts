@@ -77,6 +77,7 @@ async function withRendering<T>(job: PageJob, makePlan: (timeline: Timeline) => 
       cursor: job.events ? createCursorTrack(job.events) : undefined,
       ...(job.shortcuts && { shortcuts: job.shortcuts }),
       ...(job.transcript && { transcript: job.transcript }),
+      ...(job.narration && { narration: job.narration }),
       ...(job.captions !== undefined && { captions: job.captions }),
     });
     const plan = makePlan(timeline);

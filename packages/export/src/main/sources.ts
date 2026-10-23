@@ -1,19 +1,9 @@
 import { readFile, stat } from 'node:fs/promises';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
-import {
-  parseEventsJsonl,
-  parseMarkersJson,
-  parseProjectJson,
-  parseTakeJson,
-  parseTranscriptJson,
-  trackOffset,
-  type CuttleProject,
-  type InputEvent,
-  type TakeFile,
-  type TranscriptWord,
-} from '@cuttle/project';
+import { parseEventsJsonl, parseMarkersJson, parseProjectJson, parseTakeJson, parseTranscriptJson, trackOffset, type CuttleProject, type InputEvent, type TakeFile, type TranscriptWord, speaks } from '@cuttle/project';
 import { shortcutsOf, type Shortcut } from '@cuttle/timeline';
 import { ExportError } from '../errors';
+import { loadNarration, type NarrationLine } from './narration';
 import type { MotionPages } from '../job';
 import type { TakeInputs } from '../motion/take';
 
@@ -31,6 +21,8 @@ export interface ProjectSources {
   mic?: { path: string; offset: number };
   /** What the computer played (`sources.system`), while `look.audio.system` is on. */
   system?: { path: string; offset: number };
+  /** The narration's enabled lines as rendered (`cuttle voice render`), while the audio is on. */
+  narration?: NarrationLine[];
   events?: InputEvent[];
   /** The take's key counts, for the typing sounds (loaded whether the cursor shows or not). */
   keys?: InputEvent[];
@@ -153,9 +145,10 @@ function offsetFor(take: TakeFile | undefined, track: 'webcam' | 'mic' | 'system
 
 /**
  * Reads and validates cuttle.json, take.json and events.jsonl and checks that every file the
- * export reads exists. Sources that the look switches off are left out.
+ * export reads exists. Sources that the look switches off are left out. The narration's lines must
+ * all be spoken (`cuttle voice render`), unless `narration` is `spoken`: then those not yet are left out.
  */
-export async function loadSources(projectDir: string): Promise<ProjectSources> {
+export async function loadSources(projectDir: string, options: { narration?: 'whole' | 'spoken' } = {}): Promise<ProjectSources> {
   const projectPath = join(projectDir, PROJECT_FILE);
   let text: string;
   try {
@@ -189,6 +182,11 @@ export async function loadSources(projectDir: string): Promise<ProjectSources> {
     // the cleaned-up mic plays in its place, in step with it (take.json describes the mic itself)
     const clean = look.audio.cleanup && sources.cleanMic ? await existing(projectDir, sources.cleanMic, 'cleaned-up mic (sources.cleanMic)') : undefined;
     result.mic = { path: clean ?? path, offset: offsetFor(take, 'mic', path, screen) };
+  }
+  if (look.audio.enabled && project.voiceover.lines.some(speaks)) {
+    // stills show the words of the lines spoken so far; a video needs every line
+    result.narration = await loadNarration(projectDir, project, options.narration === 'spoken');
+    result.inputs.push(...result.narration.map((line) => line.sound), ...project.voiceover.lines.flatMap((line) => (line.file === undefined ? [] : [resolve(projectDir, line.file)])));
   }
   if (screen && look.audio.enabled && look.audio.system && sources.system) {
     const path = await existing(projectDir, sources.system, "the computer's sound (sources.system)");

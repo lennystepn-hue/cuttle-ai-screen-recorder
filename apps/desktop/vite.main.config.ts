@@ -20,7 +20,7 @@ export default defineConfig({
         'media-worker': fileURLToPath(new URL('./src/workers/media.ts', import.meta.url)),
         'recorder-host': fileURLToPath(new URL('./src/workers/recorder.ts', import.meta.url)),
       },
-      external: ['electron', 'koffi', 'uiohook-napi'],
+      external: ['electron', 'koffi', 'uiohook-napi', 'sherpa-onnx-node'],
       output: { format: 'es', entryFileNames: '[name].mjs', chunkFileNames: '[name]-[hash].mjs' },
     },
   },

@@ -82,10 +82,29 @@ export interface LengthReport {
   written: boolean;
 }
 
-export type MediaJob = ProxyJob | ThumbnailsJob | PeaksJob | SuggestJob | TranscribeJob | SpeechEditsJob | ReadScreenJob | PrivacyEditsJob | FitLengthJob;
+/**
+ * Speaks the narration's lines not spoken yet of a project (`input`: its folder) into its voiceover/
+ * folder: the lines of `project` (cuttle.json as the editor has it, else as saved).
+ */
+export interface VoiceJob {
+  job: 'voice';
+  input: string;
+  output: string;
+  project?: unknown;
+  /** ElevenLabs' API key, for lines in its voices. */
+  elevenLabsKey?: string;
+}
 
-/** What a job answers besides being done: the thumbnails' layout, or a length fit's report. */
-export type JobResult = ThumbnailsMeta | LengthReport;
+/** What a narration job did: how many lines it spoke, of how many that play. */
+export interface VoiceReport {
+  spoken: number;
+  lines: number;
+}
+
+export type MediaJob = ProxyJob | ThumbnailsJob | PeaksJob | SuggestJob | TranscribeJob | SpeechEditsJob | ReadScreenJob | PrivacyEditsJob | FitLengthJob | VoiceJob;
+
+/** What a job answers besides being done: the thumbnails' layout, a length fit's report, or a narration's. */
+export type JobResult = ThumbnailsMeta | LengthReport | VoiceReport;
 
 export interface ThumbnailsMeta {
   interval: number;

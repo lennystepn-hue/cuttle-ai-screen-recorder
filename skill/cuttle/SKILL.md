@@ -33,7 +33,9 @@ cuttle --version
 
 If the command is missing, {{INSTALL_CLI}}, and to open a new terminal. Recording and
 rendering also need ffmpeg on PATH (Windows: `winget install Gyan.FFmpeg`, macOS:
-`brew install ffmpeg`). Recording works on Windows and macOS. macOS asks the app that runs
+`brew install ffmpeg`). Recording works on Windows and macOS. On Linux (a server, CI, a container)
+cuttle renders without recording: videos written in code, `render`, `preview`, `motion check` and
+`music check`, each run inside a virtual display (`xvfb-run -a cuttle …`). macOS asks the app that runs
 `cuttle` (the terminal) for Screen Recording, Microphone and Camera, and the input log needs Input
 Monitoring: a `permission-denied` error or an input warning names the setting to ask the user for.
 

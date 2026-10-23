@@ -29,3 +29,19 @@ jobs:
       - run: node -e "console.log(require('electron'))"
       - run: pnpm typecheck
       - run: xvfb-run -a pnpm cli:check
+      # the engine's goldens for Linux, made here once (-u) and kept as the run's artifact to look at
+      - run: pnpm exec playwright install --with-deps chromium
+      - run: pnpm exec vitest run --project browser -u || true
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-goldens
+          path: packages/*/test/__golden__/**/*.linux.png
+      # the image, and a video of the kit's templates rendered in it
+      - run: docker build -t cuttle .
+      - run: |
+          mkdir -p "$RUNNER_TEMP/docker"
+          docker run --rm -v "$RUNNER_TEMP/docker:/work" cuttle init /work/reel
+          docker run --rm -v "$RUNNER_TEMP/docker:/work" cuttle -C /work/reel motion new title --first
+          docker run --rm -v "$RUNNER_TEMP/docker:/work" cuttle -C /work/reel motion new end-card
+          docker run --rm -v "$RUNNER_TEMP/docker:/work" cuttle -C /work/reel --json render
+          ffprobe -v error -show_entries stream=codec_name,width,height:format=duration -of csv=p=0 "$RUNNER_TEMP/docker/reel/out/16x9.mp4"

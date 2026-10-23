@@ -577,6 +577,18 @@ describe.runIf(enabled)('the Cuttle app', () => {
     expect(tall).toEqual(['h264,1080,1920', 'aac']);
     const length = (file: string) => Number(spawnSync('ffprobe', ['-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', join(project, 'out', file)], { encoding: 'utf8' }).stdout.trim());
     expect(length('9x16.mp4')).toBeCloseTo(length('export.mp4'), 1);
+    // transparent, for another editor: no background, the window on nothing
+    await editor.click('text=Export again');
+    await editor.evaluate(() => [...document.querySelectorAll<HTMLElement>('.format')].find((button) => button.textContent?.includes('9:16'))!.click());
+    await chooseIn(editor, '[data-testid=export-file-kind]', 'WebM, transparent');
+    await editor.waitForFunction(() => document.querySelector('[data-testid=export-note]')?.textContent?.includes('Saves out/export.webm'));
+    await editor.click('[data-testid=export-start]');
+    await exported(editor);
+    const webm = join(project, 'out', 'export.webm');
+    expect(spawnSync('ffprobe', ['-v', 'error', '-show_entries', 'stream=codec_name:stream_tags=alpha_mode', '-of', 'csv=p=0', webm], { encoding: 'utf8' }).stdout.trim().split(/\r?\n/)).toEqual(['vp9,1', 'opus']);
+    const rgba = spawnSync('ffmpeg', ['-hide_banner', '-v', 'error', '-c:v', 'libvpx-vp9', '-ss', '1', '-i', webm, '-frames:v', '1', '-f', 'rawvideo', '-pix_fmt', 'rgba', '-'], { maxBuffer: 16 * 1024 * 1024 }).stdout;
+    const alphaAt = (x: number, y: number) => rgba[(y * FIXTURE_OUTPUT.width + x) * 4 + 3];
+    expect([alphaAt(2, 2), alphaAt(FIXTURE_OUTPUT.width / 2, FIXTURE_OUTPUT.height / 2)]).toEqual([0, 255]);
     await editor.keyboard.press('Escape');
     expect(await editor.locator('[data-testid=export-sheet]').count()).toBe(0);
   }, 150_000);

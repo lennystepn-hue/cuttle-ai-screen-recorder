@@ -69,6 +69,8 @@ export interface ExportJob {
   narration?: { t: number; end: number; text: string }[];
   /** Burn the captions in (default: the project's `captions.enabled`). */
   captions?: boolean;
+  /** Frames with transparency, no background: a video encodes VP9 with alpha in WebM, a still keeps its alpha. */
+  transparent?: boolean;
   /** Scene index → image of a still scene. */
   stills: Record<number, string>;
   /** Image for `look.background.preset: 'image'`. */

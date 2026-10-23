@@ -399,8 +399,9 @@ export const COMMAND_TOOLS: readonly CommandTool[] = [
       srt: z.boolean().optional(),
       vtt: z.boolean().optional(),
       loudness: z.enum(['youtube', 'podcast', 'broadcast', 'off']).optional().describe("the sound at a platform's loudness: youtube -14 LUFS (also Spotify, TikTok, Instagram), podcast -16, broadcast -23 (default: the project's)"),
+      transparent: z.boolean().optional().describe('with transparency, no background, for another editor: VP9 with alpha in a .webm, or ProRes 4444 when out ends in .mov'),
     },
-    argv: (input) => ['render', ...option('format', input.format), ...options('format', input.formats), ...option('all', input.all), ...option('out', input.out), ...off('captions', input.captions), ...on('srt', input.srt), ...on('vtt', input.vtt), ...option('loudness', input.loudness)],
+    argv: (input) => ['render', ...option('format', input.format), ...options('format', input.formats), ...option('all', input.all), ...option('out', input.out), ...off('captions', input.captions), ...on('srt', input.srt), ...on('vtt', input.vtt), ...option('loudness', input.loudness), ...on('alpha', input.transparent)],
   }),
   tool({
     name: 'import',

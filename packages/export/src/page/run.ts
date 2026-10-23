@@ -6,7 +6,7 @@ import { host, PageError } from './host';
 import { loadImage } from './images';
 import { openVideo, type VideoFile } from './media';
 import { SceneSources } from './scene-sources';
-import { createVideoOutput } from './video-output';
+import { createAlphaOutput, createVideoOutput } from './video-output';
 
 /** Seconds before a scene first shows that its decoders start. */
 const LOOKAHEAD_SECONDS = 1;
@@ -83,7 +83,7 @@ async function withRendering<T>(job: PageJob, makePlan: (timeline: Timeline) => 
     const plan = makePlan(timeline);
     if (job.backgroundImage) background = await loadImage(job.backgroundImage, probeMaxTextureSize(), 'the background image');
     if (job.watermarkImage) watermark = await loadImage(job.watermarkImage, probeMaxTextureSize(), 'the watermark image');
-    renderer = createRenderer(canvas, project, { assets, screenSize, backgroundImage: background, ...(watermark && { watermarkImage: watermark }) });
+    renderer = createRenderer(canvas, project, { assets, screenSize, backgroundImage: background, ...(watermark && { watermarkImage: watermark }), ...(job.transparent && { transparent: true }) });
     const gl = canvas.getContext('webgl2')!;
     const maxTextureSize = gl.getParameter(gl.MAX_TEXTURE_SIZE) as number;
     sources = new SceneSources(
@@ -109,7 +109,7 @@ async function exportVideo(job: ExportJob): Promise<PageSuccess> {
   const started = performance.now();
   const fps = job.project.output.fps;
   return withRendering(job, (timeline) => planFrames(timeline, fps), Math.round(LOOKAHEAD_SECONDS * fps), async ({ timeline, plan, renderer, canvas, gl, sources }) => {
-    const output = await createVideoOutput(canvas, job.project.output, job.encoder);
+    const output = job.transparent ? await createAlphaOutput(canvas, job.project.output) : await createVideoOutput(canvas, job.project.output, job.encoder);
     const timings = { decodeMs: 0, renderMs: 0, encodeMs: 0, finalizeMs: 0, totalMs: 0 };
     try {
       for (let frame = 0; frame < plan.frames; frame++) {

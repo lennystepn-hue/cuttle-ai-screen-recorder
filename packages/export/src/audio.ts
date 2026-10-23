@@ -353,6 +353,55 @@ export function muxArgs({ video, audio, chapters, out }: MuxArgsOptions): string
   ];
 }
 
+/** The files a transparent video is written as: VP9 with alpha in WebM, or ProRes 4444 in MOV (for Final Cut, Premiere, Resolve). */
+export type AlphaContainer = 'webm' | 'mov';
+
+export interface AlphaMuxArgsOptions {
+  /** The page's video: VP9 with alpha in WebM. */
+  video: string;
+  /** The mix (`mixArgs`), encoded here: Opus in WebM, PCM in MOV. */
+  audio: string;
+  /** Filters on the sound on its way in (`masterFilter`). */
+  master?: string;
+  chapters?: string;
+  container: AlphaContainer;
+  out: string;
+}
+
+/**
+ * ffmpeg arguments that put the sound beside a transparent video: in WebM the video copied (its
+ * alpha kept beside each frame) and the sound as Opus; in MOV the video decoded with libvpx (whose
+ * decoder reads the alpha) and encoded as ProRes 4444 with 10-bit alpha, the sound as 16-bit PCM.
+ */
+export function alphaMuxArgs({ video, audio, master, chapters, container, out }: AlphaMuxArgsOptions): string[] {
+  const mov = container === 'mov';
+  return [
+    '-hide_banner',
+    '-nostdin',
+    '-loglevel',
+    'error',
+    '-y',
+    ...(mov ? ['-c:v', 'libvpx-vp9'] : []),
+    '-i',
+    video,
+    '-i',
+    audio,
+    ...(chapters ? ['-i', chapters] : []),
+    '-map',
+    '0:v:0',
+    '-map',
+    '1:a:0',
+    ...(master ? ['-af', master] : []),
+    ...(chapters ? ['-map_chapters', '2'] : []),
+    ...(mov ? ['-c:v', 'prores_ks', '-profile:v', '4444', '-pix_fmt', 'yuva444p10le', '-vendor', 'apl0', '-c:a', 'pcm_s16le'] : ['-c:v', 'copy', '-c:a', 'libopus', '-b:a', AUDIO_BITRATE]),
+    '-ar',
+    String(AUDIO_SAMPLE_RATE),
+    '-f',
+    mov ? 'mov' : 'webm',
+    out,
+  ];
+}
+
 /** dB the master limiter stays under its ceiling: the AAC encoder's overshoot on loud peaks. */
 export const CODEC_HEADROOM = 0.5;
 

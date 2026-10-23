@@ -18,6 +18,9 @@ export type ExportTarget = (typeof EXPORT_TARGETS)[number];
 export const ENCODERS = ['auto', 'hardware', 'software'] as const;
 /** Subtitle files an export can write next to the video (as @cuttle/export's SUBTITLE_FORMATS). */
 export const SUBTITLE_FILES = ['srt', 'vtt'] as const;
+/** What an export writes: an MP4, or a transparent video for another editor (VP9 with alpha in WebM, ProRes 4444 in MOV). */
+export const EXPORT_FILES = ['mp4', 'webm', 'mov'] as const;
+export type ExportFileKind = (typeof EXPORT_FILES)[number];
 
 /** The origin of the media protocol in an editor window: `cuttle-media://project/<path in the project>`. */
 export const MEDIA_ORIGIN = 'cuttle-media://project';
@@ -373,10 +376,12 @@ export const REQUESTS = {
   'export:copy': z.string().max(20_000),
   'media:state': z.undefined(),
   'media:retry': z.undefined(),
-  'export:targets': z.array(z.enum(EXPORT_TARGETS)).min(1).max(4),
+  'export:targets': z.strictObject({ formats: z.array(z.enum(EXPORT_TARGETS)).min(1).max(4), file: z.enum(EXPORT_FILES) }),
   'export:start': z.strictObject({
     formats: z.array(z.enum(EXPORT_TARGETS)).min(1).max(4),
     encoder: z.enum(ENCODERS),
+    /** The file: an MP4 (default), or a transparent WebM or MOV. */
+    file: z.enum(EXPORT_FILES).optional(),
     /** Burn the subtitles in (default: the project's `captions.enabled`). */
     captions: z.boolean().optional(),
     /** Subtitle files next to each video. */

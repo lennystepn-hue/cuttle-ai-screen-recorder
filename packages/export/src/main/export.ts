@@ -1,12 +1,12 @@
 import { randomUUID } from 'node:crypto';
 import { mkdir, mkdtemp, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { basename, dirname, join, relative, resolve, sep } from 'node:path';
+import { basename, dirname, extname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { LOUDNESS, type LoudnessTarget } from '@cuttle/project';
 import { applyCaptionFixes, captionCues, captionWords, sceneSpans, stepChapters, toSrt, toVtt, totalDuration, typingClicks, type Chapter } from '@cuttle/timeline';
 import { app } from 'electron';
-import { INLINE_GRAPH_LIMIT, audioFilterGraph, encodeArgs, masterFilter, meterArgs, mixArgs, muxArgs, parseMeter, planAudio } from '../audio';
+import { INLINE_GRAPH_LIMIT, alphaMuxArgs, audioFilterGraph, encodeArgs, masterFilter, meterArgs, mixArgs, muxArgs, parseMeter, planAudio, type AlphaContainer } from '../audio';
 import { frameCount } from '../frame-plan';
 import { chapterMetadata } from '../chapters';
 import { duckExpression, speechSpans } from '../music/duck';
@@ -44,6 +44,19 @@ export interface ExportOptions {
   subtitles?: readonly SubtitleFormat[];
   /** The loudness the mix is brought to (default: the project's `look.audio.loudness`). */
   loudness?: LoudnessTarget;
+  /**
+   * Frames with transparency, no background, for another editor to lay over its own: `out` names a
+   * `.webm` (VP9 with alpha, Opus sound) or a `.mov` (ProRes 4444, PCM sound).
+   */
+  transparent?: boolean;
+}
+
+/** What a batch of transparent videos is written as: all WebM or all MOV, by their names. */
+function alphaContainer(outs: readonly string[]): AlphaContainer {
+  const kinds = new Set(outs.map((out) => extname(out).toLowerCase()));
+  if ([...kinds].some((kind) => kind !== '.webm' && kind !== '.mov')) throw new ExportError('invalid-project', 'a transparent video is a .webm (VP9 with alpha) or a .mov (ProRes 4444): name the file so');
+  if (kinds.size > 1) throw new ExportError('invalid-project', 'transparent videos of one export are all .webm or all .mov');
+  return kinds.has('.mov') ? 'mov' : 'webm';
 }
 
 /** The most a quiet mix is raised (dB): more would lift its noise into the video. */
@@ -301,6 +314,8 @@ export async function exportProjects(opts: BatchExportOptions): Promise<ExportRe
   await app.whenReady();
   const projectDir = resolve(opts.projectDir);
   const outs = opts.targets.map((target) => resolve(target.out));
+  // transparent: each a WebM (VP9 with alpha) or a MOV (ProRes 4444), by its name
+  const alpha = opts.transparent ? alphaContainer(outs) : undefined;
   const twice = outs.find((out, i) => outs.findIndex((other) => samePath(other, out)) !== i);
   if (twice) throw new ExportError('invalid-project', `two formats would write ${twice}: give each its own file`);
   const sources = await loadSources(projectDir);
@@ -342,6 +357,7 @@ export async function exportProjects(opts: BatchExportOptions): Promise<ExportRe
     backgroundImage: sources.backgroundImage,
     watermarkImage: sources.watermarkImage,
     ...(sources.motion && { motion: sources.motion }),
+    ...(alpha && { transparent: true }),
     encoder: opts.encoder ?? 'auto',
   });
   for (const out of outs) {
@@ -457,10 +473,11 @@ export async function exportProjects(opts: BatchExportOptions): Promise<ExportRe
         master = masterFilter(gain, LOUDNESS[target].truePeak);
         loudness = { target, expected: LOUDNESS[target], mix: measured, gain, video: { lufs: null, truePeak: null } };
       }
-      await runFfmpeg(encodeArgs({ mix, ...(master && { master }), out: audio }), signal);
-      // what the platform will hear: the sound every video gets, measured
-      if (loudness) loudness.video = parseMeter(await runFfmpeg(meterArgs(audio), signal));
-      return { audio, music, loudness, audioMs: Math.round(performance.now() - audioStarted) };
+      // an MP4's AAC once for all of them; a transparent video's sound is encoded as it is muxed
+      if (!alpha) await runFfmpeg(encodeArgs({ mix, ...(master && { master }), out: audio }), signal);
+      // what the platform will hear: the sound every video gets, measured (a transparent one's once muxed)
+      if (loudness && !alpha) loudness.video = parseMeter(await runFfmpeg(meterArgs(audio), signal));
+      return { audio: alpha ? mix : audio, master, music, loudness, audioMs: Math.round(performance.now() - audioStarted) };
     })();
     sound.catch(() => {});
 
@@ -478,7 +495,7 @@ export async function exportProjects(opts: BatchExportOptions): Promise<ExportRe
         opening.catch(() => {});
       }
       const job = jobOf(target.format);
-      const video = join(folder, `video-${index}.mp4`);
+      const video = join(folder, `video-${index}.${alpha ? 'webm' : 'mp4'}`);
       const images = [...Object.values(sources.stills), ...[sources.backgroundImage, sources.watermarkImage].filter((path): path is string => path !== undefined)];
       const host = new FileHost([...(sources.screen ? [sources.screen] : []), ...(sources.webcam ? [sources.webcam.path] : [])], video, images);
       hosts.push(host);
@@ -514,7 +531,7 @@ export async function exportProjects(opts: BatchExportOptions): Promise<ExportRe
       window.win.destroy();
       pages.push({ page, video, said });
     }
-    const { audio, music, loudness, audioMs } = await sound;
+    const { audio, master, music, loudness, audioMs } = await sound;
     throwIfCancelled();
 
     // the script's steps as the video's chapters, where the take reached them
@@ -523,9 +540,12 @@ export async function exportProjects(opts: BatchExportOptions): Promise<ExportRe
     if (chapterFile) await writeFile(chapterFile, chapterMetadata(chapters));
     // each video with the sound, then all of them in place
     for (const [index, partial] of partials.entries()) {
-      await runFfmpeg(muxArgs({ video: pages[index]!.video, audio, ...(chapterFile && { chapters: chapterFile }), out: partial }), signal);
+      const video = pages[index]!.video;
+      const chaptersOf = chapterFile ? { chapters: chapterFile } : {};
+      await runFfmpeg(alpha ? alphaMuxArgs({ video, audio, ...(master && { master }), ...chaptersOf, container: alpha, out: partial }) : muxArgs({ video, audio, ...chaptersOf, out: partial }), signal);
       throwIfCancelled();
     }
+    if (loudness && alpha) loudness.video = parseMeter(await runFfmpeg(meterArgs(partials[0]!), signal));
     for (const [index, out] of outs.entries()) {
       try {
         await rename(partials[index]!, out);

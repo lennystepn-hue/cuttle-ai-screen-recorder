@@ -404,6 +404,7 @@ cuttle motion new title --first      # a motion page as the intro, from a templa
 cuttle motion add motion/chart/index.html --after s3   # or a page you wrote, as a scene, an overlay or a transition
 cuttle music new lofi                # music composed for the video, fitted to its scenes and cuts
 cuttle render --format 16:9 --format 9:16 --loudness youtube   # both in one go, at -14 LUFS, with the script's steps as chapters
+cuttle render --alpha -o title.mov    # transparent, for Premiere, Final Cut or Resolve (ProRes 4444; .webm: VP9 with alpha)
 cuttle chapters                      # those chapters as lines for a YouTube description
 cuttle recover takes/2               # after a crash
 ```

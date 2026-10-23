@@ -18,6 +18,8 @@ export interface RenderArgs {
   vtt?: boolean;
   /** The loudness the mix is brought to, instead of the project's `look.audio.loudness`. */
   loudness?: string;
+  /** With transparency, no background: VP9 with alpha in a .webm (the default name), or ProRes 4444 in a .mov (`-o`). */
+  alpha?: boolean;
 }
 
 /** An EBU R128 measurement: LUFS and dBTP, null for silence. */
@@ -61,7 +63,8 @@ async function renderProject(projectDir: string, formats: (string | undefined)[]
   const file = await readProjectFile(projectDir); // fails fast, before Electron starts, on a broken project
   // the narration's lines not spoken yet are spoken first (the export reads them from voiceover/)
   if (file.project.look.audio.enabled && file.project.voiceover.lines.some(speaks)) await voiceRenderCommand(file.dir, quietly(output), signal);
-  const targets = formats.map((format) => ({ ...(format !== undefined && { format }), out: args.out ? resolve(args.out) : join(file.dir, 'out', `${(format ?? 'export').replace(':', 'x')}.mp4`) }));
+  const extension = args.alpha ? 'webm' : 'mp4';
+  const targets = formats.map((format) => ({ ...(format !== undefined && { format }), out: args.out ? resolve(args.out) : join(file.dir, 'out', `${(format ?? 'export').replace(':', 'x')}.${extension}`) }));
   output.info(`rendering ${targets.map((target) => target.out).join(', ')} …`);
   return runInElectron<RenderResult[]>(
     {
@@ -74,6 +77,7 @@ async function renderProject(projectDir: string, formats: (string | undefined)[]
       ...(args.captions === false && { captions: false }),
       ...((args.srt || args.vtt) && { subtitles: [...(args.srt ? ['srt'] : []), ...(args.vtt ? ['vtt'] : [])] }),
       ...(args.loudness !== undefined && { loudness: args.loudness }),
+      ...(args.alpha && { transparent: true }),
     },
     signal,
     (label, done, total) => output.info(`${label} ${done}/${total}`),
@@ -83,6 +87,7 @@ async function renderProject(projectDir: string, formats: (string | undefined)[]
 function checkArgs(args: RenderArgs, formats: (string | undefined)[]): void {
   if (args.loudness !== undefined && !(LOUDNESS_TARGETS as readonly string[]).includes(args.loudness)) throw new CliError('usage', `"${args.loudness}" is no loudness: ${LOUDNESS_TARGETS.join(', ')}`);
   if (args.out !== undefined && formats.length > 1) throw new CliError('usage', '-o names one file: with several formats each goes to out/<format>.mp4');
+  if (args.alpha && args.out !== undefined && !/\.(webm|mov)$/i.test(args.out)) throw new CliError('usage', '--alpha writes a .webm (VP9 with alpha) or a .mov (ProRes 4444): name the file so');
 }
 
 /**

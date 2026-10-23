@@ -211,17 +211,17 @@ async function editorWindow(dir: string, key: string, file: ProjectFile, release
     'export:copy': (text) => (CHECK ? void ((globalThis as { __copied?: string }).__copied = text) : clipboard.writeText(text)),
     'media:state': () => media.current(),
     'media:retry': () => void media.start(),
-    'export:targets': async (formats) =>
+    'export:targets': async ({ formats, file }) =>
       Promise.all(
         formats.map(async (format) => {
-          const out = exportPath(dir, format);
+          const out = exportPath(dir, format, file);
           const info = await stat(out).catch(() => undefined);
           return { format, out, ...(info?.isFile() && { modified: info.mtimeMs }) };
         }),
       ),
-    'export:start': ({ formats, encoder, captions, subtitles }) => {
+    'export:start': ({ formats, encoder, file, captions, subtitles }) => {
       if (editor.run) throw new Error('an export is already running');
-      const settings = { encoder, ...(captions !== undefined && { captions }), ...(subtitles && { subtitles }) };
+      const settings = { encoder, ...(file && { file }), ...(captions !== undefined && { captions }), ...(subtitles && { subtitles }) };
       const run = new ExportRun(dir, formats, settings, (progress) => send(contents, 'export:progress', progress));
       editor.run = run;
       void run.done.then((end: ExportEnd) => {

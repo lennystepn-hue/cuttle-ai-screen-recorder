@@ -72,7 +72,9 @@ Cuttle runs on **Windows and macOS**. A change made on one has to keep working o
   video action (`actions/release-video`). Recording refuses (`platformFor`), and the app and the
   OCR stay Windows and macOS. There the CLI gives Chromium switches (`chromiumSwitches`): it draws
   with SwiftShader, and runs without its sandbox where that cannot start (Ubuntu 24.04 without the
-  setuid helper, root in a container). Nothing in the Windows or macOS paths may change for Linux.
+  setuid helper, root in a container). A motion frame gets longer to paint there, and `cuttle watch`
+  watches each folder (Node's recursive watch loses a file saved by rename). Nothing in the Windows
+  or macOS paths may change for Linux.
 
 ## Checks
 

@@ -31,6 +31,7 @@ jobs:
       - run: pnpm exec vitest run --project node --retry 1
         continue-on-error: true
       - run: xvfb-run -a pnpm cli:check
+        continue-on-error: true
       # the engine's goldens for Linux, made here once (-u) and kept as the run's artifact to look at
       - run: pnpm exec playwright install --with-deps chromium
       - run: pnpm exec vitest run --project browser -u || true

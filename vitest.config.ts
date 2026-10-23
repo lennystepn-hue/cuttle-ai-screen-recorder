@@ -61,7 +61,8 @@ export default defineConfig({
           browser: {
             enabled: true,
             headless: true,
-            provider: playwright(),
+            // Linux (CI) has no GPU: WebGL with Chromium's own software GL, as the CLI draws there
+            provider: playwright(process.platform === 'linux' ? { launchOptions: { args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'] } } : {}),
             instances: [{ browser: 'chromium' }],
             viewport: { width: 1280, height: 720 },
             commands: { matchGolden },

@@ -23,8 +23,11 @@ export const MOTION_SCHEME_PRIVILEGES: Electron.CustomScheme = {
   privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true, stream: true },
 };
 
-/** Longest wait for one frame, and for the page to load (its fonts, images and `cuttle.ready`), in ms. */
-export const FRAME_TIMEOUT_MS = 5_000;
+/**
+ * Longest wait for one frame, and for the page to load (its fonts, images and `cuttle.ready`), in ms.
+ * Linux draws with software GL (SwiftShader), where a 3D page's frame can take seconds.
+ */
+export const FRAME_TIMEOUT_MS = process.platform === 'linux' ? 30_000 : 5_000;
 export const LOAD_TIMEOUT_MS = 30_000;
 /** A frame whose paint has not come in this long is drawn again (ms). */
 const REDRAW_MS = 400;
@@ -330,10 +333,12 @@ export class MotionPage {
     return this.drawn;
   }
 
-  /** Whether the latest paint shows draw `draw`: its marker pixel (BGRA), `scale` image pixels a CSS pixel. */
-  private shows(draw: number): boolean {
+  /** Whether the latest paint shows one of the draws `from` to `to` (16-bit numbers): its marker pixel (BGRA), `scale` image pixels a CSS pixel. */
+  private shows(from: number, to: number): boolean {
     const marker = this.marker();
-    return marker !== undefined && marker[2] === (draw & 255) && marker[1] === ((draw >> 8) & 255) && marker[0] === 200;
+    if (marker === undefined || marker[0] !== 200) return false;
+    const shown = (marker[1]! << 8) | marker[2]!;
+    return ((shown - from) & 0xffff) <= ((to - from) & 0xffff);
   }
 
   /** The latest paint's marker pixel (BGRA), or undefined when it has none where the marker goes. */
@@ -405,11 +410,13 @@ export class MotionPage {
     const script = `window.__cuttleDraw(${at}${view || frames ? `, ${JSON.stringify(view ?? null)}` : ''}${frames ? `, ${JSON.stringify(frames)}` : ''})`;
     const drawn = () => this.timed(this.win.webContents.executeJavaScript(script) as Promise<number>, ms, `to draw frame ${n}`);
     let draw = await drawn();
+    const first = draw;
     const deadline = Date.now() + ms;
     const since = { paints: this.paints, empty: this.emptyPaints };
     let asked = false;
     let redrawAt = Date.now() + REDRAW_MS;
-    while (!this.shows(draw)) {
+    // any draw of this moment shows it: on a slow GPU the paint of the first may come after a redraw
+    while (!this.shows(first, draw)) {
       if (this.failure) throw new Error(this.failure);
       if (Date.now() > deadline) throw new Error(`the motion page's frame ${n} was never painted (draw ${draw}: ${this.paintReport(since)})`);
       // Now and then a draw never reaches the paints: they go on showing the page as it was, and

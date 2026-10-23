@@ -20,6 +20,11 @@ export interface RenderArgs {
   loudness?: string;
   /** With transparency, no background: VP9 with alpha in a .webm (the default name), or ProRes 4444 in a .mov (`-o`). */
   alpha?: boolean;
+  /** `4k`: the short side 2160 (`hd`: the format's size). */
+  size?: string;
+  fps?: number;
+  /** `hevc`: smaller files at 4K, with a hardware encoder (`h264`: everywhere). */
+  codec?: string;
 }
 
 /** An EBU R128 measurement: LUFS and dBTP, null for silence. */
@@ -78,6 +83,9 @@ async function renderProject(projectDir: string, formats: (string | undefined)[]
       ...((args.srt || args.vtt) && { subtitles: [...(args.srt ? ['srt'] : []), ...(args.vtt ? ['vtt'] : [])] }),
       ...(args.loudness !== undefined && { loudness: args.loudness }),
       ...(args.alpha && { transparent: true }),
+      ...(args.size !== undefined && { size: args.size }),
+      ...(args.fps !== undefined && { fps: args.fps }),
+      ...(args.codec !== undefined && { codec: args.codec }),
     },
     signal,
     (label, done, total) => output.info(`${label} ${done}/${total}`),
@@ -88,6 +96,10 @@ function checkArgs(args: RenderArgs, formats: (string | undefined)[]): void {
   if (args.loudness !== undefined && !(LOUDNESS_TARGETS as readonly string[]).includes(args.loudness)) throw new CliError('usage', `"${args.loudness}" is no loudness: ${LOUDNESS_TARGETS.join(', ')}`);
   if (args.out !== undefined && formats.length > 1) throw new CliError('usage', '-o names one file: with several formats each goes to out/<format>.mp4');
   if (args.alpha && args.out !== undefined && !/\.(webm|mov)$/i.test(args.out)) throw new CliError('usage', '--alpha writes a .webm (VP9 with alpha) or a .mov (ProRes 4444): name the file so');
+  if (args.size !== undefined && !['hd', '4k'].includes(args.size)) throw new CliError('usage', `--size ${args.size}: hd (the format's size) or 4k`);
+  if (args.fps !== undefined && ![24, 25, 30, 50, 60].includes(args.fps)) throw new CliError('usage', `--fps ${args.fps}: 24, 25, 30, 50 or 60`);
+  if (args.codec !== undefined && !['h264', 'hevc'].includes(args.codec)) throw new CliError('usage', `--codec ${args.codec}: h264 or hevc`);
+  if (args.codec === 'hevc' && args.alpha) throw new CliError('usage', '--alpha writes VP9 or ProRes, not HEVC');
 }
 
 /**

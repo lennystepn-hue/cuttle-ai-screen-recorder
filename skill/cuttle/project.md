@@ -58,6 +58,8 @@ Unknown fields are errors, and every command names the path of a problem, counti
 ## Fields
 
 `output`: `width` and `height` (even, at most 4096; default 1920×1080) and `fps` (default 30).
+An export may take another size and rate without changing them: `render --size 4k` (2160 on the
+short side), `--fps 60`, `--codec hevc`.
 `cuttle render --format` overrides the size: `16:9` is 1920×1080, `1:1` is 1080×1080, `9:16` is
 1080×1920.
 

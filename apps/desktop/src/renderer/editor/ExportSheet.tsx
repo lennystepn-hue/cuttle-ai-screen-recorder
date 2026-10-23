@@ -3,7 +3,7 @@
 // with their chapters (from the script's steps) to copy into a YouTube description.
 // Closing it while an export runs keeps the export running (the title bar shows it).
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { EXPORT_FORMATS } from '@cuttle/export/formats';
+import { atSize, EXPORT_FORMATS } from '@cuttle/export/formats';
 import { formatBytes, formatDuration, formatTime } from '../../shared/format';
 import type { ExportFileKind, ExportTarget } from '../../shared/ipc';
 import { sceneSpans, stepChapters, youtubeChapters, type Chapter } from '@cuttle/timeline';
@@ -55,6 +55,10 @@ export function ExportSheet() {
   const [encoder, setEncoder] = useState<keyof typeof ENCODERS>('auto');
   // an MP4, or a transparent video for another editor
   const [file, setFile] = useState<ExportFileKind>('mp4');
+  // 4K, another frame rate, HEVC
+  const [size, setSize] = useState<'hd' | '4k'>('hd');
+  const [fps, setFps] = useState<'project' | '30' | '60'>('project');
+  const [codec, setCodec] = useState<'h264' | 'hevc'>('h264');
   // subtitles: burned in as the project has them (Look tab), and the files beside the video
   const [burned, setBurned] = useState<'in' | 'off'>('in');
   const [subtitleFiles, setSubtitleFiles] = useState<('srt' | 'vtt')[]>([]);
@@ -145,7 +149,7 @@ export function ExportSheet() {
           <>
             <div className="formats" role="group" aria-label="Formats">
               {targets.map((name) => {
-                const { width, height } = name === 'project' ? (output ?? { width: 16, height: 9 }) : EXPORT_FORMATS[name];
+                const { width, height } = atSize(name === 'project' ? (output ?? { width: 16, height: 9 }) : EXPORT_FORMATS[name], size);
                 const scale = 34 / Math.max(width, height);
                 return (
                   <button key={name} className="format" aria-pressed={chosen.includes(name)} onClick={() => toggle(name)}>
@@ -172,6 +176,42 @@ export function ExportSheet() {
                 title="A transparent video has no background: for Premiere, Final Cut, Resolve or CapCut to lay over its own"
               />
             </div>
+            <div className="row">
+              Size
+              <Select value={size} options={[{ value: 'hd', label: 'As the format' }, { value: '4k', label: '4K' }]} onChange={setSize} label="Size" variant="compact" testId="export-size" />
+            </div>
+            <div className="row">
+              Frame rate
+              <Select
+                value={fps}
+                options={[
+                  { value: 'project', label: output ? `${output.fps} fps, the project's` : "The project's" },
+                  { value: '30', label: '30 fps' },
+                  { value: '60', label: '60 fps' },
+                ]}
+                onChange={setFps}
+                label="Frame rate"
+                variant="compact"
+                testId="export-fps"
+              />
+            </div>
+            {file === 'mp4' && (
+              <div className="row">
+                Codec
+                <Select
+                  value={codec}
+                  options={[
+                    { value: 'h264', label: 'H.264' },
+                    { value: 'hevc', label: 'HEVC, smaller' },
+                  ]}
+                  onChange={setCodec}
+                  label="Codec"
+                  variant="compact"
+                  testId="export-codec"
+                  title="HEVC makes smaller files at 4K; it needs a graphics card that encodes it"
+                />
+              </div>
+            )}
             <div className="row">
               Encoder
               <Select
@@ -260,7 +300,13 @@ export function ExportSheet() {
               <button
                 className="primary"
                 disabled={chosen.length === 0}
-                onClick={() => void startExport(chosen, encoder, transcribed ? { captions: burned === 'in', files: subtitleFiles } : {}, file)}
+                onClick={() =>
+                  void startExport(chosen, encoder, transcribed ? { captions: burned === 'in', files: subtitleFiles } : {}, file, {
+                    size,
+                    ...(fps !== 'project' && { fps: Number(fps) as 30 | 60 }),
+                    codec,
+                  })
+                }
                 data-testid="export-start"
                 data-autofocus
               >

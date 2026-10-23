@@ -1,6 +1,6 @@
 import { stat } from 'node:fs/promises';
 import { join } from 'node:path';
-import { exportProjects, ExportError, type EncoderPreference } from '@cuttle/export';
+import { exportProjects, ExportError, type EncoderPreference, type ExportCodec, type ExportSize } from '@cuttle/export';
 import type { ExportEnd, ExportFile, ExportFileKind, ExportProgress, ExportTarget, SUBTITLE_FILES } from '../shared/ipc';
 import { bundlePath } from './protocols';
 import { speakNarration } from './voice';
@@ -12,6 +12,10 @@ export interface ExportSettings {
   encoder: EncoderPreference;
   /** An MP4 (default), or a transparent WebM (VP9 with alpha) or MOV (ProRes 4444). */
   file?: ExportFileKind;
+  /** 4K instead of the format's size; another frame rate than the project's; HEVC instead of H.264. */
+  size?: ExportSize;
+  fps?: number;
+  codec?: ExportCodec;
   captions?: boolean;
   subtitles?: readonly (typeof SUBTITLE_FILES)[number][];
 }
@@ -53,6 +57,9 @@ export class ExportRun {
         projectDir,
         targets: formats.map((format) => ({ ...(format !== 'project' && { format }), out: exportPath(projectDir, format, settings.file) })),
         ...(settings.file && settings.file !== 'mp4' && { transparent: true }),
+        ...(settings.size && { size: settings.size }),
+        ...(settings.fps && { fps: settings.fps }),
+        ...(settings.codec && { codec: settings.codec }),
         encoder: settings.encoder,
         ...(settings.captions !== undefined && { captions: settings.captions }),
         ...(settings.subtitles && settings.subtitles.length > 0 && { subtitles: settings.subtitles }),

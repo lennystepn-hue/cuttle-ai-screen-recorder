@@ -322,11 +322,13 @@ export interface MuxArgsOptions {
   audio: string;
   /** The chapters as an ffmetadata file (the last input), when the video has any. */
   chapters?: string;
+  /** The video is HEVC: tagged `hvc1`, which QuickTime and Apple's players need. */
+  hevc?: boolean;
   out: string;
 }
 
 /** ffmpeg arguments that put the sound (and the chapters) beside the video, both as they are, the moov at the front. */
-export function muxArgs({ video, audio, chapters, out }: MuxArgsOptions): string[] {
+export function muxArgs({ video, audio, chapters, hevc, out }: MuxArgsOptions): string[] {
   return [
     '-hide_banner',
     '-nostdin',
@@ -345,6 +347,7 @@ export function muxArgs({ video, audio, chapters, out }: MuxArgsOptions): string
     ...(chapters ? ['-map_chapters', '2'] : []),
     '-c',
     'copy',
+    ...(hevc ? ['-tag:v', 'hvc1'] : []),
     '-movflags',
     '+faststart',
     '-f',

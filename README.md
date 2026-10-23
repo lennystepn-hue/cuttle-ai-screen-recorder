@@ -405,6 +405,7 @@ cuttle motion add motion/chart/index.html --after s3   # or a page you wrote, as
 cuttle music new lofi                # music composed for the video, fitted to its scenes and cuts
 cuttle render --format 16:9 --format 9:16 --loudness youtube   # both in one go, at -14 LUFS, with the script's steps as chapters
 cuttle render --alpha -o title.mov    # transparent, for Premiere, Final Cut or Resolve (ProRes 4444; .webm: VP9 with alpha)
+cuttle render --size 4k --fps 60 --codec hevc   # 3840×2160 at 60 fps, HEVC where the graphics card encodes it
 cuttle chapters                      # those chapters as lines for a YouTube description
 cuttle recover takes/2               # after a crash
 ```

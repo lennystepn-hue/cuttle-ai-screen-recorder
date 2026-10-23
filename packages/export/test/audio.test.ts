@@ -199,6 +199,10 @@ describe('muxArgs', () => {
   it('takes the chapters from their metadata file, the input after the sound', () => {
     expect(muxArgs({ video: 'v.mp4', audio: 'sound.m4a', chapters: 'c.txt', out: 'o.mp4' }).join(' ')).toContain('-i v.mp4 -i sound.m4a -i c.txt -map 0:v:0 -map 1:a:0 -map_chapters 2 -c copy');
   });
+
+  it("tags HEVC as hvc1, as QuickTime and Apple's players need it", () => {
+    expect(muxArgs({ video: 'v.mp4', audio: 'sound.m4a', hevc: true, out: 'o.mp4' }).join(' ')).toContain('-c copy -tag:v hvc1 -movflags +faststart');
+  });
 });
 
 describe('alphaMuxArgs', () => {

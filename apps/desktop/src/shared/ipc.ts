@@ -382,6 +382,10 @@ export const REQUESTS = {
     encoder: z.enum(ENCODERS),
     /** The file: an MP4 (default), or a transparent WebM or MOV. */
     file: z.enum(EXPORT_FILES).optional(),
+    /** 4K (the short side 2160) instead of the format's size; another frame rate; HEVC instead of H.264. */
+    size: z.enum(['hd', '4k']).optional(),
+    fps: z.union([z.literal(24), z.literal(25), z.literal(30), z.literal(50), z.literal(60)]).optional(),
+    codec: z.enum(['h264', 'hevc']).optional(),
     /** Burn the subtitles in (default: the project's `captions.enabled`). */
     captions: z.boolean().optional(),
     /** Subtitle files next to each video. */

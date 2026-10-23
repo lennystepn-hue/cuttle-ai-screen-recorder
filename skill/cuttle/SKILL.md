@@ -359,6 +359,10 @@ encoder (`stats`). For 9:16, check `preview --format 9:16` first. Render every f
 wants in one run, `render --format 16:9 --format 9:16 --format 1:1` (each to `out/<format>.mp4`,
 the JSON's `videos`): the sound is made once for all of them, faster than one render each.
 `render --all <folder>` renders every project in a folder (`projects` in the JSON).
+`--size 4k` renders at 2160 on the short side (3840×2160 for 16:9), `--fps 60` smoother (cursor
+moves, zooms), `--codec hevc` smaller files at 4K where the computer has a hardware HEVC encoder (it
+says so when it has none; H.264 plays everywhere). For YouTube, 4K at 60 fps suits a screen take
+recorded on a Retina or 4K display.
 For another editor (Premiere, Final Cut, Resolve, CapCut), `render --alpha` renders without the
 background, with transparency: VP9 with alpha in `out/<format>.webm`, or ProRes 4444 with
 `-o title.mov`. A lower third or a title alone is a project whose only scene is its page (a page

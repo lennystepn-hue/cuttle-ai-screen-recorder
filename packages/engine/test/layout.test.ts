@@ -4,6 +4,9 @@ import { createTimeline } from '@cuttle/timeline';
 import { pointerPath } from '../src/passes/cursor';
 import {
   blurSamples,
+  CAMERA_LARGE,
+  cameraPlace,
+  WINDOW_PADDING,
   blurredMaskRect,
   cursorSizePx,
   maskRectToOutput,
@@ -226,6 +229,52 @@ describe('cursorSizePx', () => {
     expect(cursorSizePx({ width: 1920, height: 1080 }, 1, [0, 0, 960, 540], [0, 0, 1920, 1080])).toBe(64);
     expect(cursorSizePx({ width: 1920, height: 1080 }, 1.5, [0, 0, 1920, 1080], [0, 0, 1920, 1080])).toBe(48);
     expect(cursorSizePx({ width: 2560, height: 1440 }, 1, [0, 0, 2560, 1440], [0, 0, 2560, 1440])).toBeCloseTo(42.67, 2);
+  });
+});
+
+describe('cameraPlace', () => {
+  const output = { width: 1920, height: 1080 };
+  const webcam = { enabled: true, shape: 'circle' as const, corner: 'bottom-left' as const, size: 0.18, border: true, shadow: true, mirror: false };
+
+  it('is the bubble without a layout, and turns into each layout as it goes', () => {
+    const bubble = webcamRect(output, webcam);
+    expect(cameraPlace(output, webcam)).toEqual({ area: [0, 0, 1920, 1080], box: bubble, radius: bubble[2] / 2, squircle: false, border: 1, shadow: 1, opacity: 1 });
+    expect(cameraPlace(output, webcam, { layout: 'full', amount: 1 })).toMatchObject({ area: [0, 0, 1920, 1080], box: [0, 0, 1920, 1080], radius: 0, border: 0, shadow: 0, opacity: 1 });
+    // half way: the box between the bubble and the whole output
+    const half = cameraPlace(output, webcam, { layout: 'full', amount: 0.5 });
+    expect(half.box[2]).toBeCloseTo((bubble[2] + 1920) / 2, 0);
+    // side by side: the window keeps the left 60 %, the camera a column on the right, its shadow without the ring
+    const side = cameraPlace(output, webcam, { layout: 'side', amount: 1 });
+    expect(side.area).toEqual([0, 0, 1152, 1080]);
+    expect(side.box[0]).toBe(1152);
+    expect(side.box[0] + side.box[2]).toBe(1920 - WINDOW_PADDING);
+    expect([side.border, side.shadow]).toEqual([0, 1]);
+    // on a tall video the camera goes below the screen
+    const tall = cameraPlace({ width: 1080, height: 1920 }, webcam, { layout: 'side', amount: 1 });
+    expect(tall.area).toEqual([0, 0, 1080, 1152]);
+    expect(tall.box[1]).toBe(1152);
+    // large: a bigger bubble in the same corner
+    const large = cameraPlace(output, webcam, { layout: 'large', amount: 1 });
+    expect(large.box[2]).toBe(Math.round(CAMERA_LARGE * 1080));
+    expect(large.box[0]).toBe(bubble[0]);
+  });
+
+  it('fades the camera in where the layout puts it when the bubble is off', () => {
+    const off = { ...webcam, enabled: false };
+    expect(cameraPlace(output, off).opacity).toBe(0);
+    const coming = cameraPlace(output, off, { layout: 'full', amount: 0.25 });
+    expect(coming.box).toEqual([0, 0, 1920, 1080]);
+    expect(coming.opacity).toBeCloseTo(0.25);
+  });
+
+  it('centres the window in what the camera leaves, at the chrome sizes of the whole output', () => {
+    const chrome = { titleBar: 40, radius: 14 };
+    const whole = windowLayout(output, 16 / 9, chrome);
+    const left = windowLayout(output, 16 / 9, chrome, [0, 0, 1152, 1080]);
+    expect(left.titleBar).toBe(whole.titleBar);
+    expect(left.window[0]).toBe(WINDOW_PADDING);
+    expect(left.window[0] + left.window[2]).toBe(1152 - WINDOW_PADDING);
+    expect(left.content[2] / left.content[3]).toBeCloseTo(16 / 9, 2);
   });
 });
 

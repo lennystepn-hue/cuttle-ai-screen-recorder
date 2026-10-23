@@ -7,7 +7,7 @@ import { takeKey } from './take';
 
 export type Raw = Record<string, unknown>;
 export type ListName = IdList;
-export type OverlayList = 'zooms' | 'masks' | 'texts' | 'annotations' | 'overlays' | 'sounds';
+export type OverlayList = 'zooms' | 'masks' | 'texts' | 'annotations' | 'cameras' | 'overlays' | 'sounds';
 type Item = Record<string, unknown>;
 
 /** What a command may need to clamp to: the take's length and the screen's size. */
@@ -492,6 +492,7 @@ const NOUNS: Record<ListName, [string, string]> = {
   masks: ['mask', 'masks'],
   texts: ['caption', 'captions'],
   annotations: ['annotation', 'annotations'],
+  cameras: ['camera layout', 'camera layouts'],
   overlays: ['motion overlay', 'motion overlays'],
   cuts: ['cut', 'cuts'],
   sounds: ['sound', 'sounds'],

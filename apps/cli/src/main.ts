@@ -1,5 +1,6 @@
 import { Command, CommanderError, InvalidArgumentError, Option } from 'commander';
 import { annotateCommand, type AnnotateArgs } from './commands/annotate';
+import { cameraCommand, type CameraArgs } from './commands/camera';
 import { backgroundCommand, type BackgroundArgs } from './commands/background';
 import { brandApplyCommand, brandListCommand, brandRemoveCommand, brandSaveCommand } from './commands/brand';
 import { capturePageCommand } from './commands/capture-page';
@@ -441,6 +442,14 @@ export async function runCli(argv: readonly string[], streams?: Streams): Promis
     .option('--remove', 'take the move at --at off the path')
     .option('--clear', 'take every move off: the zoom holds still')
     .action(action((output, project, id: string, options: ZoomPathArgs) => zoomPathCommand(project, id, options, output)));
+
+  program
+    .command('camera <layout>')
+    .description('the camera in another layout for a while: full (over the whole video: an intro, an outro), side (beside the screen, below it on a tall video) or large (a big bubble); the bubble turns into it and back')
+    .requiredOption('--at <seconds>', 'source seconds it starts at', seconds)
+    .option('--duration <seconds>', 'how long, in source seconds (default 3)', positive)
+    .option('--label <text>', 'a name for it')
+    .action(action((output, project, layout: string, options: CameraArgs) => cameraCommand(project, layout, options, output)));
 
   const sound = program.command('sound').description('sounds at moments of the video: built-in effects or files of the project');
   sound

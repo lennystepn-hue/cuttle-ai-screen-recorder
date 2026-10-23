@@ -292,7 +292,9 @@ Then refine `cuttle.json` ([project.md](project.md)) and preview again:
   the viewer must not miss:
   `cuttle -C "<project>" --json annotate arrow --at 12.5 --from 300,700 --to 620,410 --text "Click here"`,
   or `box`, `highlight`, `spotlight`, `magnifier` with `--rect x,y,w,h` (off the same grid); one or
-  two per step, never on a sped-up clip.
+  two per step, never on a sped-up clip. With a webcam take, open and close with the face:
+  `cuttle -C "<project>" --json camera full --at 0 --duration 4` (the camera over the whole video),
+  `side` (beside the screen while someone explains) or `large`.
 - **Look.** When `cuttle --json brand list` shows brand kits, ask which one the video wears and run
   `cuttle -C "<project>" --json brand apply "<name>"`: the brand (name, URL, logo, colours, heading
   font) for the motion pages, the background, frame and cursor. Without one, set `theme` (project.md)

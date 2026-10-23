@@ -684,6 +684,7 @@ button.chip-status:hover {
 .dot.mask { --kind: var(--mask); }
 .dot.caption { --kind: var(--caption); }
 .dot.annotation { --kind: var(--annotation); }
+.dot.camera { --kind: var(--camera); }
 .dot.card { --kind: var(--card); }
 .dot.still { --kind: var(--still); }
 .dot.motion { --kind: var(--motion); }
@@ -794,6 +795,7 @@ button.chip-status:hover {
 .lane-name.mask { --kind: var(--mask); }
 .lane-name.caption { --kind: var(--caption); }
 .lane-name.annotation { --kind: var(--annotation); }
+.lane-name.camera { --kind: var(--camera); }
 .lane-name.motion { --kind: var(--motion); }
 .lane-name.sound { --kind: var(--sound); }
 .lane-name.music { --kind: var(--music); }
@@ -980,6 +982,11 @@ button.chip-status:hover {
   background: color-mix(in srgb, var(--mask) 15%, transparent);
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--mask) 50%, transparent);
   color: var(--mask);
+}
+.item.camera {
+  background: color-mix(in srgb, var(--camera) 14%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--camera) 50%, transparent);
+  color: var(--camera);
 }
 .item.annotation {
   background: color-mix(in srgb, var(--annotation) 14%, transparent);

@@ -1,4 +1,4 @@
-import type { Annotation, CuttleProject, Mask, Rect } from '@cuttle/project';
+import type { Annotation, CameraLayout, CuttleProject, Mask, Rect } from '@cuttle/project';
 import { applyCaptionFixes, captionAt, captionCues, captionWords, type ActiveCaption, type CaptionCue, type CaptionWord, type SpokenWord } from './captions';
 import { cursorAt, type CursorFrame, type CursorTrack } from './cursor';
 import { clamp, type Curve } from './easing';
@@ -54,7 +54,12 @@ export interface SceneFrame {
   cursor?: CursorFrame;
   /** Clip scenes: the badge of the shortcut pressed now (`look.keys`). */
   keys?: KeyBadge;
+  /** Clip scenes: the camera in another layout (`cameras`), and how far it has turned into it (0 to 1, eased). */
+  camera?: { layout: CameraLayout; amount: number };
 }
+
+/** The camera turns into a layout, and back, over this long (output seconds). */
+export const CAMERA_SWITCH_SECONDS = 0.5;
 
 /** An annotation on a frame: how far it has drawn itself in (0 to 1, eased) and how faded it is. */
 export interface ActiveAnnotation {
@@ -150,7 +155,19 @@ export function createTimeline(project: CuttleProject, opts: TimelineOptions): T
   const textShown = new Map(project.texts.map((text) => [text, occurrences(spans, text.at, text.at + text.duration)]));
   const overlayShown = project.overlays.map((overlay) => occurrences(spans, overlay.at, overlay.at + overlay.duration));
   const annotationShown = project.annotations.map((annotation) => occurrences(spans, annotation.at, annotation.at + annotation.duration));
+  const cameraShown = project.cameras.map((camera) => occurrences(spans, camera.at, camera.at + camera.duration));
   const round = (seconds: number) => Math.round(seconds * 1e6) / 1e6;
+  /** The camera's layout where the video shows output second `at` of span `index`: the one that started last, if any. */
+  const cameraAt = (index: number, at: number): { camera?: { layout: CameraLayout; amount: number } } => {
+    let found: { layout: CameraLayout; amount: number; start: number } | undefined;
+    project.cameras.forEach((camera, i) => {
+      const occurrence = camera.enabled ? cameraShown[i]?.[index] : undefined;
+      if (!occurrence || at < occurrence.start - 1e-9 || at >= occurrence.end - 1e-9) return;
+      if (found && found.start > occurrence.start) return;
+      found = { layout: camera.layout, amount: rampAmount(occurrence, at, CAMERA_SWITCH_SECONDS, 'smooth'), start: occurrence.start };
+    });
+    return found ? { camera: { layout: found.layout, amount: found.amount } } : {};
+  };
   /** How long a frame's shutter is open (output seconds): the motion blur's share of a frame. */
   const shutter = project.look.motionBlur / project.output.fps;
 
@@ -229,6 +246,7 @@ export function createTimeline(project: CuttleProject, opts: TimelineOptions): T
       badge: badgeFor(scene),
       cursor,
       ...(badge && { keys: badge }),
+      ...cameraAt(span.index, shownAt),
     };
   }
 

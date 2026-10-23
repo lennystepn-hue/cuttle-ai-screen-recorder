@@ -173,6 +173,14 @@ beside it), `color` (the brand's accent when left out), `enabled` (`true`), `id`
 out over 0.3; it moves with the content under zooms. A magnifier hides what masks hide.
 `cuttle annotate <kind> --at <s> --rect x,y,w,h` (or `--from x,y --to x,y`) adds one.
 
+`cameras` show the webcam in another layout for a while, where the clips show `at` to `at + duration`
+(source seconds): `layout` (`full`: the camera over the whole video, a talking-head intro or outro;
+`side`: the screen in the left 60 % and the camera in a column on the right, the screen above and
+the camera below on a tall video; `large`: a bubble 0.42 of the short side in the bubble's corner),
+`enabled` (`true`), `id` (`k1`) and `label`. The bubble turns into the layout and back over 0.5
+output seconds each way; with the bubble off (`look.webcam.enabled`) the camera fades in there. The
+take needs a webcam (`sources.webcam`). `cuttle camera <layout> --at <s> [--duration <s>]` adds one.
+
 `overlays` are motion pages over the video: `src`, `at` and `duration` (source seconds, as a
 text's), `params`, `network`, `motionBlur` and `enabled` (`true`). A page covers the whole output with its
 transparency (a lower third, a callout, a logo), over the clip, its zooms, masks, cursor and texts,

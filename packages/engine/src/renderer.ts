@@ -5,7 +5,7 @@ import { CAPTION_LOOKS, drawCaption } from './captions';
 import { drawKeys } from './keys';
 import { createRenderTarget, deleteRenderTarget, type RenderTarget } from './gl/target';
 import { createTexture, sourceSize, uploadPixels, uploadTexture } from './gl/texture';
-import { blurSamples, placeBadge, placeOverlay, stillCrop, unitFor, uvRect, watermarkRect, webcamRect, type Size, type WindowLayout } from './layout';
+import { blurSamples, cameraPlace, placeBadge, placeOverlay, stillCrop, unitFor, uvRect, watermarkRect, webcamRect, type Size, type WindowLayout } from './layout';
 import { BackgroundPass } from './passes/background';
 import { ContentPass } from './passes/content';
 import { CursorPass } from './passes/cursor';
@@ -190,8 +190,8 @@ export function createRenderer(canvas: HTMLCanvasElement | OffscreenCanvas, proj
   let scenes: readonly Scene[] = project.scenes;
 
   /** The window for a frame style; `aspect` is the content's (a clip's crop, else the screen's). */
-  function frame(style: FrameStyle | null, aspect = screenAspect): { chrome: FrameChrome | null; layout: WindowLayout } {
-    return frameLayout(output, look, style, aspect);
+  function frame(style: FrameStyle | null, aspect = screenAspect, area?: Rect): { chrome: FrameChrome | null; layout: WindowLayout } {
+    return frameLayout(output, look, style, aspect, area);
   }
 
   /** `avoid`: rects the texts move clear of (the webcam bubble, the badge). */
@@ -207,7 +207,9 @@ export function createRenderer(canvas: HTMLCanvasElement | OffscreenCanvas, proj
   }
 
   function drawClip(layer: SceneFrame, sources: FrameSources): void {
-    const { chrome, layout } = frame(look.frame.enabled ? look.frame.style : null, layer.aspect);
+    // a camera layout (`cameras`) moves the window aside and the camera into its place
+    const place = cameraPlace(output, look.webcam, layer.camera);
+    const { chrome, layout } = frame(look.frame.enabled ? look.frame.style : null, layer.aspect, place.area);
     if (chrome) windowPass.draw(layout, chrome, look.frame.shadow, look.frame.title);
     const screen = sources.screens.get(layer.index);
     if (!screen) throw new Error(`render: no screen frame for scene ${layer.index}`);
@@ -235,10 +237,10 @@ export function createRenderer(canvas: HTMLCanvasElement | OffscreenCanvas, proj
     // a device's camera over its screen
     if (chrome) windowPass.drawOver(layout, chrome);
     // An empty webcam frame counts as missing: no bubble, as when the webcam track is shorter.
-    const camera = look.webcam.enabled ? sources.webcams.get(layer.index) : undefined;
+    const camera = place.opacity > 0 ? sources.webcams.get(layer.index) : undefined;
     if (camera && hasPixels(camera)) {
       uploadTexture(gl, webcamTexture, camera, true);
-      webcam.draw(webcamTexture, sourceSize(camera), look.webcam);
+      webcam.draw(webcamTexture, sourceSize(camera), look.webcam, place);
     }
     // The badge is placed first so the texts can move clear of it; it is drawn on top of them.
     const badge = layer.badge ? sprites.label(layer.badge, BADGE_STYLE, unit, layout.content[2] * BADGE_MAX_WIDTH) : undefined;

@@ -248,9 +248,7 @@ export function audioFilterGraph(segments: readonly AudioSegment[], inputs: Audi
  */
 export const INLINE_GRAPH_LIMIT = 30_000;
 
-export interface MuxArgsOptions {
-  /** The video-only MP4 from the frame loop. */
-  video: string;
+export interface MixArgsOptions {
   /** The mic file, when the graph uses it. */
   mic?: string;
   /** The system audio's file, when the graph uses it (the input after the mic). */
@@ -264,14 +262,71 @@ export interface MuxArgsOptions {
   graph: string;
   /** A file holding `graph`, used instead of the inline graph when given. */
   graphFile?: string;
+  /** The WAV it writes. */
+  out: string;
+}
+
+/**
+ * ffmpeg arguments that mix the take's sound (`audioFilterGraph`) into one WAV of floats, the sound
+ * of every format of the video, made while their frames render. The graph counts its inputs after
+ * the video's: a tiny picture of nothing stands in for it. RF64 past 4 GB (hours).
+ */
+export function mixArgs({ mic, system, narration, typing, sound, graph, graphFile, out }: MixArgsOptions): string[] {
+  return [
+    '-hide_banner',
+    '-nostdin',
+    '-loglevel',
+    'error',
+    '-y',
+    '-f',
+    'lavfi',
+    '-i',
+    'color=s=16x16:d=1',
+    ...(mic ? ['-i', mic] : []),
+    ...(system ? ['-i', system] : []),
+    ...(narration ? ['-i', narration] : []),
+    ...(typing ? ['-i', typing] : []),
+    ...(sound ? ['-i', sound] : []),
+    ...(graphFile ? ['-/filter_complex', graphFile] : ['-filter_complex', graph]),
+    '-map',
+    '[aout]',
+    '-c:a',
+    'pcm_f32le',
+    '-ar',
+    String(AUDIO_SAMPLE_RATE),
+    '-rf64',
+    'auto',
+    '-f',
+    'wav',
+    out,
+  ];
+}
+
+export interface EncodeArgsOptions {
+  /** The mix (`mixArgs`). */
+  mix: string;
+  /** Filters on the way (`masterFilter`: a platform's loudness). */
+  master?: string;
+  out: string;
+}
+
+/** ffmpeg arguments that encode the mix as the videos' sound, once for all of them: AAC 48 kHz in an M4A. */
+export function encodeArgs({ mix, master, out }: EncodeArgsOptions): string[] {
+  return ['-hide_banner', '-nostdin', '-loglevel', 'error', '-y', '-i', mix, '-map', '0:a:0', ...(master ? ['-af', master] : []), '-c:a', 'aac', '-b:a', AUDIO_BITRATE, '-ar', String(AUDIO_SAMPLE_RATE), '-f', 'mp4', out];
+}
+
+export interface MuxArgsOptions {
+  /** The video-only MP4 from the frame loop. */
+  video: string;
+  /** The videos' sound (`encodeArgs`). */
+  audio: string;
   /** The chapters as an ffmetadata file (the last input), when the video has any. */
   chapters?: string;
   out: string;
 }
 
-/** ffmpeg arguments that add the audio (and the chapters) to the video without re-encoding it: AAC 48 kHz, moov at the front. */
-export function muxArgs({ video, mic, system, narration, typing, sound, graph, graphFile, chapters, out }: MuxArgsOptions): string[] {
-  const inputs = 1 + [mic, system, narration, typing, sound].filter((input) => input !== undefined).length;
+/** ffmpeg arguments that put the sound (and the chapters) beside the video, both as they are, the moov at the front. */
+export function muxArgs({ video, audio, chapters, out }: MuxArgsOptions): string[] {
   return [
     '-hide_banner',
     '-nostdin',
@@ -280,26 +335,16 @@ export function muxArgs({ video, mic, system, narration, typing, sound, graph, g
     '-y',
     '-i',
     video,
-    ...(mic ? ['-i', mic] : []),
-    ...(system ? ['-i', system] : []),
-    ...(narration ? ['-i', narration] : []),
-    ...(typing ? ['-i', typing] : []),
-    ...(sound ? ['-i', sound] : []),
+    '-i',
+    audio,
     ...(chapters ? ['-i', chapters] : []),
-    ...(graphFile ? ['-/filter_complex', graphFile] : ['-filter_complex', graph]),
     '-map',
     '0:v:0',
     '-map',
-    '[aout]',
-    ...(chapters ? ['-map_chapters', String(inputs)] : []),
-    '-c:v',
+    '1:a:0',
+    ...(chapters ? ['-map_chapters', '2'] : []),
+    '-c',
     'copy',
-    '-c:a',
-    'aac',
-    '-b:a',
-    AUDIO_BITRATE,
-    '-ar',
-    String(AUDIO_SAMPLE_RATE),
     '-movflags',
     '+faststart',
     '-f',
@@ -312,40 +357,17 @@ export function muxArgs({ video, mic, system, narration, typing, sound, graph, g
 export const CODEC_HEADROOM = 0.5;
 
 /**
- * The graph with a master stage after the mix: `gain` dB on the whole of it, then a limiter at four
+ * The master stage for a platform's loudness: `gain` dB on the whole mix, then a limiter at four
  * times the rate (so peaks between samples count) that keeps the true peak under `ceiling` dBTP,
- * `CODEC_HEADROOM` lower than asked. Its output is `[aout]` still.
+ * `CODEC_HEADROOM` lower than asked.
  */
-export function masterGraph(graph: string, gain: number, ceiling: number): string {
-  if (!graph.endsWith('[aout]')) throw new Error('the audio graph does not end in [aout]');
+export function masterFilter(gain: number, ceiling: number): string {
   const limit = 10 ** ((ceiling - CODEC_HEADROOM) / 20);
-  return `${graph.slice(0, -'[aout]'.length)}[premaster];[premaster]volume=${gain.toFixed(2)}dB,aresample=${AUDIO_SAMPLE_RATE * 4},alimiter=limit=${limit.toFixed(4)}:attack=1:release=60:level=false,aresample=${AUDIO_SAMPLE_RATE}[aout]`;
+  return `volume=${gain.toFixed(2)}dB,aresample=${AUDIO_SAMPLE_RATE * 4},alimiter=limit=${limit.toFixed(4)}:attack=1:release=60:level=false,aresample=${AUDIO_SAMPLE_RATE}`;
 }
 
-/** The graph with the mix going on into ffmpeg's EBU R128 meter (`[meter]`), for `meterArgs`. */
-export const meteredGraph = (graph: string): string => `${graph};[aout]ebur128=peak=true[meter]`;
-
-/** ffmpeg's arguments that play the inputs of `muxArgs` through a `meteredGraph` and write nothing: its summary is on stderr. */
-export function meterArgs({ video, mic, system, narration, typing, sound, graph, graphFile }: Omit<MuxArgsOptions, 'chapters' | 'out'>): string[] {
-  return [
-    '-hide_banner',
-    '-nostdin',
-    '-nostats',
-    '-i',
-    video,
-    ...(mic ? ['-i', mic] : []),
-    ...(system ? ['-i', system] : []),
-    ...(narration ? ['-i', narration] : []),
-    ...(typing ? ['-i', typing] : []),
-    ...(sound ? ['-i', sound] : []),
-    ...(graphFile ? ['-/filter_complex', graphFile] : ['-filter_complex', graph]),
-    '-map',
-    '[meter]',
-    '-f',
-    'null',
-    '-',
-  ];
-}
+/** ffmpeg arguments that play a file's sound through the EBU R128 meter and write nothing: its summary is on stderr (`parseMeter`). */
+export const meterArgs = (file: string): string[] => ['-hide_banner', '-nostdin', '-nostats', '-i', file, '-map', '0:a:0', '-af', 'ebur128=peak=true', '-f', 'null', '-'];
 
 /** The integrated loudness (LUFS) and true peak (dBTP) in the summary ffmpeg's `ebur128` meter prints last; null where it has none (silence). */
 export function parseMeter(stderr: string): { lufs: number | null; truePeak: number | null } {

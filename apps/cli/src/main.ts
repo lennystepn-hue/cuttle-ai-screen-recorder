@@ -15,7 +15,7 @@ import { musicCheckCommand, musicNewCommand, musicSetCommand, musicTemplatesComm
 import { previewCommand } from './commands/preview';
 import { recordCommand } from './commands/record';
 import { recoverCommand } from './commands/recover';
-import { renderCommand } from './commands/render';
+import { renderAllCommand, renderCommand } from './commands/render';
 import { chaptersCommand } from './commands/chapters';
 import { suggestCommand } from './commands/suggest';
 import { modelsDownloadCommand, modelsListCommand, modelsRemoveCommand } from './commands/models';
@@ -488,17 +488,18 @@ export async function runCli(argv: readonly string[], streams?: Streams): Promis
 
   program
     .command('render')
-    .description('export the project as an MP4')
-    .option('--format <format>', '16:9, 1:1 or 9:16 (default: the project output)')
-    .option('-o, --out <file>', 'output file (default: out/<format>.mp4 in the project)')
+    .description('export the project as an MP4; several formats render in one go (their frames side by side, the sound once)')
+    .option('--format <formats...>', '16:9, 1:1 or 9:16, one or several (default: the project output)')
+    .option('-o, --out <file>', 'output file, with one format (default: out/<format>.mp4 in the project)')
+    .option('--all <folder>', 'every project in the folder (it and the folders in it with a cuttle.json), one after another, -C left aside')
     .addOption(new Option('--encoder <encoder>', 'H.264 encoder').choices(['auto', 'hardware', 'software']))
     .option('--no-captions', 'no captions burned in, whatever the project says')
     .option('--srt', 'also write the captions as <name>.srt next to the video')
     .option('--vtt', 'also write the captions as <name>.vtt next to the video')
     .option('--loudness <target>', "bring the sound to a platform's loudness: youtube (-14 LUFS: YouTube, Spotify, TikTok, Instagram), podcast (-16), broadcast (-23) or off (default: the project's look.audio.loudness)")
     .action(
-      action((output, project, options: { format?: string; out?: string; encoder?: string; captions: boolean; srt?: boolean; vtt?: boolean; loudness?: string }) =>
-        withSignal(output, (signal) => renderCommand(project, options, output, signal)),
+      action((output, project, options: { format?: string[]; out?: string; all?: string; encoder?: string; captions: boolean; srt?: boolean; vtt?: boolean; loudness?: string }) =>
+        withSignal<unknown>(output, (signal) => (options.all !== undefined ? renderAllCommand(options.all, options, output, signal) : renderCommand(project, options, output, signal))),
       ),
     );
 

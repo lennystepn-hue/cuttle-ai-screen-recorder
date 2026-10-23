@@ -1,6 +1,6 @@
 import { stat } from 'node:fs/promises';
 import { join } from 'node:path';
-import { exportProject, ExportError, type EncoderPreference } from '@cuttle/export';
+import { exportProjects, ExportError, type EncoderPreference } from '@cuttle/export';
 import type { ExportEnd, ExportFile, ExportProgress, ExportTarget, SUBTITLE_FILES } from '../shared/ipc';
 import { bundlePath } from './protocols';
 import { speakNarration } from './voice';
@@ -23,9 +23,9 @@ export function exportPath(projectDir: string, format: Format): string {
 const PROGRESS_MS = 100;
 
 /**
- * One export run of an editor: its formats one after another, with progress, cancel and the files
- * it wrote. `exportProject` reads cuttle.json from disk, so the run exports what was saved when it
- * started.
+ * One export run of an editor: its formats in one go (their frames one after another, the sound once,
+ * made meanwhile), with progress, cancel and the files it wrote. `exportProjects` reads cuttle.json
+ * from disk, so the run exports what was saved when it started; a failure or a cancel leaves none.
  */
 export class ExportRun {
   private readonly controller = new AbortController();
@@ -36,44 +36,52 @@ export class ExportRun {
   }
 
   private async run(projectDir: string, formats: readonly Format[], settings: ExportSettings, onProgress: (progress: ExportProgress) => void): Promise<ExportEnd> {
-    const files: ExportFile[] = [];
     const started = Date.now();
     // the narration's lines not spoken yet are spoken first (the export reads them from voiceover/)
     try {
       await speakNarration(projectDir);
     } catch (error) {
-      return { state: 'failed', files, format: formats[0]!, code: 'voice', message: `the narration could not be spoken: ${error instanceof Error ? error.message : String(error)}` };
+      return { state: 'failed', files: [], format: formats[0]!, code: 'voice', message: `the narration could not be spoken: ${error instanceof Error ? error.message : String(error)}` };
     }
-    for (const [position, format] of formats.entries()) {
-      let last = 0;
-      try {
-        const out = exportPath(projectDir, format);
-        const result = await exportProject({
-          projectDir,
-          ...(format !== 'project' && { format }),
-          out,
-          encoder: settings.encoder,
-          ...(settings.captions !== undefined && { captions: settings.captions }),
-          ...(settings.subtitles && settings.subtitles.length > 0 && { subtitles: settings.subtitles }),
-          pageDir: bundlePath('main', 'export-page'),
-          signal: this.controller.signal,
-          onProgress: (done, total) => {
-            const now = Date.now();
-            if (done < total && now - last < PROGRESS_MS) return;
-            last = now;
-            onProgress({ format, position, formats: formats.length, done, total, elapsed: (now - started) / 1000 });
-          },
-        });
-        files.push({ format, out: result.out, seconds: result.seconds, bytes: (await stat(result.out)).size, ...(result.subtitles && { subtitles: result.subtitles }), ...(result.chapters && { chapters: result.chapters }),
+    let last = 0;
+    // the format being rendered: each has the same number of frames
+    let position = 0;
+    try {
+      const results = await exportProjects({
+        projectDir,
+        targets: formats.map((format) => ({ ...(format !== 'project' && { format }), out: exportPath(projectDir, format) })),
+        encoder: settings.encoder,
+        ...(settings.captions !== undefined && { captions: settings.captions }),
+        ...(settings.subtitles && settings.subtitles.length > 0 && { subtitles: settings.subtitles }),
+        pageDir: bundlePath('main', 'export-page'),
+        signal: this.controller.signal,
+        onProgress: (done, total) => {
+          const each = total / formats.length;
+          position = Math.min(formats.length - 1, Math.floor(done / each));
+          const now = Date.now();
+          if (done < total && now - last < PROGRESS_MS) return;
+          last = now;
+          onProgress({ format: formats[position]!, position, formats: formats.length, done: done - position * each, total: each, elapsed: (now - started) / 1000 });
+        },
+      });
+      const files: ExportFile[] = [];
+      for (const [index, result] of results.entries()) {
+        files.push({
+          format: formats[index]!,
+          out: result.out,
+          seconds: result.seconds,
+          bytes: (await stat(result.out)).size,
+          ...(result.subtitles && { subtitles: result.subtitles }),
+          ...(result.chapters && { chapters: result.chapters }),
           ...(result.loudness && { loudness: { target: result.loudness.target, lufs: result.loudness.video.lufs, truePeak: result.loudness.video.truePeak } }),
         });
-      } catch (error) {
-        if (error instanceof ExportError && error.code === 'cancelled') return { state: 'cancelled', files };
-        const code = error instanceof ExportError ? error.code : 'internal';
-        return { state: 'failed', files, format, code, message: error instanceof Error ? error.message : String(error) };
       }
+      return { state: 'done', files };
+    } catch (error) {
+      if (error instanceof ExportError && error.code === 'cancelled') return { state: 'cancelled', files: [] };
+      const code = error instanceof ExportError ? error.code : 'internal';
+      return { state: 'failed', files: [], format: formats[position]!, code, message: error instanceof Error ? error.message : String(error) };
     }
-    return { state: 'done', files };
   }
 
   cancel(): void {

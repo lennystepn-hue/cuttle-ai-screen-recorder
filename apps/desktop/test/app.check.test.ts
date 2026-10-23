@@ -566,6 +566,17 @@ describe.runIf(enabled)('the Cuttle app', () => {
     // again: now it says which export it replaces
     await editor.click('text=Export again');
     await editor.waitForFunction(() => document.querySelector('[data-testid=export-note]')?.textContent?.includes('Replaces out/export.mp4 from'));
+    // two formats in one go: both files, each its size, the same sound
+    await editor.evaluate(() => [...document.querySelectorAll<HTMLElement>('.format')].find((button) => button.textContent?.includes('9:16'))!.click());
+    await editor.waitForFunction(() => document.querySelector('[data-testid=export-note]')?.textContent?.includes('out/9x16.mp4'));
+    expect(await editor.locator('[data-testid=export-start]').textContent()).toContain('Export 2 formats');
+    await editor.click('[data-testid=export-start]');
+    await exported(editor);
+    await editor.waitForFunction(() => document.querySelectorAll('[data-testid=export-file]').length === 2);
+    const tall = spawnSync('ffprobe', ['-v', 'error', '-show_entries', 'stream=codec_name,width,height', '-of', 'csv=p=0', join(project, 'out', '9x16.mp4')], { encoding: 'utf8' }).stdout.trim().split(/\r?\n/);
+    expect(tall).toEqual(['h264,1080,1920', 'aac']);
+    const length = (file: string) => Number(spawnSync('ffprobe', ['-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', join(project, 'out', file)], { encoding: 'utf8' }).stdout.trim());
+    expect(length('9x16.mp4')).toBeCloseTo(length('export.mp4'), 1);
     await editor.keyboard.press('Escape');
     expect(await editor.locator('[data-testid=export-sheet]').count()).toBe(0);
   }, 150_000);

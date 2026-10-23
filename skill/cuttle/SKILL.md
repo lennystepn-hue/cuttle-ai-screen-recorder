@@ -349,8 +349,10 @@ With a transcript, `--srt` and `--vtt` also write the subtitles next to the vide
 (-23) brings the whole mix there with its peaks under -1 dBTP (`look.audio.loudness` keeps it in the
 project); the JSON's `loudness` says what the video measures. Use `youtube` for a video for the web. Run it in the background when the video is longer than about a minute; the Bash tool stops long
 commands. It writes `out/16x9.mp4` (or `-o <file>`); the JSON has the frames, the seconds and the
-encoder (`stats`). For 9:16, check `preview --format 9:16` first. Render each format the user
-wants. Tell the user the file's path and length. Do not upload it anywhere.
+encoder (`stats`). For 9:16, check `preview --format 9:16` first. Render every format the user
+wants in one run, `render --format 16:9 --format 9:16 --format 1:1` (each to `out/<format>.mp4`,
+the JSON's `videos`): the sound is made once for all of them, faster than one render each.
+`render --all <folder>` renders every project in a folder (`projects` in the JSON). Tell the user the file's path and length. Do not upload it anywhere.
 
 With a script, the video file has the steps as its chapters (`chapters` in the JSON, output
 seconds). `cuttle -C "<project>" --json chapters` gives them as lines for a YouTube description

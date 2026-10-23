@@ -2544,8 +2544,8 @@ describe.runIf(enabled)('the Cuttle app', () => {
     await expect.poll(() => saved(second.dir).theme).toEqual({ name: 'Nimbus', url: 'nimbus.app', logo: 'brand/nimbus-logo.svg', foreground: '#FFFFFF', font: 'Bebas Neue', accent: '#7C5CFF', kit: 'Nimbus' });
     expect(saved(second.dir).look).toMatchObject({ background: { preset: 'mesh' }, frame: { style: 'mac-dark' }, cursor: { style: 'system', color: '#D97757' } });
     expect(existsSync(join(second.dir, 'brand', 'nimbus-logo.svg'))).toBe(true);
-    const secondCard = await settled(second);
-    expect(difference(secondCard, firstCard).mean, 'the second end card against the first').toBeLessThan(0.5);
+    // the page may still say ready from its render before the kit: the card as it comes, until it matches
+    await expect.poll(async () => difference(await settled(second), firstCard).mean, { timeout: 30_000, message: 'the second end card against the first' }).toBeLessThan(0.5);
     await shotOf('42b-brand-applied', '/editor.html', 'brand-second · Cuttle');
     await second.page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
     await second.page.keyboard.press('Control+Z');

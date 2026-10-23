@@ -10,15 +10,15 @@ export function ffmpegPath(): string {
 const STDERR_TAIL_LINES = 12;
 
 /** Fails fast with `ffmpeg-missing` before minutes of rendering, instead of at the audio step. */
-export function checkFfmpeg(): Promise<void> {
-  return runFfmpeg(['-hide_banner', '-version']);
+export async function checkFfmpeg(): Promise<void> {
+  await runFfmpeg(['-hide_banner', '-version']);
 }
 
 /**
- * Runs ffmpeg and resolves when it exits with 0; otherwise rejects with the end of its stderr.
- * `signal` stops it (the child is killed) and rejects with `cancelled`.
+ * Runs ffmpeg and resolves with the end of its stderr when it exits with 0; otherwise rejects with
+ * that. `signal` stops it (the child is killed) and rejects with `cancelled`.
  */
-export function runFfmpeg(args: readonly string[], signal?: AbortSignal): Promise<void> {
+export function runFfmpeg(args: readonly string[], signal?: AbortSignal): Promise<string> {
   return new Promise((resolve, reject) => {
     if (signal?.aborted) return reject(new ExportError('cancelled', 'the export was cancelled'));
     const child = spawn(ffmpegPath(), args, { stdio: ['ignore', 'ignore', 'pipe'], windowsHide: true, signal });
@@ -43,7 +43,7 @@ export function runFfmpeg(args: readonly string[], signal?: AbortSignal): Promis
       }
     });
     child.on('close', (code) => {
-      if (code === 0) return resolve();
+      if (code === 0) return resolve(stderr);
       if (signal?.aborted) return reject(new ExportError('cancelled', 'the export was cancelled'));
       const tail = stderr.trim().split(/\r?\n/).slice(-STDERR_TAIL_LINES).join('\n');
       reject(new ExportError('render', `ffmpeg exited with code ${code}:\n${tail}`));

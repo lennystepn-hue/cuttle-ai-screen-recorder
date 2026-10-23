@@ -72,6 +72,8 @@ export interface ExportFile {
   subtitles?: string[];
   /** The chapters in it, from the script's steps. */
   chapters?: Chapter[];
+  /** Its sound brought to a platform's loudness (`look.audio.loudness`): the target and what it measures (LUFS, dBTP). */
+  loudness?: { target: string; lufs: number | null; truePeak: number | null };
 }
 
 export type ExportEnd =

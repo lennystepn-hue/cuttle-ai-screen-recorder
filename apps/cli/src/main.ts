@@ -495,8 +495,9 @@ export async function runCli(argv: readonly string[], streams?: Streams): Promis
     .option('--no-captions', 'no captions burned in, whatever the project says')
     .option('--srt', 'also write the captions as <name>.srt next to the video')
     .option('--vtt', 'also write the captions as <name>.vtt next to the video')
+    .option('--loudness <target>', "bring the sound to a platform's loudness: youtube (-14 LUFS: YouTube, Spotify, TikTok, Instagram), podcast (-16), broadcast (-23) or off (default: the project's look.audio.loudness)")
     .action(
-      action((output, project, options: { format?: string; out?: string; encoder?: string; captions: boolean; srt?: boolean; vtt?: boolean }) =>
+      action((output, project, options: { format?: string; out?: string; encoder?: string; captions: boolean; srt?: boolean; vtt?: boolean; loudness?: string }) =>
         withSignal(output, (signal) => renderCommand(project, options, output, signal)),
       ),
     );

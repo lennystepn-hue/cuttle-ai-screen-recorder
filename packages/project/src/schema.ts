@@ -14,6 +14,19 @@ export const TEXT_STYLES = ['pill', 'lower-third', 'caption'] as const;
 export const CURSOR_STYLES = ['system', 'arrow-white', 'arrow-black', 'dot', 'ring', 'spotlight'] as const;
 export const CURSOR_SHAPES = ['arrow', 'text', 'pointer', 'wait', 'crosshair', 'move', 'not-allowed'] as const;
 export const EASES = ['smooth', 'linear'] as const;
+
+/** The loudness a video's mix is brought to on export: none (`off`), or where a platform plays it (`LOUDNESS`). */
+export const LOUDNESS_TARGETS = ['off', 'youtube', 'podcast', 'broadcast'] as const;
+export type LoudnessTarget = (typeof LOUDNESS_TARGETS)[number];
+/**
+ * Each target's integrated loudness (LUFS, EBU R128) and true peak ceiling (dBTP): YouTube, Spotify,
+ * TikTok and Instagram play at about -14; Apple Podcasts and many feeds at -16; broadcast (EBU R128) at -23.
+ */
+export const LOUDNESS: Record<Exclude<LoudnessTarget, 'off'>, { lufs: number; truePeak: number }> = {
+  youtube: { lufs: -14, truePeak: -1 },
+  podcast: { lufs: -16, truePeak: -1 },
+  broadcast: { lufs: -23, truePeak: -1 },
+};
 export const MASK_STYLES = ['fill', 'blur'] as const;
 export const TEXT_POSITIONS = ['top', 'center', 'bottom'] as const;
 /** How captions look: classic subtitles on a dark box, the spoken word in colour, or a few big words at a time. */
@@ -154,6 +167,8 @@ const AudioSchema = z.strictObject({
   systemVolume: z.number().min(0).max(1).default(0.8),
   /** How far it goes down under speech (dB), as the music; 0 leaves it. */
   systemDuck: z.number().min(0).max(40).default(12),
+  /** The loudness the export brings the whole mix to (`LOUDNESS`): a platform's, or `off` (the mix as it is). */
+  loudness: z.enum(LOUDNESS_TARGETS).default('off'),
 });
 
 const TransitionSchema = z.strictObject({

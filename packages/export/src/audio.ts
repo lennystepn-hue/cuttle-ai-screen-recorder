@@ -307,3 +307,51 @@ export function muxArgs({ video, mic, system, narration, typing, sound, graph, g
     out,
   ];
 }
+
+/** dB the master limiter stays under its ceiling: the AAC encoder's overshoot on loud peaks. */
+export const CODEC_HEADROOM = 0.5;
+
+/**
+ * The graph with a master stage after the mix: `gain` dB on the whole of it, then a limiter at four
+ * times the rate (so peaks between samples count) that keeps the true peak under `ceiling` dBTP,
+ * `CODEC_HEADROOM` lower than asked. Its output is `[aout]` still.
+ */
+export function masterGraph(graph: string, gain: number, ceiling: number): string {
+  if (!graph.endsWith('[aout]')) throw new Error('the audio graph does not end in [aout]');
+  const limit = 10 ** ((ceiling - CODEC_HEADROOM) / 20);
+  return `${graph.slice(0, -'[aout]'.length)}[premaster];[premaster]volume=${gain.toFixed(2)}dB,aresample=${AUDIO_SAMPLE_RATE * 4},alimiter=limit=${limit.toFixed(4)}:attack=1:release=60:level=false,aresample=${AUDIO_SAMPLE_RATE}[aout]`;
+}
+
+/** The graph with the mix going on into ffmpeg's EBU R128 meter (`[meter]`), for `meterArgs`. */
+export const meteredGraph = (graph: string): string => `${graph};[aout]ebur128=peak=true[meter]`;
+
+/** ffmpeg's arguments that play the inputs of `muxArgs` through a `meteredGraph` and write nothing: its summary is on stderr. */
+export function meterArgs({ video, mic, system, narration, typing, sound, graph, graphFile }: Omit<MuxArgsOptions, 'chapters' | 'out'>): string[] {
+  return [
+    '-hide_banner',
+    '-nostdin',
+    '-nostats',
+    '-i',
+    video,
+    ...(mic ? ['-i', mic] : []),
+    ...(system ? ['-i', system] : []),
+    ...(narration ? ['-i', narration] : []),
+    ...(typing ? ['-i', typing] : []),
+    ...(sound ? ['-i', sound] : []),
+    ...(graphFile ? ['-/filter_complex', graphFile] : ['-filter_complex', graph]),
+    '-map',
+    '[meter]',
+    '-f',
+    'null',
+    '-',
+  ];
+}
+
+/** The integrated loudness (LUFS) and true peak (dBTP) in the summary ffmpeg's `ebur128` meter prints last; null where it has none (silence). */
+export function parseMeter(stderr: string): { lufs: number | null; truePeak: number | null } {
+  const summary = stderr.slice(stderr.lastIndexOf('Summary:'));
+  const lufs = /I:\s+(-?[\d.]+|-inf) LUFS/.exec(summary)?.[1];
+  const peak = /True peak:\s+Peak:\s+(-?[\d.]+|-inf) dBFS/.exec(summary)?.[1];
+  const value = (text: string | undefined) => (text === undefined || text === '-inf' || !summary.startsWith('Summary:') ? null : Number(text));
+  return { lufs: value(lufs), truePeak: value(peak) };
+}

@@ -425,6 +425,10 @@ const CaptionsSchema = z.strictObject({
   /** The spoken word's colour (`karaoke`, `bold`). */
   color: hexColor.default('#D97757'),
   fixes: z.array(CaptionFixSchema).default([]),
+  /** The subtitles in other languages: each language's code and its file in the project (`subtitles/de.json`). */
+  translations: z.record(z.string().regex(/^[a-z]{2,3}(-[A-Za-z0-9]{2,8})*$/, 'a language code: de, en, pt-BR'), z.string().min(1)).optional(),
+  /** The language the picture shows: one of `translations`; left out, the words as spoken. */
+  language: z.string().optional(),
 });
 
 /** A source range taken out of every clip that covers it: a jump cut, no crossfade. */
@@ -676,6 +680,9 @@ export const ProjectSchema = z
   })
   // Runs once everything else is valid (see the note above BackgroundSchema).
   .superRefine((project, ctx) => {
+    if (project.captions.language !== undefined && !project.captions.translations?.[project.captions.language]) {
+      ctx.addIssue({ code: 'custom', message: `the picture shows "${project.captions.language}", which is not one of the subtitles' translations`, path: ['captions', 'language'] });
+    }
     const seen = new Map<string, string>();
     const lists: [string[], readonly { id?: string }[]][] = [
       ...(['scenes', 'zooms', 'masks', 'texts', 'annotations', 'cameras', 'overlays', 'cuts', 'sounds', 'script'] as const).map((list): [string[], readonly { id?: string }[]] => [[list], project[list]]),

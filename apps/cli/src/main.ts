@@ -22,7 +22,8 @@ import { chaptersCommand } from './commands/chapters';
 import { suggestCommand } from './commands/suggest';
 import { modelsDownloadCommand, modelsListCommand, modelsRemoveCommand } from './commands/models';
 import { transcribeCommand } from './commands/transcribe';
-import { transcriptCommand } from './commands/transcript';
+import { transcriptCommand, translateCommand } from './commands/transcript';
+import { captionsSetCommand, type CaptionsSetArgs } from './commands/captions';
 import { voiceAddCommand, voiceDownloadCommand, voiceListCommand, voiceRemoveCommand, voiceRenderCommand, voiceUseCommand, type VoiceAddArgs, type VoiceUseArgs } from './commands/voice';
 import { CliError, EXIT, toCliError } from './errors';
 import { createOutput, type Output, type Streams } from './output';
@@ -525,7 +526,21 @@ export async function runCli(argv: readonly string[], streams?: Streams): Promis
     .option('--srt', 'the captions as SubRip')
     .option('--vtt', 'the captions as WebVTT')
     .option('--text', 'the words as plain text')
-    .action(action((output, project, options: { srt?: boolean; vtt?: boolean; text?: boolean }) => transcriptCommand(project, options, output)));
+    .option('--translate <language>', 'write subtitles/<language>.json: the sentences on their timing, each to translate (then captions set --translation)')
+    .action(
+      action((output, project, options: { srt?: boolean; vtt?: boolean; text?: boolean; translate?: string }) =>
+        options.translate !== undefined ? translateCommand(project, options.translate, output) : transcriptCommand(project, options, output),
+      ),
+    );
+
+  const captions = program.command('captions').description("the subtitles' languages: translations of the transcript, and the one the picture shows");
+  captions
+    .command('set')
+    .description('take a translation in (every sentence written), or put a language in the picture')
+    .option('--translation <language>', 'a translation written into subtitles/<language>.json (de, en, pt-BR)')
+    .option('--file <path>', "the translation's file, if not subtitles/<language>.json")
+    .option('--show <language>', 'the language the picture shows: a translation, or spoken')
+    .action(action((output, project, options: CaptionsSetArgs) => captionsSetCommand(project, options, output)));
 
   program
     .command('watch')

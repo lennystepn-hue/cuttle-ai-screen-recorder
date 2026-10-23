@@ -1,7 +1,7 @@
 // The project's media in the editor, read through the cuttle-media protocol (Range requests).
 import { ALL_FORMATS, Input, UrlSource, type InputAudioTrack, type InputVideoTrack, type VideoSinkDecoderOptions } from 'mediabunny';
 import { createCursorTrack, shortcutsOf, type CursorTrack, type Shortcut } from '@cuttle/timeline';
-import { parseEventsJsonl, parseMarkersJson, parseProject, parseTranscriptJson, type CuttleProject, type InputEvent, type Marker, type TranscriptFile, parseVoiceRender, showsCamera, speaks, voiceLineKey, voiceRenderFiles, type VoiceRender } from '@cuttle/project';
+import { parseEventsJsonl, parseMarkersJson, parseProject, parseTranscriptJson, parseTranslationJson, type TranslatedSentence, type CuttleProject, type InputEvent, type Marker, type TranscriptFile, parseVoiceRender, showsCamera, speaks, voiceLineKey, voiceRenderFiles, type VoiceRender } from '@cuttle/project';
 import { isSvg, svgBitmap } from '@cuttle/export/svg';
 import { plainIssue } from '../../shared/format';
 import { MEDIA_ORIGIN, type ProjectInfo } from '../../shared/ipc';
@@ -170,6 +170,9 @@ export interface EditorMedia {
   /** What the mic said (`sources.transcript`), and the path it was read from: it can be linked after the editor opened. */
   transcript?: TranscriptFile;
   transcriptPath?: string;
+  /** The subtitles' translation the picture shows (`captions.language`), and the path it was read from. */
+  translation?: { language: string; sentences: TranslatedSentence[] };
+  translationPath?: string;
   /** Still images by their project path. */
   stills: Map<string, ImageBitmap>;
   backgroundImage?: ImageBitmap;
@@ -257,6 +260,24 @@ export async function ensureMedia(media: EditorMedia, project: CuttleProject): P
       const parsed = text === undefined ? undefined : parseTranscriptJson(text);
       if (parsed?.ok) media.transcript = parsed.transcript;
       else if (parsed) media.warnings.push(`${path} is invalid: no subtitles.`);
+    }
+    added = true;
+  }
+  // the subtitles in another language, when the picture shows one
+  const language = project.captions.language;
+  const translationPath = language ? project.captions.translations?.[language] : undefined;
+  if (translationPath !== media.translationPath) {
+    media.translationPath = translationPath;
+    delete media.translation;
+    if (language && translationPath) {
+      const text = await optional(media, translationPath, async () => {
+        const found = await fetchText(translationPath);
+        if (found === undefined) throw new MediaError(`${translationPath} cannot be read: the subtitles show as spoken.`);
+        return found;
+      });
+      const parsed = text === undefined ? undefined : parseTranslationJson(text);
+      if (parsed?.ok) media.translation = { language, sentences: parsed.translation.sentences };
+      else if (parsed) media.warnings.push(`${translationPath} is invalid: the subtitles show as spoken.`);
     }
     added = true;
   }

@@ -56,6 +56,55 @@ export function applyCaptionFixes(words: readonly SpokenWord[], fixes: readonly 
   return fixed.sort((a, b) => a.t - b.t);
 }
 
+/** A sentence ends after a word ending in one of these, or at a pause this long (seconds), or at this many words. */
+const SENTENCE_END = /[.!?…。！？]["')\]]*$/;
+const SENTENCE_PAUSE = 0.8;
+const SENTENCE_WORDS = 24;
+
+/**
+ * The transcript's sentences (source seconds), each from its first word's start to its last word's
+ * end: what a translation is written for, sentence by sentence on the original's timing.
+ */
+export function sentencesOf(words: readonly SpokenWord[]): { at: number; end: number; text: string }[] {
+  const sentences: { at: number; end: number; text: string }[] = [];
+  let current: SpokenWord[] = [];
+  const close = () => {
+    if (current.length === 0) return;
+    sentences.push({ at: current[0]!.t, end: current.at(-1)!.end, text: current.map((word) => word.text).join(' ') });
+    current = [];
+  };
+  for (const word of [...words].sort((a, b) => a.t - b.t)) {
+    const last = current.at(-1);
+    if (last && (word.t - last.end >= SENTENCE_PAUSE || current.length >= SENTENCE_WORDS)) close();
+    current.push(word);
+    if (SENTENCE_END.test(word.text)) close();
+  }
+  close();
+  return sentences;
+}
+
+/**
+ * A translation's words, each sentence's spread over the time its original took, by their length:
+ * what the captions show in that language (the karaoke's word follows its share of the sentence).
+ * Sentences left untranslated are left out.
+ */
+export function translatedWords(sentences: readonly { at: number; end: number; text: string }[]): SpokenWord[] {
+  const words: SpokenWord[] = [];
+  for (const sentence of sentences) {
+    const parts = sentence.text.split(/\s+/).filter((part) => part !== '');
+    if (parts.length === 0) continue;
+    const total = parts.reduce((sum, part) => sum + [...part].length + 1, 0);
+    const length = Math.max(0, sentence.end - sentence.at);
+    let t = sentence.at;
+    for (const part of parts) {
+      const share = (([...part].length + 1) / total) * length;
+      words.push({ t, end: t + share, text: part });
+      t += share;
+    }
+  }
+  return words;
+}
+
 /**
  * The words in output seconds: each word whose start a clip shows at 1× (a sped-up clip's speech is
  * not captioned), once per time it is shown, its end kept inside its clip's piece.

@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { basename, dirname, extname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { LOUDNESS, type LoudnessTarget } from '@cuttle/project';
-import { applyCaptionFixes, captionCues, captionWords, sceneSpans, stepChapters, toSrt, toVtt, totalDuration, typingClicks, type Chapter } from '@cuttle/timeline';
+import { applyCaptionFixes, captionCues, captionWords, sceneSpans, stepChapters, toSrt, toVtt, totalDuration, translatedWords, typingClicks, type Chapter } from '@cuttle/timeline';
 import { app } from 'electron';
 import { INLINE_GRAPH_LIMIT, alphaMuxArgs, audioFilterGraph, encodeArgs, masterFilter, meterArgs, mixArgs, muxArgs, parseMeter, planAudio, type AlphaContainer } from '../audio';
 import { frameCount } from '../frame-plan';
@@ -93,7 +93,7 @@ export const SUBTITLE_FORMATS = ['srt', 'vtt'] as const;
 export type SubtitleFormat = (typeof SUBTITLE_FORMATS)[number];
 
 /** The subtitle file of `out` in `format`: its name with the format's extension. */
-export const subtitlePath = (out: string, format: SubtitleFormat) => join(dirname(out), `${basename(out).replace(/\.[^.]*$/, '')}.${format}`);
+export const subtitlePath = (out: string, format: SubtitleFormat, language?: string) => join(dirname(out), `${basename(out).replace(/\.[^.]*$/, '')}${language ? `.${language}` : ''}.${format}`);
 
 export interface ExportStats {
   gpu: string;
@@ -332,7 +332,8 @@ export async function exportProjects(opts: BatchExportOptions): Promise<ExportRe
   if (subtitles.length > 0 && !sources.transcript && !narrated) {
     throw new ExportError('missing-file', 'subtitle files need the take\'s transcript (sources.transcript): run "cuttle transcribe" first');
   }
-  for (const out of outs) for (const format of subtitles) await checkOutput(subtitlePath(out, format), sources.inputs);
+  const languages = Object.keys(sources.translations ?? {});
+  for (const out of outs) for (const format of subtitles) for (const language of [undefined, ...languages]) await checkOutput(subtitlePath(out, format, language), sources.inputs);
   await checkFfmpeg();
   if (sources.mic) await checkMic(sources.mic.path, signal);
   if (sources.system) await checkMic(sources.system.path, signal, "the computer's sound (sources.system)");
@@ -352,6 +353,8 @@ export async function exportProjects(opts: BatchExportOptions): Promise<ExportRe
     const line = project.voiceover.lines[index]!;
     console.warn(`warning: the narration's line ${line.id ?? `#${index + 1}`} plays nowhere: ${line.scene !== undefined ? 'it starts after its scene ends' : 'no clip shows its second'}`);
   }
+  // the subtitles in the picture in another language: its sentences
+  const pictured = project.captions.language ? sources.translations?.[project.captions.language] : undefined;
   const jobOf = (format: ExportFormat | undefined): ExportJob => ({
     kind: 'video',
     project: withFormat(project, format, { ...(opts.size && { size: opts.size }), ...(opts.fps !== undefined && { fps: opts.fps }) }),
@@ -360,6 +363,7 @@ export async function exportProjects(opts: BatchExportOptions): Promise<ExportRe
     events: sources.events,
     ...(sources.shortcuts && { shortcuts: sources.shortcuts }),
     ...(sources.transcript && { transcript: sources.transcript }),
+    ...(pictured && { translated: translatedWords(pictured) }),
     ...(narration && narration.words.length > 0 && { narration: narration.words }),
     ...(opts.captions !== undefined && { captions: opts.captions }),
     stills: sources.stills,
@@ -576,6 +580,13 @@ export async function exportProjects(opts: BatchExportOptions): Promise<ExportRe
         const path = subtitlePath(out, format);
         await writeFile(path, format === 'srt' ? toSrt(cues()) : toVtt(cues()));
         written.push(path);
+        // each translation in a file of its own: <name>.<language>.srt
+        for (const [language, sentences] of Object.entries(sources.translations ?? {})) {
+          const translated = captionCues(captionWords(translatedWords(sentences), spans), 'subtitle');
+          const other = subtitlePath(out, format, language);
+          await writeFile(other, format === 'srt' ? toSrt(translated) : toVtt(translated));
+          written.push(other);
+        }
       }
       results.push({
         out,

@@ -385,6 +385,21 @@ export const COMMAND_TOOLS: readonly CommandTool[] = [
     argv: (input) => ['transcript', ...(input.as ? [`--${input.as}`] : [])],
   }),
   tool({
+    name: 'translate_subtitles',
+    title: 'Start a translation',
+    description:
+      "Writes subtitles/<language>.json: the transcript's sentences on their original timing, each with an empty text to translate into (sentences translated before keep theirs). Edit the file to write each sentence's text in that language, then call captions_set with translation.",
+    input: { project, language: z.string().min(2).describe('a language code: de, en, pt-BR') },
+    argv: (input) => ['transcript', '--translate', input.language],
+  }),
+  tool({
+    name: 'captions_set',
+    title: 'Subtitle languages',
+    description: "Takes a translation in once every sentence is written (translation, with file if it is not subtitles/<language>.json), or puts a language in the picture (show: a translation, or 'spoken'). The export writes subtitle files in every language.",
+    input: { project, translation: z.string().optional(), file: z.string().optional(), show: z.string().optional() },
+    argv: (input) => ['captions', 'set', ...option('translation', input.translation), ...option('file', input.file), ...option('show', input.show)],
+  }),
+  tool({
     name: 'render',
     title: 'Render the video',
     description:

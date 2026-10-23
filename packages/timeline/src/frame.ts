@@ -114,6 +114,8 @@ export interface TimelineOptions {
   cursor?: CursorTrack;
   /** The take's transcript (source seconds), for the captions. */
   transcript?: readonly SpokenWord[];
+  /** The captions' words in the language the picture shows (`captions.language`, `translatedWords`), instead of the transcript's. */
+  translated?: readonly SpokenWord[];
   /** The narration's words (output seconds, `narrationWords`), for the captions while `voiceover.captions` is on. */
   narration?: readonly CaptionWord[];
   /** Show the captions (default: `captions.enabled`); an export without them passes false. */
@@ -143,7 +145,8 @@ export function createTimeline(project: CuttleProject, opts: TimelineOptions): T
   cuts.sort((a, b) => a - b);
   const full: Rect = [0, 0, opts.screenSize.width, opts.screenSize.height];
   const { captions } = project;
-  const spoken = opts.transcript ? captionWords(applyCaptionFixes(opts.transcript, captions.fixes), spans) : [];
+  // a translation in the picture: its words, as they are (the fixes are the spoken words')
+  const spoken = opts.translated ? captionWords(opts.translated, spans) : opts.transcript ? captionWords(applyCaptionFixes(opts.transcript, captions.fixes), spans) : [];
   const narrated = project.voiceover.captions ? (opts.narration ?? []) : [];
   const words = narrated.length > 0 ? [...spoken, ...narrated].sort((a, b) => a.t - b.t) : spoken;
   const cues = words.length > 0 ? captionCues(words, captions.style) : [];

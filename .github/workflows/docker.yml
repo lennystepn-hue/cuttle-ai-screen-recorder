@@ -1,0 +1,43 @@
+# The Docker image (the Dockerfile: the cuttle command rendering on Linux) on GitHub's container
+# registry, for every published release: ghcr.io/<owner>/cuttle:<version> and :latest.
+name: Docker image
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  image:
+    name: ghcr.io
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: names
+        run: |
+          echo "image=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/cuttle" >> "$GITHUB_OUTPUT"
+          echo "version=$(node -p "require('./apps/desktop/package.json').version")" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ steps.names.outputs.image }}:${{ steps.names.outputs.version }}
+            ${{ steps.names.outputs.image }}:latest
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.description=Cuttle renders videos written in code on Linux: the cuttle command in a virtual display
+            org.opencontainers.image.version=${{ steps.names.outputs.version }}

@@ -75,15 +75,18 @@ runs:
         node-version: 24
 
     # Electron's Chromium draws in a virtual display (Xvfb) on Linux; the names of Ubuntu 24.04
-    # (t64), else 22.04's; without man-db's index rebuilt after the install (minutes on a runner)
+    # (t64), else 22.04's. The runner's own updates are stopped (they hold dpkg's lock), a slow
+    # mirror gives up after 30 s a connection and is tried again, and man-db keeps its index.
     - name: ffmpeg and a display (Linux)
       if: runner.os == 'Linux'
       shell: bash
       run: |
+        sudo systemctl stop unattended-upgrades.service apt-daily.service apt-daily-upgrade.service 2>/dev/null || true
         sudo rm -f /var/lib/man-db/auto-update
-        sudo apt-get update -qq
+        apt=(sudo apt-get -o DPkg::Lock::Timeout=600 -o Acquire::Retries=5 -o Acquire::http::Timeout=30)
+        "${apt[@]}" -q update
         t64=$(apt-cache show libasound2t64 >/dev/null 2>&1 && echo t64 || true)
-        sudo apt-get install -y -qq --no-install-recommends ffmpeg xvfb xauth libnss3 "libatk1.0-0$t64" "libatk-bridge2.0-0$t64" "libcups2$t64" "libgtk-3-0$t64" libgbm1 "libasound2$t64" libxss1 libxshmfence1 libdrm2 fonts-noto-color-emoji >/dev/null
+        "${apt[@]}" -qq install -y --no-install-recommends ffmpeg xvfb xauth libnss3 "libatk1.0-0$t64" "libatk-bridge2.0-0$t64" "libcups2$t64" "libgtk-3-0$t64" libgbm1 "libasound2$t64" libxss1 libxshmfence1 libdrm2 fonts-noto-color-emoji >/dev/null
 
     - name: ffmpeg (macOS)
       if: runner.os == 'macOS'

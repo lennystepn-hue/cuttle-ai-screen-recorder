@@ -11,7 +11,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "engine:electron": "vite build --config packages/engine/electron/vite.config.ts && electron packages/engine/electron/main.mjs",
-    "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.node.json && tsc -p packages/engine/tsconfig.json && tsc -p packages/export/tsconfig.json && tsc -p packages/export/tsconfig.node.json && tsc -p packages/recorder/tsconfig.json && tsc -p packages/core/tsconfig.json && tsc -p apps/cli/tsconfig.json && tsc -p apps/desktop/tsconfig.json && tsc -p skill/tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.node.json && tsc -p packages/engine/tsconfig.json && tsc -p packages/export/tsconfig.json && tsc -p packages/export/tsconfig.node.json && tsc -p packages/recorder/tsconfig.json && tsc -p packages/core/tsconfig.json && tsc -p apps/cli/tsconfig.json && tsc -p apps/desktop/tsconfig.json && tsc -p skill/tsconfig.json && tsc -p packages/sdk/tsconfig.json",
     "export:build": "vite build --config packages/export/electron/vite.main.config.ts && vite build --config packages/export/electron/vite.page.config.ts && node packages/motion-kit/scripts/copy.mjs packages/export/dist/motion-kit",
     "export:check": "pnpm export:build && electron packages/export/dist/check.mjs",
     "recorder:real": "vitest run --mode real --silent=false packages/recorder/test/real.test.ts",
@@ -30,6 +30,7 @@
     "skill:uninstall": "node skill/install.mjs --uninstall"
   },
   "devDependencies": {
+    "@cuttle/sdk": "workspace:*",
     "@types/node": "^22.20.5",
     "@types/pngjs": "^6.0.5",
     "@vitest/browser-playwright": "5.0.5",

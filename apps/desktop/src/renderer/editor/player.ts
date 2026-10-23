@@ -1,9 +1,10 @@
 // The editor's output view: the export's engine drawing the export's timeline into a canvas, played
 // with the mic as the clock (video follows the audio and drops frames rather than drifting) and
 // scrubbed one frame at a time.
-import { createRenderer, type DrawnText, type EngineAssets, type FrameSources, type Renderer } from '@cuttle/engine';
+import { createRenderer, loadSegmenter, type DrawnText, type EngineAssets, type FrameSources, type Renderer, type Segmenter } from '@cuttle/engine';
+import { SEGMENTER_FILES } from '@cuttle/engine/segment-files';
 import { planStills } from '@cuttle/export/frame-plan';
-import { voiceLineKey, type CuttleProject } from '@cuttle/project';
+import { showsCamera, voiceLineKey, type CuttleProject } from '@cuttle/project';
 import { translatedWords, createTimeline, crossfadeHalf, narrationCues, narrationWords, pageTransition, sceneSpans, type CaptionWord, type RenderState, type Timeline } from '@cuttle/timeline';
 import { speechSpans } from '@cuttle/export/music-duck';
 import { AudioSchedule, NarrationSchedule, systemLevel } from './audio';
@@ -115,6 +116,24 @@ export class Player {
     this.renderer = this.makeRenderer();
     this.fullSizeMotion = options.fullSizeMotion ?? false;
     this.motion = new MotionFrames(this.project, this.media.screenSize, () => this.motionSize());
+    this.wantSegmenter();
+  }
+
+  /** Finds the person in the webcam's frames, once loaded (`look.webcam.background`). */
+  private segmenter: Segmenter | undefined;
+  private segmenterLoading = false;
+
+  /** Loads the segmenter when the project first shows the camera with a background other than the room; the frame is drawn again with it. */
+  private wantSegmenter(): void {
+    if (this.segmenter || this.segmenterLoading || !showsCamera(this.project) || (this.project.look.webcam.background ?? 'keep') === 'keep') return;
+    this.segmenterLoading = true;
+    void loadSegmenter(SEGMENTER_FILES)
+      .then((segmenter) => {
+        this.segmenter = segmenter;
+        if (!this.state.playing) void this.seek(this.seeking ?? this.state.t);
+      })
+      .catch((error: unknown) => console.error(`the webcam's segmentation model did not load: ${(error as Error).message}`))
+      .finally(() => (this.segmenterLoading = false));
   }
 
   /** The size motion frames are drawn at: the output's part that fills the player on screen. */
@@ -218,6 +237,7 @@ export class Player {
     return createRenderer(this.canvas, this.project, {
       assets: this.assets,
       screenSize: this.media.screenSize,
+      segmenter: () => this.segmenter,
       ...(this.media.backgroundImage && { backgroundImage: this.media.backgroundImage }),
       ...(this.drawnWatermark && { watermarkImage: this.drawnWatermark }),
     });
@@ -258,6 +278,7 @@ export class Player {
       this.renderer = this.makeRenderer();
     } else this.renderer.setScenes(project.scenes);
     if (this.media.webcam && !this.webcamGrabber) this.webcamGrabber = new FrameGrabber(this.media.webcam);
+    this.wantSegmenter();
     void this.seek(Math.min(this.seeking ?? this.state.t, this.timeline.duration));
     if (playing) this.play();
   }

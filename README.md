@@ -59,7 +59,7 @@ made that way: nine pages and a score, no camera, no editor. See [Motion videos,
     <td><img src="docs/media/feature-voice.jpg" alt="Karaoke subtitles over a waveform, the filler words struck out" /></td>
   </tr>
   <tr>
-    <td valign="top"><b>Make it look designed.</b> Backgrounds (gradients, animated ones, your wallpaper), window frames from macOS to a phone, cursor styles, keycaps of the shortcuts you press, a webcam bubble you move and reshape after the take, brand kits, watermarks, motion titles and music written for the video.</td>
+    <td valign="top"><b>Make it look designed.</b> Backgrounds (gradients, animated ones, your wallpaper), window frames from macOS to a phone, cursor styles, keycaps of the shortcuts you press, a webcam bubble you move and reshape after the take (the room behind you blurred, a colour or gone), brand kits, watermarks, motion titles and music written for the video.</td>
     <td valign="top"><b>Fillers and pauses, gone.</b> Your voice is transcribed on your computer with Whisper. Filler words and long pauses are cut where the picture rests, subtitles come word by word (or karaoke), and the export writes SRT and VTT. No voice of your own? A narration speaks your text, with neural voices that run on your computer (English, German, French, Spanish) or your ElevenLabs voice by its ID.</td>
   </tr>
   <tr>

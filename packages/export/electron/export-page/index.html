@@ -2,10 +2,11 @@
 <html>
   <head>
     <meta charset="utf-8" />
-    <!-- The page loads only its own script; fonts are inlined, cursor art and images become blob: URLs. -->
+    <!-- The page loads only its own script; fonts are inlined, cursor art and images become blob: URLs, and so
+         do the webcam's segmenter (MediaPipe's loader script and WebAssembly), read through the host. -->
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'none'; script-src 'self'; img-src blob: data:; font-src data:; worker-src blob:"
+      content="default-src 'none'; script-src 'self' blob: 'wasm-unsafe-eval'; connect-src blob:; img-src blob: data:; font-src data:; worker-src blob:"
     />
     <title>Cuttle export</title>
   </head>

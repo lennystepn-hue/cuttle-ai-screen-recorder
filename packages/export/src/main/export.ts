@@ -16,6 +16,7 @@ import { EXPORT_FPS, withFormat, type ExportCodec, type ExportFormat, type Expor
 import { CHANNELS, type EncoderPreference, type ExportJob, type PageResult, type PageStillsSuccess, type PageSuccess } from '../job';
 import { checkFfmpeg, runFfmpeg } from './ffmpeg';
 import { FileHost } from './files';
+import { segmenterPaths } from './segmenter';
 import { MotionHost, motionWarnings, serveMotion, type MotionItemReport } from './motion-host';
 import { motionSoundCues } from './motion-sounds';
 import { loadSources, motionTake, samePath } from './sources';
@@ -355,6 +356,7 @@ export async function exportProjects(opts: BatchExportOptions): Promise<ExportRe
   }
   // the subtitles in the picture in another language: its sentences
   const pictured = project.captions.language ? sources.translations?.[project.captions.language] : undefined;
+  const segmenter = segmenterPaths(project, opts.pageDir ?? defaultPageDir());
   const jobOf = (format: ExportFormat | undefined): ExportJob => ({
     kind: 'video',
     project: withFormat(project, format, { ...(opts.size && { size: opts.size }), ...(opts.fps !== undefined && { fps: opts.fps }) }),
@@ -370,6 +372,7 @@ export async function exportProjects(opts: BatchExportOptions): Promise<ExportRe
     backgroundImage: sources.backgroundImage,
     watermarkImage: sources.watermarkImage,
     ...(sources.motion && { motion: sources.motion }),
+    ...(segmenter && { segmenter }),
     ...(alpha && { transparent: true }),
     ...(opts.codec === 'hevc' && { codec: 'hevc' as const }),
     encoder: opts.encoder ?? 'auto',
@@ -510,7 +513,8 @@ export async function exportProjects(opts: BatchExportOptions): Promise<ExportRe
       }
       const job = jobOf(target.format);
       const video = join(folder, `video-${index}.${alpha ? 'webm' : 'mp4'}`);
-      const images = [...Object.values(sources.stills), ...[sources.backgroundImage, sources.watermarkImage].filter((path): path is string => path !== undefined)];
+      // the segmenter's files are read whole, as the images are
+      const images = [...Object.values(sources.stills), ...[sources.backgroundImage, sources.watermarkImage].filter((path): path is string => path !== undefined), ...(segmenter ? Object.values(segmenter) : [])];
       const host = new FileHost([...(sources.screen ? [sources.screen] : []), ...(sources.webcam ? [sources.webcam.path] : [])], video, images);
       hosts.push(host);
       const guard = watchdog();

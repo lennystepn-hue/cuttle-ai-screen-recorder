@@ -74,9 +74,9 @@ async function help(command: string): Promise<string> {
 
 /** `--flag` as a whole option in a help text (not `--until` inside `--until-file`). */
 const hasFlag = (text: string, flag: string) => new RegExp(`${flag}(?![\\w-])`).test(text);
-const COMMANDS = ['devices', 'record', 'import', 'suggest', 'transcribe', 'models', 'transcript', 'preview', 'fit', 'frame', 'capture-page', 'motion check', 'motion add', 'motion new', 'motion templates', 'music new', 'music templates', 'music set', 'music check', 'sound add', 'sound list', 'voice use', 'voice add', 'voice render', 'voice list', 'voice download', 'annotate', 'camera', 'captions set', 'items', 'zoom-path', 'watch', 'brand list', 'brand save', 'brand apply', 'brand remove', 'background', 'init', 'render', 'open', 'chapters', 'recover'];
+const COMMANDS = ['devices', 'record', 'import', 'suggest', 'transcribe', 'models', 'transcript', 'preview', 'fit', 'frame', 'capture-page', 'motion check', 'motion add', 'motion new', 'motion templates', 'music new', 'music templates', 'music set', 'music check', 'sound add', 'sound list', 'voice use', 'voice add', 'voice render', 'voice list', 'voice download', 'annotate', 'camera', 'captions set', 'items', 'zoom-path', 'watch', 'brand list', 'brand save', 'brand apply', 'brand remove', 'background', 'init', 'render', 'open', 'chapters', 'recover', 'webcam background'];
 /** Commands with subcommands: the subcommand is part of the command (`motion check`). */
-const GROUPS = ['motion', 'music', 'sound', 'brand', 'voice', 'captions'];
+const GROUPS = ['motion', 'music', 'sound', 'brand', 'voice', 'captions', 'webcam'];
 
 describe('the cuttle commands in the skill', () => {
   // Code blocks and inline code: what Claude runs.

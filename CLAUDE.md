@@ -55,6 +55,11 @@ Cuttle runs on **Windows and macOS**. A change made on one has to keep working o
   sheets are dialogs) and, through the Accessibility API, the Notification Center's banners and a
   browser's page (`pageOf`). macOS hides notifications from screen recordings unless the person
   allows them while sharing the screen.
+- **The webcam's background** (`look.webcam.background`): MediaPipe's selfie segmenter (its
+  landscape model, `packages/engine/assets`) on the CPU in WebAssembly, the same on both and in the
+  editor and the export. The editor's bundle has its files as URLs (`segment-files.ts`); the export
+  page reads them from `segment/` beside it through its host and hands them over as blob: URLs (its
+  CSP allows those and `wasm-unsafe-eval`, as the app's does).
 - **The screen's text**: Windows' own OCR through a PowerShell helper, macOS's Vision through
   `cuttle-capture ocr`; both speak the protocol in `core/src/privacy/ocr.ts`. Vision's boxes jitter
   around still text, which the privacy masks allow for (`MASK_RULES.jitter`).

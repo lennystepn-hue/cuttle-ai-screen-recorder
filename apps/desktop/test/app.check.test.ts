@@ -789,6 +789,31 @@ describe.runIf(enabled)('the Cuttle app', () => {
     expect(readFileSync(projectFile(), 'utf8')).toBe(original);
   }, 90_000);
 
+  it('puts a colour behind the person in the camera, the segmentation model loaded in the editor as in the export, and draws it as the export does', async () => {
+    const original = readFileSync(projectFile(), 'utf8');
+    type Behind = { look?: { webcam?: { background?: string } } };
+    const behind = () => (onDisk() as unknown as Behind).look?.webcam?.background;
+    await seek(1);
+    const before = await pixels();
+    await click(editor, '#tab-look');
+    await openLook(editor, 'camera');
+    await editor.waitForSelector('[data-testid=webcam-background]');
+    await chooseIn(editor, '[data-testid=webcam-background]', 'A colour');
+    await savedWhen(() => behind() === 'color');
+    expect((await doc()).undo).toBe('Behind you: a colour');
+    // the take's camera shows a test pattern, no person: the whole bubble takes the colour, as cuttle preview draws it
+    await editor.evaluate(() => (window as unknown as Hooked).__cuttleCheck.flush());
+    const still = spawnSync('node', [CLI, '--json', '-C', project, 'preview', '--at', '1', '-o', join(root, 'behind-still')], { encoding: 'utf8', timeout: 120_000 });
+    expect(still.status, still.stderr).toBe(0);
+    const exported = PNG.sync.read(readFileSync((JSON.parse(still.stdout) as { stills: { file: string }[] }).stills[0]!.file));
+    await expect.poll(async () => (await seek(1), difference(await pixels(), exported).mean), { timeout: 30_000, message: 'the colour behind: the editor against the export' }).toBeLessThan(2);
+    // and it is the colour, not the room: the bubble changed from before
+    expect(difference(await pixels(), before).mean, 'the bubble against the room as filmed').toBeGreaterThan(0.3);
+    await shot('08-camera-behind');
+    await undoAll();
+    expect(readFileSync(projectFile(), 'utf8')).toBe(original);
+  }, 90_000);
+
   it('animates a caption in and out, picked in the inspector and drawn as the export draws it, and a card’s title', async () => {
     const original = readFileSync(projectFile(), 'utf8');
     type Animated = { texts: { enter?: string; exit?: string }[]; scenes: { type: string; enter?: string }[] };

@@ -87,6 +87,13 @@ export interface RecordOptions {
   /** Device names from `listDevices()`. */
   webcam?: string;
   mic?: string;
+  /**
+   * Records what the computer plays (its apps' sound) as a track of its own, `system.m4a`: macOS
+   * through the capture helper (ScreenCaptureKit; a window take hears the window's app alone),
+   * Windows through the loopback helper (the default output device's mix). Without the helper the
+   * take records without it and says so.
+   */
+  systemAudio?: boolean;
   stop: StopOptions;
   /** Seconds to wait before the capture starts (default 3). */
   countdownSeconds?: number;
@@ -145,6 +152,8 @@ export interface Take {
   screen: string;
   webcam?: string;
   mic?: string;
+  /** What the computer played, when the take recorded it (`systemAudio`). */
+  system?: string;
   events: string;
   markers: string;
   screenSize: { width: number; height: number };

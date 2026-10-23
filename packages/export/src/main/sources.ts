@@ -29,6 +29,8 @@ export interface ProjectSources {
   screen?: string;
   webcam?: { path: string; offset: number };
   mic?: { path: string; offset: number };
+  /** What the computer played (`sources.system`), while `look.audio.system` is on. */
+  system?: { path: string; offset: number };
   events?: InputEvent[];
   /** The take's key counts, for the typing sounds (loaded whether the cursor shows or not). */
   keys?: InputEvent[];
@@ -143,7 +145,7 @@ async function readTake(screen: string): Promise<{ path: string; take?: TakeFile
 }
 
 /** Offset of a track from take.json, only when take.json describes that very file. */
-function offsetFor(take: TakeFile | undefined, track: 'webcam' | 'mic', path: string, screen: string): number {
+function offsetFor(take: TakeFile | undefined, track: 'webcam' | 'mic' | 'system', path: string, screen: string): number {
   const entry = take?.tracks[track];
   if (!take || !entry || !samePath(resolve(dirname(screen), entry.file), path)) return 0;
   return trackOffset(take, track) ?? 0;
@@ -174,7 +176,7 @@ export async function loadSources(projectDir: string): Promise<ProjectSources> {
   const take = takeFile?.take;
   // Every file the project names, including sources the look switches off: the output must not
   // replace a recording just because this export does not read it.
-  const named = [sources.screen, sources.webcam, sources.mic, sources.cleanMic, sources.events, sources.markers, sources.transcript, look.background.image, look.watermark.image, project.theme.logo].filter((path) => path !== undefined);
+  const named = [sources.screen, sources.webcam, sources.mic, sources.system, sources.cleanMic, sources.events, sources.markers, sources.transcript, look.background.image, look.watermark.image, project.theme.logo].filter((path) => path !== undefined);
   const inputs = [resolve(projectPath), ...(screen ? [join(dirname(screen), TAKE_FILE)] : []), ...named.map((path) => resolve(projectDir, path))];
   const result: ProjectSources = { project, ...(screen && { screen }), stills: {}, inputs, warnings: takeFile?.warning ? [takeFile.warning] : [] };
 
@@ -187,6 +189,10 @@ export async function loadSources(projectDir: string): Promise<ProjectSources> {
     // the cleaned-up mic plays in its place, in step with it (take.json describes the mic itself)
     const clean = look.audio.cleanup && sources.cleanMic ? await existing(projectDir, sources.cleanMic, 'cleaned-up mic (sources.cleanMic)') : undefined;
     result.mic = { path: clean ?? path, offset: offsetFor(take, 'mic', path, screen) };
+  }
+  if (screen && look.audio.enabled && look.audio.system && sources.system) {
+    const path = await existing(projectDir, sources.system, "the computer's sound (sources.system)");
+    result.system = { path, offset: offsetFor(take, 'system', path, screen) };
   }
   const typing = look.audio.enabled && look.audio.typing;
   if (screen && (look.cursor.enabled || typing || look.keys.enabled) && sources.events) {

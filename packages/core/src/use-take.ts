@@ -5,6 +5,8 @@ export interface TakeFiles {
   screen: string;
   webcam?: string;
   mic?: string;
+  /** What the computer played, when the take recorded it. */
+  system?: string;
   events?: string;
   markers?: string;
   /** What the mic said (`transcript.json`), when the take was transcribed. */
@@ -35,6 +37,7 @@ export function useTake(file: ProjectFile, take: TakeFiles, keepEdit = false): b
     screen: take.screen,
     ...(take.webcam && { webcam: take.webcam }),
     ...(take.mic && { mic: take.mic }),
+    ...(take.system && { system: take.system }),
     ...(take.events && { events: take.events }),
     ...(take.markers && { markers: take.markers }),
     ...(take.transcript && { transcript: take.transcript }),

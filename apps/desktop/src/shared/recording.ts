@@ -73,6 +73,8 @@ export type PickedTarget =
 export interface RecordChoices {
   camera?: string;
   mic?: string;
+  /** What the computer plays (its apps' sound) as a track of the take. */
+  systemAudio?: boolean;
   stop: 'none' | 'claude' | 'idle';
   /** The folder Claude Code runs in, for `stop: 'claude'`. */
   claudeFolder?: string;

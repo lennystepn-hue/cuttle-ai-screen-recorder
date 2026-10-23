@@ -50,6 +50,7 @@ describe.concurrent('record (test backend)', () => {
       projectDir,
       webcam: 'Test Camera',
       mic: 'Test Microphone',
+      systemAudio: true,
       stop: { maxSeconds: 3 },
       onEvent: (event) => {
         events.push(event);
@@ -74,6 +75,7 @@ describe.concurrent('record (test backend)', () => {
       screen: 'takes/1/screen.mp4',
       webcam: 'takes/1/webcam.mp4',
       mic: 'takes/1/mic.m4a',
+      system: 'takes/1/system.m4a',
       events: 'takes/1/events.jsonl',
       markers: 'takes/1/markers.json',
       screenSize: { width: 1280, height: 720 },
@@ -90,6 +92,9 @@ describe.concurrent('record (test backend)', () => {
     expect(Math.abs(trackOffset(takeFile.take, 'mic')!)).toBeLessThan(0.5);
     // the mic runs to the stop from its own start: as long as the take, and as much longer as it started earlier
     expect(probe(join(projectDir, take.mic!))).toMatchObject({ codec_name: 'aac', sample_rate: '48000', duration: expect.closeTo(take.seconds - trackOffset(takeFile.take, 'mic')!, 0) });
+    // what the computer played (the test backend's tone), lined up the same way
+    expect(Math.abs(trackOffset(takeFile.take, 'system')!)).toBeLessThan(0.5);
+    expect(probe(join(projectDir, take.system!))).toMatchObject({ codec_name: 'aac', sample_rate: '48000', duration: expect.closeTo(take.seconds - trackOffset(takeFile.take, 'system')!, 0) });
 
     const { events: input, issues } = parseEventsJsonl(read(projectDir, take.events));
     expect(issues).toEqual([]);
@@ -108,9 +113,9 @@ describe.concurrent('record (test backend)', () => {
     const levels = events.flatMap((event) => (event.type === 'level' ? [event.rms] : []));
     expect(levels.length).toBeGreaterThan(15);
     expect(levels.every((rms) => rms > -22.5 && rms < -19.5)).toBe(true);
-    // screen, webcam and mic: the app kills these when its recorder host dies
+    // screen, webcam, mic and the computer's sound: the app kills these when its recorder host dies
     const processes = events[0]!;
-    expect(processes.type === 'processes' && processes.pids.length === 3 && processes.pids.every(Number.isInteger)).toBe(true);
+    expect(processes.type === 'processes' && processes.pids.length === 4 && processes.pids.every(Number.isInteger)).toBe(true);
   }, SLOW);
 
   it("moves through the script's steps: the first at the first frame, then a marker for each move, none past either end", async () => {
@@ -375,6 +380,7 @@ describe.concurrent('pausing a take (test backend)', () => {
       projectDir,
       webcam: 'Test Camera',
       mic: 'Test Microphone',
+      systemAudio: true,
       stop: { maxSeconds: 5 },
       onEvent: (event) => {
         events.push(event.type);
@@ -412,11 +418,13 @@ describe.concurrent('pausing a take (test backend)', () => {
     expect(screen.duration).toBeCloseTo(take.seconds, 1);
     expect(Math.abs(probe(join(projectDir, take.webcam!)).duration - take.seconds)).toBeLessThan(0.1);
     expect(Math.abs(probe(join(projectDir, take.mic!)).duration - take.seconds)).toBeLessThan(0.1);
-    // take.json: the joined webcam and mic start with the screen
+    expect(Math.abs(probe(join(projectDir, take.system!)).duration - take.seconds)).toBeLessThan(0.1);
+    // take.json: the joined webcam, mic and system audio start with the screen
     const takeFile = parseTakeJson(read(projectDir, 'takes/1/take.json'));
     if (!takeFile.ok) throw new Error(JSON.stringify(takeFile.issues));
     expect(trackOffset(takeFile.take, 'webcam')).toBe(0);
     expect(trackOffset(takeFile.take, 'mic')).toBe(0);
+    expect(trackOffset(takeFile.take, 'system')).toBe(0);
     // segments.json keeps the stamps (for Claude's markers later); the segments' files are gone
     const manifest = parseSegmentsJson(read(projectDir, 'takes/1/segments.json'));
     if (!manifest.ok) throw new Error(JSON.stringify(manifest.issues));
@@ -424,7 +432,7 @@ describe.concurrent('pausing a take (test backend)', () => {
     expect(manifest.segments.segments).toHaveLength(3);
     const lengths = manifest.segments.segments.map((segment) => segment.duration!);
     expect(lengths.reduce((sum, length) => sum + length, 0)).toBeCloseTo(take.seconds, 1);
-    expect(readdirSync(join(projectDir, 'takes/1')).sort()).toEqual(['events.jsonl', 'markers.json', 'mic.m4a', 'screen.mp4', 'segments.json', 'take.json', 'webcam.mp4']);
+    expect(readdirSync(join(projectDir, 'takes/1')).sort()).toEqual(['events.jsonl', 'markers.json', 'mic.m4a', 'screen.mp4', 'segments.json', 'system.m4a', 'take.json', 'webcam.mp4']);
 
     // the marker set while paused is at the end of the first segment
     expect(markersOf(projectDir, take.markers)).toEqual([{ t: expect.closeTo(lengths[0]!, 1), kind: 'manual', label: 'during the pause' }]);

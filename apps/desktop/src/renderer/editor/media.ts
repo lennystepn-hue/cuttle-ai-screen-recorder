@@ -157,6 +157,8 @@ export interface EditorMedia {
   mic?: AudioSource;
   /** The file `mic` was opened from: the mic, or its cleaned-up copy (`look.audio.cleanup`). */
   micPath?: string;
+  /** What the computer played (`sources.system`), while the look plays it. */
+  system?: AudioSource;
   events: InputEvent[];
   /** The pointer's track from the input events (drawn when the look's cursor is on). */
   cursor?: CursorTrack;
@@ -174,7 +176,7 @@ export interface EditorMedia {
   /** The watermark's image (its own, else the brand's logo), and the path it was read from. */
   watermarkImage?: ImageBitmap;
   watermarkPath?: string;
-  /** Seconds after the screen track that the webcam and the mic started. */
+  /** Seconds after the screen track that the webcam, the mic and the system audio started. */
   offsets: ProjectInfo['offsets'];
   /** Sources tried and failed (not tried again), and warnings for people (a missing webcam file …). */
   failed: Set<string>;
@@ -227,8 +229,8 @@ export async function openProjectMedia(info: ProjectInfo, project: CuttleProject
 
 /**
  * Opens what `project` needs and `media` lacks: the images of its stills (a placeholder for one
- * that cannot be read), the background image, the webcam when the look shows it, the mic when the
- * look plays it. Returns whether anything was added.
+ * that cannot be read), the background image, the webcam when the look shows it, the mic and the
+ * system audio when the look plays them. Returns whether anything was added.
  */
 export async function ensureMedia(media: EditorMedia, project: CuttleProject): Promise<boolean> {
   const { sources, look } = project;
@@ -286,6 +288,18 @@ export async function ensureMedia(media: EditorMedia, project: CuttleProject): P
     if (mic) {
       media.mic = mic;
       media.micPath = micPath;
+      added = true;
+    }
+  }
+  const system = sources.system;
+  if (system && look.audio.enabled && look.audio.system && !media.system) {
+    const audio = await optional(media, system, async () => {
+      const opened = await openAudio(system, media.offsets.system);
+      if (opened) return opened;
+      throw (await present(system)) ? new MediaError(`The computer's sound (${system}) cannot be played.`) : missing(system);
+    });
+    if (audio) {
+      media.system = audio;
       added = true;
     }
   }

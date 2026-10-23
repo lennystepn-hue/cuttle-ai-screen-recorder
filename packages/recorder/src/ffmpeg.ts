@@ -62,7 +62,20 @@ export interface Feeder {
    * (`relayFrames`), and stop() ends stdin instead of sending "q".
    */
   frameBytes?: number;
+  /**
+   * The feeder's output goes into ffmpeg's stdin as it comes (`-i pipe:0`; a file descriptor of its
+   * own is not open to ffmpeg on Windows), and stop() ends it instead of sending "q".
+   */
+  stream?: boolean;
+  /**
+   * The feeder says on stderr when its first sample was captured (`start <Unix seconds>`, the wall
+   * clock): that is the track's start, not ffmpeg's stamp of when it read it.
+   */
+  stamps?: boolean;
 }
+
+/** A feeder's stamp of its first sample: `start 1792189686.207373`. */
+const FEEDER_START = /^start (\d+(?:\.\d+)?)$/;
 
 /** A feeder's exit code that means the OS does not allow the capture (cuttle-capture: screen recording). */
 const FEEDER_DENIED = 3;
@@ -73,20 +86,40 @@ const FEEDER_DENIED = 3;
  * `onStdout` takes what ffmpeg writes to its stdout (the mic's samples), as it comes.
  */
 export function spawnCapture(name: string, args: readonly string[], feeder?: Feeder, onStdout?: (chunk: Buffer) => void): CaptureProcess {
+  let resolveStarted!: (start: number) => void;
+  let rejectStarted!: (error: Error) => void;
+  const started = new Promise<number>((resolve, reject) => {
+    resolveStarted = resolve;
+    rejectStarted = reject;
+  });
+  started.catch(() => {}); // `exited` reports the failure; a caller may never await `started`
+
   const feed = feeder && spawn(feeder.command, [...feeder.args], { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
   const frameBytes = feeder?.frameBytes;
+  const stream = feeder?.stream === true;
   const feedTail: string[] = [];
+  let feedPartial = '';
   feed?.stderr?.setEncoding('utf8');
-  feed?.stderr?.on('data', (chunk: string) => feedTail.push(...chunk.split(/\r?\n/).filter((line) => line.trim() !== '')));
+  feed?.stderr?.on('data', (chunk: string) => {
+    const lines = (feedPartial + chunk).split(/\r?\n/);
+    feedPartial = lines.pop() ?? '';
+    for (const line of lines.filter((text) => text.trim() !== '')) {
+      const stamp = feeder?.stamps ? FEEDER_START.exec(line.trim()) : null;
+      if (stamp) resolveStarted(Number(stamp[1]));
+      else feedTail.push(line);
+    }
+  });
   feed?.on('error', () => {}); // a feeder that cannot start ends its pipe: ffmpeg reports that
   const feedExit = feed && new Promise<number | null>((resolve) => feed.once('close', (code) => resolve(code)));
   // stdin for "q" (a relay's frames), stdout for what the caller reads (else nothing), stderr for the log; a feeder's pipe as file descriptor 3
-  const direct = feed && frameBytes === undefined ? [feed.stdout] : [];
+  const direct = feed && frameBytes === undefined && !stream ? [feed.stdout] : [];
   const child = spawn(ffmpegPath(), ['-hide_banner', ...args], { stdio: ['pipe', onStdout ? 'pipe' : 'ignore', 'pipe', ...direct], windowsHide: true }) as ChildProcessByStdio<Writable, Readable | null, Readable>;
   // read as it comes: a full pipe would stall ffmpeg
   if (onStdout) child.stdout?.on('data', onStdout);
   // ffmpeg holds the pipe now: this process lets go of it, so the feeder sees ffmpeg's end
   if (direct.length > 0) feed?.stdout?.destroy();
+  // a stream's end (the feeder's) ends ffmpeg's input, and ffmpeg finishes the file
+  if (stream) feed?.stdout?.pipe(child.stdin);
   let resolveEnded!: () => void;
   const ended = frameBytes === undefined ? undefined : new Promise<void>((resolve) => (resolveEnded = resolve));
   const relay =
@@ -104,17 +137,9 @@ export function spawnCapture(name: string, args: readonly string[], feeder?: Fee
   let stopping = false;
   let killed = false;
 
-  let resolveStarted!: (start: number) => void;
-  let rejectStarted!: (error: Error) => void;
-  const started = new Promise<number>((resolve, reject) => {
-    resolveStarted = resolve;
-    rejectStarted = reject;
-  });
-  started.catch(() => {}); // `exited` reports the failure; a caller may never await `started`
-
   const line = (text: string) => {
     if (text.trim() === '') return;
-    const start = INPUT_START.exec(text);
+    const start = feeder?.stamps ? null : INPUT_START.exec(text);
     if (start) resolveStarted(Number(start[1]));
     const time = PROGRESS_TIME.exec(text);
     if (time) seconds = Number(time[1]) * 3600 + Number(time[2]) * 60 + Number(time[3]);
@@ -180,9 +205,10 @@ export function spawnCapture(name: string, args: readonly string[], feeder?: Fee
     stop() {
       if (child.exitCode === null && !stopping) {
         stopping = true;
-        if (relay) {
-          // the frames written so far, then the end of the input: ffmpeg finishes the file
-          relay.stop();
+        if (relay || stream) {
+          // the frames (or samples) written so far, then the end of the input: ffmpeg finishes the file
+          relay?.stop();
+          if (stream) feed?.stdout?.unpipe(child.stdin);
           child.stdin.end();
           if (feed && feed.exitCode === null && feed.signalCode === null) feed.kill();
         } else child.stdin.end('q');

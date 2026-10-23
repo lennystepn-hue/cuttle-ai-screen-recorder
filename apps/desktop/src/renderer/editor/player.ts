@@ -5,7 +5,8 @@ import { createRenderer, type DrawnText, type EngineAssets, type FrameSources, t
 import { planStills } from '@cuttle/export/frame-plan';
 import type { CuttleProject } from '@cuttle/project';
 import { createTimeline, crossfadeHalf, pageTransition, type RenderState, type Timeline } from '@cuttle/timeline';
-import { AudioSchedule } from './audio';
+import { speechSpans } from '@cuttle/export/music-duck';
+import { AudioSchedule, systemLevel } from './audio';
 import { TypingSchedule } from './typing-audio';
 import { FrameGrabber, KeyFrames, PlaybackFrames, type HeldFrame, type PlaybackVideo } from './frames';
 import { watermarkFile, type EditorMedia, type VideoSource } from './media';
@@ -81,6 +82,8 @@ export class Player {
   private playToken = 0;
   private context: AudioContext | undefined;
   private audio: AudioSchedule | undefined;
+  /** The computer's sound while playing, and its level (its volume and the duck under speech). */
+  private system: { schedule: AudioSchedule; level: GainNode } | undefined;
   /** The typing sounds while playing (also without a mic). */
   private typing: TypingSchedule | undefined;
   /** The music and sounds rendered for the project, and their playback while playing. */
@@ -449,11 +452,18 @@ export class Player {
     void this.run(token, from);
   }
 
+  private stopSystem(): void {
+    this.system?.schedule.stop();
+    this.system?.level.disconnect();
+    this.system = undefined;
+  }
+
   pause(): void {
     if (!this.state.playing) return;
     this.playToken++;
     this.audio?.stop();
     this.audio = undefined;
+    this.stopSystem();
     this.typing?.stop();
     this.typing = undefined;
     this.sound?.stop();
@@ -502,6 +512,11 @@ export class Player {
     this.motion.startPlaying();
     try {
       if (this.media.mic) this.audio = new AudioSchedule(context, this.media.mic, this.project, this.timeline.spans, from, contextStart);
+      if (this.media.system && this.project.look.audio.system) {
+        const speech = this.media.transcript ? speechSpans(this.project, this.media.transcript.words, this.timeline.spans) : [];
+        const level = systemLevel(context, this.project, speech, from, this.duration, contextStart);
+        this.system = { schedule: new AudioSchedule(context, this.media.system, this.project, this.timeline.spans, from, contextStart, level), level };
+      }
       this.typing = new TypingSchedule(context, this.project, this.timeline.spans, this.media.events, from, contextStart);
       this.runMap = { from, contextStart };
       this.soundStarts = 0;
@@ -550,6 +565,7 @@ export class Player {
         this.clockNow = undefined;
         this.audio?.stop();
         this.audio = undefined;
+        this.stopSystem();
         this.typing?.stop();
         this.typing = undefined;
         this.sound?.stop();

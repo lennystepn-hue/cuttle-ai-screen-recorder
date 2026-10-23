@@ -59,6 +59,8 @@ const SourcesSchema = z.strictObject({
   screen: z.string().min(1),
   webcam: z.string().min(1).optional(),
   mic: z.string().min(1).optional(),
+  /** What the computer played while the take recorded (its apps' sound), beside the mic. */
+  system: z.string().min(1).optional(),
   events: z.string().min(1).optional(),
   markers: z.string().min(1).optional(),
   /** What the mic said, word by word (`cuttle transcribe`, the app after a take). */
@@ -146,6 +148,12 @@ const AudioSchema = z.strictObject({
   effects: z.boolean().default(true),
   /** Their volume, 0 to 1. */
   effectsVolume: z.number().min(0).max(1).default(0.8),
+  /** What the computer played (`sources.system`), where its clip is heard. */
+  system: z.boolean().default(true),
+  /** Its volume, 0 to 1. */
+  systemVolume: z.number().min(0).max(1).default(0.8),
+  /** How far it goes down under speech (dB), as the music; 0 leaves it. */
+  systemDuck: z.number().min(0).max(40).default(12),
 });
 
 const TransitionSchema = z.strictObject({

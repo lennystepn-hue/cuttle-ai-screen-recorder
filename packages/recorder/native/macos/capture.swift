@@ -10,6 +10,13 @@
 // changes; the last one is written again on every tick, so ffmpeg gets a constant frame rate. Exits when
 // ffmpeg closes the pipe; exit code 3 when screen recording is not allowed, 2 for other failures.
 //
+//   cuttle-capture audio --display <CGDirectDisplayID> [--window <CGWindowID>] [--exclude-pid <pid>]...
+//
+// What the computer plays, through ScreenCaptureKit: the display's sound without the given processes
+// (Cuttle's own), or with --window the sound of that window's app alone. 48 kHz stereo 32-bit float
+// samples on stdout, silence where nothing played, so they keep time with the clock; first a line on
+// stderr that says when the first sample played, `start <Unix seconds>`. Exit codes as above.
+//
 //   cuttle-capture ocr
 //
 // Reads the text of pictures with the Vision framework, for the privacy masks: as Windows' OCR helper
@@ -48,9 +55,10 @@ struct Options {
   var size: CGSize?
 }
 
-func parse() -> Options {
+/** The options after the command (`audio` takes --window without --size). */
+func parse(_ given: ArraySlice<String>, audio: Bool = false) -> Options {
   var options = Options()
-  var args = CommandLine.arguments.dropFirst().makeIterator()
+  var args = given.makeIterator()
   while let arg = args.next() {
     switch arg {
     case "--display": options.display = required(args.next().flatMap(UInt32.init), "--display needs a display id")
@@ -70,7 +78,7 @@ func parse() -> Options {
     default: fail(2, "unknown argument \(arg)")
     }
   }
-  if options.window != nil && options.size == nil { fail(2, "--window needs --size") }
+  if options.window != nil && options.size == nil && !audio { fail(2, "--window needs --size") }
   return options
 }
 
@@ -122,6 +130,109 @@ final class Frames: NSObject, SCStreamOutput, SCStreamDelegate {
     defer { lock.unlock() }
     return latest
   }
+}
+
+/** The sound's sample rate and channels, as `cuttle-capture audio` writes them. */
+let soundRate = 48_000.0
+/** While nothing comes, silence is written up to this long before now (seconds): a buffer comes within it. */
+let soundLag = 0.03
+/** Silence fills in once the samples are this far behind the clock (seconds). */
+let soundBehind = 0.06
+/** A buffer this far from where the samples so far end (seconds) goes at its own time: silence before it, or its start left out. */
+let soundSlack = 0.01
+
+/**
+ * The sound as it comes, at its time on the host clock from `origin` (the first sample): silence
+ * where none came (macOS sends nothing while nothing plays), a buffer that overlaps what was written
+ * without its start. Everything runs on one queue.
+ */
+final class Sound: NSObject, SCStreamOutput, SCStreamDelegate {
+  let origin: Double
+  private var written: Int64 = 0
+  private let out = FileHandle.standardOutput.fileDescriptor
+  private var warned = false
+
+  init(origin: Double) {
+    self.origin = origin
+  }
+
+  func stream(_ stream: SCStream, didOutputSampleBuffer buffer: CMSampleBuffer, of type: SCStreamOutputType) {
+    guard type == .audio, buffer.isValid, let description = buffer.formatDescription?.audioStreamBasicDescription else { return }
+    let frames = buffer.numSamples
+    // ScreenCaptureKit's sound is 32-bit float at the rate asked for, a buffer per channel
+    guard frames > 0, description.mFormatID == kAudioFormatLinearPCM, description.mFormatFlags & kAudioFormatFlagIsFloat != 0,
+          description.mBitsPerChannel == 32, description.mSampleRate == soundRate else {
+      if !warned { FileHandle.standardError.write("cuttle-capture: sound in a format it does not read: \(description)\n".data(using: .utf8)!) }
+      warned = true
+      return
+    }
+    var samples = [Float](repeating: 0, count: frames * 2)
+    let separate = description.mFormatFlags & kAudioFormatFlagIsNonInterleaved != 0
+    let channels = Int(description.mChannelsPerFrame)
+    try? buffer.withAudioBufferList { list, _ in
+      guard let first = list.first?.mData?.assumingMemoryBound(to: Float.self) else { return }
+      if separate {
+        let second = list.count > 1 ? list[1].mData?.assumingMemoryBound(to: Float.self) ?? first : first
+        for i in 0..<frames {
+          samples[2 * i] = first[i]
+          samples[2 * i + 1] = second[i]
+        }
+      } else {
+        for i in 0..<frames {
+          samples[2 * i] = first[i * channels]
+          samples[2 * i + 1] = first[i * channels + (channels > 1 ? 1 : 0)]
+        }
+      }
+    }
+    put(samples, frames: frames, at: buffer.presentationTimeStamp.seconds)
+  }
+
+  func stream(_ stream: SCStream, didStopWithError error: Error) {
+    fail(2, "the sound capture stopped: \(error.localizedDescription)")
+  }
+
+  /** `samples` (`frames` stereo frames) at host time `time`. */
+  private func put(_ samples: [Float], frames: Int, at time: Double) {
+    let at = Int64(((time - origin) * soundRate).rounded())
+    let gap = at - written
+    let slack = Int64(soundSlack * soundRate)
+    var skip = 0
+    if gap > slack { silence(gap) } else if gap < -slack { skip = Int(min(Int64(frames), -gap)) }
+    guard skip < frames else { return }
+    samples.withUnsafeBytes { bytes in write(UnsafeRawBufferPointer(rebasing: bytes[(skip * 8)...])) }
+    written += Int64(frames - skip)
+  }
+
+  /** Silence up to a moment ago, when nothing came for a while. */
+  func keepTime(now: Double) {
+    let due = Int64(((now - soundLag - origin) * soundRate).rounded())
+    if due - written > Int64((soundBehind - soundLag) * soundRate) { silence(due - written) }
+  }
+
+  private func silence(_ frames: Int64) {
+    let zeros = [UInt8](repeating: 0, count: 4_800 * 8)
+    var left = frames
+    while left > 0 {
+      let now = Int(min(left, 4_800))
+      zeros.withUnsafeBytes { bytes in write(UnsafeRawBufferPointer(rebasing: bytes[..<(now * 8)])) }
+      left -= Int64(now)
+    }
+    written += frames
+  }
+
+  private func write(_ bytes: UnsafeRawBufferPointer) {
+    var offset = 0
+    while offset < bytes.count {
+      let done = Darwin.write(out, bytes.baseAddress! + offset, bytes.count - offset)
+      if done <= 0 { exit(0) } // ffmpeg is done (or gone)
+      offset += done
+    }
+  }
+}
+
+/** The host clock's time now, in seconds (the clock ScreenCaptureKit stamps its buffers on). */
+func hostNow() -> Double {
+  CMClockGetTime(CMClockGetHostTimeClock()).seconds
 }
 
 /** One JSON line on stdout. */
@@ -214,8 +325,10 @@ func readText() -> Never {
 }
 
 signal(SIGPIPE, SIG_IGN)
-if CommandLine.arguments.dropFirst().first == "ocr" { readText() }
-let options = parse()
+let command = CommandLine.arguments.dropFirst().first
+if command == "ocr" { readText() }
+let audio = command == "audio"
+let options = parse(CommandLine.arguments.dropFirst(audio ? 2 : 1), audio: audio)
 func say(_ message: String) {
   if options.verbose { FileHandle.standardError.write("cuttle-capture: \(message)\n".data(using: .utf8)!) }
 }
@@ -223,6 +336,42 @@ if !CGPreflightScreenCaptureAccess() { fail(3, "screen recording is not allowed 
 
 /** The stream and its timer live as long as the process: released, they would stop. */
 var running: (stream: SCStream, frames: Frames, timer: DispatchSourceTimer)?
+var sounding: (stream: SCStream, sound: Sound, timer: DispatchSourceTimer)?
+
+/**
+ * `cuttle-capture audio`: the sound of the display without the processes left out, or of the window's
+ * app alone. A stream needs a picture too: the smallest, once a second, and dropped.
+ */
+func startSound(_ content: SCShareableContent, _ display: SCDisplay) async throws {
+  let excluded = content.applications.filter { options.excluded.contains($0.processID) }
+  let owner = options.window.flatMap { id in content.windows.first(where: { $0.windowID == id })?.owningApplication }
+  let filter = owner.map { SCContentFilter(display: display, including: [$0], exceptingWindows: []) }
+    ?? SCContentFilter(display: display, excludingApplications: excluded, exceptingWindows: [])
+  let config = SCStreamConfiguration()
+  config.capturesAudio = true
+  config.sampleRate = Int(soundRate)
+  config.channelCount = 2
+  config.excludesCurrentProcessAudio = true
+  config.width = 2
+  config.height = 2
+  config.minimumFrameInterval = CMTime(value: 1, timescale: 1)
+  config.showsCursor = false
+  let queue = DispatchQueue(label: "cuttle.sound")
+  let origin = hostNow()
+  let sound = Sound(origin: origin)
+  let stream = SCStream(filter: filter, configuration: config, delegate: sound)
+  try stream.addStreamOutput(sound, type: .audio, sampleHandlerQueue: queue)
+  try stream.addStreamOutput(sound, type: .screen, sampleHandlerQueue: queue)
+  try await stream.startCapture()
+  // the first sample is the start's: what came before it is left out, silence fills in until sound comes
+  FileHandle.standardError.write(String(format: "start %.6f\n", Date().timeIntervalSince1970 - (hostNow() - origin)).data(using: .utf8)!)
+  say(owner.map { "recording the sound of \($0.applicationName)" } ?? "recording the sound, leaving out \(excluded.map(\.applicationName))")
+  let timer = DispatchSource.makeTimerSource(queue: queue)
+  timer.schedule(deadline: .now(), repeating: .milliseconds(10), leeway: .milliseconds(2))
+  timer.setEventHandler { sound.keepTime(now: hostNow()) }
+  timer.resume()
+  sounding = (stream, sound, timer)
+}
 
 Task {
   do {
@@ -230,6 +379,7 @@ Task {
     let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: false)
     say("\(content.displays.count) displays, \(content.applications.count) apps")
     guard let display = content.displays.first(where: { $0.displayID == options.display }) else { fail(2, "there is no display \(options.display)") }
+    if audio { return try await startSound(content, display) }
     let mode = CGDisplayCopyDisplayMode(options.display)
     let pixelWidth = mode?.pixelWidth ?? display.width
     let pixelHeight = mode?.pixelHeight ?? display.height

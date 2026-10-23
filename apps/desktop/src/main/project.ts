@@ -17,20 +17,20 @@ async function screenTake(dir: string, project: CuttleProject): Promise<TakeFile
 }
 
 /**
- * Seconds after the screen track that the webcam and the mic started, from the take.json next to
+ * Seconds after the screen track that the webcam, the mic and the system audio started, from the take.json next to
  * the screen track, used only where take.json describes those very files (as the export does);
  * 0 otherwise.
  */
 function trackOffsets(dir: string, project: CuttleProject, take: TakeFile | undefined): ProjectInfo['offsets'] {
-  if (!take) return { webcam: 0, mic: 0 };
+  if (!take) return { webcam: 0, mic: 0, system: 0 };
   const screen = resolve(dir, project.sources.screen);
-  const offset = (track: 'webcam' | 'mic') => {
+  const offset = (track: 'webcam' | 'mic' | 'system') => {
     const source = project.sources[track];
     const entry = take.tracks[track];
     if (source === undefined || !entry || !samePath(resolve(dirname(screen), entry.file), resolve(dir, source))) return 0;
     return trackOffset(take, track) ?? 0;
   };
-  return { webcam: offset('webcam'), mic: offset('mic') };
+  return { webcam: offset('webcam'), mic: offset('mic'), system: offset('system') };
 }
 
 export async function projectInfo(file: ProjectFile): Promise<ProjectInfo> {

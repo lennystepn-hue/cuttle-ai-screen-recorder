@@ -43,7 +43,7 @@ made that way: nine pages and a score, no camera, no editor. See [Motion videos,
     <td width="50%"><img src="docs/media/feature-auto-edit.jpg" alt="Cuttle's timeline after its cut: 4:12 became 0:38" /></td>
   </tr>
   <tr>
-    <td valign="top"><b>Record a window, a screen or a region.</b> With your webcam and mic, a countdown and a small recording bar that never shows in the video. A window take records only that window, also while another one lies over it, so you can keep working (or chatting) beside it. Pause, mark a slip with one key, and keep a script of your steps in a prompter.</td>
+    <td valign="top"><b>Record a window, a screen or a region.</b> With your webcam and mic, the computer's own sound (a video, an app, a game) on a track of its own, a countdown and a small recording bar that never shows in the video. A window take records only that window, also while another one lies over it, so you can keep working (or chatting) beside it. Pause, mark a slip with one key, and keep a script of your steps in a prompter.</td>
     <td valign="top"><b>It cuts itself.</b> Idle stretches out, waiting sped up with a speed badge, slips and long pauses gone, zooms placed where they belong. A take of four minutes becomes a tight demo, in seconds, on your computer.</td>
   </tr>
   <tr>
@@ -364,6 +364,7 @@ recent projects (open, rename, show, remove).
 cuttle init demo && cd demo
 cuttle devices                       # monitors, windows, cameras, microphones
 cuttle record --mic --until-claude   # stops when Claude Code in this folder has answered, background work included (or Ctrl+C)
+cuttle record --mic --system-audio   # the computer's sound too, beside the mic
 cuttle import phone.mp4 --to 40      # or a video made elsewhere as the take (30 fps, BT.709), its sound as the mic
 cuttle suggest                       # scenes: quiet start and end trimmed, idle cut, waiting sped up, zooms on the answer and on clicks
 cuttle preview                       # 12 stills and a contact sheet in preview/

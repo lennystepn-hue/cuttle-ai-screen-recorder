@@ -1258,12 +1258,15 @@ describe.runIf(enabled)('the Cuttle app', () => {
     expect(await opened.locator('.scene').count()).toBe(cut.scenes.length);
   }, 120_000);
 
-  it('records again into the same project, keeping the first take restorable', async () => {
+  it("records again into the same project, with the computer's sound, keeping the first take restorable", async () => {
     const dir = join(root, 'projects', readdirSync(join(root, 'projects'))[0]!);
     const opened = await waitForPage(app, async (page) => page.url().includes('/editor.html') && (await page.title()) !== 'demo · Cuttle');
-    await recordThroughPicker(() => click(opened, '[data-testid=record-again]'));
+    await recordThroughPicker(() => click(opened, '[data-testid=record-again]'), { stop: 'none', systemAudio: true });
     const second = await projectWhen(dir, (written) => written.sources.screen === 'takes/2/screen.mp4' && written.scenes[0]?.id !== undefined);
     expect(second.scenes.length).toBeGreaterThan(0);
+    // the picker's choice reached the take: the test backend's tone as the computer's sound
+    expect(second.sources.system).toBe('takes/2/system.m4a');
+    expect(existsSync(join(dir, 'takes', '2', 'system.m4a'))).toBe(true);
     // The first take's edit is kept next to it, for "Back to take 1".
     expect(JSON.parse(readFileSync(join(dir, 'takes', '1', 'cuttle.json'), 'utf8')).sources.screen).toBe('takes/1/screen.mp4');
   }, 120_000);

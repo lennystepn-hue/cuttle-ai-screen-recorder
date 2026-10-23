@@ -6,7 +6,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, typ
 import type { PickedTarget, PickerSetup, Rect, RecordChoices, ScriptStep } from '../../shared/ipc';
 import { barPlacement, bubblePlacement, bubbleSize, dragRect, labelPlacement, matchMediaDevice, noticePlacement, windowsAt } from '../../shared/recording';
 import { bridge } from '../bridge';
-import { FolderIcon, MicIcon, WarningIcon } from '../icons';
+import { FolderIcon, MicIcon, SoundIcon, WarningIcon } from '../icons';
 import { Select } from '../Select';
 import { hotkey } from '../keys';
 import { ScriptIcon, ScriptPanel, writtenSteps } from './Script';
@@ -206,6 +206,7 @@ export function Picker() {
       }
       if (lower === 'c' && setup && setup.cameras.length > 0) return updateChoices({ camera: choices.camera ? undefined : firstCamera(setup.cameras) });
       if (lower === 'm' && setup && setup.mics.length > 0) return updateChoices({ mic: choices.mic ? undefined : setup.mics[0] });
+      if (lower === 'a') return updateChoices({ systemAudio: !choices.systemAudio });
       if (lower === 'o') return updateChoices({ stop: STOPS[(STOPS.indexOf(choices.stop) + 1) % STOPS.length]! });
       if (lower === 'p') return setScriptOpen((open) => !open);
       if (region && key.startsWith('Arrow')) {
@@ -405,6 +406,21 @@ export function Picker() {
               onChange={(mic) => updateChoices({ mic })}
               meter={choices.mic && active ? <MicMeter name={choices.mic} /> : undefined}
             />
+            <div className={`opt${choices.systemAudio ? ' on' : ''}`} title={`What the computer plays: its apps' sound, beside the mic (A turns it ${choices.systemAudio ? 'off' : 'on'})`}>
+              <button
+                className="toggle"
+                onClick={() => updateChoices({ systemAudio: !choices.systemAudio })}
+                aria-pressed={choices.systemAudio === true}
+                aria-label={`Computer sound ${choices.systemAudio ? 'on' : 'off'}`}
+                data-testid="system-audio"
+              >
+                <SoundIcon />
+                <span className="name">
+                  Sound
+                  <small>{choices.systemAudio ? "the computer's" : 'off'}</small>
+                </span>
+              </button>
+            </div>
             <div className={`opt${choices.stop !== 'none' ? ' on' : ''}`} title="When the recording stops (O)">
               <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true">
                 <path d="M8 1.5v3M8 11.5v3M1.5 8h3M11.5 8h3" />

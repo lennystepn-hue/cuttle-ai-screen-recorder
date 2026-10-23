@@ -40,6 +40,12 @@ describe('planAudio', () => {
     expect(loud[1]!.mic).toEqual({ from: 192_000, to: 576_000, speed: 4, content: 96_000 });
   });
 
+  it("plays the clips' stretches for the computer's sound alone, without a mic", () => {
+    const p = project({ scenes });
+    const segments = planAudio({ spans: sceneSpans(p.scenes), look: p.look, mic: false, system: true, seconds: 6 });
+    expect(segments.map((s) => s.mic?.from)).toEqual([48_000, undefined, undefined, 24_000]);
+  });
+
   it('is silent without a mic or with audio switched off', () => {
     expect(plan({ scenes }, 6, false).every((s) => s.mic === undefined)).toBe(true);
     expect(plan({ scenes, look: { audio: { enabled: false } } }).every((s) => s.mic === undefined)).toBe(true);
@@ -87,7 +93,7 @@ describe('atempoChain', () => {
 
 describe('audioFilterGraph', () => {
   it('shifts the mic once, splits it per clip and concatenates the segments into stereo', () => {
-    const graph = audioFilterGraph(plan({ scenes }), 0.5);
+    const graph = audioFilterGraph(plan({ scenes }), { mic: { input: 1, offset: 0.5 } });
     expect(graph.split(';')).toEqual([
       '[1:a]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=mono,adelay=delays=24000S:all=1,asplit=2[m0][m1]',
       '[m0]atrim=start_sample=48000:end_sample=144000,asetpts=N/SR/TB,apad,atrim=end_sample=96000,asetpts=N/SR/TB,afade=t=in:ss=0:ns=480,afade=t=out:ss=88800:ns=7200[s0]',
@@ -99,23 +105,23 @@ describe('audioFilterGraph', () => {
   });
 
   it('ends the fade-out where the mic ends, not in the padding after it', () => {
-    const graph = audioFilterGraph(plan({ scenes }, 6.02));
+    const graph = audioFilterGraph(plan({ scenes }, 6.02), { mic: { input: 1, offset: 0 } });
     expect(graph).toContain('atrim=end_sample=48960,asetpts=N/SR/TB,afade=t=in:ss=0:ns=7200,afade=t=out:ss=47520:ns=480[s3]');
   });
 
   it('feeds atempo silence past a sped-up clip, because it returns fewer samples, then cuts to the clip', () => {
-    const graph = audioFilterGraph(plan({ scenes, look: { audio: { muteSpedUp: false } } }));
+    const graph = audioFilterGraph(plan({ scenes, look: { audio: { muteSpedUp: false } } }), { mic: { input: 1, offset: 0 } });
     expect(graph).toContain(
       '[m1]atrim=start_sample=192000:end_sample=576000,asetpts=N/SR/TB,apad=pad_len=200000,atempo=4,atrim=end_sample=96000,asetpts=N/SR/TB,apad,',
     );
   });
 
   it('drops the start of a mic that started before the screen', () => {
-    expect(audioFilterGraph(plan({ scenes }), -0.25)).toContain('channel_layouts=mono,atrim=start_sample=12000,asetpts=N/SR/TB,asplit=2');
+    expect(audioFilterGraph(plan({ scenes }), { mic: { input: 1, offset: -0.25 } })).toContain('channel_layouts=mono,atrim=start_sample=12000,asetpts=N/SR/TB,asplit=2');
   });
 
   it('mixes the typing sounds in as they are, as long as the video', () => {
-    const parts = audioFilterGraph(plan({ scenes }), 0.5, 1, 2).split(';');
+    const parts = audioFilterGraph(plan({ scenes }), { mic: { input: 1, offset: 0.5 }, typing: 2 }).split(';');
     expect(parts.slice(-3)).toEqual([
       '[s0][s1][s2][s3]concat=n=4:v=0:a=1[base]',
       '[2:a]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=mono,apad,atrim=end_sample=288000,asetpts=N/SR/TB[keys]',
@@ -124,7 +130,7 @@ describe('audioFilterGraph', () => {
   });
 
   it('mixes a soundtrack in stereo under the mic, then keeps the sum below full scale', () => {
-    const parts = audioFilterGraph(plan({ scenes }), 0.5, 1, undefined, 2).split(';');
+    const parts = audioFilterGraph(plan({ scenes }), { mic: { input: 1, offset: 0.5 }, sound: 2 }).split(';');
     expect(parts.slice(-3)).toEqual([
       '[s0][s1][s2][s3]concat=n=4:v=0:a=1,pan=stereo|c0=c0|c1=c0[voice]',
       '[2:a]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,apad,atrim=end_sample=288000,asetpts=N/SR/TB[sound]',
@@ -132,8 +138,31 @@ describe('audioFilterGraph', () => {
     ]);
   });
 
+  it("mixes the computer's sound in stereo with the mic and the typing, at its volume and duck, then limits the sum", () => {
+    const parts = audioFilterGraph(plan({ scenes }), { mic: { input: 1, offset: 0.5 }, system: { input: 2, offset: -0.1, volume: 0.8, duck: 'D' }, typing: 3 }).split(';');
+    // shifted on its own (it started 0.1 s before the screen), cut like the mic
+    expect(parts).toContain('[2:a]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,atrim=start_sample=4800,asetpts=N/SR/TB,asplit=2[y0][y1]');
+    expect(parts).toContain('[y0]atrim=start_sample=48000:end_sample=144000,asetpts=N/SR/TB,apad,atrim=end_sample=96000,asetpts=N/SR/TB,afade=t=in:ss=0:ns=480,afade=t=out:ss=88800:ns=7200[z0]');
+    expect(parts).toContain('anullsrc=r=48000:cl=stereo,atrim=end_sample=96000[z1]');
+    expect(parts.slice(-4)).toEqual([
+      '[s0][s1][s2][s3]concat=n=4:v=0:a=1,pan=stereo|c0=c0|c1=c0[voice]',
+      "[z0][z1][z2][z3]concat=n=4:v=0:a=1,volume=0.8,volume=eval=frame:volume='D'[system]",
+      '[3:a]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=mono,apad,atrim=end_sample=288000,asetpts=N/SR/TB,pan=stereo|c0=c0|c1=c0[keys]',
+      '[voice][system][keys]amix=inputs=3:duration=first:normalize=0,aresample=192000,alimiter=limit=0.89:attack=1:release=60:level=false,aresample=48000[aout]',
+    ]);
+  });
+
+  it("plays the computer's sound without a mic: the voice is silence", () => {
+    const p = project({ scenes });
+    const segments = planAudio({ spans: sceneSpans(p.scenes), look: p.look, mic: false, system: true, seconds: 6 });
+    const graph = audioFilterGraph(segments, { system: { input: 1, offset: 0, volume: 1 } });
+    expect(graph).not.toContain('[m0]');
+    expect(graph).toContain('anullsrc=r=48000:cl=mono,atrim=end_sample=96000[s0]');
+    expect(graph).toContain('[z0][z1][z2][z3]concat=n=4:v=0:a=1,volume=1[system]');
+  });
+
   it('needs no mic input when every segment is silent', () => {
-    const graph = audioFilterGraph(plan({ scenes }, 6, false));
+    const graph = audioFilterGraph(plan({ scenes }, 6, false), { mic: { input: 1, offset: 0 } });
     expect(graph).not.toContain('[1:a]');
     expect(graph.endsWith('concat=n=4:v=0:a=1,pan=stereo|c0=c0|c1=c0[aout]')).toBe(true);
   });
@@ -149,6 +178,7 @@ describe('muxArgs', () => {
     // the typing sounds' track comes after the mic
     expect(muxArgs({ video: 'v.mp4', mic: 'm.m4a', typing: 't.wav', graph: 'G', out: 'o.mp4' }).join(' ')).toContain('-i v.mp4 -i m.m4a -i t.wav -filter_complex G');
     expect(muxArgs({ video: 'v.mp4', sound: 's.wav', graph: 'G', out: 'o.mp4' }).join(' ')).toContain('-i v.mp4 -i s.wav -filter_complex G');
+    expect(muxArgs({ video: 'v.mp4', mic: 'm.m4a', system: 'y.m4a', sound: 's.wav', graph: 'G', out: 'o.mp4' }).join(' ')).toContain('-i v.mp4 -i m.m4a -i y.m4a -i s.wav -filter_complex G');
   });
 
   it('takes the chapters from their metadata file, the input after the sound', () => {

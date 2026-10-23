@@ -2037,7 +2037,7 @@ function LookPanel() {
         : 'Off',
     subtitles: captions.enabled ? CAPTION_STYLE_NAMES[captions.style] : sources.transcript ? 'Off' : 'Not transcribed yet',
     sound: current.audio.enabled
-      ? [sources.cleanMic && current.audio.cleanup ? 'Mic · clean voice' : 'Mic', current.audio.typing && 'key clicks', project.music?.enabled && 'music', current.audio.effects && project.sounds.length > 0 && 'sounds'].filter(Boolean).join(' · ')
+      ? [sources.cleanMic && current.audio.cleanup ? 'Mic · clean voice' : 'Mic', sources.system && current.audio.system && "computer's sound", current.audio.typing && 'key clicks', project.music?.enabled && 'music', current.audio.effects && project.sounds.length > 0 && 'sounds'].filter(Boolean).join(' · ')
       : 'Muted',
     video: `${size?.name ?? `${output.width} × ${output.height}`} · ${output.fps} fps${current.transition.enabled ? ' · crossfades' : ''}${current.motionBlur > 0 ? ' · motion blur' : ''}`,
   };
@@ -2243,11 +2243,42 @@ function LookPanel() {
       </LookPart>
 
       <LookPart id="sound" summary={summaries.sound} on={{ checked: current.audio.enabled, label: 'Sound', onChange: (on) => look(['audio', 'enabled'], on, on ? 'Sound on' : 'Sound off') }}>
-        {!current.audio.enabled && <p className="hint">Muted: the video has no sound, neither the mic nor the music nor the sounds.</p>}
+        {!current.audio.enabled && <p className="hint">Muted: the video has no sound, neither the mic nor the computer's nor the music nor the sounds.</p>}
         {current.audio.enabled && sources.cleanMic && (
           <Row label="Clean voice" inline note="less noise">
             <Toggle checked={current.audio.cleanup} label="Clean voice" onChange={(on) => look(['audio', 'cleanup'], on, on ? 'Clean voice on' : 'Clean voice off')} testId="audio-cleanup" />
           </Row>
+        )}
+        {current.audio.enabled && sources.system && (
+          <Row label="Computer's sound" inline note="what the apps played">
+            <Toggle checked={current.audio.system} label="Computer's sound" onChange={(on) => look(['audio', 'system'], on, on ? "Computer's sound on" : "Computer's sound off")} testId="audio-system" />
+          </Row>
+        )}
+        {current.audio.enabled && sources.system && current.audio.system && (
+          <>
+            <Row label="Its volume">
+              <RangeInput
+                value={Math.round(current.audio.systemVolume * 100)}
+                min={0}
+                max={100}
+                label="Computer's sound volume"
+                toCommand={(value) => ({ type: 'look', path: ['audio', 'systemVolume'], value: value / 100 }) as Command}
+                commitLabel="Computer's sound volume"
+                testId="audio-system-volume"
+              />
+            </Row>
+            <Row label="Under speech" note={current.audio.systemDuck > 0 ? `${current.audio.systemDuck} dB down` : 'stays up'}>
+              <RangeInput
+                value={current.audio.systemDuck}
+                min={0}
+                max={24}
+                label="Computer's sound under speech"
+                toCommand={(value) => ({ type: 'look', path: ['audio', 'systemDuck'], value }) as Command}
+                commitLabel="Computer's sound under speech"
+                testId="audio-system-duck"
+              />
+            </Row>
+          </>
         )}
         {current.audio.enabled && (
           <Row label="Typing sounds" inline note="a click per key">

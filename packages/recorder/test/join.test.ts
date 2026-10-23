@@ -67,8 +67,8 @@ describe('joining a paused take', () => {
       { screen: { file: 'screen.2.mp4', start: 1010 }, mic: { file: 'mic.2.m4a', start: 1009.9 }, duration: 2 },
       { screen: { file: 'screen.3.mp4', start: 1020 }, mic: { file: 'mic.3.m4a', start: 1020.05 }, duration: 2.5 },
     ];
-    const joined = await joinSegments(dir, segments, { screen: 'screen.mp4', webcam: 'webcam.mp4', mic: 'mic.m4a' });
-    expect(joined).toEqual({ webcam: false, mic: true });
+    const joined = await joinSegments(dir, segments, { screen: 'screen.mp4', webcam: 'webcam.mp4', mic: 'mic.m4a', system: 'system.m4a' });
+    expect(joined).toEqual({ webcam: false, mic: true, system: false });
 
     // the screen is copied end to end: 3 + 2 + 2.5 s, its flashes where each segment put them
     expect((await mediaInfo(join(dir, 'screen.mp4'), 'v')).seconds).toBeCloseTo(7.5, 1);
@@ -88,7 +88,7 @@ describe('joining a paused take', () => {
       { screen: { file: 'a.mp4', start: 0 }, mic: { file: 'm.m4a', start: 0 }, duration: 1 },
       { screen: { file: 'b.mp4', start: 5 }, duration: 1 },
     ];
-    await joinSegments(dir, segments, { screen: 'screen.mp4', webcam: 'webcam.mp4', mic: 'mic.m4a' });
+    await joinSegments(dir, segments, { screen: 'screen.mp4', webcam: 'webcam.mp4', mic: 'mic.m4a', system: 'system.m4a' });
     expect(await mediaInfo(join(dir, 'screen.mp4'), 'v')).toEqual({ seconds: expect.closeTo(2, 1), width: 320, height: 240 });
     expect((await mediaInfo(join(dir, 'mic.m4a'), 'a')).seconds).toBeCloseTo(2, 1);
     expect(await beeps(join(dir, 'mic.m4a'))).toHaveLength(1);
@@ -107,7 +107,7 @@ describe('joining a paused take', () => {
       { screen: { file: 'screen.1.mp4', start: 10 }, duration: 2 },
       { screen: { file: 'screen.2.mp4', start: 20 }, duration: 1.5 },
     ];
-    await joinSegments(dir, segments, { screen: 'screen.mp4', webcam: 'webcam.mp4', mic: 'mic.m4a' });
+    await joinSegments(dir, segments, { screen: 'screen.mp4', webcam: 'webcam.mp4', mic: 'mic.m4a', system: 'system.m4a' });
     expect((await mediaInfo(join(dir, 'screen.mp4'), 'v')).seconds).toBeCloseTo(3.5, 1);
     const seen = await flashes(join(dir, 'screen.mp4'));
     expect(seen).toHaveLength(1);

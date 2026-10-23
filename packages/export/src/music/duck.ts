@@ -1,5 +1,21 @@
-// The music under speech: how far down it goes and when, the same for the export's mix and the
-// editor's preview. Pure, so the editor imports it without the main process's code.
+// The music (and the computer's sound) under speech: how far down it goes and when, the same for the
+// export's mix and the editor's preview. Pure, so the editor imports it without the main process's code.
+import type { CuttleProject, TranscriptWord } from '@cuttle/project';
+import { applyCaptionFixes, captionWords, sceneSpans } from '@cuttle/timeline';
+
+/** Words closer than this (seconds) are one stretch of speech. */
+const SPEECH_GAP = 0.6;
+
+/** The stretches of the video with speech, in output seconds: its words (`captionWords`), closer than SPEECH_GAP joined. */
+export function speechSpans(project: CuttleProject, words: readonly TranscriptWord[], spans = sceneSpans(project.scenes, project.cuts)): { start: number; end: number }[] {
+  const speech: { start: number; end: number }[] = [];
+  for (const word of captionWords(applyCaptionFixes(words, project.captions.fixes), spans)) {
+    const last = speech.at(-1);
+    if (last && word.t - last.end < SPEECH_GAP) last.end = Math.max(last.end, word.end);
+    else speech.push({ start: word.t, end: word.end });
+  }
+  return speech;
+}
 
 /** The music goes down this long before speech starts, and comes back over this long after it ends (seconds). */
 export const DUCK_ATTACK = 0.25;
@@ -34,4 +50,19 @@ export function duckEnvelope(speech: readonly { start: number; end: number }[], 
     }
     return 1 - (1 - low) * depth;
   };
+}
+
+/**
+ * The same gain as an ffmpeg expression of the output's time `t`, for the `volume` filter that lowers
+ * the take's system audio in the export; undefined where it stays up. The duck's spans do not
+ * overlap, so their ramps add up to its depth.
+ */
+export function duckExpression(speech: readonly { start: number; end: number }[], duckDb: number): string | undefined {
+  if (duckDb <= 0 || speech.length === 0) return undefined;
+  const low = 10 ** (-duckDb / 20);
+  const n = (value: number) => String(Math.round(value * 1000) / 1000);
+  const spans = duckSpans(speech).map(
+    ({ start, end }) => `min(clip((t-${n(start - DUCK_ATTACK)})/${DUCK_ATTACK},0,1),clip((${n(end + DUCK_RELEASE)}-t)/${DUCK_RELEASE},0,1))`,
+  );
+  return `1-${n(1 - low)}*(${spans.join('+')})`;
 }

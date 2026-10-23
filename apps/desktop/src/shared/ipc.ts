@@ -29,8 +29,8 @@ export interface ProjectInfo {
   /** cuttle.json as written (parse it with `parseProject`) and the SHA-256 of its bytes. */
   raw: Record<string, unknown>;
   hash: string;
-  /** Seconds after the screen track that the webcam and mic started (take.json); 0 when unknown. */
-  offsets: { webcam: number; mic: number };
+  /** Seconds after the screen track that the webcam, the mic and the system audio started (take.json); 0 when unknown. */
+  offsets: { webcam: number; mic: number; system: number };
   /** The recorded display's pixels per point (take.json), when it says: zooms are sized by it. */
   scale?: number;
 }
@@ -389,6 +389,7 @@ export const REQUESTS = {
     camera: deviceName.optional(),
     mic: deviceName.optional(),
     stop: z.enum(['none', 'claude', 'idle']),
+    systemAudio: z.boolean().optional(),
     claudeFolder: z.string().min(1).max(4096).optional(),
   }),
   'picker:record': z.discriminatedUnion('kind', [

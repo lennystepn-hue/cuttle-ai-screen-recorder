@@ -1,4 +1,4 @@
-// ffmpeg command lines for the three capture processes. Pure: the inputs come from sources.ts.
+// ffmpeg command lines for the capture processes. Pure: the inputs come from sources.ts.
 import { PCM_RATE } from './level';
 
 export const FRAME_RATE = 30;
@@ -86,6 +86,15 @@ export function micArgs(input: readonly string[], file: string, wallclock = true
     '1',
     'pipe:1',
   ];
+}
+
+/**
+ * The system audio's track: what the computer played, as it comes (stereo AAC). Its helper stamps
+ * its own start (`Feeder.stamps`), so ffmpeg keeps the samples' own time; the test backend's
+ * source is stamped by the wall clock like the mic's.
+ */
+export function systemArgs(input: readonly string[], file: string, wallclock = false): string[] {
+  return [...(wallclock ? WALLCLOCK : []), ...input, '-map', '0:a:0', ...AUDIO_CODEC, '-ac', '2', ...AUDIO_FRAGMENTS, ...FRAGMENTED_MP4, '-y', file];
 }
 
 /** `[Parsed_freezedetect_3 @ …] lavfi.freezedetect.freeze_start: 0.973633` → 0.973633 */

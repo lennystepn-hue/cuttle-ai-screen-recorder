@@ -2,7 +2,7 @@
 // concat demuxer (lossless), each cut where its segment ends (at a pause, the frames written while
 // the capture stopped are left out), or re-encoded when a segment's size changed (a display mode
 // change).
-// The mic's and the webcam's are lined up with their screen segment one by one: each starts as far
+// The mic's, the system audio's and the webcam's are lined up with their screen segment one by one: each starts as far
 // after its screen segment as it did when recorded and lasts exactly as long, so the tracks stay
 // in sync however many pauses there were (AAC joined as it is drifts ~23 ms per pause).
 import { spawn } from 'node:child_process';
@@ -62,7 +62,8 @@ export function screenEncodeArgs(files: readonly string[], size: { width: number
  * A track's segments lined up with the screen's, by the stamps in segments.json (the time of each
  * first frame or sample). A segment where the track did not start is silent (black for video).
  */
-export function alignedArgs(track: 'mic' | 'webcam', segments: readonly Segment[], dir: string, size: { width: number; height: number } | undefined, out: string): string[] {
+export function alignedArgs(track: 'mic' | 'system' | 'webcam', segments: readonly Segment[], dir: string, size: { width: number; height: number } | undefined, out: string): string[] {
+  const audio = track !== 'webcam';
   const inputs: string[] = [];
   const chains: string[] = [];
   segments.forEach((segment, k) => {
@@ -70,7 +71,7 @@ export function alignedArgs(track: 'mic' | 'webcam', segments: readonly Segment[
     const entry = segment[track];
     if (!entry) {
       chains.push(
-        track === 'mic'
+        audio
           ? `anullsrc=r=${AUDIO_RATE}:cl=stereo,atrim=duration=${seconds(duration)}[s${k}]`
           : `color=c=black:s=${size!.width}x${size!.height}:r=${FPS},trim=duration=${seconds(duration)},format=yuv420p[s${k}]`,
       );
@@ -80,7 +81,7 @@ export function alignedArgs(track: 'mic' | 'webcam', segments: readonly Segment[
     inputs.push('-i', join(dir, entry.file));
     // how much later than its screen segment the track started (negative: earlier)
     const delay = entry.start - segment.screen.start;
-    if (track === 'mic') {
+    if (audio) {
       const head = delay < 0 ? `atrim=start=${seconds(-delay)},asetpts=PTS-STARTPTS` : `adelay=${Math.round(delay * AUDIO_RATE)}S:all=1`;
       chains.push(
         `[${input}:a]aresample=${AUDIO_RATE},aformat=sample_fmts=fltp:sample_rates=${AUDIO_RATE}:channel_layouts=stereo,${head},apad,atrim=duration=${seconds(duration)},asetpts=PTS-STARTPTS[s${k}]`,
@@ -92,9 +93,9 @@ export function alignedArgs(track: 'mic' | 'webcam', segments: readonly Segment[
       );
     }
   });
-  const kind = track === 'mic' ? 'v=0:a=1' : 'v=1:a=0';
+  const kind = audio ? 'v=0:a=1' : 'v=1:a=0';
   const graph = `${chains.join(';')};${segments.map((_, k) => `[s${k}]`).join('')}concat=n=${segments.length}:${kind}[out]`;
-  const codec = track === 'mic' ? ['-c:a', 'aac', '-b:a', '160k'] : VIDEO_CODEC;
+  const codec = audio ? ['-c:a', 'aac', '-b:a', '160k'] : VIDEO_CODEC;
   return [...inputs, '-filter_complex', graph, '-map', '[out]', ...codec, '-movflags', '+faststart', '-y', out];
 }
 
@@ -133,7 +134,11 @@ export async function mediaInfo(file: string, stream: 'v' | 'a'): Promise<{ seco
  * Joins the segments of the take in `dir` into `files` (the take's track names), each through a
  * `.joining` file renamed into place when it is complete. Returns the tracks that were joined.
  */
-export async function joinSegments(dir: string, segments: readonly Segment[], files: { screen: string; webcam: string; mic: string }): Promise<{ webcam: boolean; mic: boolean }> {
+export async function joinSegments(
+  dir: string,
+  segments: readonly Segment[],
+  files: { screen: string; webcam: string; mic: string; system: string },
+): Promise<{ webcam: boolean; mic: boolean; system: boolean }> {
   const screens = segments.map((segment) => join(dir, segment.screen.file));
   const sizes = await Promise.all(screens.map((file) => mediaInfo(file, 'v')));
   const first = { width: sizes[0]?.width ?? 0, height: sizes[0]?.height ?? 0 };
@@ -148,10 +153,11 @@ export async function joinSegments(dir: string, segments: readonly Segment[], fi
     await runFfmpeg(screenEncodeArgs(screens, first, temp(files.screen), durations));
   }
   renameWhenFree(temp(files.screen), join(dir, files.screen));
-  const has = { webcam: segments.some((segment) => segment.webcam), mic: segments.some((segment) => segment.mic) };
-  if (has.mic) {
-    await runFfmpeg(alignedArgs('mic', segments, dir, undefined, temp(files.mic)));
-    renameWhenFree(temp(files.mic), join(dir, files.mic));
+  const has = { webcam: segments.some((segment) => segment.webcam), mic: segments.some((segment) => segment.mic), system: segments.some((segment) => segment.system) };
+  for (const track of ['mic', 'system'] as const) {
+    if (!has[track]) continue;
+    await runFfmpeg(alignedArgs(track, segments, dir, undefined, temp(files[track])));
+    renameWhenFree(temp(files[track]), join(dir, files[track]));
   }
   if (has.webcam) {
     const firstCamera = segments.find((segment) => segment.webcam)!.webcam!;

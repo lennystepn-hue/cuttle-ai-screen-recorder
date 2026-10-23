@@ -19,7 +19,7 @@ import projectGuide from '../../../skill/cuttle/project.md?raw';
 import { VERSION, runCli } from './main';
 
 /** How an agent starts: what the server says about itself when a client connects. */
-const INSTRUCTIONS = `Cuttle makes videos two ways that mix freely: screen recordings turned into polished demos, and videos written entirely in code (every scene a web page you write, music composed in code). Read the guide first (guide topic "workflow"; "project" is cuttle.json's reference, "motion" how to write scenes, "music" how to compose). Every project tool takes "project": the project folder's absolute path. Make a project with init, write scenes as pages in its folder and add them with motion_add, check them with motion_check and preview (both answer with images), then render. Recording is the person's: ask them to record in the Cuttle app or with "cuttle record".`;
+const INSTRUCTIONS = `Cuttle makes videos two ways that mix freely: screen recordings turned into polished demos, and videos written entirely in code (every scene a web page you write, music composed in code). Read the guide first (guide topic "workflow"; "project" is cuttle.json's reference, "motion" how to write scenes, "music" how to compose). Every project tool takes "project": the project folder's absolute path. Make a project with init, write scenes as pages in its folder and add them with motion_add, check them with motion_check and preview (both answer with images), then render. open_in_editor shows the project to the person in the Cuttle app, where they see each change you make. Recording is the person's: ask them to record in the Cuttle app or with "cuttle record".`;
 
 const project = z.string().min(1).describe("the project folder's absolute path");
 const seconds = z.number().nonnegative();
@@ -294,6 +294,13 @@ export const COMMAND_TOOLS: readonly CommandTool[] = [
     description: 'The webcam in another layout for a while (source seconds, as a caption): full over the whole video (a talking-head intro or outro), side beside the screen (below it on a tall video), large a big bubble. The bubble turns into it and back over half a second.',
     input: { project, layout: z.enum(['full', 'side', 'large']), at: seconds, duration: seconds.positive().optional(), label: z.string().optional() },
     argv: (input) => ['camera', input.layout, '--at', String(input.at), ...option('duration', input.duration), ...option('label', input.label)],
+  }),
+  tool({
+    name: 'open_in_editor',
+    title: 'Open in the editor',
+    description: "Shows the project in the Cuttle app's editor (Windows and macOS, the app installed), which then follows every change to its files: for the person to watch the video take shape or fine-tune it by hand.",
+    input: { project },
+    argv: () => ['open'],
   }),
   tool({ name: 'sound_list', title: 'Built-in sounds', description: 'The built-in sounds (whoosh, click, pop, …).', input: {}, global: true, readOnly: true, argv: () => ['sound', 'list'] }),
   tool({

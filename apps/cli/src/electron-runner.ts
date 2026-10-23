@@ -22,7 +22,7 @@ function electronEntry(): string {
  * path itself (the package's path.txt names the executable inside dist/) and, when the binary is
  * missing, runs Electron's installer with its output on stderr.
  */
-function electronBinary(): string {
+export function electronBinary(): string {
   // The Cuttle app's copy of the CLI: the app is the Electron (its shim says which)
   if (process.env.CUTTLE_ELECTRON) return process.env.CUTTLE_ELECTRON;
   let dir: string;

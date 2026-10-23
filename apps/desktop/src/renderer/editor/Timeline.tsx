@@ -1158,7 +1158,7 @@ function Scene(props: { scene: SceneBlock; project: CuttleProject; pps: number; 
   const thumbHeight = useStore(store, (state) => state.mediaState.thumbnails.height ?? 90);
   const count = useStore(store, (state) => state.mediaState.thumbnails.count ?? 1);
   const columns = useStore(store, (state) => state.mediaState.thumbnails.columns ?? 1);
-  const screenStart = useStore(store, (state) => state.media?.screen.start ?? 0);
+  const screenStart = useStore(store, (state) => state.media?.screen?.start ?? 0);
   const left = scene.start * pps;
   const width = (scene.end - scene.start) * pps;
   const clip = project.scenes[scene.index];

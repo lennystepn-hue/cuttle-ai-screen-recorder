@@ -167,7 +167,7 @@ export const COMMAND_TOOLS: readonly CommandTool[] = [
     description: 'Adds a page you wrote (an HTML file in the project) to the video: a scene (at the end, first, or after a scene), an overlay over the clips, or the transition into a scene.',
     input: {
       project,
-      page: z.string().min(1).describe('the page, relative to the project (motion/<name>/index.html)'),
+      src: z.string().min(1).describe('the page, relative to the project (motion/<name>/index.html), as motion_check and cuttle.json name it'),
       as: z.enum(['scene', 'overlay', 'transition']).optional(),
       label: z.string().optional(),
       duration: seconds.positive().optional(),
@@ -176,7 +176,7 @@ export const COMMAND_TOOLS: readonly CommandTool[] = [
       at: seconds.optional(),
       into: z.string().optional(),
     },
-    argv: (input) => ['motion', 'add', input.page, ...option('as', input.as), ...option('label', input.label), ...option('duration', input.duration), ...on('first', input.first), ...option('after', input.after), ...option('at', input.at), ...option('into', input.into)],
+    argv: (input) => ['motion', 'add', input.src, ...option('as', input.as), ...option('label', input.label), ...option('duration', input.duration), ...on('first', input.first), ...option('after', input.after), ...option('at', input.at), ...option('into', input.into)],
   }),
   tool({
     name: 'motion_check',

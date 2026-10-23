@@ -88,7 +88,7 @@ function TitleBar() {
   // the player takes a new version a moment after the document: its length comes with its state
   useStore(store, (state) => state.player.duration);
   const duration = currentPlayer()?.duration ?? 0;
-  const recorded = media ? media.screen.end - media.screen.start : 0;
+  const recorded = media?.screen ? media.screen.end - media.screen.start : undefined;
   return (
     <header className="titlebar">
       <Mark />
@@ -96,7 +96,7 @@ function TitleBar() {
         <b>{info?.name ?? 'Cuttle'}</b>
         {media && (
           <span>
-            {formatDuration(recorded)} recorded · {formatDuration(duration)} video
+            {recorded === undefined ? 'no recording' : `${formatDuration(recorded)} recorded`} · {formatDuration(duration)} video
           </span>
         )}
       </div>

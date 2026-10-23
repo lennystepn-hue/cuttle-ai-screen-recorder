@@ -69,9 +69,9 @@ export class Player {
   private readonly assets: EngineAssets;
   private readonly onChange: (state: PlayerState) => void;
   private state: PlayerState = { t: 0, playing: false };
-  private screen: VideoSource;
+  private screen: VideoSource | undefined;
   private keyFrames: KeyFrames | undefined;
-  private screenGrabber: FrameGrabber;
+  private screenGrabber: FrameGrabber | undefined;
   private webcamGrabber: FrameGrabber | undefined;
   private seekToken = 0;
   /**
@@ -109,12 +109,12 @@ export class Player {
     this.onChange = options.onChange;
     this.project = options.project;
     this.screen = this.media.screen;
-    this.screenGrabber = new FrameGrabber(this.screen);
+    this.screenGrabber = this.screen && new FrameGrabber(this.screen);
     this.webcamGrabber = this.media.webcam ? new FrameGrabber(this.media.webcam) : undefined;
     this.timeline = this.makeTimeline();
     this.renderer = this.makeRenderer();
     this.fullSizeMotion = options.fullSizeMotion ?? false;
-    this.motion = new MotionFrames(this.project, this.media.screen.size, () => this.motionSize());
+    this.motion = new MotionFrames(this.project, this.media.screenSize, () => this.motionSize());
   }
 
   /** The size motion frames are drawn at: the output's part that fills the player on screen. */
@@ -153,8 +153,8 @@ export class Player {
     return this.timeline.frameAt(Math.max(0, Math.min(t, this.duration - 1e-6))).layers.filter((layer) => layer.kind === 'clip').length;
   }
 
-  /** The video track playback and scrubbing read now (the proxy once it is made), for the source view. */
-  get screenSource(): VideoSource {
+  /** The video track playback and scrubbing read now (the proxy once it is made), for the source view; none without a take. */
+  get screenSource(): VideoSource | undefined {
     return this.screen;
   }
 
@@ -197,7 +197,7 @@ export class Player {
   private makeTimeline(): Timeline {
     const narration = this.narrationWords();
     return createTimeline(this.project, {
-      screenSize: this.media.screen.size,
+      screenSize: this.media.screenSize,
       ...(this.media.cursor && { cursor: this.media.cursor }),
       ...(this.media.shortcuts && { shortcuts: this.media.shortcuts }),
       ...(this.media.transcript && { transcript: this.media.transcript.words }),
@@ -217,7 +217,7 @@ export class Player {
     this.drawnWatermark = this.watermark();
     return createRenderer(this.canvas, this.project, {
       assets: this.assets,
-      screenSize: this.media.screen.size,
+      screenSize: this.media.screenSize,
       ...(this.media.backgroundImage && { backgroundImage: this.media.backgroundImage }),
       ...(this.drawnWatermark && { watermarkImage: this.drawnWatermark }),
     });
@@ -382,7 +382,8 @@ export class Player {
         if (image) sources.stills.set(layer.index, image);
         continue;
       }
-      if (layer.kind !== 'clip' || layer.sourceTime === undefined) continue;
+      // a clip without a take (cuttle.json edited by hand) shows nothing of it
+      if (layer.kind !== 'clip' || layer.sourceTime === undefined || !this.screenGrabber) continue;
       const screen = await this.screenGrabber.grab(layer.sourceTime);
       if (!screen || token !== this.seekToken) {
         screen?.close();
@@ -508,7 +509,7 @@ export class Player {
     this.playback.restarts = 0;
 
     const video: PlaybackVideo = {
-      screen: this.screen,
+      ...(this.screen && { screen: this.screen }),
       ...(this.keyFrames && { keyFrames: this.keyFrames }),
       ...(this.media.webcam && { webcam: this.media.webcam }),
     };

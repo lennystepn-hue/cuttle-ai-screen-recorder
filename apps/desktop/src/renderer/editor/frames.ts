@@ -93,7 +93,8 @@ export class KeyFrames {
 }
 
 export interface PlaybackVideo {
-  screen: VideoSource;
+  /** None without a take: no clip shows one. */
+  screen?: VideoSource;
   /** The proxy's key frames, when the screen is the proxy: speeds above 6× show only those. */
   keyFrames?: KeyFrames;
   webcam?: VideoSource & { offset: number };
@@ -134,8 +135,8 @@ export class PlaybackFrames {
   }
 
   private async openScene(plan: ScenePlan, speed: number): Promise<OpenScene> {
-    if (plan.kind !== 'clip') return { plan };
     const { screen, keyFrames, webcam } = this.video;
+    if (plan.kind !== 'clip' || !screen) return { plan };
     const screenTimes = new Map<number, number>();
     for (const time of plan.sourceTimes) {
       const clamped = Math.max(time, screen.start);
@@ -168,7 +169,8 @@ export class PlaybackFrames {
         stills.set(layer.index, image);
         continue;
       }
-      if (layer.kind !== 'clip' || layer.sourceTime === undefined) continue;
+      // a clip without a take (cuttle.json edited by hand) shows nothing of it
+      if (layer.kind !== 'clip' || layer.sourceTime === undefined || !this.video.screen) continue;
       // decoders are opened per scene (`plan.index`), frames are handed over per layer
       const scene = this.open.get(layer.sceneIndex);
       const time = scene?.screenTimes?.get(layer.sourceTime);

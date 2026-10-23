@@ -64,6 +64,10 @@ describe('cuttle mcp', () => {
     // no tool records: that stays with the person
     expect(tools.some((tool) => /record/.test(tool.name))).toBe(false);
     for (const tool of tools) expect(tool.description, tool.name).toBeTruthy();
+    // a page is `src` in every tool, as in cuttle.json
+    const pages = tools.filter((tool) => ['motion_add', 'motion_check', 'music_set', 'music_check'].includes(tool.name));
+    for (const tool of pages) expect(Object.keys(tool.inputSchema.properties ?? {}), tool.name).toContain('src');
+    expect(tools.filter((tool) => 'page' in (tool.inputSchema.properties ?? {})).map((tool) => tool.name)).toEqual([]);
   });
 
   it("maps each tool's input to a command and options the CLI has", async () => {

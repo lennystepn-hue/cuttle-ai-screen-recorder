@@ -9,6 +9,8 @@ export interface Output {
   json: boolean;
   /** The command's result: `value` as JSON, or `text()` for people. */
   result(value: unknown, text: () => string): void;
+  /** One of a stream of results (`cuttle watch`): with --json one line of JSON each, else `text()`. */
+  line(value: unknown, text: () => string): void;
   /** Status for people while a command runs (stderr; quiet with --json unless it is a warning). */
   info(text: string): void;
   warn(text: string): void;
@@ -32,6 +34,9 @@ export function createOutput(json: boolean, streams: Streams = processStreams): 
     json,
     result(value, text) {
       streams.stdout(json ? `${JSON.stringify(value, null, 2)}\n` : `${text()}\n`);
+    },
+    line(value, text) {
+      streams.stdout(json ? `${JSON.stringify(value)}\n` : `${text()}\n`);
     },
     info(text) {
       if (!json) streams.stderr(`${text}\n`);

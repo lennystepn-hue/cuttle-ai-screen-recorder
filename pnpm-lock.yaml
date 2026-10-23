@@ -23,6 +23,9 @@ importers:
       electron:
         specifier: ^44.7.2
         version: 44.7.2(supports-color@7.2.0)
+      jiti:
+        specifier: 2.7.0
+        version: 2.7.0
       pixelmatch:
         specifier: ^8.0.0
         version: 8.0.0

@@ -1,0 +1,157 @@
+# A release video made in code by Cuttle, in CI: a title with the version, what is new from the
+# release notes as cards, an end card with the URL, music composed for it; MP4s attached to the
+# release. Runs on ubuntu-latest (in a virtual display), windows-latest and macos-latest.
+#
+#   on:
+#     release:
+#       types: [published]
+#   permissions:
+#     contents: write
+#   jobs:
+#     video:
+#       runs-on: ubuntu-latest
+#       steps:
+#         - uses: lennystepn-hue/cuttle-ai-screen-recorder/actions/release-video@main
+#           with:
+#             accent: '#D97757'
+name: Cuttle release video
+description: A video of what is new in a release, from its notes, rendered by Cuttle and attached to the release.
+author: Cuttle
+branding:
+  icon: film
+  color: orange
+
+inputs:
+  name:
+    description: The name on the title and end card.
+    default: ${{ github.event.repository.name }}
+  version:
+    description: The version after the name ("v" in front of a number is left out).
+    default: ${{ github.event.release.tag_name }}
+  notes:
+    description: The release notes in Markdown; their top-level bullets under a heading of what is new (else all of them) become the cards.
+    default: ${{ github.event.release.body }}
+  notes-file:
+    description: A file with the release notes, instead of notes.
+    default: ''
+  lines:
+    description: How many of the notes' bullets the video shows, at most.
+    default: '5'
+  url:
+    description: The URL the end card types.
+    default: ${{ github.event.repository.html_url }}
+  cta:
+    description: The call to action under the URL.
+    default: Out now
+  accent:
+    description: The brand's accent colour (a hex code); empty for the kit's.
+    default: ''
+  music:
+    description: A music template (pulse, bright, cinematic, drift, lofi), or none.
+    default: pulse
+  formats:
+    description: The formats, apart by spaces or commas (16:9, 1:1, 9:16).
+    default: '16:9'
+  dir:
+    description: The project's folder; its videos are in out/ inside it.
+    default: cuttle-release-video
+  tag:
+    description: The release to attach the videos to (its tag); empty to attach them nowhere.
+    default: ${{ github.event.release.tag_name }}
+  token:
+    description: The token that attaches the videos (contents write).
+    default: ${{ github.token }}
+
+outputs:
+  videos:
+    description: The videos' paths, as a JSON array.
+    value: ${{ steps.render.outputs.videos }}
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@v4
+      with:
+        node-version: 24
+
+    # Electron's Chromium draws in a virtual display (Xvfb) on Linux; the names of Ubuntu 24.04
+    # (t64), else 22.04's
+    - name: ffmpeg and a display (Linux)
+      if: runner.os == 'Linux'
+      shell: bash
+      run: |
+        sudo apt-get update -qq
+        t64=$(apt-cache show libasound2t64 >/dev/null 2>&1 && echo t64 || true)
+        sudo apt-get install -y -qq --no-install-recommends ffmpeg xvfb xauth libnss3 "libatk1.0-0$t64" "libatk-bridge2.0-0$t64" "libcups2$t64" "libgtk-3-0$t64" libgbm1 "libasound2$t64" libxss1 libxshmfence1 libdrm2 fonts-noto-color-emoji >/dev/null
+
+    - name: ffmpeg (macOS)
+      if: runner.os == 'macOS'
+      shell: bash
+      run: command -v ffmpeg >/dev/null || brew install ffmpeg
+
+    # Gyan's full build (what winget installs), checked against its digest
+    - name: ffmpeg (Windows)
+      if: runner.os == 'Windows'
+      shell: pwsh
+      run: |
+        if (Get-Command ffmpeg -ErrorAction SilentlyContinue) { exit 0 }
+        $archive = Join-Path $env:RUNNER_TEMP 'ffmpeg.7z'
+        Invoke-WebRequest -Uri 'https://github.com/GyanD/codexffmpeg/releases/download/9.0.2/ffmpeg-9.0.2-full_build.7z' -OutFile $archive
+        $digest = (Get-FileHash $archive -Algorithm SHA256).Hash.ToLower()
+        if ($digest -ne 'f0e46253c70dfe902bac915dfb4224f0cf1b7c6eeab9da2ccc9a5581f9a71b13') { throw "ffmpeg's archive has another digest: $digest" }
+        7z x $archive "-o$env:RUNNER_TEMP" -y | Out-Null
+        Join-Path $env:RUNNER_TEMP 'ffmpeg-9.0.2-full_build\bin' | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
+
+    # Cuttle from this action's own checkout: its packages, Electron, the cuttle command
+    - name: Cuttle
+      shell: bash
+      working-directory: ${{ github.action_path }}/../..
+      run: |
+        npm install -g --silent "$(node -p "require('./package.json').packageManager")"
+        pnpm install --frozen-lockfile --reporter=silent
+        node -e "require('electron')"
+        pnpm cli:build >/dev/null
+
+    - id: render
+      name: the video
+      shell: bash
+      working-directory: ${{ github.workspace }}
+      env:
+        CUTTLE_NAME: ${{ inputs.name }}
+        CUTTLE_VERSION: ${{ inputs.version }}
+        CUTTLE_NOTES: ${{ inputs.notes }}
+        CUTTLE_NOTES_FILE: ${{ inputs.notes-file }}
+        CUTTLE_LINES: ${{ inputs.lines }}
+        CUTTLE_URL: ${{ inputs.url }}
+        CUTTLE_CTA: ${{ inputs.cta }}
+        CUTTLE_ACCENT: ${{ inputs.accent }}
+        CUTTLE_MUSIC: ${{ inputs.music }}
+        CUTTLE_FORMATS: ${{ inputs.formats }}
+        CUTTLE_DIR: ${{ inputs.dir }}
+        CUTTLE_ROOT: ${{ github.action_path }}/../..
+        CUTTLE_WORKSPACE: ${{ github.workspace }}
+      run: |
+        export CUTTLE_CLI="$CUTTLE_ROOT/apps/cli/dist/cuttle.mjs"
+        run=(pnpm --dir "$CUTTLE_ROOT" exec jiti "$CUTTLE_ROOT/actions/release-video/make.ts")
+        if [ "$RUNNER_OS" = Linux ]; then run=(xvfb-run -a "${run[@]}"); fi
+        "${run[@]}" | tee "$RUNNER_TEMP/cuttle-videos.txt"
+        echo "videos=$(node -e "console.log(JSON.stringify(require('fs').readFileSync(process.argv[1], 'utf8').split(/\r?\n/).filter(Boolean)))" "$RUNNER_TEMP/cuttle-videos.txt")" >> "$GITHUB_OUTPUT"
+
+    - name: attached to the release
+      if: inputs.tag != ''
+      shell: bash
+      working-directory: ${{ github.workspace }}
+      env:
+        GH_TOKEN: ${{ inputs.token }}
+        TAG: ${{ inputs.tag }}
+        NAME: ${{ inputs.name }}
+        VERSION: ${{ inputs.version }}
+      run: |
+        # 16x9.mp4 becomes <name>-<version>-16x9.mp4 on the release
+        label="${NAME// /-}${VERSION:+-${VERSION#v}}"
+        while IFS= read -r video; do
+          [ -n "$video" ] || continue
+          named="$RUNNER_TEMP/$label-$(basename "$video")"
+          cp "$video" "$named"
+          gh release upload "$TAG" "$named" --clobber --repo "$GITHUB_REPOSITORY"
+        done < "$RUNNER_TEMP/cuttle-videos.txt"

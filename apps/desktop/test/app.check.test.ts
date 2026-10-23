@@ -2623,9 +2623,10 @@ describe.runIf(enabled)('the Cuttle app', () => {
     await openLook(first.page, 'brand');
     await first.page.waitForSelector('[data-testid=brand-save]:not([disabled])');
     await click(first.page, '[data-testid=brand-save]');
-    await expect.poll(() => existsSync(join(brands, 'nimbus', 'brand.json'))).toBe(true);
+    // saving and applying a kit copies its files first: a busy runner takes seconds
+    await expect.poll(() => existsSync(join(brands, 'nimbus', 'brand.json')), { timeout: 10_000 }).toBe(true);
     expect(readdirSync(join(brands, 'nimbus')).sort()).toEqual(['brand.json', 'logo.svg']);
-    await expect.poll(() => saved(first.dir).theme?.kit).toBe('Nimbus');
+    await expect.poll(() => saved(first.dir).theme?.kit, { timeout: 10_000 }).toBe('Nimbus');
     await first.page.waitForSelector('[data-testid=brand-kit][aria-pressed=true]');
     await shotOf('42-brand', '/editor.html', 'brand-first · Cuttle');
     await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find((window) => window.getTitle() === 'brand-first · Cuttle')?.close());
@@ -2634,7 +2635,7 @@ describe.runIf(enabled)('the Cuttle app', () => {
     const second = await endCard('brand-second');
     await second.page.waitForSelector('[data-testid=brand-kit]');
     await click(second.page, '[data-testid=brand-kit]');
-    await expect.poll(() => saved(second.dir).theme).toEqual({ name: 'Nimbus', url: 'nimbus.app', logo: 'brand/nimbus-logo.svg', foreground: '#FFFFFF', font: 'Bebas Neue', accent: '#7C5CFF', kit: 'Nimbus' });
+    await expect.poll(() => saved(second.dir).theme, { timeout: 10_000 }).toEqual({ name: 'Nimbus', url: 'nimbus.app', logo: 'brand/nimbus-logo.svg', foreground: '#FFFFFF', font: 'Bebas Neue', accent: '#7C5CFF', kit: 'Nimbus' });
     expect(saved(second.dir).look).toMatchObject({ background: { preset: 'mesh' }, frame: { style: 'mac-dark' }, cursor: { style: 'system', color: '#D97757' } });
     expect(existsSync(join(second.dir, 'brand', 'nimbus-logo.svg'))).toBe(true);
     // the page may still say ready from its render before the kit: the card as it comes, until it matches

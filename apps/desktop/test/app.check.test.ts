@@ -460,6 +460,22 @@ describe.runIf(enabled)('the Cuttle app', () => {
     await shot('01-opened');
   });
 
+  it('opens the project the cuttle command names (cuttle open): a second launch hands it to the running app', async () => {
+    const reel = join(root, 'reel');
+    for (const argv of [['init', reel], ['-C', reel, 'motion', 'new', 'title', '--first']]) {
+      expect(spawnSync('node', [CLI, '--json', ...argv], { encoding: 'utf8', timeout: 60_000 }).status).toBe(0);
+    }
+    // the second launch shares the check's user data, where the lock of the one running app is
+    const opened = spawnSync('node', [CLI, '--json', '-C', reel, 'open'], {
+      encoding: 'utf8',
+      timeout: 60_000,
+      env: { ...process.env, CUTTLE_APP: MAIN, CUTTLE_USER_DATA: join(root, 'user-data'), CUTTLE_HIDDEN: '1' },
+    });
+    expect(opened.status, opened.stdout + opened.stderr).toBe(0);
+    expect(JSON.parse(opened.stdout)).toEqual({ dir: reel, app: MAIN });
+    await expect.poll(editorTitles, { timeout: 30_000 }).toContain('reel · Cuttle');
+  });
+
   it('shows what the export renders, frame for frame, the webcam lined up', async () => {
     const stills = join(root, 'stills');
     const times = [1, 3.3, 6.8, 9.9];

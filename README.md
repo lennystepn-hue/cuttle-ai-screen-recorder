@@ -299,8 +299,9 @@ jobs:
 
 `cuttle mcp` is an MCP server over stdio: Claude Desktop, Claude Code, Cursor or any MCP client
 gets Cuttle's commands as tools (make a project, add and check motion pages, music, a narration,
-preview, render…), the skill's guides as a tool, and `cuttle.json` to read and write. Previews and
-checks answer with their stills as images; renders report their progress. Recording stays with you:
+preview, render, open it in the editor…), the skill's guides as a tool, and `cuttle.json` to read
+and write. Previews and checks answer with their stills as images; renders report their progress.
+With the project open in the app, you watch each change the agent makes. Recording stays with you:
 no tool records, you record in the app or with `cuttle record`.
 
 Claude Desktop (`claude_desktop_config.json`), Cursor (`.cursor/mcp.json`) and other clients:
@@ -450,6 +451,7 @@ cuttle render --alpha -o title.mov    # transparent, for Premiere, Final Cut or 
 cuttle render --size 4k --fps 60 --codec hevc   # 3840×2160 at 60 fps, HEVC where the graphics card encodes it
 cuttle transcript --translate de     # the sentences to translate (Claude writes them), then captions set --translation de
 cuttle chapters                      # those chapters as lines for a YouTube description
+cuttle open                          # the project in the app's editor, which follows every change to it (Claude's too)
 cuttle recover takes/2               # after a crash
 ```
 

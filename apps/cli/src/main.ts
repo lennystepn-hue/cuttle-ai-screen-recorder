@@ -11,6 +11,7 @@ import { importCommand, type ImportArgs } from './commands/import';
 import { init } from './commands/init';
 import { itemsCommand, type ItemsArgs } from './commands/items';
 import { zoomPathCommand, type ZoomPathArgs } from './commands/zoom-path';
+import { openCommand } from './commands/open';
 import { watchCommand } from './commands/watch';
 import { motionAddCommand, motionCheckCommand, motionNewCommand, motionTemplatesCommand } from './commands/motion';
 import { musicCheckCommand, musicNewCommand, musicSetCommand, musicTemplatesCommand, soundAddCommand, soundListCommand } from './commands/music';
@@ -546,6 +547,11 @@ export async function runCli(argv: readonly string[], streams?: Streams): Promis
     .command('watch')
     .description('keep the previews fresh while files are written: a motion page saved reruns its check, the music page its music check, cuttle.json and the rest the preview; each update says what changed and its errors first (--json: a line each); Ctrl+C stops')
     .action(action((output, project) => withSignal(output, (signal) => watchCommand(project, output, signal))));
+
+  program
+    .command('open')
+    .description("show the project in the Cuttle app's editor (Windows and macOS), which follows every change to its files: the installed app, or the one CUTTLE_APP names")
+    .action(action((output, project) => openCommand(project, output)));
 
   program
     .command('chapters')

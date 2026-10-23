@@ -10,6 +10,7 @@ const EXIT_CODES: Record<string, number> = {
   usage: EXIT.usage,
   'invalid-project': EXIT.usage,
   'project-open': EXIT.usage,
+  'app-missing': EXIT.device,
   // @cuttle/recorder
   'invalid-options': EXIT.usage,
   'device-not-found': EXIT.device,

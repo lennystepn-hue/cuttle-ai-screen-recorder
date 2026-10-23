@@ -14,6 +14,7 @@ import { openSettings } from './settings-window';
 import { findFfmpeg } from './tools';
 import { createTray, updateTray, type TrayActions } from './tray';
 import { startUpdates } from './updates';
+import { launchOf, type Launch } from './launch';
 import { chooseAndOpen, createPill, lockDown, openEditorOrSay, showPill } from './windows';
 
 app.setName('Cuttle');
@@ -22,14 +23,10 @@ if (process.env.CUTTLE_USER_DATA) app.setPath('userData', resolve(process.env.CU
 /** A quit waits this long for a recording to be written into its project, then quits anyway. */
 const QUIT_WAIT_MS = 60_000;
 
-/** The folder after `--open` in `argv`, if any, resolved against the folder that launch ran in. */
-function openArgument(argv: readonly string[], cwd: string): string | undefined {
-  const at = argv.indexOf('--open');
-  const dir = at >= 0 ? argv[at + 1] : undefined;
-  return dir === undefined ? undefined : resolve(cwd, dir);
-}
+const launched = launchOf(process.argv, process.cwd());
 
-if (!app.requestSingleInstanceLock()) {
+// a second launch hands the running app what it was asked (its argv arrives reordered)
+if (!app.requestSingleInstanceLock(launched)) {
   app.quit();
 } else {
   registerSchemes();
@@ -65,10 +62,10 @@ if (!app.requestSingleInstanceLock()) {
     quit: () => app.quit(),
   };
 
-  app.on('second-instance', (_event, argv, workingDirectory) => {
-    const dir = openArgument(argv, workingDirectory);
-    if (dir) void openEditorOrSay(dir);
-    else if (argv.includes('--settings')) void openSettings();
+  app.on('second-instance', (_event, argv, workingDirectory, additionalData) => {
+    const launch: Launch = { ...launchOf(argv, workingDirectory), ...(additionalData as Launch | null) };
+    if (launch.open) void openEditorOrSay(launch.open);
+    else if (launch.settings) void openSettings();
     else void showPill();
   });
 
@@ -109,9 +106,8 @@ if (!app.requestSingleInstanceLock()) {
     await createPill();
     // A new recording from anywhere (the recorder's own keys stop it and set markers).
     if (!HIDDEN) globalShortcut.register('Control+Shift+Alt+R', () => void startPicking());
-    const dir = openArgument(process.argv, process.cwd());
-    if (dir) await openEditorOrSay(dir);
-    else if (process.argv.includes('--settings')) await openSettings();
+    if (launched.open) await openEditorOrSay(launched.open);
+    else if (launched.settings) await openSettings();
     // the first plain start welcomes (ffmpeg, the cuttle command and the skill), then the pill
     else if (!settings.welcomed) await openSettings({ welcome: true });
     else await showPill();

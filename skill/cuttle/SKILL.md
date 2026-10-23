@@ -375,6 +375,13 @@ background, with transparency: VP9 with alpha in `out/<format>.webm`, or ProRes 
 `-o title.mov`. A lower third or a title alone is a project whose only scene is its page (a page
 with a transparent background); `preview --alpha` shows the stills as they come out. Tell the user the file's path and length. Do not upload it anywhere.
 
+To let the user watch and change the video themselves, `cuttle -C "<project>" --json open` shows
+it in the Cuttle app's editor (Windows and macOS), a recorded take or a video written in code
+alike. The editor follows every change to the project's files, yours too: the user sees each
+command you run land. Offer it once the first version renders, or when the user wants to fine-tune
+by hand; open it when they ask. Then say what you changed as you go, since they may be editing too
+(`conflict` below).
+
 With a script, the video file has the steps as its chapters (`chapters` in the JSON, output
 seconds). `cuttle -C "<project>" --json chapters` gives them as lines for a YouTube description
 (`youtube`) and says why YouTube would not show them (`problems`: fewer than three, or one shorter
@@ -401,5 +408,6 @@ than 10 s). Give the user the lines when the video goes to YouTube.
   the user to run `winget upgrade Gyan.FFmpeg` (macOS: `brew install whisper-cpp`).
 - `frame` says no frame starts at that second: the take ends there; take an earlier second.
 - A render fails with `render`: try `--encoder software`.
+- `app-missing` from `open`: the Cuttle app is not installed; the error says where to get it.
 - `conflict`: `cuttle.json` was saved by someone else (the user, or the Cuttle app) while the
   command ran, and nothing was written. Read the file again, then run the command again.

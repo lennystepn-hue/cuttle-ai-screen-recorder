@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { LOUDNESS } from '@cuttle/project';
 import { afterAll, describe, expect, it } from 'vitest';
-import { CODEC_HEADROOM, masterGraph, meteredGraph, parseMeter } from '../src/audio';
+import { CODEC_HEADROOM, masterGraph, meteredGraph, parseMeter } from '../../src/audio';
 
 const dir = mkdtempSync(join(tmpdir(), 'cuttle-loudness-'));
 afterAll(() => rmSync(dir, { recursive: true, force: true }));

@@ -207,7 +207,10 @@ overlay or a clip's `crop`): `answer` and `click` zooms from `suggest`, and late
 step's title: a text, or an overlay of its `motion` template) and `step` (a zoom on where a step
 happens) from the script. A rerun replaces
 only tagged items. **When you change a tagged item's time, place or size, remove its `auto`**: then
-it is yours and the next `suggest` keeps it (switching it on or off keeps the tag). `autoEdits`
+it is yours and the next `suggest` keeps it (switching it on or off keeps the tag).
+`cuttle items` lists the timed items by kind, tag (`--made click`), stretch (`--between a,b`) or id,
+and with `--on`, `--off`, `--delete` or `--shift <s>` changes all it picks in one write (moved
+items lose their `auto`, as by hand). `autoEdits`
 (`clickZooms`, `answerZoom`, `crop`, `privacy`, `retakes`, `fillers`, `pauses`, `typingZooms`,
 `dialogZooms`, `stepTitles`, `stepZooms`: all `true`) holds which kinds are made at all; one set
 to `false` is not made again.

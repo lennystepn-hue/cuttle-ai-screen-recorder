@@ -335,7 +335,9 @@ pixel by `app:check`. It plays a 720p proxy of the take (made in the background 
 at once, and one gesture is one step to undo (Ctrl+Z, Ctrl+Shift+Z; on a Mac ⌘ works wherever Ctrl
 does). On the timeline: S splits the
 clip at the playhead, edges trim, a dragged scene moves, R or the bar sets a clip's speed, overlays
-move and stretch (Alt copies, Ctrl skips snapping). The tools beside the video: V selects (a click
+move and stretch (Alt copies, Ctrl skips snapping). Shift- or Ctrl-click adds an item to the
+selection (a Shift-drag on the lanes, all a band touches): dragged, switched off, duplicated or
+deleted, they go together, one step to undo. The tools beside the video: V selects (a click
 on a caption picks it), Z and M draw a zoom or a mask on the screen itself (the source view, Esc
 for the video), T types a caption on the video. The inspector edits the selection and the look;
 Ctrl+K lists every command and its keys. A change written while the project is open (by Claude,

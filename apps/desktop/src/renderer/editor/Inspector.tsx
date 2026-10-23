@@ -59,7 +59,7 @@ import { BackgroundIcon, BrandIcon, CameraIcon, CardIcon, CheckIcon, ChevronIcon
 import { bridge } from '../bridge';
 import { Select as StyledSelect } from '../Select';
 import { shortcut } from '../keys';
-import { chooseImage, chooseTool, cutShownAt, deleteSelection, duplicateSelection, LIST_OF, playheadPlace, reveal, setSpeed, SPEEDS } from './actions';
+import { chooseImage, chooseTool, cutShownAt, deleteSelection, duplicateSelection, LIST_OF, playheadPlace, reveal, setSpeed, SPEEDS, switchSelection } from './actions';
 import { edit, preview } from './doc';
 import { currentPlayer, engineAssets, select, setTool, store, type LookSection, type Selection, type Tool } from './session';
 import { isColoured, swatch, type SwatchKey } from './swatches';
@@ -879,15 +879,56 @@ function SelectionPanel() {
 
 function SelectedPanel() {
   const selection = useStore(store, (state) => state.selection);
+  const also = useStore(store, (state) => state.also);
   const tool = useStore(store, (state) => state.tool);
   // a drag in progress shows here as it goes
   const project = useStore(store, (state) => state.doc?.preview ?? state.doc?.project);
   if (!project || !selection) return HINTS[tool];
+  if (also.length > 0) return <ManyDetails project={project} items={[selection, ...also]} />;
   if (selection.kind === 'music') return project.music ? <MusicDetails music={project.music} /> : <p className="hint">The music is not in the project any more.</p>;
   const list = LIST_OF[selection.kind];
   const item = (project[list] as { id?: string }[]).find((candidate) => candidate.id === selection.id);
   if (!item) return <p className="hint">The selection is not in the project any more.</p>;
   return <Details project={project} selection={selection} />;
+}
+
+/** What each kind is called, one and several. */
+const KIND_NAMES: Record<Selection['kind'], [string, string]> = {
+  scene: ['scene', 'scenes'],
+  zoom: ['zoom', 'zooms'],
+  mask: ['mask', 'masks'],
+  caption: ['caption', 'captions'],
+  annotation: ['annotation', 'annotations'],
+  motion: ['motion overlay', 'motion overlays'],
+  cut: ['cut', 'cuts'],
+  crop: ['crop', 'crops'],
+  sound: ['sound', 'sounds'],
+  music: ['music', 'music'],
+};
+
+/** Several items selected together: what they are, and what can be done to all of them at once. */
+function ManyDetails({ project, items }: { project: CuttleProject; items: readonly Selection[] }) {
+  const counts = new Map<Selection['kind'], number>();
+  for (const item of items) counts.set(item.kind, (counts.get(item.kind) ?? 0) + 1);
+  const kinds = [...counts].map(([kind, count]) => `${count} ${KIND_NAMES[kind][count === 1 ? 0 : 1]}`);
+  // a scene is not turned off: it is cut or deleted
+  const switchable = items.filter((item) => item.kind !== 'scene' && item.kind !== 'music' && item.kind !== 'crop');
+  const on = switchable.filter((item) => (project[LIST_OF[item.kind as Exclude<Selection['kind'], 'music'>]] as { id?: string; enabled?: boolean }[]).find((candidate) => candidate.id === item.id)?.enabled !== false);
+  return (
+    <div data-testid="many-details">
+      <Head icon={<SelectIcon />} color="var(--accent)" name={`${items.length} items`} copies={items.some((item) => item.kind !== 'cut')} />
+      <p className="hint many-kinds">{kinds.join(', ')}</p>
+      {switchable.length > 0 && (
+        <Row label="Show" inline>
+          <em>{on.length === switchable.length ? 'All on' : on.length === 0 ? 'All off: kept, not in the video' : `${on.length} of ${switchable.length} on`}</em>
+          <Toggle checked={on.length === switchable.length} label="Show them all" onChange={switchSelection} testId="many-enabled" />
+        </Row>
+      )}
+      <p className="hint">
+        Drag one on the timeline and the others move along. {shortcut('Shift')}- or {shortcut('Ctrl')}-click adds an item or takes it out; {shortcut('Shift')}-drag on the lanes selects what the band touches.
+      </p>
+    </div>
+  );
 }
 
 function Details({ project, selection }: { project: CuttleProject; selection: Selection }) {

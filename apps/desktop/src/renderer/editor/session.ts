@@ -34,6 +34,8 @@ export interface EditorState {
   format?: ExportFormat;
   player: PlayerState;
   selection?: Selection;
+  /** The other selected items, besides `selection` (Shift- or Ctrl/⌘-click, a rubber band on the timeline): edited together. */
+  also: Selection[];
   tool: Tool;
   tab: 'selection' | 'auto' | 'transcript' | 'voice' | 'look';
   /** The part of the look that is open (one at a time; none once it is closed). */
@@ -78,6 +80,7 @@ export interface EditorState {
 export const store = createStore<EditorState>({
   phase: 'loading',
   player: { t: 0, playing: false },
+  also: [],
   tool: 'select',
   tab: 'selection',
   lookSection: 'background',
@@ -242,8 +245,9 @@ function followDocument(): void {
   let running = Promise.resolve();
   store.subscribe(() => {
     // a selection whose item an undo or an outside change removed is cleared
-    const { selection, doc } = store.get();
+    const { selection, also, doc } = store.get();
     if (selection && doc && !stillThere(selection, doc.project)) select(undefined);
+    else if (doc && also.some((item) => !stillThere(item, doc.project))) store.set({ also: also.filter((item) => stillThere(item, doc.project)) });
     const next = shownProject();
     if (next === last || !next) return;
     last = next;
@@ -382,8 +386,38 @@ export function setFormat(format: ExportFormat | undefined): void {
 
 export function select(selection: Selection | undefined): void {
   dismissWarning();
-  store.set({ selection, ...(selection && { tab: 'selection' as const }) });
+  store.set({ selection, also: [], ...(selection && { tab: 'selection' as const }) });
 }
+
+const same = (a: Selection, b: Selection) => a.kind === b.kind && a.id === b.id;
+
+/** What can be selected with others: anything but the music and a clip's crop (each is one of its own). */
+export const groupable = (item: Selection) => item.kind !== 'music' && item.kind !== 'crop';
+
+/** Adds an item to the selection, or takes it out when it is in (Shift- or Ctrl/⌘-click on the timeline). */
+export function toggleSelect(item: Selection): void {
+  const { selection, also } = store.get();
+  if (!selection || !groupable(item) || !groupable(selection)) return select(item);
+  dismissWarning();
+  if (same(selection, item)) {
+    const [next, ...rest] = also;
+    return store.set({ selection: next, also: rest });
+  }
+  if (also.some((each) => same(each, item))) return store.set({ also: also.filter((each) => !same(each, item)) });
+  // the one clicked last is the one the inspector would show alone
+  store.set({ selection: item, also: [...also, selection], tab: 'selection' });
+}
+
+/** Selects these items together (a rubber band); none leaves nothing selected. */
+export function selectMany(items: readonly Selection[]): void {
+  const kept = items.filter(groupable);
+  if (kept.length <= 1) return select(kept[0]);
+  dismissWarning();
+  store.set({ selection: kept.at(-1), also: kept.slice(0, -1), tab: 'selection' });
+}
+
+/** Every selected item: the selection, then the others. */
+export const selectedItems = (state: Pick<EditorState, 'selection' | 'also'> = store.get()): Selection[] => (state.selection ? [state.selection, ...state.also] : []);
 
 /** A warning (an edit that was not possible) is about what was being done: a new selection or tool ends it. */
 function dismissWarning(): void {

@@ -8,7 +8,7 @@ import { outputTimesOf } from '../../shared/timeline-model';
 import { bridge } from '../bridge';
 import { edit, projectAfter, toast } from './doc';
 import { speedCommands } from '../../shared/speed';
-import { currentPlayer, documentProject, select, setTool, store, type Selection, type Tool } from './session';
+import { currentPlayer, documentProject, select, setTool, store, type Selection, type Tool, selectedItems } from './session';
 
 /** Output seconds a new zoom or caption lasts. */
 export const NEW_OVERLAY_SECONDS = 3;
@@ -82,6 +82,13 @@ export function split(): void {
 export function deleteSelection(): void {
   const selection = store.get().selection;
   if (!selection) return;
+  // several: all of them, one step to undo
+  const items = selectedItems();
+  if (items.length > 1) {
+    const commands = items.map((item): Command => ({ type: 'delete', list: LIST_OF[item.kind as Exclude<Selection['kind'], 'music'>], id: item.id }));
+    if (edit(commands, `Delete ${items.length} items`)) select(undefined);
+    return;
+  }
   if (selection.kind === 'music') {
     if (edit([{ type: 'music', fields: null }], 'Remove the music')) select(undefined);
     return;
@@ -95,10 +102,34 @@ export function deleteSelection(): void {
   if (edit([{ type: 'delete', list, id: selection.id }], `Delete ${NAMES[list]}`)) select(undefined);
 }
 
+/** Turns the selected items on or off (those that can be: not a scene), one step to undo. */
+export function switchSelection(on: boolean): void {
+  const project = documentProject();
+  if (!project) return;
+  const commands = selectedItems().flatMap((item): Command[] => {
+    if (item.kind === 'music') return project.music ? [{ type: 'music', fields: { enabled: on ? undefined : false } }] : [];
+    if (item.kind === 'scene' || item.kind === 'crop') return [];
+    return [{ type: 'set', list: LIST_OF[item.kind], id: item.id, fields: { enabled: on ? undefined : false } }];
+  });
+  if (commands.length > 0) edit(commands, on ? `Turn ${commands.length} items on` : `Turn ${commands.length} items off`);
+}
+
 /** A copy of the selection right after it (an overlay a second later in its source). */
 export function duplicateSelection(): void {
   const selection = store.get().selection;
   if (!selection) return;
+  const items = selectedItems();
+  if (items.length > 1) {
+    // a cut is cut once: the others are copied
+    const copied = items.filter((item) => item.kind !== 'cut');
+    if (copied.length === 0) return toast('A cut cannot be copied: the same stretch is cut once.', { tone: 'warning' });
+    const commands = copied.map((item): Command => {
+      const list = LIST_OF[item.kind as Exclude<Selection['kind'], 'music'>];
+      return { type: 'duplicate', list, id: item.id, ...(list !== 'scenes' && { shift: 1 }) };
+    });
+    edit(commands, `Duplicate ${copied.length} items`);
+    return;
+  }
   if (selection.kind === 'cut') return toast('A cut cannot be copied: the same stretch is cut once.', { tone: 'warning' });
   if (selection.kind === 'crop') return toast('A crop belongs to its clip: duplicate the clip instead.', { tone: 'warning' });
   if (selection.kind === 'music') return toast('A video has one music: change its page or its params instead.', { tone: 'warning' });

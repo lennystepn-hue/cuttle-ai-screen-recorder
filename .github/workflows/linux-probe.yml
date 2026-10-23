@@ -1,0 +1,31 @@
+# Temporary: the Linux render job alone, on pushes to the linux branch, while it is made to work (#129).
+name: Linux probe
+
+on:
+  push:
+    branches: [linux]
+
+permissions:
+  contents: read
+
+jobs:
+  linux:
+    name: render on linux
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      # ffmpeg, a display for Electron (Xvfb), and the libraries Electron's Chromium loads
+      - run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ffmpeg xvfb xauth libnss3 libatk1.0-0t64 libatk-bridge2.0-0t64 libcups2t64 libgtk-3-0t64 libgbm1 libasound2t64 libxss1 libxshmfence1 libdrm2 fonts-noto-color-emoji
+          ffmpeg -hide_banner -version | head -1
+      - run: pnpm install --frozen-lockfile
+      - run: node -e "console.log(require('electron'))"
+      - run: pnpm typecheck
+      - run: xvfb-run -a pnpm cli:check

@@ -18,6 +18,8 @@ const enabled = process.env.MODE === 'cli';
 
 function cuttle(...argv: string[]): { code: number; json: Record<string, unknown> } {
   const result = spawnSync('node', [CLI, '--json', ...argv], { encoding: 'utf8', timeout: 120_000 });
+  // What Electron said, for a failure that was not expected
+  if (result.status !== 0) process.stderr.write(result.stderr.slice(-4000));
   return { code: result.status ?? -1, json: JSON.parse(result.stdout || '{}') as Record<string, unknown> };
 }
 

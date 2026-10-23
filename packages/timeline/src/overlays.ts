@@ -1,11 +1,39 @@
-import type { ClipScene, Mask, Rect, TextOverlay } from '@cuttle/project';
+import type { ClipScene, Mask, Rect, TextAnimation, TextOverlay } from '@cuttle/project';
+import { clamp } from './easing';
 
 /** Length of a text's fades in output seconds (see `rampAmount`). */
 export const TEXT_FADE_SECONDS = 0.25;
 
 export interface ActiveText {
   overlay: TextOverlay;
+  /** Its fades: what a caption that fades in and out (the default) shows with. */
   opacity: number;
+  /** How far it has come in (0 to 1 over its `enter`, 1 once in), and gone out (0 until its `exit` starts), in output time. */
+  enter: number;
+  exit: number;
+}
+
+/**
+ * How long a caption takes to come in, or to go out (`out`), with each animation (output seconds): a
+ * fade a quarter second, the others a little longer; a typewriter or word by word longer for a
+ * longer text (going out quicker), within bounds.
+ */
+export function textAnimationSeconds(animation: TextAnimation, text: string, out = false): number {
+  switch (animation) {
+    case 'fade':
+      return TEXT_FADE_SECONDS;
+    case 'pop':
+      return 0.35;
+    case 'slide':
+    case 'blur':
+      return 0.4;
+    case 'sweep':
+      return 0.45;
+    case 'typewriter':
+      return clamp([...text].length * (out ? 0.02 : 0.045), 0.3, out ? 0.6 : 1.6);
+    case 'words':
+      return clamp(text.split(/\s+/).filter(Boolean).length * (out ? 0.06 : 0.16), 0.3, out ? 0.6 : 1.6);
+  }
 }
 
 /**
@@ -33,11 +61,11 @@ export function activeMasks(masks: readonly Mask[], sourceTime: number): Mask[] 
 }
 
 /** Enabled texts whose `[at, at+duration)` range, in source seconds, contains `sourceTime`, with their opacity from `opacityOf` (their fades; 0 on a fade's first frame). */
-export function activeTexts(texts: readonly TextOverlay[], sourceTime: number, opacityOf: (text: TextOverlay) => number): ActiveText[] {
+export function activeTexts(texts: readonly TextOverlay[], sourceTime: number, motionOf: (text: TextOverlay) => Omit<ActiveText, 'overlay'>): ActiveText[] {
   const active: ActiveText[] = [];
   for (const overlay of texts) {
     if (!overlay.enabled || sourceTime < overlay.at || sourceTime >= overlay.at + overlay.duration) continue;
-    active.push({ overlay, opacity: opacityOf(overlay) });
+    active.push({ overlay, ...motionOf(overlay) });
   }
   return active;
 }

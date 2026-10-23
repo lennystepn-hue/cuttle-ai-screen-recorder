@@ -744,6 +744,33 @@ describe.runIf(enabled)('the Cuttle app', () => {
     expect(readFileSync(projectFile(), 'utf8')).toBe(original);
   }, 90_000);
 
+  it('animates a caption in and out, picked in the inspector and drawn as the export draws it, and a card’s title', async () => {
+    const original = readFileSync(projectFile(), 'utf8');
+    type Animated = { texts: { enter?: string; exit?: string }[]; scenes: { type: string; enter?: string }[] };
+    const animated = () => onDisk() as unknown as Animated;
+    await press('.item.caption');
+    await editor.waitForSelector('[data-testid=caption-enter]');
+    await chooseIn(editor, '[data-testid=caption-enter]', 'Typewriter');
+    await savedWhen(() => animated().texts[0]!.enter === 'typewriter');
+    await chooseIn(editor, '[data-testid=caption-exit]', 'Pop');
+    await savedWhen(() => animated().texts[0]!.exit === 'pop');
+    expect((await doc()).undo).toBe('Caption goes out: pop');
+    // a fifth of a second into it, a few letters typed: as cuttle preview draws them
+    await editor.keyboard.press('Escape');
+    await editor.evaluate(() => (window as unknown as Hooked).__cuttleCheck.flush());
+    const still = spawnSync('node', [CLI, '--json', '-C', project, 'preview', '--at', '0.7', '-o', join(root, 'caption-still')], { encoding: 'utf8', timeout: 120_000 });
+    expect(still.status, still.stderr).toBe(0);
+    const exported = PNG.sync.read(readFileSync((JSON.parse(still.stdout) as { stills: { file: string }[] }).stills[0]!.file));
+    await expect.poll(async () => (await seek(0.7), difference(await pixels(), exported).mean), { timeout: 20_000, message: 'the caption typing: the editor against the export' }).toBeLessThan(1.5);
+    // the card's title pops in
+    await press('.scene[title^="Built with"]');
+    await editor.waitForSelector('[data-testid=card-enter]');
+    await chooseIn(editor, '[data-testid=card-enter]', 'Pop');
+    await savedWhen(() => animated().scenes.find((scene) => scene.type === 'card')?.enter === 'pop');
+    await undoAll();
+    expect(readFileSync(projectFile(), 'utf8')).toBe(original);
+  }, 90_000);
+
   it('selects several items on the timeline (Shift- and Ctrl-click, a rubber band): moved, switched off and deleted together, each one step to undo', async () => {
     const original = readFileSync(projectFile(), 'utf8');
     const selected = () => editor.locator('.item.selected, .scene.selected').count();

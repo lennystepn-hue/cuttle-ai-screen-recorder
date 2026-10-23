@@ -164,7 +164,7 @@ describe('render', () => {
   it('reports where it drew each text, for picking one with the pointer', () => {
     const project = parse({ scenes: [{ type: 'clip', from: 0, to: 1 }], texts: [{ id: 't1', at: 0, duration: 1, text: 'Hello', position: 'bottom' }] });
     const renderer = createRenderer(new OffscreenCanvas(1, 1), project, { assets, screenSize: SCREEN });
-    renderer.render({ t: 0, layers: [{ ...layer(0, 1, 'clip'), texts: [{ overlay: project.texts[0]!, opacity: 1 }] }] }, { ...NO_SOURCES, screens: new Map([[0, fakeScreen()]]) });
+    renderer.render({ t: 0, layers: [{ ...layer(0, 1, 'clip'), texts: [{ overlay: project.texts[0]!, opacity: 1, enter: 1, exit: 0 }] }] }, { ...NO_SOURCES, screens: new Map([[0, fakeScreen()]]) });
     const [drawn] = renderer.drawnTexts();
     expect(drawn?.overlay.id).toBe('t1');
     // inside the output, in its lower half (a bottom caption)

@@ -24,8 +24,18 @@ export function fitText(ctx: OffscreenCanvasRenderingContext2D, text: string, ma
   return `${text.slice(0, end).trimEnd()}…`;
 }
 
-/** Draws one line of text in `style` at `unit` scale, at most `maxWidth` px wide (box included). */
-export function drawLabel(text: string, style: LabelStyle, unit: number, maxWidth: number): { canvas: OffscreenCanvas; margin: number } {
+/**
+ * A label as it comes in or goes out (`textMotion`): the first `reveal` letters of its text, the
+ * left `sweep` share of it, blurred by `blur` px. Its box stays the whole label's.
+ */
+export interface LabelPart {
+  reveal?: number;
+  sweep?: number;
+  blur?: number;
+}
+
+/** Draws one line of text in `style` at `unit` scale, at most `maxWidth` px wide (box included); `part`: a part of it. */
+export function drawLabel(text: string, style: LabelStyle, unit: number, maxWidth: number, part: LabelPart = {}): { canvas: OffscreenCanvas; margin: number } {
   const fontPx = Math.max(1, Math.round(style.size * unit));
   const padX = Math.round(style.padX * unit);
   const padY = Math.round(style.padY * unit);
@@ -36,12 +46,21 @@ export function drawLabel(text: string, style: LabelStyle, unit: number, maxWidt
   const boxWidth = Math.max(1, Math.ceil(measure.measureText(shown).width) + 2 * padX + accent);
   const boxHeight = Math.round(fontPx * 1.3) + 2 * padY;
   const shadowMargin = style.shadow ? Math.ceil((style.shadow.blur + Math.abs(style.shadow.y)) * unit) : 0;
-  // Glyph ink can reach past the advance width and the 1.3 em box (the hook of a j, the dots of Ä).
-  const margin = Math.max(shadowMargin, Math.ceil(fontPx * 0.15));
+  // Glyph ink can reach past the advance width and the 1.3 em box (the hook of a j, the dots of Ä);
+  // a blur spreads it further
+  const blur = part.blur && part.blur > 0 ? part.blur : 0;
+  const margin = Math.max(shadowMargin, Math.ceil(fontPx * 0.15)) + Math.ceil(blur * 2.5);
 
   const canvas = new OffscreenCanvas(boxWidth + 2 * margin, boxHeight + 2 * margin);
   const ctx = canvas.getContext('2d')!;
   ctx.translate(margin, margin);
+  if (blur > 0) ctx.filter = `blur(${blur}px)`;
+  if (part.sweep !== undefined && part.sweep < 1) {
+    // the left part of it, its shadow and overhanging ink with it
+    ctx.beginPath();
+    ctx.rect(-margin, -margin, margin + boxWidth * Math.max(0, part.sweep), boxHeight + 2 * margin);
+    ctx.clip();
+  }
   const shadowOn = () => {
     if (!style.shadow) return;
     ctx.shadowColor = style.shadow.color;
@@ -69,7 +88,7 @@ export function drawLabel(text: string, style: LabelStyle, unit: number, maxWidt
   ctx.font = cssFont(style.weight, fontPx);
   ctx.fillStyle = style.color;
   ctx.textBaseline = 'middle';
-  ctx.fillText(shown, accent + padX, boxHeight / 2);
+  ctx.fillText(part.reveal === undefined ? shown : [...shown].slice(0, Math.max(0, part.reveal)).join(''), accent + padX, boxHeight / 2);
   return { canvas, margin };
 }
 
@@ -83,8 +102,12 @@ export class SpriteCache {
     private readonly maxIdleFrames = 120,
   ) {}
 
-  label(text: string, style: LabelStyle, unit: number, maxWidth: number): Sprite {
-    return this.drawn(JSON.stringify([text, style, unit, maxWidth]), () => drawLabel(text, style, unit, maxWidth));
+  label(text: string, style: LabelStyle, unit: number, maxWidth: number, part?: LabelPart): Sprite {
+    // a part keyed in steps: a sweep in 48ths, a blur in half pixels (a sprite each, while it moves)
+    const key = part && (part.reveal !== undefined || (part.sweep !== undefined && part.sweep < 1) || (part.blur ?? 0) > 0)
+      ? { reveal: part.reveal, sweep: part.sweep === undefined ? undefined : Math.round(part.sweep * 48) / 48, blur: part.blur ? Math.round(part.blur * 2) / 2 : undefined }
+      : undefined;
+    return this.drawn(JSON.stringify([text, style, unit, maxWidth, key]), () => drawLabel(text, style, unit, maxWidth, key));
   }
 
   /** A sprite drawn by `draw` once per `key` (anything else drawn into a canvas: a caption). */

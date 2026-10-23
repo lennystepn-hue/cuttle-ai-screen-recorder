@@ -35,6 +35,8 @@ export {
   WINDOW_KINDS,
   ANNOTATION_KINDS,
   CAMERA_LAYOUTS,
+  TEXT_ANIMATIONS,
+  type TextAnimation,
   showsCamera,
   type CameraLayout,
   VOICE_LINE_MAX,

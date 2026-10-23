@@ -48,3 +48,18 @@ describe('annotations on the video', () => {
     expect(magnifier.ok && magnifier.project.annotations[0]).toMatchObject({ zoom: 2, enabled: true });
   });
 });
+
+describe('captions coming in and going out', () => {
+  it('give their progress in and out, timed for their animations, in output seconds', () => {
+    const parsed = parseProject({ version: 1, sources: { screen: 's.mp4' }, look: { transition: { enabled: false } }, scenes: [{ type: 'clip', from: 0, to: 20 }], texts: [{ at: 4, duration: 4, text: 'Typed letter by letter', enter: 'typewriter', exit: 'pop' }] });
+    if (!parsed.ok) throw new Error(JSON.stringify(parsed.issues));
+    const video = createTimeline(parsed.project, { screenSize });
+    const text = (t: number) => video.frameAt(t).layers[0]!.texts[0];
+    expect(text(4)).toMatchObject({ enter: 0, exit: 0 });
+    // 22 letters at 0.045 s each: about a second to type
+    expect(text(4.5)!.enter).toBeCloseTo(0.5 / (22 * 0.045), 3);
+    expect(text(6)).toMatchObject({ enter: 1, exit: 0 });
+    // a pop goes out over 0.35 s
+    expect(text(8 - 0.175)!.exit).toBeCloseTo(0.5, 3);
+  });
+});

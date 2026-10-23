@@ -4,7 +4,7 @@ import { cursorAt, type CursorFrame, type CursorTrack } from './cursor';
 import { clamp, type Curve } from './easing';
 import { keyBadgeAt, keyGroups, type KeyBadge, type Shortcut } from './keys';
 import { occurrences, rampAmount, type Occurrence } from './occurrences';
-import { TEXT_FADE_SECONDS, activeMasks, activeTexts, badgeFor, type ActiveText } from './overlays';
+import { TEXT_FADE_SECONDS, activeMasks, activeTexts, badgeFor, textAnimationSeconds, type ActiveText } from './overlays';
 import { crossfadeHalf, isContinuousCut, pageTransition, sceneSpans, sourceTimeAt, spanAt, totalDuration, type SceneSpan } from './time';
 import { ZOOM_RAMP_SECONDS, zoomRectAt } from './zoom';
 
@@ -225,7 +225,18 @@ export function createTimeline(project: CuttleProject, opts: TimelineOptions): T
       ...(blurred && { motion: { zoom: zoomAt(open, shownAt - (sourceTime - open) / scene.speed), ...(before && { cursor: { x: before.x, y: before.y } }) } }),
       aspect: screen[2] / screen[3],
       masks: activeMasks(project.masks, sourceTime),
-      texts: activeTexts(project.texts, sourceTime, (text) => amount(textShown.get(text), TEXT_FADE_SECONDS, 'linear')),
+      texts: activeTexts(project.texts, sourceTime, (text) => {
+        const opacity = amount(textShown.get(text), TEXT_FADE_SECONDS, 'linear');
+        const occurrence = textShown.get(text)?.[span.index];
+        if (!occurrence) return { opacity, enter: 1, exit: 0 };
+        // in and out in output seconds where the video shows its start and its end, each at most half of it
+        const half = (occurrence.end - occurrence.start) / 2;
+        const enterSeconds = Math.min(textAnimationSeconds(text.enter ?? 'fade', text.text), half);
+        const exitSeconds = Math.min(textAnimationSeconds(text.exit ?? 'fade', text.text, true), half);
+        const enter = occurrence.rampIn && enterSeconds > 0 ? clamp((shownAt - occurrence.start) / enterSeconds, 0, 1) : 1;
+        const exit = occurrence.rampOut && exitSeconds > 0 ? clamp(1 - (occurrence.end - shownAt) / exitSeconds, 0, 1) : 0;
+        return { opacity, enter, exit };
+      }),
       ...withAnnotations(
         project.annotations.flatMap((annotation, index) => {
           const occurrence = annotation.enabled ? annotationShown[index]?.[span.index] : undefined;

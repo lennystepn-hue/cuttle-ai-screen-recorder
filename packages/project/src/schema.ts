@@ -11,6 +11,15 @@ export const FRAME_STYLES = ['mac-dark', 'mac-light', 'browser-light', 'browser-
 /** The frames that are a device around the screen (a bezel, a camera), not a window with a title bar. */
 export const DEVICE_FRAMES = ['iphone', 'android'] as const;
 export const TEXT_STYLES = ['pill', 'lower-third', 'caption'] as const;
+
+/**
+ * How a caption comes in (`enter`) and goes out (`exit`): `fade`; `pop` (grows in with a little
+ * bounce, shrinks away); `slide` (rises into place, sinks away); `blur` (sharpens, blurs away);
+ * `typewriter` (letter by letter, deleted back); `words` (word by word); `sweep` (its box wipes in,
+ * the text with it, and wipes away).
+ */
+export const TEXT_ANIMATIONS = ['fade', 'pop', 'slide', 'blur', 'typewriter', 'words', 'sweep'] as const;
+export type TextAnimation = (typeof TEXT_ANIMATIONS)[number];
 export const CURSOR_STYLES = ['system', 'arrow-white', 'arrow-black', 'dot', 'ring', 'spotlight'] as const;
 export const CURSOR_SHAPES = ['arrow', 'text', 'pointer', 'wait', 'crosshair', 'move', 'not-allowed'] as const;
 export const EASES = ['smooth', 'linear'] as const;
@@ -287,6 +296,8 @@ const CardSceneSchema = z.strictObject({
   title: z.string().min(1),
   subtitle: z.string().optional(),
   duration: positiveSeconds,
+  /** How its title comes in (its subtitle a moment later); left out, it is there from the start. */
+  enter: z.enum(TEXT_ANIMATIONS).optional(),
 });
 
 /** What a motion page gets: the page (a path in the project), its params, and whether it may reach the network. */
@@ -449,6 +460,9 @@ const TextSchema = z.strictObject({
   text: z.string().min(1),
   style: z.enum(TEXT_STYLES).default('pill'),
   position: z.enum(TEXT_POSITIONS).default('top'),
+  /** How it comes in and goes out (`fade` when left out). */
+  enter: z.enum(TEXT_ANIMATIONS).optional(),
+  exit: z.enum(TEXT_ANIMATIONS).optional(),
   enabled: z.boolean().default(true),
   auto: autoKind,
 });

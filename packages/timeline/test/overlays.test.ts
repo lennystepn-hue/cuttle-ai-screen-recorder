@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { ClipScene, Mask, TextOverlay } from '@cuttle/project';
-import { activeMasks, activeTexts, badgeFor, maskRectAt } from '../src/overlays';
+import { TEXT_FADE_SECONDS, activeMasks, activeTexts, badgeFor, maskRectAt, textAnimationSeconds } from '../src/overlays';
 
 const mask = (from: number, to: number, enabled = true): Mask => ({
   from, to, rect: [0, 0, 50, 50], style: 'fill', enabled,
@@ -29,14 +29,16 @@ describe('activeMasks', () => {
 });
 
 describe('activeTexts', () => {
-  it('gives each active text its opacity', () => {
-    expect(activeTexts([text], 12, () => 0.4)).toEqual([{ overlay: text, opacity: 0.4 }]);
+  const shown = { opacity: 1, enter: 1, exit: 0 };
+
+  it('gives each active text its opacity and how far it has come in and gone out', () => {
+    expect(activeTexts([text], 12, () => ({ opacity: 0.4, enter: 0.5, exit: 0 }))).toEqual([{ overlay: text, opacity: 0.4, enter: 0.5, exit: 0 }]);
   });
 
   it('hides texts outside their range and disabled texts', () => {
-    expect(activeTexts([text], 10.9, () => 1)).toEqual([]);
-    expect(activeTexts([text], 13, () => 1)).toEqual([]);
-    expect(activeTexts([{ ...text, enabled: false }], 12, () => 1)).toEqual([]);
+    expect(activeTexts([text], 10.9, () => shown)).toEqual([]);
+    expect(activeTexts([text], 13, () => shown)).toEqual([]);
+    expect(activeTexts([{ ...text, enabled: false }], 12, () => shown)).toEqual([]);
   });
 });
 
@@ -55,5 +57,15 @@ describe('badgeFor', () => {
   it('uses an explicit badge and hides it when empty', () => {
     expect(badgeFor(clip(12, 'fast-forward'))).toBe('fast-forward');
     expect(badgeFor(clip(12, ''))).toBeUndefined();
+  });
+});
+
+describe('textAnimationSeconds', () => {
+  it('takes a quarter second to fade, longer to type a longer text, and goes out quicker', () => {
+    expect(textAnimationSeconds('fade', 'Hello')).toBe(TEXT_FADE_SECONDS);
+    expect(textAnimationSeconds('typewriter', 'Hi')).toBe(0.3);
+    expect(textAnimationSeconds('typewriter', 'A longer line of text')).toBeGreaterThan(0.9);
+    expect(textAnimationSeconds('typewriter', 'A longer line of text', true)).toBeLessThan(textAnimationSeconds('typewriter', 'A longer line of text'));
+    expect(textAnimationSeconds('words', 'one two three four five six seven eight nine ten eleven twelve')).toBe(1.6);
   });
 });

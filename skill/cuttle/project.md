@@ -134,7 +134,7 @@ there are not two cursors.
 |---|---|
 | `clip` | `from`, `to` (source seconds, `to` > `from`), `speed` (`1`, up to 64; above 1 a badge like "12× speed" shows), `badge` (custom badge text, `""` for none), `crop` (`{ "rect": [x, y, w, h], "enabled": true }`: the part of the screen the clip shows, e.g. a browser's page without its tabs; the window takes its shape and zooms stay inside it; `suggest` makes it, tagged `auto: "crop"`, and cuts a clip where the content area changes for good) |
 | `still` | `image` (a path, e.g. from `cuttle capture-page`), `duration` (output seconds), `motion` (`none`, `kenburns`, `scroll`: top to bottom of a tall image), `frame` (`none`, `mac-dark`, `mac-light`, `browser-light`, `browser-dark`, `windows-light`, `windows-dark`, `terminal`, `iphone`, `android`: a phone frame suits a page captured at a phone's width) |
-| `card` | `title`, `subtitle` (optional), `duration` (output seconds): a title or end card on the background |
+| `card` | `title`, `subtitle` (optional), `duration` (output seconds): a title or end card on the background; `enter` (left out: there from the start) is how the title comes in, as a text's, the subtitle 0.2 s later |
 | `motion` | `src` (an HTML page in the project, e.g. `motion/intro/index.html`), `duration` (output seconds), `params` (`{ "name": value }`: text, numbers, `true`/`false` or `null`, for the page), `network` (`false`; `true` lets the page load from https), `motionBlur` (`{ "samples": 8, "shutter": 0.5 }`: each frame the average of that many moments while a camera's shutter would be open, half a frame here; off without it): a page drawn frame by frame over the whole output, over the background where it is clear (see "Motion pages" and [motion.md](motion.md)) |
 
 `zooms`: `at` and `duration` (source seconds), `rect`, `ease` (`smooth`, `linear`) and `enabled`
@@ -163,6 +163,10 @@ words masked wherever the screen shows them (`suggest --mask` adds to them).
 `texts`: `at` and `duration` (source seconds), `text`, `style` (`pill`, `lower-third`, `caption`),
 `position` (`top`, `center`, `bottom`) and `enabled` (`true`). A `top` text sits over the window's
 title bar; `bottom` keeps the title visible. Texts fade in and out over 0.25 output seconds.
+`enter` and `exit` are how a text comes in and goes out (both `fade` when left out): `pop` (grows in
+with a little bounce, shrinks away), `slide` (rises into place, sinks away), `blur` (sharpens, blurs
+away), `typewriter` (letter by letter, about 0.045 s each, deleted back), `words` (word by word) or
+`sweep` (its box wipes in with the text). Each takes at most half the text's time on screen.
 
 `annotations` mark things on the screen's content, in source px, where the clips show `at` to
 `at + duration` (source seconds): `kind` (`arrow` from `from` to `to`, each `[x, y]`; `box`,

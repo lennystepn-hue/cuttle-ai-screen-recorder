@@ -22,7 +22,7 @@ export { occurrences, rampAmount, type Occurrence } from './occurrences';
 export { YOUTUBE_CHAPTERS, chapterTime, stepChapters, youtubeChapters, type Chapter } from './chapters';
 export { STEP_SLIP_SECONDS, STEP_ZOOM, shownFrom, stepMoves, stepZooms, type StepMove, type StepZoom } from './steps';
 export { ZOOM_MOVE_LEAD, ZOOM_MOVE_SECONDS, ZOOM_RAMP_SECONDS, fitZoomRect, zoomBetween, zoomRectAt, zoomTargetAt } from './zoom';
-export { TEXT_FADE_SECONDS, activeMasks, activeTexts, badgeFor, maskRectAt, type ActiveText } from './overlays';
+export { TEXT_FADE_SECONDS, activeMasks, activeTexts, badgeFor, maskRectAt, textAnimationSeconds, type ActiveText } from './overlays';
 export { CLICK_EFFECT_SECONDS, createCursorTrack, cursorAt, smoothedPath, type CursorFrame, type CursorTrack } from './cursor';
 export { KEY_HOLD_SECONDS, KEY_MAX_SPEED, KEY_REPEAT_SECONDS, keyBadgeAt, keyGroups, shortcutsOf, type KeyBadge, type KeyGroup, type Shortcut } from './keys';
 export { ANNOTATION_IN_SECONDS, ANNOTATION_OUT_SECONDS, CAMERA_SWITCH_SECONDS, createTimeline, type ActiveAnnotation, type ActiveOverlay, type ActiveTransition, type RenderState, type SceneFrame, type Timeline, type TimelineOptions } from './frame';

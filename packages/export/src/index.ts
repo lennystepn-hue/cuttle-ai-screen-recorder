@@ -4,6 +4,8 @@ export { ExportError } from './errors';
 export { EXPORT_CODECS, EXPORT_FORMATS, EXPORT_FPS, EXPORT_SIZES, isExportFormat, withFormat, type ExportCodec, type ExportFormat, type ExportSize } from './formats';
 export type { EncoderPreference, ExportErrorCode } from './job';
 export { renderStills, stillName, type StillsOptions, type StillsResult } from './main/stills';
+export { renderShot, shotFormatOf, type ShotOptions, type ShotResult } from './main/shot';
+export { SHOT_FORMATS, type ShotFormat } from './job';
 export { MOTION_SCHEME_PRIVILEGES } from './main/motion';
 export { checkMusic, type MusicCheckOptions, type MusicCheckResult } from './main/music-check';
 export { planSoundtrack, renderSoundtrack, type SoundtrackPlan } from './main/soundtrack';

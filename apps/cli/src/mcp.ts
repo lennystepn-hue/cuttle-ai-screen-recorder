@@ -303,6 +303,69 @@ export const COMMAND_TOOLS: readonly CommandTool[] = [
     argv: (input) => ['webcam', 'background', input.mode, ...option('color', input.color)],
   }),
   tool({
+    name: 'screenshot_frame',
+    title: 'Frame a screenshot',
+    description:
+      "Frames a screenshot as the videos are and writes it as a PNG, JPEG or WebP (answered as an image): the image in a window, a browser, a phone or alone (frame), on a background or on nothing (transparent), with rounded corners, a shadow and padding, pixel for pixel at the image's own scale (a Retina PNG's from its resolution). For a README, a launch post, a PR. image: a PNG, JPEG or WebP, or a shot's folder made with save (its settings change and it is drawn again). Lengths are points.",
+    input: {
+      image: z.string().min(1).describe("a PNG, JPEG or WebP (absolute path), or a shot's folder"),
+      background: z.enum(['sunset-sky', 'aurora', 'mesh', 'solid', 'image', 'gradient', 'flow', 'bokeh', 'dots']).optional(),
+      colors: z.array(z.string()).optional().describe("hex colours: a gradient's stops, or the tints of mesh, flow, bokeh and dots"),
+      from: z.string().optional().describe('"shot" (the colours of the image itself) or an image file'),
+      angle: z.number().min(0).max(360).optional(),
+      radial: z.boolean().optional(),
+      color: z.string().optional().describe("the solid background's colour"),
+      backgroundImage: z.string().optional().describe('an image behind the shot'),
+      wallpaper: z.boolean().optional().describe("the desktop's wallpaper behind the shot, softened"),
+      blur: z.number().min(0).max(1).optional(),
+      dim: z.number().min(0).max(0.8).optional(),
+      transparent: z.boolean().optional().describe('no background: the framed shot and its shadow on nothing (PNG or WebP)'),
+      frame: z.enum(['none', 'mac-dark', 'mac-light', 'browser-light', 'browser-dark', 'windows-light', 'windows-dark', 'terminal', 'iphone', 'android']).optional().describe('none (default): the image alone, rounded'),
+      title: z.string().optional().describe("the title bar's text: a window's title, a browser's address"),
+      radius: z.number().min(0).max(1000).optional(),
+      shadow: z.boolean().optional(),
+      padding: z.number().min(0).max(1000).optional().describe('default 64'),
+      size: z.string().optional().describe('auto (default), a ratio the canvas grows to (16:9, 1:1, 4:5, 9:16, 1.91:1) or pixels it is fitted into (1200x630)'),
+      crop: z.array(z.number()).length(4).optional().describe("x, y, w, h in the image's pixels"),
+      shotScale: z.number().positive().max(8).optional().describe("the image's pixels per point (default: from a PNG's resolution, else 1)"),
+      scale: z.number().positive().max(8).optional().describe("the output's pixels per point (default: the image's own)"),
+      quality: z.number().min(0).max(1).optional(),
+      out: z.string().optional().describe("the image to write, .png, .jpg or .webp (default: <image>-framed.png beside it; a shot folder's shot.png)"),
+      save: z.string().optional().describe('also keep the shot as this folder, to frame it again with other settings'),
+    },
+    global: true,
+    argv: (input) => [
+      'shot',
+      'frame',
+      input.image,
+      ...option('background', input.background),
+      ...option('colors', input.colors?.join(',')),
+      ...option('from', input.from),
+      ...option('angle', input.angle),
+      ...on('radial', input.radial),
+      ...option('color', input.color),
+      ...option('image', input.backgroundImage),
+      ...on('wallpaper', input.wallpaper),
+      ...option('blur', input.blur),
+      ...option('dim', input.dim),
+      ...on('transparent', input.transparent),
+      ...off('transparent', input.transparent),
+      ...option('frame', input.frame),
+      ...option('title', input.title),
+      ...option('radius', input.radius),
+      ...on('shadow', input.shadow),
+      ...off('shadow', input.shadow),
+      ...option('padding', input.padding),
+      ...option('size', input.size),
+      ...option('crop', input.crop?.join(',')),
+      ...option('shot-scale', input.shotScale),
+      ...option('scale', input.scale),
+      ...option('quality', input.quality),
+      ...option('out', input.out),
+      ...option('save', input.save),
+    ],
+  }),
+  tool({
     name: 'open_in_editor',
     title: 'Open in the editor',
     description: "Shows the project in the Cuttle app's editor (Windows and macOS, the app installed), which then follows every change to its files: for the person to watch the video take shape or fine-tune it by hand.",
@@ -473,7 +536,7 @@ export async function runCommand(argv: readonly string[], progress?: (text: stri
 async function imagesOf(result: unknown): Promise<CallToolResult['content']> {
   const found: string[] = [];
   const walk = (value: unknown, key?: string): void => {
-    if (typeof value === 'string' && /\.png$/i.test(value)) {
+    if (typeof value === 'string' && /\.(png|jpe?g|webp)$/i.test(value)) {
       if (key === 'sheet') found.unshift(value);
       else found.push(value);
     } else if (Array.isArray(value)) value.forEach((item) => walk(item));

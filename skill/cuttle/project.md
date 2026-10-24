@@ -314,6 +314,24 @@ recording.
 </script>
 ```
 
+## Screenshots: shot.json
+
+`cuttle shot frame --save` keeps a framed screenshot as a folder: `shot.json`, its image
+(`source.png`) and its last render (`shot.png`). Lengths are points: the image's pixels over its
+`scale`, so a Retina shot's frame and padding are drawn at 2× and its pixels stay as they are.
+
+| Field | |
+| --- | --- |
+| `version` | `1` |
+| `source` | the image, from the folder (`source.png`) or absolute |
+| `scale` | the image's pixels per point: `2` from a Retina display, `1.5` at 150 % (default 1) |
+| `crop` | `[x, y, w, h]` in the image's pixels: only that part |
+| `padding` | points between the framed shot and the canvas's edge (default 64) |
+| `size` | `"auto"` (the shot and its padding), a ratio the canvas grows to (`"16:9"`), or `{ "width": 1200, "height": 630 }` it is fitted into (smaller, never larger) |
+| `background` | as `look.background` (`preset`, `color`, `colors`, `image`, …) |
+| `transparent` | `true`: no background, the shot and its shadow on nothing (PNG or WebP) |
+| `frame` | `style` (the frame styles above; default `none`: the image alone, rounded), `title`, `radius` in points (default 12), `shadow` (default true) |
+
 ## Finding source seconds and rects
 
 - `cuttle --json preview` lists each still's `source` second next to its output second `t`.

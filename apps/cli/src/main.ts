@@ -17,6 +17,7 @@ import { webcamBackgroundCommand } from './commands/webcam';
 import { motionAddCommand, motionCheckCommand, motionNewCommand, motionTemplatesCommand } from './commands/motion';
 import { musicCheckCommand, musicNewCommand, musicSetCommand, musicTemplatesCommand, soundAddCommand, soundListCommand } from './commands/music';
 import { previewCommand } from './commands/preview';
+import { shotFrameCommand, type ShotFrameArgs } from './commands/shot';
 import { recordCommand } from './commands/record';
 import { recoverCommand } from './commands/recover';
 import { renderAllCommand, renderCommand } from './commands/render';
@@ -66,6 +67,18 @@ const speed = (value: string): number => {
 const degrees = (value: string): number => {
   const parsed = Number(value);
   if (!Number.isFinite(parsed) || parsed < 0 || parsed > 360) throw new InvalidArgumentError('expected degrees from 0 to 360');
+  return parsed;
+};
+/** A length in points (a shot's padding, its corners): 0 to 1000. */
+const points = (value: string): number => {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed < 0 || parsed > 1000) throw new InvalidArgumentError('expected points from 0 to 1000');
+  return parsed;
+};
+/** Pixels per point: more than 0, at most 8. */
+const scale = (value: string): number => {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0 || parsed > 8) throw new InvalidArgumentError('expected a scale more than 0 and at most 8 (2: two pixels a point)');
   return parsed;
 };
 /** Seconds either way: negative is earlier. */
@@ -336,6 +349,38 @@ export async function runCli(argv: readonly string[], streams?: Streams): Promis
     .option('--blur <0-1>', 'how soft the image is: 0 sharp, 1 a wash of its colours', fraction)
     .option('--dim <0-0.8>', 'how much darker the image is', fraction)
     .action(action((output, project, preset: string | undefined, options: BackgroundArgs) => backgroundCommand(project, preset, options, output)));
+
+  const shot = program.command('shot').description('screenshots framed as the videos are: the image in a window, a browser, a phone or alone, on a background, with rounded corners and a shadow, pixel for pixel');
+  shot
+    .command('frame <image>')
+    .description('frames a PNG, JPEG or WebP (or a shot folder made with --save) and writes it as a PNG, JPEG or WebP')
+    .option('--background <preset>', `sunset-sky, aurora, mesh, solid, image, gradient, flow, bokeh or dots (default: sunset-sky, or what the options ask for)`)
+    .option('--colors <list>', 'colours, comma-separated: a gradient\'s stops (2 to 4), or the tints of mesh, flow, bokeh and dots')
+    .option('--from <source>', 'the colours read off "shot" (the image itself) or an image file')
+    .option('--angle <degrees>', 'a gradient\'s direction: 0 to the top, 90 to the right (default 135)', degrees)
+    .option('--radial', 'a gradient from the centre out')
+    .option('--linear', 'a gradient along its angle (the default)')
+    .option('--color <hex>', 'the solid background\'s colour')
+    .option('--image <file>', 'an image behind the shot')
+    .option('--wallpaper', 'the desktop\'s wallpaper behind the shot, softened')
+    .option('--blur <0-1>', 'how soft the image is: 0 sharp, 1 a wash of its colours', fraction)
+    .option('--dim <0-0.8>', 'how much darker the image is', fraction)
+    .option('--transparent', 'no background: the framed shot and its shadow on nothing (PNG or WebP)')
+    .option('--no-transparent', 'the background again')
+    .option('--frame <style>', 'none (the image alone, rounded), mac-dark, mac-light, browser-light, browser-dark, windows-light, windows-dark, terminal, iphone or android (default none)')
+    .option('--title <text>', 'the title bar\'s text: a window\'s title, a browser\'s address, a terminal\'s path')
+    .option('--radius <points>', 'the corner radius (default 12)', points)
+    .option('--shadow', 'a soft shadow under it (the default)')
+    .option('--no-shadow', 'no shadow')
+    .option('--padding <points>', 'space around it (default 64)', points)
+    .option('--size <size>', 'auto (it and its padding, pixel for pixel), a ratio the canvas grows to (16:9, 1:1, 4:5, 9:16, 1.91:1) or pixels it is fitted into (1200x630)')
+    .option('--crop <x,y,w,h>', 'only this part of the image, in its pixels')
+    .option('--shot-scale <n>', "the image's pixels per point: 2 from a Retina display (default: from a PNG's resolution, else 1)", scale)
+    .option('--scale <n>', 'the output\'s pixels per point (default: the image\'s own, pixel for pixel)', scale)
+    .option('--quality <0-1>', 'a JPEG\'s or WebP\'s quality', fraction)
+    .option('-o, --out <file>', 'the image to write: .png, .jpg or .webp (default: <image>-framed.png beside it; a shot folder\'s shot.png)')
+    .option('--save <folder>', 'also keep the shot as a folder (shot.json, its image, shot.png), to frame it again with other options')
+    .action(action((output, _project, image: string, options: ShotFrameArgs) => withSignal(output, (signal) => shotFrameCommand(image, options, output, signal))));
 
   const brand = program.command('brand').description('brand kits: a project\'s theme (name, URL, logo, colours, heading font), background, frame and cursor, saved once and applied with one command');
   brand

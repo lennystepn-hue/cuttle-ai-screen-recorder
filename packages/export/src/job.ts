@@ -1,4 +1,4 @@
-import type { CuttleProject, InputEvent, TranscriptWord } from '@cuttle/project';
+import type { CuttleProject, InputEvent, Shot, TranscriptWord } from '@cuttle/project';
 import type { Shortcut } from '@cuttle/timeline';
 import type { MotionView } from './motion/runtime';
 
@@ -109,7 +109,26 @@ export interface StillsJob extends Omit<ExportJob, 'kind' | 'encoder'> {
   sheet?: { columns: number };
 }
 
-export type PageJob = ExportJob | StillsJob;
+/** The image formats a shot is written in. */
+export const SHOT_FORMATS = ['png', 'jpeg', 'webp'] as const;
+export type ShotFormat = (typeof SHOT_FORMATS)[number];
+
+/** One framed screenshot (`shot.json`) instead of a project's frames, written through `ExportHost.writeStill` as `shot`. */
+export interface ShotJob {
+  kind: 'shot';
+  shot: Shot;
+  /** The shot's image (absolute). */
+  source: string;
+  /** Image for `shot.background.preset: 'image'`. */
+  backgroundImage?: string;
+  /** Output px per point; default the shot's own scale (the image pixel for pixel). */
+  scale?: number;
+  format: ShotFormat;
+  /** JPEG's and WebP's quality, 0 to 1. */
+  quality?: number;
+}
+
+export type PageJob = ExportJob | StillsJob | ShotJob;
 
 export interface PageTimings {
   /** Waiting for decoded frames and still images. */
@@ -152,7 +171,17 @@ export interface PageStillsSuccess {
   totalMs: number;
 }
 
-export type PageResult = PageSuccess | PageStillsSuccess | PageFailure;
+/** A shot job's result: the image's size and the scale it was drawn at (output px per point). */
+export interface PageShotSuccess {
+  ok: true;
+  width: number;
+  height: number;
+  scale: number;
+  gpu: string;
+  totalMs: number;
+}
+
+export type PageResult = PageSuccess | PageStillsSuccess | PageShotSuccess | PageFailure;
 
 /** What the preload script exposes to the page as `window.cuttleHost`. */
 export interface ExportHost {
@@ -164,7 +193,7 @@ export interface ExportHost {
   /** Writes into the video-only output file at a byte position. */
   write(data: Uint8Array, position: number): Promise<void>;
   progress(done: number, total: number): void;
-  /** Writes a PNG of a stills job: `still-<n>` (0-based, in the order of `times`) or `sheet`. */
+  /** Writes a PNG of a stills job (`still-<n>`, 0-based in the order of `times`, or `sheet`), or a shot job's image (`shot`). */
   writeStill(name: string, data: Uint8Array): Promise<void>;
   /** A motion item's frame (frames of one showing only go forward; an earlier one starts it again). */
   motionFrame(request: MotionFrameRequest): Promise<MotionPixels>;

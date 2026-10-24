@@ -12,6 +12,7 @@ uniform int u_samples;  // the moments averaged from u_from to u_crop; 1: none
 uniform vec4 u_window;
 uniform float u_radius;
 uniform vec3 u_matte;
+uniform bool u_keepAlpha;
 void main() {
   // A small negative LOD bias keeps downscaled UI text crisp while trilinear filtering stops shimmer.
   vec4 texel;
@@ -27,10 +28,13 @@ void main() {
     }
     texel /= float(u_samples);
   }
-  // Premultiplied: transparent parts of the image show the matte instead of black.
-  vec3 color = texel.rgb + (1.0 - texel.a) * u_matte;
   float a = coverage(sdRoundRect(v_px, u_window, u_radius));
-  o_color = vec4(color * a, a);
+  // Premultiplied: transparent parts of the image show the matte instead of black, or stay transparent.
+  if (u_keepAlpha) {
+    o_color = texel * a;
+  } else {
+    o_color = vec4((texel.rgb + (1.0 - texel.a) * u_matte) * a, a);
+  }
 }`;
 
 /** The screen (cropped to the zoom) or a still image, drawn into the content rect and clipped to the window's rounded corners (a device's screen). */
@@ -46,10 +50,11 @@ export class ContentPass {
 
   /**
    * `crop` is in texture coordinates (see `uvRect`); the texture needs mipmaps. `matte` shows through
-   * transparent parts of the image (screen frames are opaque; stills use white). `blur`: the crop
-   * when the shutter opened and how many moments from there to `crop` to average (`blurSamples`).
+   * transparent parts of the image (screen frames are opaque; stills use white); null keeps them
+   * transparent (a shot). `blur`: the crop when the shutter opened and how many moments from there
+   * to `crop` to average (`blurSamples`).
    */
-  draw(texture: WebGLTexture, crop: Rect, layout: WindowLayout, matte: Rgb = [0, 0, 0], blur?: { from: Rect; samples: number }): void {
+  draw(texture: WebGLTexture, crop: Rect, layout: WindowLayout, matte: Rgb | null = [0, 0, 0], blur?: { from: Rect; samples: number }): void {
     this.shader
       .use()
       .texture('u_tex', 0, texture)
@@ -58,7 +63,8 @@ export class ContentPass {
       .int('u_samples', blur?.samples ?? 1)
       .vec4('u_window', layout.clip)
       .float('u_radius', layout.clipRadius)
-      .vec3('u_matte', matte);
+      .vec3('u_matte', matte ?? [0, 0, 0])
+      .int('u_keepAlpha', matte ? 0 : 1);
     drawRect(this.gl, this.shader, layout.content, this.output);
   }
 

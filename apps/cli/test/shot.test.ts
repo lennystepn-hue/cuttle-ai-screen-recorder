@@ -60,6 +60,33 @@ describe('cuttle shot frame', () => {
     writeFileSync(join(dir, 'notes.txt'), 'hello');
     expect(((await cli('--json', 'shot', 'frame', join(dir, 'notes.txt'))).json.error as { message: string }).message).toMatch(/not a PNG, JPEG or WebP/);
   });
+
+  it("names what is wrong with a publishing option: where it sits, a headline's parts without one, a mask, a style or a kit that is not there", async () => {
+    const dir = temp();
+    const image = join(dir, 'shot.png');
+    writeFileSync(image, pngWith(8, 8));
+    const saved = { brands: process.env.CUTTLE_BRANDS_DIR, styles: process.env.CUTTLE_SHOT_STYLES };
+    process.env.CUTTLE_BRANDS_DIR = join(dir, 'brands');
+    process.env.CUTTLE_SHOT_STYLES = join(dir, 'shot-styles.json');
+    try {
+      const message = async (...argv: string[]) => ((await cli('--json', 'shot', 'frame', image, ...argv)).json.error as { message: string }).message;
+      expect(await message('--align', 'middle')).toMatch(/--align middle: center, top, bottom, left, right/);
+      expect(await message('--bleed', '0.9')).toMatch(/0 to 0\.6/);
+      expect(await message('--subtitle', 'More')).toMatch(/give it with --headline/);
+      expect(await message('--mask', '1,2')).toMatch(/--mask 1,2/);
+      expect(await message('--font', 'Comic Sans')).toMatch(/--font Comic Sans: Archivo, Inter, Space Grotesk, Fraunces, Instrument Serif, Bebas Neue/);
+      expect(await message('--style', 'Launch')).toMatch(/no screenshot style "Launch": save one first/);
+      expect(await message('--brand', 'Acme')).toMatch(/no brand kit "Acme"/);
+      // the styles: none yet, and where they will be kept
+      expect((await cli('--json', 'shot', 'styles')).json).toEqual({ file: join(dir, 'shot-styles.json'), styles: {} });
+      expect(((await cli('--json', 'shot', 'styles', '--remove', 'Launch')).json.error as { message: string }).message).toMatch(/no screenshot style "Launch"/);
+    } finally {
+      for (const [key, value] of [['CUTTLE_BRANDS_DIR', saved.brands], ['CUTTLE_SHOT_STYLES', saved.styles]] as const) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+    }
+  });
 });
 
 describe('cuttle shot take', () => {

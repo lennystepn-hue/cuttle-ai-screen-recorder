@@ -1,11 +1,12 @@
 import { ShotSchema, type ShotInput } from '@cuttle/project';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { loadEngineAssets } from '../src/assets';
+import { loadHeadingFont } from '../src/fonts';
 import { drawShot } from '../src/shot';
 import { pixelAt, readPixels, type Pixels } from './gl-util';
 
 beforeAll(async () => {
-  await loadEngineAssets();
+  await Promise.all([loadEngineAssets(), loadHeadingFont('Archivo')]);
 });
 
 const shot = (input: Partial<ShotInput>) => ShotSchema.parse({ version: 1, source: 'source.png', ...input });
@@ -77,6 +78,41 @@ describe('a shot', () => {
     // the shadow under the window, fading to nothing at the canvas's edge
     expect(pixelAt(pixels, x + w / 2, y + h + 10)[3]).toBeGreaterThan(30);
     expect(pixelAt(pixels, x + w / 2, pixels.height - 1)[3]).toBeLessThanOrEqual(2);
+    bitmap.close();
+  });
+
+  it('hides a masked part of the image, and draws the headline on the background', async () => {
+    const { bitmap, at } = await noise(80, 40);
+    const { pixels, layout } = draw(
+      { padding: 10, frame: { radius: 0, shadow: false }, background: { preset: 'solid', color: '#000000' }, masks: [{ rect: [0, 0, 20, 20], style: 'fill' }], headline: { title: 'Hi', color: '#ffffff' } },
+      bitmap,
+    );
+    const [x, y] = layout.layout.content;
+    // the masked corner is one colour; the rest of the image as it was
+    const masked = [pixelAt(pixels, x + 2, y + 2), pixelAt(pixels, x + 12, y + 12), pixelAt(pixels, x + 17, y + 5)];
+    expect(new Set(masked.map((pixel) => pixel.join()))).toHaveProperty('size', 1);
+    expect(pixelAt(pixels, x + 50, y + 30)).toEqual(at(50, 30));
+    // white text in the headline's band above the image, on black
+    let lit = 0;
+    for (let row = layout.headline!.title; row < y - 20; row++) for (let column = 0; column < pixels.width; column++) if (pixelAt(pixels, column, row)[0]! > 200) lit++;
+    expect(lit).toBeGreaterThan(20);
+    bitmap.close();
+  });
+
+  it("sets the headline in the shot's font, and refuses one that is not loaded", async () => {
+    const { bitmap } = await noise(240, 40);
+    const input = { padding: 10, frame: { radius: 0, shadow: false }, background: { preset: 'solid' as const, color: '#000000' }, headline: { title: 'Ship it today', color: '#ffffff' } };
+    expect(() => draw({ ...input, font: 'Fraunces' }, bitmap)).toThrow(/the font Fraunces is not loaded/);
+    await Promise.all([loadHeadingFont('Fraunces'), loadHeadingFont('Bebas Neue')]);
+    /** How wide the title's ink is. */
+    const inked = (font: 'Fraunces' | 'Bebas Neue') => {
+      const { pixels, layout } = draw({ ...input, font }, bitmap);
+      const columns: number[] = [];
+      for (let row = layout.headline!.title; row < layout.layout.content[1] - 20; row++) for (let column = 0; column < pixels.width; column++) if (pixelAt(pixels, column, row)[0]! > 200) columns.push(column);
+      return Math.max(...columns) - Math.min(...columns);
+    };
+    // Bebas Neue's tall narrow capitals
+    expect(inked('Bebas Neue')).toBeLessThan(inked('Fraunces') * 0.85);
     bitmap.close();
   });
 

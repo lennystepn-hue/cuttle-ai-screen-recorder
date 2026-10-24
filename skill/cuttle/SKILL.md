@@ -406,7 +406,21 @@ cuttle --json shot frame "<image.png>" --frame browser-dark --title "acme.app" -
 - `--background` takes the video's presets; `--from shot` reads a gradient's colours off the image,
   `--wallpaper` puts the desktop's wallpaper behind it, `--transparent` puts it on nothing.
 - `--size 16:9` (or `1:1`, `4:5`, `9:16`, `1.91:1`) grows the canvas around it; `--size 1200x630`
-  fits it into an Open Graph image. `--crop x,y,w,h` (the image's pixels) shows a part of it.
+  fits it into an Open Graph image. By what it is for: `og` (1200×630), `x-header` (1500×500),
+  `x` and `youtube` (16:9), `square`, `instagram` and `linkedin` (4:5), `story` (9:16),
+  `app-store-iphone` (1290×2796), `app-store-mac` (2880×1800). `--crop x,y,w,h` (the image's
+  pixels) shows a part of it.
+- In a canvas larger than the shot, `--align bottom` (or `top`, `left`, `right`) sets it on that
+  edge, and `--bleed 0.3` lets that share of it reach past the edge: a product shot cut off at the
+  bottom, under a headline.
+- `--headline "Ship it today" --subtitle "Screenshots, framed"` writes a title, and a line under it,
+  on the background above the shot (`--headline-position below`, `--headline-color "#111111"` on a
+  light background). `--font` sets the title in one of the videos' heading fonts: `Archivo` (the
+  default), `Inter`, `Space Grotesk`, `Fraunces`, `Instrument Serif` or `Bebas Neue`.
+- `--brand "<name>"` wears a brand kit (`cuttle --json brand list`): its background, its frame, its
+  heading font and its logo (or its name) in a corner. `--watermark "<logo.png or a name>"` puts one there yourself.
+- `--save-style "<name>"` keeps the look (not the image, its masks or its headline) to frame other
+  shots with `--style "<name>"`; `cuttle --json shot styles` lists them.
 - `-o` picks the format: `.png`, `.jpg` (`--quality`) or `.webp`. `--save "<folder>"` keeps the shot
   as a folder (`shot.json`, its image, `shot.png`); `cuttle --json shot frame "<folder>" --frame
   mac-light` changes it and draws it again. [project.md](project.md) has `shot.json`'s fields.
@@ -422,8 +436,11 @@ display's own pixels (a window by itself, without its shadow) and frames it with
 into a new folder in Pictures/Cuttle (`--save "<folder>"` names another; `--raw` leaves it
 unframed). It is the person's screen: take one only when they ask for it.
 
-Read the image before you hand it over, and look for private data as in a video's stills: a
-screenshot has no masks yet, so crop it away (`--crop`).
+Read the image before you hand it over, and look for private data as in a video's stills.
+`--redact` reads its text on this computer (Windows' OCR, macOS's Vision) and fills in email
+addresses, keys and tokens, IBANs, card and phone numbers (the result's `masked` says how many); it
+misses small and grey text, so still look. Hide the rest with `--mask x,y,w,h` (the image's pixels,
+blurred; again for each), or crop it away (`--crop`).
 
 ## When something fails
 

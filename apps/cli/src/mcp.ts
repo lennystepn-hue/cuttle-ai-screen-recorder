@@ -10,7 +10,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { PROJECT_FILE, newProjectFile, projectExists, readProjectFile, runFfmpeg, writeProjectFile } from '@cuttle/core';
-import { parseProject } from '@cuttle/project';
+import { THEME_FONTS, parseProject } from '@cuttle/project';
 import { z } from 'zod';
 import skillGuide from '../../../skill/cuttle/SKILL.md?raw';
 import motionGuide from '../../../skill/cuttle/motion.md?raw';
@@ -47,6 +47,36 @@ const itemFilters = (input: { kind?: string[]; auto?: boolean; made?: string; be
   ...option('made', input.made),
   ...option('between', input.between?.join(',')),
   ...option('ids', input.ids?.join(',')),
+];
+
+/** What a screenshot gets for publishing: where it sits, a headline, masks over private data, a brand, a style, a watermark. */
+const SHOT_PUBLISH = {
+  align: z.enum(['center', 'top', 'bottom', 'left', 'right']).optional().describe('where the shot sits in a canvas larger than it'),
+  bleed: z.number().min(0).max(0.6).optional().describe('the share of the shot past the edge it is aligned to (a product shot)'),
+  headline: z.string().optional().describe('a title on the background, above the shot'),
+  subtitle: z.string().optional().describe('a line under the headline'),
+  headlinePosition: z.enum(['above', 'below']).optional(),
+  font: z.enum(THEME_FONTS).optional().describe("the headline's and a watermark's font (default Archivo)"),
+  redact: z.boolean().optional().describe("read the shot's text on this computer and mask what is private: email addresses, keys, tokens, card and phone numbers"),
+  masks: z.array(z.string()).optional().describe('parts blurred, "x,y,w,h" each, in the image\'s pixels'),
+  brand: z.string().optional().describe("a brand kit's background, frame, font and logo (brand_list)"),
+  style: z.string().optional().describe("a saved style's look (screenshot_styles)"),
+  saveStyle: z.string().optional().describe('keep the look as a style under this name'),
+  watermark: z.string().optional().describe('a logo (an image file) or a name in a corner'),
+};
+const shotPublish = (input: { align?: string; bleed?: number; headline?: string; subtitle?: string; headlinePosition?: string; font?: string; redact?: boolean; masks?: string[]; brand?: string; style?: string; saveStyle?: string; watermark?: string }): string[] => [
+  ...option('align', input.align),
+  ...option('bleed', input.bleed),
+  ...option('headline', input.headline),
+  ...option('subtitle', input.subtitle),
+  ...option('headline-position', input.headlinePosition),
+  ...option('font', input.font),
+  ...on('redact', input.redact),
+  ...options('mask', input.masks),
+  ...option('brand', input.brand),
+  ...option('style', input.style),
+  ...option('save-style', input.saveStyle),
+  ...option('watermark', input.watermark),
 ];
 
 /** A tool that runs a cuttle command. */
@@ -322,6 +352,7 @@ export const COMMAND_TOOLS: readonly CommandTool[] = [
       size: z.string().optional().describe('auto, a ratio (16:9) or pixels (1200x630)'),
       out: z.string().optional().describe('the framed image, .png, .jpg or .webp (default: shot.png in the shot folder)'),
       save: z.string().optional().describe("the shot folder (default: a new one in Pictures/Cuttle)"),
+      ...SHOT_PUBLISH,
     },
     global: true,
     argv: (input) => [
@@ -342,6 +373,7 @@ export const COMMAND_TOOLS: readonly CommandTool[] = [
       ...option('size', input.size),
       ...option('out', input.out),
       ...option('save', input.save),
+      ...shotPublish(input),
     ],
   }),
   tool({
@@ -374,6 +406,7 @@ export const COMMAND_TOOLS: readonly CommandTool[] = [
       quality: z.number().min(0).max(1).optional(),
       out: z.string().optional().describe("the image to write, .png, .jpg or .webp (default: <image>-framed.png beside it; a shot folder's shot.png)"),
       save: z.string().optional().describe('also keep the shot as this folder, to frame it again with other settings'),
+      ...SHOT_PUBLISH,
     },
     global: true,
     argv: (input) => [
@@ -405,7 +438,17 @@ export const COMMAND_TOOLS: readonly CommandTool[] = [
       ...option('quality', input.quality),
       ...option('out', input.out),
       ...option('save', input.save),
+      ...shotPublish(input),
     ],
+  }),
+  tool({
+    name: 'screenshot_styles',
+    title: 'Screenshot styles',
+    description: 'The saved screenshot styles (a look kept with save_style), by name.',
+    input: {},
+    global: true,
+    readOnly: true,
+    argv: () => ['shot', 'styles'],
   }),
   tool({
     name: 'open_in_editor',

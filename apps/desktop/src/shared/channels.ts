@@ -87,7 +87,7 @@ export const WINDOW_CHANNELS = {
     events: ['toast:show', 'app:motion'],
   },
   shot: {
-    requests: ['shot:view', 'shot:change', 'shot:palette', 'shot:background-image', 'shot:copy', 'shot:save', 'shot:drag', 'shot:reveal', 'shot:library', 'shot:open', 'shot:new'],
+    requests: ['shot:view', 'shot:change', 'shot:palette', 'shot:background-image', 'shot:copy', 'shot:save', 'shot:drag', 'shot:reveal', 'shot:library', 'shot:open', 'shot:new', 'shot:redact', 'shot:brands', 'shot:brand', 'shot:styles', 'shot:style', 'shot:style-save'],
     events: ['shot:show', 'app:motion'],
   },
   countdown: {

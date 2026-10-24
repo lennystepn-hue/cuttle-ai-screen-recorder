@@ -396,6 +396,14 @@ export interface ShotView {
   raw: Record<string, unknown>;
   image: Uint8Array;
   backgroundImage?: Uint8Array;
+  watermarkImage?: Uint8Array;
+}
+
+/** A look the editor takes (a brand kit's, a style's): its fields, and the bytes of the images they name. */
+export interface ShotLookAnswer {
+  fields: Record<string, unknown>;
+  backgroundImage?: Uint8Array;
+  watermarkImage?: Uint8Array;
 }
 
 /** A shot in the library: its folder, and a small picture of it (its last render, else its image). */
@@ -513,6 +521,16 @@ export const REQUESTS = {
   'shot:open': z.strictObject({ dir: z.string().min(1).max(4096) }),
   /** A new screenshot (the editor steps aside meanwhile). */
   'shot:new': z.undefined(),
+  /** Reads the shot's text on this computer and answers masks over what is private in it. */
+  'shot:redact': z.undefined(),
+  'shot:brands': z.undefined(),
+  /** A brand kit's look for the shot (its images copied into its folder). */
+  'shot:brand': z.strictObject({ name: z.string().min(1).max(200) }),
+  'shot:styles': z.undefined(),
+  /** A saved style's look for the shot (its images copied into its folder). */
+  'shot:style': z.strictObject({ name: z.string().min(1).max(200) }),
+  /** Keeps the shot's look as a style under this name. */
+  'shot:style-save': z.strictObject({ name: z.string().trim().min(1).max(80) }),
   // prompter
   'prompter:next': z.undefined(),
   'prompter:previous': z.undefined(),
@@ -737,6 +755,12 @@ export interface Responses {
   'shot:library': ShotEntry[];
   'shot:open': void;
   'shot:new': void;
+  'shot:redact': { masks: Record<string, unknown>[] };
+  'shot:brands': string[];
+  'shot:brand': ShotLookAnswer;
+  'shot:styles': string[];
+  'shot:style': ShotLookAnswer;
+  'shot:style-save': void;
   'prompter:next': void;
   'prompter:previous': void;
   'prompter:size': void;

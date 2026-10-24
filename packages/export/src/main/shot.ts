@@ -65,6 +65,8 @@ export async function renderShot(opts: ShotOptions): Promise<ShotResult> {
   if (!existsSync(source)) throw new ExportError('missing-file', `the shot's image is missing: ${source}`);
   const background = opts.shot.background.preset === 'image' && opts.shot.background.image ? inShot(opts.shot.background.image) : undefined;
   if (background && !opts.shot.transparent && !existsSync(background)) throw new ExportError('missing-file', `the background image is missing: ${background}`);
+  const watermark = opts.shot.watermark?.image ? inShot(opts.shot.watermark.image) : undefined;
+  if (watermark && !existsSync(watermark)) throw new ExportError('missing-file', `the watermark's image is missing: ${watermark}`);
   await app.whenReady();
   if (opts.signal?.aborted) throw cancelledError();
   const job: ShotJob = {
@@ -72,6 +74,7 @@ export async function renderShot(opts: ShotOptions): Promise<ShotResult> {
     shot: opts.shot,
     source,
     ...(background && !opts.shot.transparent && { backgroundImage: background }),
+    ...(watermark && { watermarkImage: watermark }),
     ...(opts.scale !== undefined && { scale: opts.scale }),
     format,
     ...(opts.quality !== undefined && { quality: opts.quality }),
@@ -80,7 +83,7 @@ export async function renderShot(opts: ShotOptions): Promise<ShotResult> {
   const work = join(dirname(out), `.${basename(out)}.cuttle-${process.pid}.tmp`);
   const cancel = whenCancelled(opts.signal);
   const guard = watchdog();
-  const host = new FileHost([], join(dirname(out), '.unused'), [source, ...(job.backgroundImage ? [job.backgroundImage] : [])]);
+  const host = new FileHost([], join(dirname(out), '.unused'), [source, ...[job.backgroundImage, job.watermarkImage].filter((path): path is string => path !== undefined)]);
   let window: ExportWindow | undefined;
   let written = false;
   try {

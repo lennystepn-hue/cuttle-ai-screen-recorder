@@ -95,7 +95,7 @@ export class MaskPass {
    * `screen` must be the uploaded screen texture, with mipmaps. `from`: the zoom when the shutter
    * opened, under motion blur; each mask then covers every place it had meanwhile.
    */
-  draw(masks: readonly Mask[], screen: WebGLTexture, screenSize: Size, zoom: Rect, layout: WindowLayout, from?: Rect): void {
+  draw(masks: readonly Pick<Mask, 'rect' | 'style'>[], screen: WebGLTexture, screenSize: Size, zoom: Rect, layout: WindowLayout, from?: Rect): void {
     if (masks.length === 0) return;
     const texel: [number, number] = [1 / screenSize.width, 1 / screenSize.height];
     withScissor(this.gl, this.output, layout.content, () => {

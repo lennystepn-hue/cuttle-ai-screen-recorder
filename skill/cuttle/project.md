@@ -331,6 +331,12 @@ recording.
 | `background` | as `look.background` (`preset`, `color`, `colors`, `image`, …) |
 | `transparent` | `true`: no background, the shot and its shadow on nothing (PNG or WebP) |
 | `frame` | `style` (the frame styles above; default `none`: the image alone, rounded), `title`, `radius` in points (default 12), `shadow` (default true) |
+| `align` | where the framed shot sits in a canvas larger than it: `center` (default), `top`, `bottom`, `left`, `right` |
+| `bleed` | `0` to `0.6`: the share of the framed shot past the edge it is aligned to (default 0) |
+| `headline` | `title` (1 to 120 characters), `subtitle`, `position` (`above`, the default, or `below` the shot), `color` (hex; default white, dark on nothing); the title is 40 pt, or 6 % of a wider shot's width |
+| `font` | the title's and a watermark text's font: `Archivo` (default), `Inter`, `Space Grotesk`, `Fraunces`, `Instrument Serif`, `Bebas Neue`; the line under the title is Inter |
+| `masks` | `[{ "rect": [x, y, w, h], "style": "blur" }]` in the image's pixels: `blur` (default) or `fill`; `auto: "privacy"` on those `--redact` found |
+| `watermark` | `image` (from the folder) or `text`, `corner` (default `bottom-right`), `size` (its height over the canvas's short side, 0.02 to 0.3, default 0.05), `opacity` (0.1 to 1, default 0.8) |
 
 ## Finding source seconds and rects
 

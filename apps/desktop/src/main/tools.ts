@@ -6,7 +6,7 @@
 // else is overwritten: a cuttle command already on PATH and a skill folder Cuttle did not write
 // are left as they are.
 import { execFile } from 'node:child_process';
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, realpathSync } from 'node:fs';
 import { chmod, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { delimiter, join } from 'node:path';
@@ -157,11 +157,28 @@ export function shims(exe: string, entry: string, packaged: boolean, batch: { ex
   };
 }
 
+/**
+ * The Electron a shim runs: this one. A copy started from the repository names it through the
+ * repository's node_modules/electron link: pnpm keeps the link when the store folder behind it gets
+ * another name (a dependency changed), which would leave a shim with the real path broken.
+ */
+function shimElectron(): string {
+  if (app.isPackaged) return process.execPath;
+  try {
+    const link = fileURLToPath(new URL('../../../../node_modules/electron/', import.meta.url));
+    const exe = join(link, 'dist', readFileSync(join(link, 'path.txt'), 'utf8').trim());
+    return realpathSync(exe) === realpathSync(process.execPath) ? exe : process.execPath;
+  } catch {
+    return process.execPath;
+  }
+}
+
 /** The shims for this copy of the app. */
 async function ownShims(): Promise<Record<string, string>> {
   const entry = cliEntry();
-  const batch = windows ? { exe: await batchPathOrShort(process.execPath), entry: await batchPathOrShort(entry) } : { exe: process.execPath, entry };
-  return shims(process.execPath, entry, app.isPackaged, batch);
+  const exe = shimElectron();
+  const batch = windows ? { exe: await batchPathOrShort(exe), entry: await batchPathOrShort(entry) } : { exe, entry };
+  return shims(exe, entry, app.isPackaged, batch);
 }
 
 const isOurShim = (file: string) => {

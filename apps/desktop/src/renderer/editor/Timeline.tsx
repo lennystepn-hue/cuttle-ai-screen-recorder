@@ -28,9 +28,9 @@ import {
   type SceneBlock,
   type TimelineModel,
 } from '../../shared/timeline-model';
-import { FitIcon } from '../icons';
+import { FitIcon, ShotIcon } from '../icons';
 import { Select } from '../Select';
-import { addCard, addMask, addMotion, addMusic, addPage, addSound, addZoom, overlayBlocked, selectedOrCurrentClip, setSpeed, split, SPEEDS, templateLabel } from './actions';
+import { addCard, addMask, addMotion, addMusic, addPage, addSound, addZoom, overlayBlocked, selectedOrCurrentClip, setSpeed, shotMenu, split, SPEEDS, templateLabel } from './actions';
 import { audible } from './audio';
 import { edit, fitLength, preview } from './doc';
 import { placeCommand, selectedZoom, selectPlace } from './path';
@@ -74,7 +74,7 @@ const SNAP_PX = 6;
  */
 let pointerSeekUntil = 0;
 
-const MARKER_DOT: Record<MarkerKind, string> = { prompt: '#ececf1', tool: '#7a7a85', answer: '#4fd1a1', manual: '#9a9aa5', retake: '#f2b34a', step: '#d97757' };
+const MARKER_DOT: Record<MarkerKind, string> = { prompt: '#ececf1', tool: '#7a7a85', answer: '#4fd1a1', manual: '#9a9aa5', retake: '#f2b34a', step: '#d97757', shot: '#6fd3ff' };
 
 interface Layout {
   heights: Record<'markers' | 'ruler' | 'video' | OverlayKind | 'music' | 'mic' | 'input', number>;
@@ -1096,8 +1096,19 @@ const Markers = memo(function Markers({ model, pps }: { model: TimelineModel; pp
         // A flag ends before the next one starts (its dot always shows); the tooltip names it in full.
         const next = groups[i + 1];
         const room = next ? (next.t - group.t) * pps - 3 : undefined;
+        const style = { left: group.t * pps, ...(room !== undefined && { maxWidth: Math.max(17, room) }) };
+        // a screenshot the take took: its menu (a still here, open it as a screenshot, its folder)
+        const shot = group.kind === 'shot' ? group.pins[0] : undefined;
+        if (shot?.file) {
+          return (
+            <button key={i} type="button" className="flag shot" style={style} title={`${pinGroupName(group)}: put it into the video as a still, or open it as a screenshot`} onClick={() => void shotMenu(shot)} data-testid="shot-flag">
+              <ShotIcon size={11} />
+              <span>{pinGroupName(group)}</span>
+            </button>
+          );
+        }
         return (
-          <span key={i} className="flag" style={{ left: group.t * pps, ...(room !== undefined && { maxWidth: Math.max(17, room) }) }} title={`${pinGroupName(group)}: ${pinGroupDetail(group)}`}>
+          <span key={i} className="flag" style={style} title={`${pinGroupName(group)}: ${pinGroupDetail(group)}`}>
             <i style={{ background: MARKER_DOT[group.kind] }} />
             <span>{pinGroupName(group)}</span>
           </span>

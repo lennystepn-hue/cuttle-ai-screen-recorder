@@ -10,7 +10,7 @@ import { listDevices } from './devices';
 import { RecorderError } from './errors';
 import { ffmpegMissing, ffmpegPath } from './ffmpeg';
 import { captureHelper } from './mac-capture';
-import { platformFor, resolveArea, type ScreenArea } from './sources';
+import { platformFor, resolveArea, type Platform, type ScreenArea } from './sources';
 import type { Backend, CaptureSource, Devices } from './types';
 import { hasWindowCapture } from './window-capture';
 
@@ -69,8 +69,15 @@ function run(command: string, args: readonly string[], what: string): Promise<{ 
   });
 }
 
+/** What a picture of an area is written to, and with what. */
+interface AreaShot {
+  out: string;
+  cursor?: boolean;
+  hideWindowsOf?: readonly number[];
+}
+
 /** macOS: the helper takes the display or the window and writes the PNG itself. */
-async function macShot(area: ScreenArea, options: ShotOptions): Promise<{ width: number; height: number; scale: number }> {
+async function macShot(area: ScreenArea, options: AreaShot): Promise<{ width: number; height: number; scale: number }> {
   const { loadDarwin } = await import('./darwin');
   const mac = await loadDarwin();
   if (!mac.screenAccess()) {
@@ -98,13 +105,14 @@ async function macShot(area: ScreenArea, options: ShotOptions): Promise<{ width:
 
 /**
  * The ffmpeg graph of one frame: a take's own source. Windows: the window by gfxcapture (all of it,
- * at its frame's size), else ddagrab's part of the monitor; the test backend: its pattern.
+ * at its frame's size), else ddagrab's part of the monitor; the test backend: its pattern (a window
+ * at its frame's size).
  */
-export function shotGraph(platform: 'windows' | 'test', area: ScreenArea, cursor: boolean, windowCapture: boolean, devices: Devices): string {
+export function shotGraph(platform: 'windows' | 'test', area: ScreenArea, cursor: boolean, windowCapture: boolean): string {
   const { monitor, crop } = area;
   if (platform === 'test') {
-    const window = area.window !== undefined ? devices.windows.find((candidate) => candidate.id === area.window) : undefined;
-    const size = window?.bounds ?? monitor.bounds;
+    const window = area.window !== undefined ? (area.frame ?? crop) : undefined;
+    const size = window ?? monitor.bounds;
     // in RGB: a 4:2:0 picture is cut to even sizes
     const pattern = `testsrc2=s=${size.width}x${size.height}:d=1,format=rgba`;
     return !window && crop ? `${pattern},crop=${crop.width}:${crop.height}:${crop.x}:${crop.y}` : pattern;
@@ -117,27 +125,33 @@ export function shotGraph(platform: 'windows' | 'test', area: ScreenArea, cursor
   return `ddagrab=output_idx=${monitor.index}:draw_mouse=${cursor ? 1 : 0}${region},hwdownload,format=bgra`;
 }
 
+/**
+ * A picture of an area (a take's, or a screenshot's) into a PNG: the window by itself, the display or
+ * its region, at the display's pixels.
+ */
+export async function shootArea(platform: Platform, area: ScreenArea, options: AreaShot): Promise<{ width: number; height: number; scale: number; warnings: string[] }> {
+  const warnings: string[] = [];
+  await rm(options.out, { force: true });
+  if (platform === 'macos') return { ...(await macShot(area, options)), warnings };
+  const windowCapture = platform === 'windows' && area.window !== undefined && (await hasWindowCapture());
+  if (platform === 'windows' && area.window !== undefined && !windowCapture) {
+    warnings.push('this ffmpeg has no gfxcapture (ffmpeg 8 and newer): the window was taken where it is on the screen, with whatever lies over it');
+  }
+  const scale = area.monitor.scale;
+  const graph = shotGraph(platform, area, options.cursor ?? false, windowCapture);
+  const done = await run(ffmpegPath(), ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', graph, '-frames:v', '1', '-dpi', String(Math.round(72 * scale)), options.out], 'the screenshot');
+  if (done.code !== 0) throw new RecorderError('capture', `the screenshot failed: ${done.stderr.trim().split('\n').slice(-5).join('\n') || `ffmpeg exited with code ${done.code}`}`);
+  const byItself = area.window !== undefined && (platform === 'test' || windowCapture) && area.frame;
+  const size = byItself ? area.frame! : (area.crop ?? area.monitor.bounds);
+  return { width: size.width, height: size.height, scale, warnings };
+}
+
 /** Takes a screenshot of a monitor, a region of it or a window, into a PNG. */
 export async function takeShot(options: ShotOptions): Promise<ScreenShot> {
   const platform = platformFor(options.backend);
   const devices = options.devices ?? (await listDevices({ ...(options.backend && { backend: options.backend }), media: false }));
   const area = resolveArea(options.source, devices, true);
   const window = area.window !== undefined ? devices.windows.find((candidate) => candidate.id === area.window) : undefined;
-  const warnings: string[] = [];
-  await rm(options.out, { force: true });
-  let taken: { width: number; height: number; scale: number };
-  if (platform === 'macos') taken = await macShot(area, options);
-  else {
-    const windowCapture = platform === 'windows' && area.window !== undefined && (await hasWindowCapture());
-    if (platform === 'windows' && area.window !== undefined && !windowCapture) {
-      warnings.push('this ffmpeg has no gfxcapture (ffmpeg 8 and newer): the window was taken where it is on the screen, with whatever lies over it');
-    }
-    const scale = area.monitor.scale;
-    const graph = shotGraph(platform, area, options.cursor ?? false, windowCapture, devices);
-    const done = await run(ffmpegPath(), ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', graph, '-frames:v', '1', '-dpi', String(Math.round(72 * scale)), options.out], 'the screenshot');
-    if (done.code !== 0) throw new RecorderError('capture', `the screenshot failed: ${done.stderr.trim().split('\n').slice(-5).join('\n') || `ffmpeg exited with code ${done.code}`}`);
-    const size = platform === 'test' ? (window?.bounds ?? area.crop ?? area.monitor.bounds) : area.window !== undefined && windowCapture && area.frame ? area.frame : (area.crop ?? area.monitor.bounds);
-    taken = { width: size.width, height: size.height, scale };
-  }
-  return { file: options.out, ...taken, monitor: area.monitor.index, ...(window && { window: window.title }), warnings };
+  const taken = await shootArea(platform, area, options);
+  return { file: options.out, ...taken, monitor: area.monitor.index, ...(window && { window: window.title }) };
 }

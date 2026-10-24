@@ -20,7 +20,7 @@ import { previewCommand } from './commands/preview';
 import { shotFrameCommand, shotTakeCommand, type ShotFrameArgs, type ShotTakeArgs } from './commands/shot';
 import { recordCommand } from './commands/record';
 import { recoverCommand } from './commands/recover';
-import { renderAllCommand, renderCommand } from './commands/render';
+import { renderAllCommand, renderCommand, renderStillCommand } from './commands/render';
 import { chaptersCommand } from './commands/chapters';
 import { suggestCommand } from './commands/suggest';
 import { modelsDownloadCommand, modelsListCommand, modelsRemoveCommand } from './commands/models';
@@ -575,6 +575,7 @@ export async function runCli(argv: readonly string[], streams?: Streams): Promis
     .description('export the project as an MP4; several formats render in one go (their frames side by side, the sound once)')
     .option('--format <formats...>', '16:9, 1:1 or 9:16, one or several (default: the project output)')
     .option('-o, --out <file>', 'output file, with one format (default: out/<format>.mp4 in the project)')
+    .option('--still <seconds>', 'one frame at this output second as a PNG, as the export draws it (default: out/still-<t>s.png)', seconds)
     .option('--all <folder>', 'every project in the folder (it and the folders in it with a cuttle.json), one after another, -C left aside')
     .addOption(new Option('--encoder <encoder>', 'H.264 encoder').choices(['auto', 'hardware', 'software']))
     .option('--no-captions', 'no captions burned in, whatever the project says')
@@ -586,8 +587,12 @@ export async function runCli(argv: readonly string[], streams?: Streams): Promis
     .option('--fps <fps>', '24, 25, 30, 50 or 60 instead of the project\'s', integer)
     .option('--codec <codec>', 'h264 (default, plays everywhere) or hevc (smaller files at 4K; needs a hardware encoder)')
     .action(
-      action((output, project, options: { format?: string[]; out?: string; all?: string; encoder?: string; captions: boolean; srt?: boolean; vtt?: boolean; loudness?: string; alpha?: boolean; size?: string; fps?: number; codec?: string }) =>
-        withSignal<unknown>(output, (signal) => (options.all !== undefined ? renderAllCommand(options.all, options, output, signal) : renderCommand(project, options, output, signal))),
+      action((output, project, options: { format?: string[]; out?: string; still?: number; all?: string; encoder?: string; captions: boolean; srt?: boolean; vtt?: boolean; loudness?: string; alpha?: boolean; size?: string; fps?: number; codec?: string }) =>
+        withSignal<unknown>(output, (signal) => {
+          if (options.still !== undefined && options.all !== undefined) throw new CliError('usage', '--still and --all together');
+          if (options.still !== undefined) return renderStillCommand(project, options.still, options, output, signal);
+          return options.all !== undefined ? renderAllCommand(options.all, options, output, signal) : renderCommand(project, options, output, signal);
+        }),
       ),
     );
 

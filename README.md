@@ -435,7 +435,10 @@ live (background, frame and title, corners, shadow, padding, a canvas of 16:9, 4
 and the shot is copied, saved as PNG, JPEG or WebP, or dragged straight into a chat. Every shot keeps
 a folder of its own in `Pictures/Cuttle/<date time>` (its picture, `shot.json` and the framed
 `shot.png`), listed beside the editor; the settings choose the folder, and whether a shot is copied at
-once or opens in the editor.
+once or opens in the editor. During a take, the HUD's camera (or Ctrl+Shift+Alt+C) takes a
+screenshot of what is recorded into the take; on the editor's timeline it has a flag of its own that
+puts it into the video as a still right there, or opens it as a screenshot. Any frame of the video
+is an image too (Ctrl+K: copy it, save it, or open it as a screenshot), as the export draws it.
 
 **First run and settings.** The first start looks for ffmpeg where Windows has it now (also right
 after `winget install Gyan.FFmpeg`: "Check again", no restart), on macOS also in Homebrew's folders
@@ -476,6 +479,7 @@ cuttle chapters                      # those chapters as lines for a YouTube des
 cuttle open                          # the project in the app's editor, which follows every change to it (Claude's too)
 cuttle shot frame screen.png --frame browser-dark --background gradient --from shot   # a screenshot framed as the videos are, pixel for pixel (Retina at 2×), as PNG, JPEG or WebP
 cuttle shot take --window "Claude"     # takes the window by itself and frames it, kept in Pictures/Cuttle
+cuttle render --still 12.5             # the video's frame at 12.5 s as a PNG (a thumbnail), as the export draws it
 cuttle recover takes/2               # after a crash
 ```
 

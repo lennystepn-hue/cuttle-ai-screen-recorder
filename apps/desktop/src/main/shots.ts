@@ -8,7 +8,7 @@ import { copyFile, mkdir, mkdtemp, readdir, readFile, rename, rm, stat, writeFil
 import { tmpdir } from 'node:os';
 import { basename, extname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { app, BrowserWindow, clipboard, ClipboardItem, dialog, nativeImage, screen, session, shell, type Rectangle } from 'electron';
-import { imagePalette, importWallpaper, keepInProject, newShotFolder } from '@cuttle/core';
+import { imagePalette, importWallpaper, keepInProject, newShotFolder, pngScale } from '@cuttle/core';
 import { renderShot } from '@cuttle/export';
 import { SHOT_FILE, SHOT_VERSION, parseShot, parseShotJson } from '@cuttle/project';
 import type { ShotDelay, ShotEntry, ShotView } from '../shared/ipc';
@@ -114,16 +114,33 @@ export async function takePicked(target: PickedTarget, display: PickerDisplay, d
   } finally {
     await thawDisplays();
   }
-  // the last shot's look, when it still makes a shot
-  const base = { version: SHOT_VERSION, source: SOURCE, ...(scale !== 1 && { scale }) };
-  const withLook = { ...(settings.shots.look ?? {}), ...base };
-  const raw = parseShot(withLook).ok ? withLook : base;
-  await writeJson(join(folder, SHOT_FILE), raw);
+  await writeShot(folder, scale, settings.shots.look);
   return () => (settings.shots.quick ? quickShot(folder, display) : openShotEditor(folder));
 }
 
+/** A shot's shot.json for its source.png: the last shot's look, when it still makes a shot. */
+async function writeShot(folder: string, scale: number, look: Record<string, unknown> | undefined): Promise<void> {
+  const base = { version: SHOT_VERSION, source: SOURCE, ...(scale !== 1 && { scale }) };
+  const withLook = { ...(look ?? {}), ...base };
+  await writeJson(join(folder, SHOT_FILE), parseShot(withLook).ok ? withLook : base);
+}
+
+/**
+ * A picture as a new shot of the library (a screenshot a take took, a frame of the video), in the
+ * last look, opened in the screenshot editor. Its scale comes from its PNG's resolution.
+ */
+export async function openAsShot(image: string, given?: number): Promise<void> {
+  const scale = given ?? pngScale(await readFile(image)) ?? 1;
+  const settings = await loadSettings();
+  const folder = newShotFolder(settings.shots.folder);
+  await mkdir(folder, { recursive: true });
+  await copyFile(image, join(folder, SOURCE));
+  await writeShot(folder, scale, settings.shots.look);
+  await openShotEditor(folder);
+}
+
 /** Puts a PNG into the clipboard as an image other apps paste; the check keeps it instead (the person's clipboard stays theirs). */
-async function copyImage(png: Uint8Array): Promise<void> {
+export async function copyImage(png: Uint8Array): Promise<void> {
   if (CHECK) {
     (globalThis as { __copiedImage?: Uint8Array }).__copiedImage = png;
     return;

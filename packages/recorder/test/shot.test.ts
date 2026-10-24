@@ -53,15 +53,15 @@ describe("a screenshot's ffmpeg graph on Windows", () => {
   };
 
   it('takes the screen through ddagrab, a region of it at its exact size', () => {
-    expect(shotGraph('windows', resolveArea({ kind: 'monitor', index: 1 }, devices, true), false, false, devices)).toBe('ddagrab=output_idx=1:draw_mouse=0,hwdownload,format=bgra');
-    expect(shotGraph('windows', resolveArea({ kind: 'region', monitor: 1, rect: [5, 6, 301, 201] }, devices, true), true, false, devices)).toBe(
+    expect(shotGraph('windows', resolveArea({ kind: 'monitor', index: 1 }, devices, true), false, false)).toBe('ddagrab=output_idx=1:draw_mouse=0,hwdownload,format=bgra');
+    expect(shotGraph('windows', resolveArea({ kind: 'region', monitor: 1, rect: [5, 6, 301, 201] }, devices, true), true, false)).toBe(
       'ddagrab=output_idx=1:draw_mouse=1:offset_x=5:offset_y=6:video_size=301x201,hwdownload,format=bgra',
     );
   });
 
   it('takes a window by itself through gfxcapture, and where it is on the screen without it', () => {
     const area = resolveArea({ kind: 'window', title: 'Docs' }, devices, true);
-    expect(shotGraph('windows', area, false, true, devices)).toBe('gfxcapture=hwnd=4242:capture_cursor=0:capture_border=1:display_border=0:width=801:height=601,hwdownload,format=bgra');
-    expect(shotGraph('windows', area, false, false, devices)).toBe('ddagrab=output_idx=1:draw_mouse=0:offset_x=100:offset_y=50:video_size=801x601,hwdownload,format=bgra');
+    expect(shotGraph('windows', area, false, true)).toBe('gfxcapture=hwnd=4242:capture_cursor=0:capture_border=1:display_border=0:width=801:height=601,hwdownload,format=bgra');
+    expect(shotGraph('windows', area, false, false)).toBe('ddagrab=output_idx=1:draw_mouse=0:offset_x=100:offset_y=50:video_size=801x601,hwdownload,format=bgra');
   });
 });

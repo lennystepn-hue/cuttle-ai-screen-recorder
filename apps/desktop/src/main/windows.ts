@@ -1,9 +1,11 @@
 import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { copyFile, readdir, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises';
+import { copyFile, mkdtemp, readdir, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 import { app, BrowserWindow, clipboard, dialog, Menu, screen, session, shell, type Session, type WebContents } from 'electron';
 import { PROJECT_FILE, backupFile, writeProjectFile, type ProjectFile } from '@cuttle/core';
+import { renderStills } from '@cuttle/export';
 import { parseProject } from '@cuttle/project';
 import { plainIssue } from '../shared/format';
 import type { Event, Events, ExportEnd, ProjectFileEvent, ProjectStatus } from '../shared/ipc';
@@ -21,6 +23,7 @@ import { LockedError, lockProject, openProjectFile, projectInfo } from './projec
 import { importImage, ProjectFileWatch } from './project-watch';
 import { APP_ORIGIN, assetPath, bundlePath, serveApp, serveMedia } from './protocols';
 import { cutIfPending, recut, startPicking, startShooting, takesBusy, undoRestart } from './recording';
+import { copyImage, openAsShot } from './shots';
 import { deletableTakes, sizeText, trashName } from '../shared/takes';
 import { addRecent, loadSettings, motionSetting, updateSettings } from './settings';
 import { downloadAppVoice, speakNarration, storeElevenLabsKey, voiceState } from './voice';
@@ -45,6 +48,12 @@ export function titleBar(height: number) {
     trafficLightPosition: { x: 16, y: Math.round((height - TRAFFIC_LIGHTS_HEIGHT) / 2) },
   } as const;
 }
+/** A screenshot that cannot open says why. */
+const warnShot = (error: Error) => {
+  const message = `Cuttle cannot open the screenshot: ${error.message}`;
+  if (HIDDEN) console.error(message);
+  else void dialog.showMessageBox({ type: 'warning', title: 'Cuttle', message });
+};
 /** The person's version that a save conflict could not carry over (the editor offers it back). */
 const DRAFT_FILE = 'cuttle.json.draft';
 
@@ -278,6 +287,39 @@ async function editorWindow(dir: string, key: string, file: ProjectFile, release
         ).filePaths[0];
       // a logo goes into brand/, beside the files brand kits bring
       return chosen ? { path: await importImage(dir, chosen, purpose === 'logo' ? 'brand' : 'images') } : undefined;
+    },
+    'project:shot': ({ file, action }) => {
+      const image = resolve(dir, file);
+      if (!isInside(image, dir, process.platform) || !existsSync(image)) return undefined;
+      if (action === 'open') return void openAsShot(image).catch((error: Error) => warnShot(error));
+      if (action === 'reveal') return void shell.showItemInFolder(image);
+      // the check shows no menu: its first choice
+      if (HIDDEN) return 'still';
+      return new Promise<'still' | undefined>((answer) => {
+        let chosen: 'still' | undefined;
+        Menu.buildFromTemplate([
+          { label: 'Add as a still here', click: () => (chosen = 'still') },
+          { label: 'Open as a screenshot', click: () => void openAsShot(image).catch((error: Error) => warnShot(error)) },
+          { label: 'Show in folder', click: () => shell.showItemInFolder(image) },
+        ]).popup({ window, callback: () => answer(chosen) });
+      });
+    },
+    'project:frame': async ({ t, as }) => {
+      const work = await mkdtemp(join(tmpdir(), 'cuttle-frame-'));
+      try {
+        const [still] = (await renderStills({ projectDir: dir, times: [t], outDir: work, pageDir: bundlePath('main', 'export-page') })).stills;
+        if (!still) return undefined;
+        if (as === 'copy') return void (await copyImage(await readFile(still.file)));
+        // a frame of the video is its own pixels: one a point
+        if (as === 'shot') return void (await openAsShot(still.file, 1));
+        const name = `${basename(dir)} ${t.toFixed(1)} s.png`;
+        const chosen = CHECK ? join(dir, name) : (await dialog.showSaveDialog(window, { title: 'Save the frame', defaultPath: join(app.getPath('pictures'), name), filters: [{ name: 'PNG', extensions: ['png'] }] })).filePath;
+        if (!chosen) return undefined;
+        await copyFile(still.file, chosen);
+        return chosen;
+      } finally {
+        await rm(work, { recursive: true, force: true }).catch(() => {});
+      }
     },
     'brand:list': () => brandViews(),
     'brand:save': ({ name, raw }) => saveProjectBrand(dir, name, raw),

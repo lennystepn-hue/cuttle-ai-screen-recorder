@@ -26,6 +26,7 @@ export const HOTKEYS: Record<HotkeyAction, string> = {
   retake: 'Ctrl+Shift+Alt+X',
   next: 'Ctrl+Shift+Alt+N',
   previous: 'Ctrl+Shift+Alt+B',
+  shot: 'Ctrl+Shift+Alt+C',
 };
 
 export interface KeyEvent {
@@ -184,7 +185,7 @@ async function startWindowsInput(onInput: InputSink, onHotkey: HotkeySink): Prom
   const shortcut = (event: KeyEvent) => shortcutFor('windows', event.keycode, { ctrl: event.ctrlKey, alt: event.altKey, shift: event.shiftKey, meta: event.metaKey ?? false }, label);
   const keys = keyHandler(
     modifiers,
-    new Map<number, HotkeyAction>([[UiohookKey.S, 'stop'], [UiohookKey.M, 'marker'], [UiohookKey.P, 'pause'], [UiohookKey.X, 'retake'], [UiohookKey.N, 'next'], [UiohookKey.B, 'previous']]),
+    new Map<number, HotkeyAction>([[UiohookKey.S, 'stop'], [UiohookKey.M, 'marker'], [UiohookKey.P, 'pause'], [UiohookKey.X, 'retake'], [UiohookKey.N, 'next'], [UiohookKey.B, 'previous'], [UiohookKey.C, 'shot']]),
     onInput,
     onHotkey,
     shortcut,
@@ -260,7 +261,7 @@ async function startWindowsInput(onInput: InputSink, onHotkey: HotkeySink): Prom
 }
 
 /** macOS virtual key codes of the hotkeys' letters (kVK_ANSI_S, _M, _P, _X, _N, _B). */
-const MAC_HOTKEYS = new Map<number, HotkeyAction>([[0x01, 'stop'], [0x2e, 'marker'], [0x23, 'pause'], [0x07, 'retake'], [0x2d, 'next'], [0x0b, 'previous']]);
+const MAC_HOTKEYS = new Map<number, HotkeyAction>([[0x01, 'stop'], [0x2e, 'marker'], [0x23, 'pause'], [0x07, 'retake'], [0x2d, 'next'], [0x0b, 'previous'], [0x08, 'shot']]);
 const WHERE_INPUT_MONITORING = 'allow the app that runs Cuttle (your terminal, or Cuttle) under System Settings > Privacy & Security > Input Monitoring';
 
 /**

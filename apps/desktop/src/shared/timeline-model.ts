@@ -92,6 +92,8 @@ export interface MarkerPin {
   source: number;
   kind: MarkerKind;
   label?: string;
+  /** A screenshot's picture, from the project (\`takes/1/shots/1.png\`). */
+  file?: string;
 }
 
 /** The video's music, on a lane of its own over the whole video. */
@@ -303,7 +305,9 @@ export function timelineModel(project: CuttleProject, spans: readonly SceneSpan[
     markers: markers
       .flatMap((marker) => {
         const label = marker.kind === 'step' ? stepName(project, marker.label) : marker.label;
-        return outputTimesOf(spans, marker.t).map((t) => ({ t, source: marker.t, kind: marker.kind, ...(label !== undefined && { label }) }));
+        // a screenshot's picture is in the take's folder, where its screen recording is
+        const file = marker.file && project.sources.screen ? `${project.sources.screen.replace(/[^/]*$/, '')}${marker.file}` : undefined;
+        return outputTimesOf(spans, marker.t).map((t) => ({ t, source: marker.t, kind: marker.kind, ...(label !== undefined && { label }), ...(file && { file }) }));
       })
       .sort((a, b) => a.t - b.t),
   };
@@ -330,6 +334,7 @@ export function pinGroupName(group: PinGroup): string {
   if (group.kind === 'manual') return first.label ?? 'Marker';
   if (group.kind === 'retake') return 'Retake';
   if (group.kind === 'step') return first.label ?? 'Step';
+  if (group.kind === 'shot') return first.label ?? 'Screenshot';
   if (group.pins.length === 1) return first.label ?? 'Tool';
   const tools = new Set(group.pins.map((pin) => pin.label ?? 'Tool'));
   return tools.size === 1 ? `${first.label ?? 'Tool'} ×${group.pins.length}` : `${group.pins.length} tool calls`;

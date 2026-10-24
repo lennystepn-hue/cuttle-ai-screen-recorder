@@ -1,12 +1,12 @@
 // The recording HUD: the time, the mic's level, a warning when there is one, restart, the mistake
-// key, a marker, pause and Stop, and under them the live captions when the take has them. It is
+// key, a marker, a screenshot, pause and Stop, and under them the live captions when the take has them. It is
 // never in the video (content protection), never takes the focus (the recorded window keeps it),
 // and its area is a dead zone for the input log. Its width is fixed, so Stop never moves under the
 // pointer. Restart asks for a press held 600 ms, so a stray click does not put a take aside.
 import { useEffect, useRef, useState } from 'react';
 import type { HudState } from '../../shared/ipc';
 import { bridge } from '../bridge';
-import { Mark, WarningIcon } from '../icons';
+import { Mark, ShotIcon, WarningIcon } from '../icons';
 import { hotkey } from '../keys';
 
 const clock = (seconds: number) => `${Math.floor(seconds / 60)}:${String(Math.floor(seconds % 60)).padStart(2, '0')}`;
@@ -25,12 +25,17 @@ export function Hud() {
   };
   const [now, setNow] = useState(Date.now());
   const [flash, setFlash] = useState(false);
+  const [shotFlash, setShotFlash] = useState(false);
   useEffect(() => {
     const off = bridge.on('hud:state', (next) => {
       setState((previous) => {
         if (next.markers > previous.markers) {
           setFlash(true);
           setTimeout(() => setFlash(false), 900);
+        }
+        if ((next.shots ?? 0) > (previous.shots ?? 0)) {
+          setShotFlash(true);
+          setTimeout(() => setShotFlash(false), 900);
         }
         // the mistake key: what Cuttle will do with it, for a moment
         if ((next.retakes ?? 0) > (previous.retakes ?? 0)) showHint('Slip marked: do it again');
@@ -95,6 +100,17 @@ export function Hud() {
             <path d="M4 14V2.5h8l-2 3 2 3H4" />
           </svg>
           {state.markers > 0 && <small>{state.markers}</small>}
+        </button>
+        <button
+          className={`shot${shotFlash ? ' flash' : ''}`}
+          onClick={() => void bridge.invoke('hud:shot')}
+          title={`A screenshot of what is recorded, into the take (${hotkey('Ctrl+Shift+Alt+C')})${(state.shots ?? 0) > 0 ? `: ${state.shots} so far` : ''}`}
+          aria-label="Take a screenshot"
+          disabled={!live}
+          data-testid="hud-shot"
+        >
+          <ShotIcon size={15} />
+          {(state.shots ?? 0) > 0 && <small>{state.shots}</small>}
         </button>
         <button
           className={`pause${paused ? ' paused' : ''}`}

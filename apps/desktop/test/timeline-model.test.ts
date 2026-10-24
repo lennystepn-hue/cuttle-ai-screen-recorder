@@ -155,6 +155,12 @@ describe('timelineModel', () => {
     ]);
   });
 
+  it("gives a screenshot's pin its picture from the project, in the take's folder", () => {
+    const pins = timelineModel(demo, spans, [{ t: 2, kind: 'shot', label: 'Screenshot 1', file: 'shots/1.png' }]).markers;
+    expect(pins.map((pin) => [pin.kind, pin.label, pin.file])).toEqual([['shot', 'Screenshot 1', `${demo.sources.screen!.replace(/[^/]*$/, '')}shots/1.png`]]);
+    expect(groupPins(pins, 1).map(pinGroupName)).toEqual(['Screenshot 1']);
+  });
+
   it("names a step's pin by its number and title in the script, and by its id when the script lost it", () => {
     const scripted = project({ ...demo, script: [{ id: 'step1', title: 'Open the settings' }, { id: 'step2', title: 'Turn on dark mode' }] });
     const steps = timelineModel(scripted, spans, [

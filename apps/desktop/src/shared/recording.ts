@@ -17,6 +17,8 @@ export type HostRequest =
   | { type: 'stop' }
   | { type: 'marker'; label?: string }
   | { type: 'retake' }
+  /** A screenshot of what the take records (`Recording.shot`). */
+  | { type: 'take-shot' }
   /** The script's next step (1) or the one before (-1). */
   | { type: 'step'; delta: 1 | -1 }
   | { type: 'pause' }

@@ -55,6 +55,12 @@ describe.runIf(enabled)('cuttle in Electron', () => {
     expect((sheet.json.stills as unknown[]).length).toBe(12);
     expect(pngSize((sheet.json.stills as { file: string }[])[0]!.file)).toEqual([1080, 1920]);
     expect(pngSize(sheet.json.sheet as string)[0]).toBeGreaterThan(1000);
+    // one frame as a PNG, as the export draws it: a thumbnail
+    const still = cuttle('-C', project, 'render', '--still', '1.5', '--format', '1:1');
+    expect(still.code).toBe(0);
+    expect(still.json).toMatchObject({ still: join(project, 'out', 'still-1.50s.png'), t: 1.5, width: 1080, height: 1080, source: 1.5 });
+    expect(pngSize(still.json.still as string)).toEqual([1080, 1080]);
+    expect(cuttle('-C', project, 'render', '--still', '1', '-o', join(project, 'x.jpg')).code).toBe(1);
   }, 120_000);
 
   it("renders stills at each mask's edges, a row of the sheet per mask, and says which is which", () => {

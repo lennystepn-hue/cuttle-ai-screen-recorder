@@ -411,6 +411,11 @@ cuttle --json shot frame "<image.png>" --frame browser-dark --title "acme.app" -
   as a folder (`shot.json`, its image, `shot.png`); `cuttle --json shot frame "<folder>" --frame
   mac-light` changes it and draws it again. [project.md](project.md) has `shot.json`'s fields.
 
+During a take, Ctrl+Shift+Alt+C (or the HUD's camera) takes a screenshot of what is recorded into
+the take (`takes/<n>/shots/1.png`, a `shot` marker at its second): frame it with `shot frame`, or put
+it into the video as a still scene. A frame of the video itself, as the export draws it, is
+`cuttle -C "<project>" --json render --still 12.5` (a PNG; the thumbnail or a post's image).
+
 To take one, `cuttle --json shot take --window "<part of its title>"` (or `--monitor <n>`,
 `--region x,y,w,h` in that monitor's pixels, `--delay 3` to open a menu first) takes it at the
 display's own pixels (a window by itself, without its shadow) and frames it with the same options,

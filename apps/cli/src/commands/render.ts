@@ -1,5 +1,6 @@
-import { readdir } from 'node:fs/promises';
-import { join, resolve } from 'node:path';
+import { copyFile, mkdir, mkdtemp, readdir, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { dirname, extname, join, resolve } from 'node:path';
 import { runInElectron } from '../electron-runner';
 import type { Output } from '../output';
 import { PROJECT_FILE, readProjectFile } from '@cuttle/core';
@@ -113,6 +114,45 @@ export async function renderCommand(projectDir: string, args: RenderArgs, output
   const result = videos.length === 1 ? videos[0]! : { videos };
   output.result(result, () => videos.flatMap(said).join('\n'));
   return result;
+}
+
+/** A frame of the video as an image (`render --still`): where it went, its time and size, and the source second it shows. */
+export interface StillResult {
+  still: string;
+  t: number;
+  width: number;
+  height: number;
+  source?: number;
+}
+
+/**
+ * `cuttle render --still <seconds>`: the video's frame at that output second as a PNG, as the export
+ * draws it (default out/still-<t>s.png in the project), in a format and with transparency as asked.
+ */
+export async function renderStillCommand(projectDir: string, t: number, args: RenderArgs, output: Output, signal: AbortSignal): Promise<StillResult> {
+  const formats = formatsOf(args.format);
+  if (formats.length > 1) throw new CliError('usage', '--still renders one frame: give one --format');
+  if (args.out !== undefined && extname(args.out).toLowerCase() !== '.png') throw new CliError('usage', `-o ${args.out}: a still is a .png`);
+  if (args.size !== undefined || args.fps !== undefined || args.codec !== undefined || args.srt || args.vtt || args.loudness !== undefined) throw new CliError('usage', '--still draws one frame: --size, --fps, --codec, --srt, --vtt and --loudness are for a video');
+  const file = await readProjectFile(projectDir);
+  const out = args.out ? resolve(args.out) : join(file.dir, 'out', `still-${t.toFixed(2)}s.png`);
+  const work = await mkdtemp(join(tmpdir(), 'cuttle-still-'));
+  try {
+    const format = formats[0];
+    const drawn = await runInElectron<{ stills: { t: number; file: string; source?: number }[]; width: number; height: number }>(
+      { command: 'preview', projectDir: file.dir, outDir: work, times: [t], quiet: true, ...(format !== undefined && { format }), ...(args.alpha && { transparent: true }) },
+      signal,
+    );
+    const [still] = drawn.stills;
+    if (!still) throw new CliError('render', 'the frame was not drawn');
+    await mkdir(dirname(out), { recursive: true });
+    await copyFile(still.file, out);
+    const result: StillResult = { still: out, t, width: drawn.width, height: drawn.height, ...(still.source !== undefined && { source: still.source }) };
+    output.result(result, () => `${out}  ${drawn.width}×${drawn.height} at ${t.toFixed(2)} s${still.source !== undefined ? ` (source ${still.source.toFixed(2)} s)` : ''}`);
+    return result;
+  } finally {
+    await rm(work, { recursive: true, force: true }).catch(() => {});
+  }
 }
 
 /** A project rendered by `render --all`, or why it was not. */

@@ -13,13 +13,16 @@ export const MARKERS_VERSION = 1;
  * `step`: the script moved to a step, labelled with the step's id: the first step at the take's
  * first frame, then each press of the step key (or the prompter's buttons), forward or back.
  */
-export const MARKER_KINDS = ['manual', 'prompt', 'tool', 'answer', 'retake', 'step'] as const;
+/** `shot`: a screenshot taken during the take (the shot key, or the HUD's camera), its picture in `file`. */
+export const MARKER_KINDS = ['manual', 'prompt', 'tool', 'answer', 'retake', 'step', 'shot'] as const;
 
 /** One marker; `t` is in source seconds of the screen track, like events.jsonl. */
 export const MarkerSchema = z.strictObject({
   t: z.number().nonnegative(),
   kind: z.enum(MARKER_KINDS),
   label: z.string().min(1).optional(),
+  /** A `shot`'s picture, from the take's folder (`shots/1.png`). */
+  file: z.string().min(1).optional(),
 });
 
 /** markers.json, written by the recorder next to the take's tracks (it writes them sorted by `t`). */

@@ -340,7 +340,8 @@ recording.
   the grid; `frames/<t>s-grid.png` is the default file.
 - `takes/<n>/markers.json` lists the prompt, each tool call and Claude's answer in source seconds,
   each press of the mistake key (kind `retake`), and where the take reached each step of the
-  script (kind `step`, labelled with the step's id; the first at 0).
+  script (kind `step`, labelled with the step's id; the first at 0), and each screenshot taken
+  during the take (kind `shot`, its picture in `file`, from the take's folder: `shots/1.png`).
 - `takes/<n>/events.jsonl` has the input: `move`, `click` and `scroll` with `x` and `y`, `keys`
   (presses per half second, never which keys), `shortcut` with its `keys` as the system writes
   them (`["⌘", "⇧", "P"]`, `["Ctrl", "Shift", "P"]`: only keys pressed with ⌘ or Ctrl, on Windows

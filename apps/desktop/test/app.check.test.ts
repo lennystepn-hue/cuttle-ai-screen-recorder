@@ -3048,6 +3048,49 @@ describe.runIf(enabled)('the Cuttle app', () => {
     }
   }, 90_000);
 
+  it("takes a screenshot during a take from the HUD: into the take with its marker; on the timeline a flag that puts it into the video as a still, or opens it; a frame of the video as an image", async () => {
+    const before = new Set(existsSync(join(root, 'projects')) ? readdirSync(join(root, 'projects')) : []);
+    await recordThroughPicker(pillRecord, { stop: 'none', camera: undefined }, false);
+    const hud = await runningHud();
+    await wait(800);
+    await click(hud, '[data-testid=hud-shot]');
+    // the HUD counts it
+    await expect.poll(() => hud.locator('[data-testid=hud-shot] small').textContent().catch(() => null), { timeout: 10_000 }).toBe('1');
+    await shotOf('64-hud-shot', '/hud.html');
+    await wait(800);
+    await click(hud, '[data-testid=hud-stop]');
+    const dir = await newProject(before);
+    await expect.poll(() => existsSync(join(dir, 'takes', '1', 'shots', '1.png')), { timeout: 15_000 }).toBe(true);
+    const markers = () => (existsSync(join(dir, 'takes', '1', 'markers.json')) ? (JSON.parse(readFileSync(join(dir, 'takes', '1', 'markers.json'), 'utf8')) as { markers: { kind: string; file?: string }[] }).markers : []);
+    await expect.poll(() => markers().filter((marker) => marker.kind === 'shot'), { timeout: 10_000 }).toEqual([expect.objectContaining({ kind: 'shot', file: 'shots/1.png' })]);
+    await projectWhen(dir, (written) => written.scenes[0]?.id !== undefined);
+    const opened = await waitForPage(app, async (page) => page.url().includes('/editor.html') && (await page.title()) === `${basename(dir)} · Cuttle`);
+    await opened.waitForSelector('.app[data-phase="ready"]', { timeout: 30_000 });
+    // its flag on the timeline: a still where the take was then (the clip split around it)
+    await opened.waitForSelector('[data-testid=shot-flag]', { timeout: 15_000 });
+    await shotOf('65-shot-flag', '/editor.html', `${basename(dir)} · Cuttle`);
+    const scenesBefore = (await projectWhen(dir, () => true)).scenes.length;
+    await click(opened, '[data-testid=shot-flag]');
+    const isStill = (scene: { id?: string }) => (scene as { type?: string }).type === 'still';
+    const withStill = await projectWhen(dir, (written) => written.scenes.some(isStill));
+    expect(withStill.scenes.find(isStill)).toMatchObject({ type: 'still', image: 'takes/1/shots/1.png', duration: 3, label: 'Screenshot 1' });
+    expect(withStill.scenes.length).toBeGreaterThan(scenesBefore);
+    // opened as a screenshot: a new shot of the library, in the screenshot editor
+    const shotsBefore = shotFolders().length;
+    await invokeIn(opened, 'project:shot', { file: 'takes/1/shots/1.png', action: 'open' });
+    await expect.poll(() => shotFolders().length, { timeout: 15_000 }).toBe(shotsBefore + 1);
+    const shotEditor = await waitForPage(app, async (page) => page.url().includes('/shot.html') && (await invokeIn<{ dir: string }>(page, 'shot:view')).dir === shotFolders().at(-1));
+    expect(shotEditor).toBeDefined();
+    // a frame of the video as an image, as the export draws it: saved, copied
+    const saved = await invokeIn<string>(opened, 'project:frame', { t: 0.5, as: 'save' });
+    expect(saved).toBe(join(dir, `${basename(dir)} 0.5 s.png`));
+    expect(pngSize(saved)).toEqual([1920, 1080]);
+    const copied = await copiedImage();
+    await invokeIn(opened, 'project:frame', { t: 0.5, as: 'copy' });
+    await expect.poll(copiedImage, { timeout: 10_000 }).not.toBe(copied);
+    await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find((window) => window.webContents.getURL().includes('/shot.html'))?.destroy());
+  }, 180_000);
+
   it('had no unhandled rejection in the main process, and no error in the editor', async () => {
     expect(await app.evaluate(() => (globalThis as unknown as { __rejections: string[] }).__rejections)).toEqual([]);
     expect(pageErrors).toEqual([]);

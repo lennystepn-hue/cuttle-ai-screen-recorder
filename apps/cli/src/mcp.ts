@@ -522,7 +522,7 @@ export const COMMAND_TOOLS: readonly CommandTool[] = [
     name: 'render',
     title: 'Render the video',
     description:
-      'Renders the video as an MP4 (out/<format>.mp4 in the project unless out is given), with subtitle files on request. Several formats render in one go (their frames side by side, the sound once); all: every project in a folder. It takes a while: progress is reported.',
+      'Renders the video as an MP4 (out/<format>.mp4 in the project unless out is given), with subtitle files on request. Several formats render in one go (their frames side by side, the sound once); all: every project in a folder. It takes a while: progress is reported. still: only the frame at that output second, as a PNG (a thumbnail, a post\'s image; answered as an image).',
     input: {
       project,
       format: format.optional(),
@@ -537,8 +537,9 @@ export const COMMAND_TOOLS: readonly CommandTool[] = [
       size: z.enum(['hd', '4k']).optional().describe('4k: the short side 2160'),
       fps: z.union([z.literal(24), z.literal(25), z.literal(30), z.literal(50), z.literal(60)]).optional(),
       codec: z.enum(['h264', 'hevc']).optional().describe('hevc: smaller files at 4K, needs a hardware encoder'),
+      still: seconds.optional().describe('only this output second, as a PNG (out/still-<t>s.png unless out is given)'),
     },
-    argv: (input) => ['render', ...option('format', input.format), ...options('format', input.formats), ...option('all', input.all), ...option('out', input.out), ...off('captions', input.captions), ...on('srt', input.srt), ...on('vtt', input.vtt), ...option('loudness', input.loudness), ...on('alpha', input.transparent), ...option('size', input.size), ...option('fps', input.fps), ...option('codec', input.codec)],
+    argv: (input) => ['render', ...option('format', input.format), ...options('format', input.formats), ...option('all', input.all), ...option('out', input.out), ...option('still', input.still), ...off('captions', input.captions), ...on('srt', input.srt), ...on('vtt', input.vtt), ...option('loudness', input.loudness), ...on('alpha', input.transparent), ...option('size', input.size), ...option('fps', input.fps), ...option('codec', input.codec)],
   }),
   tool({
     name: 'import',

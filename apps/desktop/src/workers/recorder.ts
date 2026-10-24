@@ -64,6 +64,9 @@ port.on('message', ({ data }) => {
     case 'stop':
       void recording?.stop().catch(() => {});
       return;
+    case 'take-shot':
+      recording?.shot();
+      return;
     case 'marker':
       recording?.marker(data.label);
       return;

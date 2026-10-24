@@ -3,7 +3,7 @@
 import { EXPORT_FORMATS } from '@cuttle/export/formats';
 import { BUILT_IN_SOUNDS, MOTION_TEMPLATES, MUSIC_TEMPLATES } from '@cuttle/motion-kit';
 import { bridge } from '../bridge';
-import { addAnnotation, addCard, addMask, addMotion, addMusic, addPage, addSound, addZoom, autoZoomClicks, cycleSpeed, deleteSelection, duplicateSelection, overlayBlocked, selectedOrCurrentClip, setSpeed, showRawTake, split, templateLabel, addCamera } from './actions';
+import { addAnnotation, addCard, addMask, addMotion, addMusic, addPage, addSound, addZoom, autoZoomClicks, cycleSpeed, deleteSelection, duplicateSelection, frameAsImage, overlayBlocked, selectedOrCurrentClip, setSpeed, showRawTake, split, templateLabel, addCamera } from './actions';
 import { redo, undo } from './doc';
 import { showInspector, toggleInspector } from './layout';
 import { currentPlayer, openExport, select, setFormat, setTool, store } from './session';
@@ -106,6 +106,9 @@ export function editorCommands(): EditorCommand[] {
     ...Object.keys(EXPORT_FORMATS).map(
       (name): EditorCommand => ({ id: `format-${name}`, name: `Preview as ${name}`, keywords: 'format aspect output vertical square', group: 'View', run: () => setFormat(name as keyof typeof EXPORT_FORMATS) }),
     ),
+    { id: 'frame-copy', name: 'Copy this frame as an image', keywords: 'screenshot still picture png clipboard thumbnail', group: 'Project', run: () => void frameAsImage('copy') },
+    { id: 'frame-save', name: 'Save this frame as an image…', keywords: 'screenshot still picture png export thumbnail', group: 'Project', run: () => void frameAsImage('save') },
+    { id: 'frame-shot', name: 'Open this frame as a screenshot (framed for a post)', keywords: 'screenshot still picture image thumbnail social', group: 'Project', run: () => void frameAsImage('shot') },
     { id: 'export', name: 'Export…', keys: 'Ctrl+E', group: 'Project', run: openExport },
     { id: 'record', name: 'Record a new take for this project', keywords: 'record again retake', group: 'Project', run: () => void bridge.invoke('project:record') },
     { id: 'takes', name: 'Earlier takes of this project…', keywords: 'takes restore history', group: 'Project', run: () => void bridge.invoke('project:takes') },

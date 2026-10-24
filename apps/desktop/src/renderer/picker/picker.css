@@ -449,7 +449,7 @@ body.transparent #root {
   padding: 10px;
 }
 .prompter {
-  width: 492px;
+  width: 532px;
   padding: 12px 14px 12px 16px;
   border-radius: 16px;
   background: var(--overlay);

@@ -839,6 +839,18 @@ button.chip-status:hover {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+/* a screenshot the take took: a flag with its menu (a still here, open it as a screenshot) */
+button.flag.shot {
+  color: var(--camera);
+  cursor: pointer;
+}
+button.flag.shot:hover {
+  background: var(--raised-hover);
+  color: var(--text);
+}
+button.flag.shot svg {
+  flex: none;
+}
 .ruler {
   color: var(--faint);
   font-size: 11px;

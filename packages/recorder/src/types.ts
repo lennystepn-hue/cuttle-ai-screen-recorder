@@ -135,6 +135,8 @@ export type RecorderEvent =
   /** Every track is capturing; `dir` is the take folder relative to the project. */
   | { type: 'recording'; dir: string }
   | { type: 'marker'; marker: Marker }
+  /** A screenshot taken during the take (`shot()`, the shot key): its PNG from the project, its pixels and the display's scale. */
+  | { type: 'shot'; file: string; width: number; height: number; scale: number }
   /** How loud the mic is now (dBFS), every tenth of a second while it records. */
   | { type: 'level'; rms: number; peak: number }
   | { type: 'warning'; message: string }
@@ -171,6 +173,11 @@ export interface Recording {
   /** Marks a slip (the mistake key): Cuttle cuts back to the pause before it. */
   retake(): void;
   /**
+   * Takes a screenshot of what the take records (a window by itself, the display or its region) into
+   * the take's `shots/<n>.png`, with a `shot` marker at this moment and a `shot` event once written.
+   */
+  shot(): void;
+  /**
    * Moves to the script's next step (the step key), or back to the one before: a `step` marker.
    * Nothing at either end, without a script, or before the screen track started.
    */
@@ -205,4 +212,4 @@ export type RawInput =
   /** A dialog or menu opened or closed. */
   | { type: 'window'; time: number; id: number; kind: WindowKind; rect: Bounds; open: boolean };
 
-export type HotkeyAction = 'stop' | 'marker' | 'pause' | 'retake' | 'next' | 'previous';
+export type HotkeyAction = 'stop' | 'marker' | 'pause' | 'retake' | 'next' | 'previous' | 'shot';

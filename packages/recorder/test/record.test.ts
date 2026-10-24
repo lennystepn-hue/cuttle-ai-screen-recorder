@@ -288,6 +288,37 @@ describe.concurrent('record (test backend)', () => {
     expect(take.warnings).toEqual(['onEvent failed on "marker": listener bug']);
   }, SLOW);
 
+  it('takes a screenshot of what it records into the take, a shot marker at the moment asked for', async () => {
+    const projectDir = project();
+    const shots: { file: string; width: number; height: number }[] = [];
+    let asked = 0;
+    const recording = record({
+      ...test,
+      projectDir,
+      source: { kind: 'region', monitor: 0, rect: [100, 50, 320, 180] },
+      stop: { maxSeconds: 2.5 },
+      onEvent: (event) => {
+        if (event.type === 'recording') {
+          setTimeout(() => {
+            asked = Date.now();
+            recording.shot();
+          }, 500);
+        }
+        if (event.type === 'shot') shots.push({ file: event.file, width: event.width, height: event.height });
+      },
+    });
+    const take = await recording.done;
+    expect(asked).toBeGreaterThan(0);
+    expect(shots).toEqual([{ file: 'takes/1/shots/1.png', width: 320, height: 180 }]);
+    const png = readFileSync(join(projectDir, 'takes', '1', 'shots', '1.png'));
+    expect([png.readUInt32BE(16), png.readUInt32BE(20)]).toEqual([320, 180]);
+    const [marker] = markersOf(projectDir, take.markers).filter((each) => each.kind === 'shot');
+    expect(marker).toMatchObject({ kind: 'shot', label: 'Screenshot 1', file: 'shots/1.png' });
+    // at the moment it was asked for, not when the picture was written
+    expect(marker!.t).toBeGreaterThan(0.3);
+    expect(marker!.t).toBeLessThan(1.2);
+  }, SLOW);
+
   it('cancels without a take folder when stopped during the countdown', async () => {
     const projectDir = project();
     const countdown: number[] = [];

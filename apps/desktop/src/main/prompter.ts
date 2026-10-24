@@ -9,7 +9,7 @@ import { APP_ORIGIN } from './protocols';
 import { recorderHost } from './recorder-host';
 
 /** As wide as the HUD's window (its card and a margin for the shadow); as high as its content, within these. */
-export const PROMPTER_WIDTH = 512;
+export const PROMPTER_WIDTH = 552;
 const MIN_HEIGHT = 96;
 const MAX_HEIGHT = 480;
 

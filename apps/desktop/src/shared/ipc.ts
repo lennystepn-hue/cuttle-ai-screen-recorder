@@ -134,6 +134,8 @@ export interface HudState {
   markers: number;
   /** How often the mistake key was pressed (its markers are not counted in `markers`). */
   retakes?: number;
+  /** The screenshots taken in the take. */
+  shots?: number;
   /** A warning in a few words ("Mic is silent: muted?"), or "Stopping…". */
   message?: string;
   /** The whole warning, for the tooltip. */
@@ -522,6 +524,8 @@ export const REQUESTS = {
   /** The mistake key: Cuttle cuts back to the pause before it. */
   'hud:retake': z.undefined(),
   'hud:pause': z.undefined(),
+  /** A screenshot of what the take records, into the take. */
+  'hud:shot': z.undefined(),
   'hud:resume': z.undefined(),
   /** Puts the take aside and records again with the same settings (the HUD asks for a press held 600 ms). */
   'hud:restart': z.undefined(),
@@ -534,6 +538,13 @@ export const REQUESTS = {
     })
     .refine((value) => JSON.stringify(value.raw).length <= MAX_PROJECT_BYTES, 'cuttle.json is too large'),
   'project:import-image': z.strictObject({ purpose: z.enum(['still', 'background', 'logo', 'watermark']) }),
+  /**
+   * A screenshot the take took (its marker's picture, from the project): its menu, or one of the
+   * menu's actions straight away. Answers \`still\` when it is to go into the video as a still.
+   */
+  'project:shot': z.strictObject({ file: z.string().min(1).max(4096), action: z.enum(['menu', 'open', 'reveal']) }),
+  /** The video's frame at \`t\` (output seconds) as an image, as the export draws it: copied, saved, or opened as a screenshot. */
+  'project:frame': z.strictObject({ t: z.number().finite().nonnegative(), as: z.enum(['copy', 'save', 'shot']) }),
   /** The brand kits saved on this computer. */
   'brand:list': z.undefined(),
   /** Saves the project's brand, as this version of it has it, as a kit (a kit of that name is replaced). */
@@ -733,12 +744,16 @@ export interface Responses {
   'hud:marker': void;
   'hud:retake': void;
   'hud:pause': void;
+  'hud:shot': void;
   'hud:resume': void;
   'hud:restart': void;
   /** Written (its new hash); or the file changed meanwhile (the version on disk now); or it could not be written. */
   'project:save': { hash: string } | { conflict: ProjectVersion & { origin: ChangeOrigin } } | { problem: string };
   /** An image chosen by the person, copied into the project when it lay outside (a path inside the project). */
   'project:import-image': { path: string } | undefined;
+  'project:shot': 'still' | undefined;
+  /** Where the frame went (saved), or nothing. */
+  'project:frame': string | undefined;
   'brand:list': BrandView[];
   /** The kits after the change, or why it could not be made. */
   'brand:save': { brands: BrandView[] } | { problem: string };

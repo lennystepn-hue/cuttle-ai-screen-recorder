@@ -159,6 +159,11 @@ export class RecorderHost {
     if (this.running) this.send({ type: 'retake' });
   }
 
+  /** A screenshot of what the take records, into the take: a `shot` marker and a `shot` event. */
+  takeShot(): void {
+    if (this.running) this.send({ type: 'take-shot' });
+  }
+
   /** The script's next step, or the one before: a `step` marker (nothing at either end). */
   nextStep(): void {
     if (this.running) this.send({ type: 'step', delta: 1 });

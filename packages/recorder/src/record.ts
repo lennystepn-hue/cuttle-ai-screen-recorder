@@ -12,6 +12,7 @@ import { startInput, type InputSource } from './input';
 import { levelMeter, wholeSamples } from './level';
 import { FPS as JOIN_FPS, joinSegments, mediaInfo, renameWhenFree } from './join';
 import { areaGeometry, checkDevice, deviceClock, micInput, micLatency, platformFor, resolveArea, screenFilter, screenInput, screenLatency, webcamInput, wholeWindow, type CameraMode, type Platform, type ScreenArea } from './sources';
+import { shootArea } from './shot';
 import { systemAudioMissing, systemFeeder, systemInput } from './system-audio';
 import { hasWindowCapture, relayInput, testWindowFeeder, windowFeeder } from './window-capture';
 import { WINDOW_GATE_MS, windowGate } from './window-gate';
@@ -56,6 +57,7 @@ export function record(options: RecordOptions): Recording {
     },
     marker: (label) => control.marker(label),
     retake: () => control.retake(),
+    shot: () => control.shot(),
     next: () => control.step(1),
     previous: () => control.step(-1),
     pause: () => control.setPaused(true),
@@ -71,6 +73,8 @@ class Control {
   onMarker: ((label?: string, kind?: 'manual' | 'retake') => void) | undefined;
   /** Moves through the script's steps once the take runs. */
   onStep: ((delta: 1 | -1) => void) | undefined;
+  /** Takes a screenshot into the take once its screen runs. */
+  onShot: (() => void) | undefined;
   /** Pointer input inside these is not logged. */
   deadZones: Bounds[] = [];
   private waiters: ((reason: StopReason) => void)[] = [];
@@ -131,6 +135,10 @@ class Control {
 
   step(delta: 1 | -1): void {
     this.onStep?.(delta);
+  }
+
+  shot(): void {
+    this.onShot?.();
   }
 }
 
@@ -302,6 +310,21 @@ async function recordTake({ options, control, platform, area, byItself, cameraMo
   };
   saveMarkers();
   control.onMarker = (label, kind = 'manual') => addMarker({ kind, ...(label && { label }) }, now());
+  // a screenshot of what the take records, its marker at the moment asked for (once the picture is written)
+  let shots = 0;
+  control.onShot = () => {
+    const time = now();
+    const n = ++shots;
+    const file = path(join('shots', `${n}.png`));
+    mkdirSync(path('shots'), { recursive: true });
+    shootArea(platform, area, { out: file, cursor: options.drawMouse ?? false, hideWindowsOf: options.hideWindowsOf ?? [] }).then(
+      (taken) => {
+        addMarker({ kind: 'shot', label: `Screenshot ${n}`, file: `shots/${n}.png` }, time);
+        reporter.emit({ type: 'shot', file: rel(file), width: taken.width, height: taken.height, scale: taken.scale });
+      },
+      (error: unknown) => reporter.warn(`screenshot ${n} could not be taken: ${message(error)}`),
+    );
+  };
 
   const writeSegments = (joined = false) => {
     const file = path(FILES.segments);
@@ -523,6 +546,7 @@ async function recordTake({ options, control, platform, area, byItself, cameraMo
         else if (action === 'retake') control.retake();
         else if (action === 'next') control.step(1);
         else if (action === 'previous') control.step(-1);
+        else if (action === 'shot') control.shot();
         else control.marker();
       },
     );
@@ -713,6 +737,7 @@ async function recordTake({ options, control, platform, area, byItself, cameraMo
   } finally {
     control.onMarker = undefined;
     control.onStep = undefined;
+    control.onShot = undefined;
     closeEvents();
   }
 

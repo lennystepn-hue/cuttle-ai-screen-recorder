@@ -3,7 +3,7 @@ import { copyFile, mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { basename, dirname, extname, isAbsolute, join, resolve } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
-import { imagePalette, keepInProject, newShotFolder, wallpaperFile } from '@cuttle/core';
+import { imagePalette, keepInProject, newShotFolder, pngScale, wallpaperFile } from '@cuttle/core';
 import { BACKGROUND_PRESETS, FRAME_STYLES, SHOT_FILE, SHOT_VERSION, isColouredBackground, parseShot, parseShotJson, shotRatio, switchBackground, type BackgroundPreset, type Shot } from '@cuttle/project';
 import { listDevices, takeShot, type Backend } from '@cuttle/recorder';
 import { runInElectron } from '../electron-runner';
@@ -57,29 +57,6 @@ export interface ShotFrameResult {
 
 const isFile = (path: string) => stat(path).then((info) => info.isFile(), () => false);
 const isDirectory = (path: string) => stat(path).then((info) => info.isDirectory(), () => false);
-
-/**
- * A screenshot's pixels per point from its PNG's resolution (pHYs): a Mac writes 144 dpi from a Retina
- * display; 72 and 96 dpi are 1. Undefined for another image or one that says nothing.
- */
-export function pngScale(bytes: Uint8Array): number | undefined {
-  const signature = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
-  if (bytes.length < 8 || signature.some((value, i) => bytes[i] !== value)) return undefined;
-  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-  for (let at = 8; at + 8 <= bytes.length; ) {
-    const length = view.getUint32(at);
-    const type = String.fromCharCode(...bytes.subarray(at + 4, at + 8));
-    if (type === 'pHYs' && length >= 9 && at + 17 <= bytes.length) {
-      // pixels per metre, the unit 1 (metres); 0: an aspect ratio only
-      if (bytes[at + 16] !== 1) return undefined;
-      const dpi = view.getUint32(at + 8) * 0.0254;
-      return dpi > 100 ? Math.min(4, Math.max(1, Math.round((dpi / 72) * 4) / 4)) : 1;
-    }
-    if (type === 'IDAT' || type === 'IEND') return undefined;
-    at += 12 + length;
-  }
-  return undefined;
-}
 
 /** `--size`: auto, a ratio (16:9) or pixels (1200x630). */
 function sizeOf(size: string): Shot['size'] {

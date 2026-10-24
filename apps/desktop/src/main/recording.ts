@@ -26,9 +26,9 @@ import { editorWindowOf, expectSuggest, guard, hidePill, reopenEditor, sendToEdi
 import { freezeDisplays, frozenDisplay, onNewShot, takePicked, thawDisplays } from './shots';
 
 /** The HUD's window (the HUD and a margin for its shadow): never in the video, and a dead zone for the input log. */
-const HUD_SIZE = { width: 512, height: 64 };
+const HUD_SIZE = { width: 552, height: 64 };
 /** With live captions: the strip of words under the bar. */
-const HUD_CAPTIONED_SIZE = { width: 512, height: 102 };
+const HUD_CAPTIONED_SIZE = { width: 552, height: 102 };
 /** The recorder host answers a listing in this time, or the picker says it cannot record. */
 const LISTING_TIMEOUT_MS = 10_000;
 
@@ -680,6 +680,7 @@ async function record(target: PickedTarget, display: PickerDisplay, displays: Pi
         },
         'hud:marker': () => recorderHost.marker(),
         'hud:retake': () => recorderHost.retake(),
+        'hud:shot': () => recorderHost.takeShot(),
         'hud:pause': () => recorderHost.pause(),
         'hud:resume': () => recorderHost.resume(),
         'hud:restart': () => {
@@ -789,6 +790,7 @@ async function record(target: PickedTarget, display: PickerDisplay, displays: Pi
             // a step of the script moves the prompter; the mistake key's marker is a retake: neither is one of the person's markers
             if (event.marker.kind === 'step') return prompter?.reached(event.marker.label ?? '');
             if (event.marker.kind === 'retake') hudState.retakes = (hudState.retakes ?? 0) + 1;
+            else if (event.marker.kind === 'shot') hudState.shots = (hudState.shots ?? 0) + 1;
             else hudState.markers++;
             showHud();
             return;

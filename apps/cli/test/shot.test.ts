@@ -3,7 +3,7 @@ import { rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
-import { pngScale } from '../src/commands/shot';
+import { pngScale } from '@cuttle/core';
 import { runCli } from '../src/main';
 import { pngWith } from './png-fixture';
 

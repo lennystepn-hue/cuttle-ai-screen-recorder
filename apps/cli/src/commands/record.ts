@@ -97,13 +97,14 @@ export async function recordCommand(projectDir: string, args: RecordArgs, output
     onEvent(event) {
       if (event.type === 'countdown') output.info(`recording in ${event.seconds} …`);
       if (event.type === 'level') hearing(event.rms);
-      if (event.type === 'recording') output.info(`recording ${event.dir}; stop: Ctrl+C or ${HOTKEYS.stop}, marker: ${HOTKEYS.marker}, pause: ${HOTKEYS.pause}, a slip: ${HOTKEYS.retake}`);
+      if (event.type === 'recording') output.info(`recording ${event.dir}; stop: Ctrl+C or ${HOTKEYS.stop}, marker: ${HOTKEYS.marker}, pause: ${HOTKEYS.pause}, a slip: ${HOTKEYS.retake}, a screenshot: ${HOTKEYS.shot}`);
+      if (event.type === 'shot') output.info(`screenshot ${event.file} (${event.width}×${event.height})`);
       if (event.type === 'recording' && script.length > 0) output.info(`script: ${script.length} steps; next step: ${HOTKEYS.next}, back: ${HOTKEYS.previous}`);
       if (event.type === 'paused') output.info(`paused: nothing is recorded until ${HOTKEYS.pause} again`);
       if (event.type === 'resuming') output.info('resuming …');
       if (event.type === 'resumed') output.info('recording again');
       if (event.type === 'marker' && event.marker.kind === 'step') output.info(`${stepLine(event.marker.label) ?? `step ${event.marker.label}`} at ${event.marker.t.toFixed(2)} s`);
-      else if (event.type === 'marker') output.info(`marker ${event.marker.kind}${event.marker.label ? ` ${event.marker.label}` : ''} at ${event.marker.t.toFixed(2)} s`);
+      else if (event.type === 'marker' && event.marker.kind !== 'shot') output.info(`marker ${event.marker.kind}${event.marker.label ? ` ${event.marker.label}` : ''} at ${event.marker.t.toFixed(2)} s`);
       if (event.type === 'warning') output.warn(event.message);
       if (event.type === 'stopping') output.info(`stopping (${event.reason}) …`);
     },

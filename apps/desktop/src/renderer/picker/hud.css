@@ -15,7 +15,7 @@ body.transparent #root {
   gap: 4px;
 }
 .hud {
-  width: 492px;
+  width: 532px;
   height: 48px;
   display: flex;
   align-items: center;
@@ -164,24 +164,27 @@ body.transparent #root {
 .hud .note svg {
   flex: none;
 }
-.hud button.marker {
+.hud button.marker,
+.hud button.shot {
   position: relative;
 }
-.hud button.marker small {
+.hud button.marker small,
+.hud button.shot small {
   position: absolute;
   right: 3px;
   bottom: 2px;
   font: 600 9px var(--font);
   color: var(--muted);
 }
-.hud button.marker.flash {
+.hud button.marker.flash,
+.hud button.shot.flash {
   color: var(--ok);
   background: rgba(79, 209, 161, 0.14);
 }
 
 /* the live captions under the bar: the newest words at the right, the older ones fading out at the left */
 .captions {
-  width: 492px;
+  width: 532px;
   height: 30px;
   display: flex;
   padding: 0 14px;

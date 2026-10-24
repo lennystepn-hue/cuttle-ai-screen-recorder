@@ -4,7 +4,7 @@ import { MOTION_TEMPLATES, MUSIC_TEMPLATES } from '@cuttle/motion-kit';
 import type { CameraLayout, ClipScene, CuttleProject, Scene } from '@cuttle/project';
 import { clickZooms, sceneSpans, shownClicks, TEXT_FADE_SECONDS, type SceneSpan, type ZoomScreen } from '@cuttle/timeline';
 import type { Command, ListName } from '../../shared/document';
-import { outputTimesOf } from '../../shared/timeline-model';
+import { outputTimesOf, type MarkerPin } from '../../shared/timeline-model';
 import { bridge } from '../bridge';
 import { edit, projectAfter, toast } from './doc';
 import { speedCommands } from '../../shared/speed';
@@ -314,6 +314,47 @@ export async function addPage(): Promise<void> {
   const chosen = await bridge.invoke('project:import-image', { purpose: 'still' });
   if (!chosen) return;
   addAndSelect({ type: 'add', list: 'scenes', index: insertIndex(), item: { type: 'still', image: chosen.path, duration: 4, motion: 'scroll', frame: 'browser-light' } }, 'scene', 'Add page');
+}
+
+/** How long a screenshot of the take stays on screen as a still. */
+const SHOT_STILL_SECONDS = 3;
+
+/**
+ * A screenshot the take took, into the video as a still where the take was then: the clip there is
+ * split and the still goes between its halves, in the video's frame (one step to undo).
+ */
+export function addShotStill(pin: MarkerPin): void {
+  const project = documentProject();
+  if (!project || !pin.file) return;
+  const place = playheadPlace(pin.t);
+  if (!place) return;
+  const frame = project.look.frame.enabled ? project.look.frame.style : 'none';
+  const still = { type: 'still' as const, image: pin.file, duration: SHOT_STILL_SECONDS, frame, label: pin.label ?? 'Screenshot' };
+  const fps = project.output.fps;
+  const splits = place.clip && place.source !== undefined && place.source - place.clip.from >= place.clip.speed / fps && place.clip.to - place.source >= place.clip.speed / fps;
+  const before = new Set(itemIds(project));
+  const commands: Command[] = splits ? [{ type: 'split', id: place.clip!.id!, at: place.source! }, { type: 'add', list: 'scenes', index: place.index + 1, item: still }] : [{ type: 'add', list: 'scenes', index: place.index + 1, item: still }];
+  if (!edit(commands, 'Add the screenshot as a still')) return;
+  const added = (documentProject()?.scenes ?? []).find((scene) => scene.id && !before.has(scene.id) && scene.type === 'still');
+  if (added?.id) select({ kind: 'scene', id: added.id });
+}
+
+/** A screenshot flag's menu: a still here, open it as a screenshot, or its folder. */
+export async function shotMenu(pin: MarkerPin): Promise<void> {
+  if (!pin.file) return;
+  if ((await bridge.invoke('project:shot', { file: pin.file, action: 'menu' })) === 'still') addShotStill(pin);
+}
+
+/** The frame at the playhead as an image (as the export draws it): copied, saved, or opened as a screenshot. */
+export async function frameAsImage(as: 'copy' | 'save' | 'shot'): Promise<void> {
+  const t = currentPlayer()?.current().t ?? 0;
+  const done = await bridge.invoke('project:frame', { t, as }).catch((error: Error) => {
+    toast(`The frame could not be made: ${error.message}`, { tone: 'warning' });
+    return null;
+  });
+  if (done === null) return;
+  if (as === 'copy') toast('The frame is copied.');
+  else if (as === 'save' && done) toast(`The frame is saved: ${done}`);
 }
 
 /** "lower-third" (or "lower-third-2", a second copy) as a label: "Lower third". */

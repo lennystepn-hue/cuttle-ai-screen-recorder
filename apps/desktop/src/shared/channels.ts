@@ -20,6 +20,8 @@ export const WINDOW_CHANNELS = {
       'project:fit-length',
       'project:save',
       'project:import-image',
+      'project:shot',
+      'project:frame',
       'brand:list',
       'brand:save',
       'brand:apply',
@@ -73,7 +75,7 @@ export const WINDOW_CHANNELS = {
     events: ['picker:open', 'picker:active', 'picker:choices', 'picker:devices', 'picker:script', 'app:motion'],
   },
   hud: {
-    requests: ['hud:stop', 'hud:marker', 'hud:retake', 'hud:pause', 'hud:resume', 'hud:restart'],
+    requests: ['hud:stop', 'hud:marker', 'hud:retake', 'hud:shot', 'hud:pause', 'hud:resume', 'hud:restart'],
     events: ['hud:state', 'hud:level', 'hud:caption', 'app:motion'],
   },
   prompter: {

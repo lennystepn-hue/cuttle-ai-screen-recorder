@@ -3159,6 +3159,8 @@ describe.runIf(enabled)('the Cuttle app', () => {
       // as it was, with a mask: the style puts the look on again, the shot keeps its mask
       expect(await invokeIn(page, 'shot:change', { raw: { ...before, masks: [{ rect: [0, 0, 40, 20], style: 'fill' }] } })).toEqual({});
       await invokeIn(page, 'shot:open', { dir });
+      // shown as written (its mask's button): picked before, the style would be put on the shot the editor still showed
+      await page.waitForSelector('[data-testid=shot-masks-clear]', { state: 'attached', timeout: 10_000 });
       await expect.poll(() => page.locator('[data-testid=shot-style]').isDisabled(), { timeout: 10_000 }).toBe(false);
       await chooseIn(page, '[data-testid=shot-style]', 'Launch');
       await expect.poll(() => written().size, { timeout: 10_000 }).toEqual({ width: 1200, height: 630 });

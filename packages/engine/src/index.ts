@@ -3,4 +3,5 @@ export { createRenderer, type DrawnText, type FrameSources, type MotionPixels, t
 export { loadSegmenter, type PersonMask, type Segmenter, type SegmenterFiles } from './segment';
 export { webcamRect, type Size } from './layout';
 export { clipView, type ClipView } from './view';
+export { drawShot, shotLayout, type ShotLayout, type ShotOptions } from './shot';
 export type { CursorImage } from './presets/cursors';

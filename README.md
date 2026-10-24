@@ -461,6 +461,7 @@ cuttle render --size 4k --fps 60 --codec hevc   # 3840×2160 at 60 fps, HEVC whe
 cuttle transcript --translate de     # the sentences to translate (Claude writes them), then captions set --translation de
 cuttle chapters                      # those chapters as lines for a YouTube description
 cuttle open                          # the project in the app's editor, which follows every change to it (Claude's too)
+cuttle shot frame screen.png --frame browser-dark --background gradient --from shot   # a screenshot framed as the videos are, pixel for pixel (Retina at 2×), as PNG, JPEG or WebP
 cuttle recover takes/2               # after a crash
 ```
 

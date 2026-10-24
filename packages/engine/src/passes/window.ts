@@ -149,12 +149,14 @@ export class WindowPass {
     private readonly output: Size,
     private readonly sprites: SpriteCache,
     private readonly spritePass: SpritePass,
+    /** Output px per unit of the chrome: the output's (`unitFor`), or a shot's own scale. */
+    unit = unitFor(output),
   ) {
     this.shadow = new Shader(gl, 'window shadow', RECT_VERTEX, SHADOW);
     this.chrome = new Shader(gl, 'window chrome', RECT_VERTEX, CHROME);
     this.device = new Shader(gl, 'device', RECT_VERTEX, DEVICE);
     this.camera = new Shader(gl, 'device camera', RECT_VERTEX, CAMERA);
-    this.unit = unitFor(output);
+    this.unit = unit;
   }
 
   /** Everything under the content: the shadow, then the title bar or the device's body. */

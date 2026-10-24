@@ -120,6 +120,7 @@ export { parseEventsJsonl } from './events';
 export { ScreenTextFrameSchema, parseScreenTextJsonl, type ScreenTextFrame, type ScreenTextLine, type ScreenTextWord } from './screen-text';
 export { SEGMENTS_VERSION, SegmentsFileSchema, parseSegmentsJson, segmentOffsets, takeTime, type Segment, type SegmentsFile, type SegmentsFileParseResult } from './segments';
 export { TAKE_VERSION, TakeFileSchema, parseTakeJson, trackOffset, type TakeFile, type TakeFileParseResult, type TakeFileTrack } from './take';
+export { SHOT_FILE, SHOT_MAX_SIDE, SHOT_VERSION, ShotSchema, parseShot, parseShotJson, shotRatio, type Shot, type ShotInput, type ShotParseResult, type ShotSize } from './shot';
 export {
   VOICEOVER_DIR,
   VOICE_RENDER_VERSION,

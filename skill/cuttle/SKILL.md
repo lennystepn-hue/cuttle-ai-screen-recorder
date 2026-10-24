@@ -1,6 +1,6 @@
 ---
 name: cuttle
-description: Makes videos with the cuttle CLI, two ways that mix freely. It records the screen and turns the take into a polished demo (cuts, speed-ups, zooms, masks over private data, a framed window on a designed background, captions), and it renders videos written entirely in code, without any recording, every scene a web page Claude writes (kinetic type, charts, 3D, UI mock-ups, anything a browser draws) with music composed in code for it; MP4 in 16:9, 1:1 or 9:16. Use when the user wants to record a demo, a screencast or screen recording, a launch, promo, product or explainer video, an animated title, intro or social clip, a motion graphic, a video of what Claude Code built, or to edit or re-render a cuttle project (cuttle.json).
+description: Makes videos with the cuttle CLI, two ways that mix freely. It records the screen and turns the take into a polished demo (cuts, speed-ups, zooms, masks over private data, a framed window on a designed background, captions), and it renders videos written entirely in code, without any recording, every scene a web page Claude writes (kinetic type, charts, 3D, UI mock-ups, anything a browser draws) with music composed in code for it; MP4 in 16:9, 1:1 or 9:16. It also frames screenshots the same way. Use when the user wants to record a demo, a screencast or screen recording, a launch, promo, product or explainer video, an animated title, intro or social clip, a motion graphic, a video of what Claude Code built, a framed screenshot for a README or a post, or to edit or re-render a cuttle project (cuttle.json).
 ---
 
 # Cuttle: screen recordings that edit themselves, and videos written in code
@@ -388,6 +388,31 @@ With a script, the video file has the steps as its chapters (`chapters` in the J
 seconds). `cuttle -C "<project>" --json chapters` gives them as lines for a YouTube description
 (`youtube`) and says why YouTube would not show them (`problems`: fewer than three, or one shorter
 than 10 s). Give the user the lines when the video goes to YouTube.
+
+## 5. Framed screenshots
+
+A screenshot comes out framed as the videos are: the image in a window, a browser, a phone or alone
+(`--frame none`, the default: rounded, with a shadow), on a background or on nothing, pixel for
+pixel. Use it for a README, a launch post or a pull request, for example of what Claude Code built
+(`capture-page` takes a page; any PNG, JPEG or WebP works).
+
+```bash
+cuttle --json shot frame "<image.png>" --frame browser-dark --title "acme.app" --background gradient --from shot -o "<out.png>"
+```
+
+- A Mac's Retina screenshot (144 dpi) keeps its pixels: the frame, the padding (`--padding`, in
+  points, default 64) and the shadow are drawn at 2×. `--shot-scale 2` says so where the file does
+  not (a JPEG, a Windows screenshot at 200 %); `--scale` draws the whole larger or smaller.
+- `--background` takes the video's presets; `--from shot` reads a gradient's colours off the image,
+  `--wallpaper` puts the desktop's wallpaper behind it, `--transparent` puts it on nothing.
+- `--size 16:9` (or `1:1`, `4:5`, `9:16`, `1.91:1`) grows the canvas around it; `--size 1200x630`
+  fits it into an Open Graph image. `--crop x,y,w,h` (the image's pixels) shows a part of it.
+- `-o` picks the format: `.png`, `.jpg` (`--quality`) or `.webp`. `--save "<folder>"` keeps the shot
+  as a folder (`shot.json`, its image, `shot.png`); `cuttle --json shot frame "<folder>" --frame
+  mac-light` changes it and draws it again. [project.md](project.md) has `shot.json`'s fields.
+
+Read the image before you hand it over, and look for private data as in a video's stills: a
+screenshot has no masks yet, so crop it away (`--crop`).
 
 ## When something fails
 

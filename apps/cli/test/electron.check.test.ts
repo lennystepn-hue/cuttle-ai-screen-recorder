@@ -6,6 +6,7 @@ import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { PNG } from 'pngjs';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { pngWith } from './png-fixture';
 
 /**
  * The commands that run in Electron (preview, capture-page, render), end to end through the built
@@ -600,6 +601,42 @@ describe.runIf(enabled)('cuttle in Electron', () => {
       rmSync(dirname(copy), { recursive: true, force: true });
     }
   }, 180_000);
+
+  it('frames a screenshot pixel for pixel, its frame at its own scale, kept as a folder and framed again', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'cuttle-shot-'));
+    try {
+      // every pixel its own colour: a pixel moved or blended shows
+      const png = new PNG({ width: 40, height: 30 });
+      for (let i = 0; i < png.data.length; i += 4) png.data.set([i % 251, (i * 7) % 253, (i * 13) % 255, 255], i);
+      const image = join(dir, 'screen.png');
+      writeFileSync(image, PNG.sync.write(png));
+      const flat = cuttle('shot', 'frame', image, '--padding', '10', '--radius', '0', '--no-shadow', '--background', 'solid', '--color', '#102030');
+      expect(flat.code).toBe(0);
+      expect(flat.json).toMatchObject({ file: join(dir, 'screen-framed.png'), format: 'png', width: 60, height: 50, scale: 1 });
+      const out = PNG.sync.read(readFileSync(flat.json.file as string));
+      let changed = 0;
+      for (let y = 0; y < 30; y++) {
+        for (let x = 0; x < 40; x++) {
+          for (let c = 0; c < 4; c++) if (png.data[(y * 40 + x) * 4 + c] !== out.data[((y + 10) * 60 + x + 10) * 4 + c]) changed++;
+        }
+      }
+      expect(changed).toBe(0);
+      expect([...out.data.subarray(0, 4)]).toEqual([0x10, 0x20, 0x30, 255]);
+      // a Retina screenshot (144 dpi): its padding and title bar at 2×, kept as a folder
+      writeFileSync(join(dir, 'retina.png'), pngWith(80, 60, 144));
+      const kept = join(dir, 'kept');
+      const retina = cuttle('shot', 'frame', join(dir, 'retina.png'), '--padding', '10', '--frame', 'mac-dark', '--no-shadow', '--save', kept);
+      expect(retina.code).toBe(0);
+      expect(retina.json).toMatchObject({ file: join(kept, 'shot.png'), width: 80 + 40, height: 60 + 40 + 72, scale: 2, shot: kept });
+      // framed again from its folder: on nothing, with its shadow, as WebP
+      const again = cuttle('shot', 'frame', kept, '--transparent', '--shadow', '-o', join(dir, 'shot.webp'));
+      expect(again.code).toBe(0);
+      expect(readFileSync(join(dir, 'shot.webp')).subarray(8, 12).toString()).toBe('WEBP');
+      expect(JSON.parse(readFileSync(join(kept, 'shot.json'), 'utf8'))).toMatchObject({ source: 'source.png', scale: 2, transparent: true, frame: { style: 'mac-dark', shadow: true } });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }, 120_000);
 
   it('fails on an unknown format before rendering, and on a page that does not exist', () => {
     expect(cuttle('-C', project, 'render', '--format', '4:3').code).toBe(1);

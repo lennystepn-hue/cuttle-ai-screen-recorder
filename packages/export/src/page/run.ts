@@ -1,7 +1,7 @@
-import { FONT_FAMILY, createRenderer, loadEngineAssets, type Renderer } from '@cuttle/engine';
+import { FONT_FAMILY, createRenderer, drawShot, loadEngineAssets, type Renderer } from '@cuttle/engine';
 import { createCursorTrack, createTimeline, type Timeline } from '@cuttle/timeline';
 import { planFrames, planStills, shownSourceTime, stillFrames, type FramePlan } from '../frame-plan';
-import type { ExportJob, PageJob, PageResult, PageStillsSuccess, PageSuccess, StillsJob } from '../job';
+import type { ExportJob, PageResult, PageShotSuccess, PageStillsSuccess, PageSuccess, ShotJob, StillsJob } from '../job';
 import { host, PageError } from './host';
 import { loadImage } from './images';
 import { openVideo, type VideoFile } from './media';
@@ -31,7 +31,7 @@ function probeMaxTextureSize(): number {
   return size;
 }
 
-function checkClipRanges(job: PageJob, screen: VideoFile | undefined): void {
+function checkClipRanges(job: ExportJob | StillsJob, screen: VideoFile | undefined): void {
   job.project.scenes.forEach((scene, index) => {
     if (scene.type === 'clip' && !screen) throw new PageError('invalid-project', `scenes[${index}] is a clip, but the project has no screen recording`);
     if (scene.type === 'clip' && screen && scene.to > screen.end + END_TOLERANCE_SECONDS) {
@@ -57,7 +57,7 @@ interface Rendering {
  * Opens the job's media, builds the timeline and the plan (`makePlan`), creates the renderer and the
  * scene sources, runs `body` and frees everything afterwards.
  */
-async function withRendering<T>(job: PageJob, makePlan: (timeline: Timeline) => FramePlan, lookahead: number, body: (rendering: Rendering) => Promise<T>): Promise<T> {
+async function withRendering<T>(job: ExportJob | StillsJob, makePlan: (timeline: Timeline) => FramePlan, lookahead: number, body: (rendering: Rendering) => Promise<T>): Promise<T> {
   const { project } = job;
   const [assets, screen, webcam, segmenter] = await Promise.all([
     loadEngineAssets(),
@@ -222,11 +222,35 @@ async function renderStills(job: StillsJob): Promise<PageStillsSuccess> {
   );
 }
 
+/** A framed screenshot: its image pixel for pixel (never scaled down to fit a texture: too large is an error), encoded as the job asks. */
+async function renderShot(job: ShotJob): Promise<PageShotSuccess> {
+  const started = performance.now();
+  await loadEngineAssets();
+  const image = await loadImage(job.source, Number.POSITIVE_INFINITY, 'the shot');
+  let background: ImageBitmap | undefined;
+  const canvas = new OffscreenCanvas(1, 1);
+  try {
+    if (job.backgroundImage) background = await loadImage(job.backgroundImage, probeMaxTextureSize(), 'the background image');
+    const placed = drawShot(canvas, job.shot, image, { ...(job.scale !== undefined && { scale: job.scale }), ...(background && { backgroundImage: background }) });
+    const gl = canvas.getContext('webgl2')!;
+    const type = `image/${job.format}`;
+    const blob = await canvas.convertToBlob({ type, ...(job.quality !== undefined && { quality: job.quality }) });
+    // a type the browser cannot write comes back as a PNG
+    if (blob.type !== type) throw new PageError('render', `this build cannot write ${job.format} images`);
+    await host().writeStill('shot', new Uint8Array(await blob.arrayBuffer()));
+    return { ok: true, width: placed.output.width, height: placed.output.height, scale: placed.scale, gpu: gpuName(gl), totalMs: Math.round(performance.now() - started) };
+  } finally {
+    (canvas.getContext('webgl2') as WebGL2RenderingContext | null)?.getExtension('WEBGL_lose_context')?.loseContext();
+    image.close();
+    background?.close();
+  }
+}
+
 /** Runs the job the main process prepared; never throws, failures come back as `{ ok: false }`. */
 export async function run(): Promise<PageResult> {
   try {
     const job = await host().job();
-    return job.kind === 'stills' ? await renderStills(job) : await exportVideo(job);
+    return job.kind === 'shot' ? await renderShot(job) : job.kind === 'stills' ? await renderStills(job) : await exportVideo(job);
   } catch (error) {
     // Unexpected errors keep their stack on stderr. The main process forwards page errors as text, so
     // spell them out (a DOMException would print as "[object DOMException]"); a V8 stack starts with

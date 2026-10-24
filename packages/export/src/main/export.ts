@@ -13,7 +13,7 @@ import { duckExpression, speechSpans } from '../music/duck';
 import { placeNarration, writeNarrationTrack } from './narration';
 import { ExportError } from '../errors';
 import { EXPORT_FPS, withFormat, type ExportCodec, type ExportFormat, type ExportSize } from '../formats';
-import { CHANNELS, type EncoderPreference, type ExportJob, type PageResult, type PageStillsSuccess, type PageSuccess } from '../job';
+import { CHANNELS, type EncoderPreference, type ExportJob, type PageResult, type PageShotSuccess, type PageStillsSuccess, type PageSuccess } from '../job';
 import { checkFfmpeg, runFfmpeg } from './ffmpeg';
 import { FileHost } from './files';
 import { segmenterPaths } from './segmenter';
@@ -219,7 +219,7 @@ export function watchdog(): { progress(done: number): void; alive(): void; stall
   };
 }
 
-export async function runPage<T extends PageSuccess | PageStillsSuccess>(window: ExportWindow, ...failures: Promise<never>[]): Promise<T> {
+export async function runPage<T extends PageSuccess | PageStillsSuccess | PageShotSuccess>(window: ExportWindow, ...failures: Promise<never>[]): Promise<T> {
   let result: PageResult;
   try {
     result = await Promise.race([

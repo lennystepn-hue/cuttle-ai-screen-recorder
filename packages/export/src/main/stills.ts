@@ -213,7 +213,7 @@ function running(pid: number): boolean {
 }
 
 /** A rename that waits a moment for a file another program holds (a virus scanner, a viewer). */
-async function renameWhenFree(from: string, to: string): Promise<void> {
+export async function renameWhenFree(from: string, to: string): Promise<void> {
   for (let attempt = 1; ; attempt++) {
     try {
       return await rename(from, to);

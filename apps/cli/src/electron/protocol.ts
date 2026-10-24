@@ -2,6 +2,8 @@
 // answer and a cancel go over Node's IPC channel (Electron's main process reads no stdin on
 // Windows, and the console's Ctrl+C does not reach it). Pure: both sides import it.
 
+import type { Shot } from '@cuttle/project';
+
 /**
  * A motion page to check (`cuttle motion check`): a scene is rendered as the project's only scene;
  * an overlay (`overlay`: its place in `overlays`) over the project's video, the only overlay.
@@ -23,6 +25,7 @@ export type ElectronRequest = (
   | { command: 'preview'; projectDir: string; outDir: string; times: number[]; format?: string; sheet?: { columns?: number }; clean?: boolean; motion?: MotionCheck; transparent?: boolean }
   | { command: 'capture-page'; target: string; out: string; width: number; height: number; fullPage: boolean; waitMs: number }
   | { command: 'music'; projectDir: string; out: string; sheet?: string; src?: string }
+  | { command: 'shot'; shot: Shot; dir: string; out: string; scale?: number; quality?: number }
 ) & {
   /** No progress lines on stderr (--json). */
   quiet?: boolean;

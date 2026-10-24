@@ -12,8 +12,8 @@ export interface Sprite {
   box: Size;
 }
 
-export function cssFont(weight: 400 | 600, px: number): string {
-  return `${weight} ${px}px "${FONT_FAMILY}"`;
+export function cssFont(weight: number, px: number, family = FONT_FAMILY): string {
+  return `${weight} ${px}px "${family}"`;
 }
 
 /** Shortens `text` with "…" until it is at most `maxWidth` px wide in the context's current font. */
@@ -41,7 +41,7 @@ export function drawLabel(text: string, style: LabelStyle, unit: number, maxWidt
   const padY = Math.round(style.padY * unit);
   const accent = style.accent ? Math.max(2, Math.round(6 * unit)) : 0;
   const measure = new OffscreenCanvas(1, 1).getContext('2d')!;
-  measure.font = cssFont(style.weight, fontPx);
+  measure.font = cssFont(style.weight, fontPx, style.family);
   const shown = fitText(measure, text, Math.max(0, maxWidth - 2 * padX - accent));
   const boxWidth = Math.max(1, Math.ceil(measure.measureText(shown).width) + 2 * padX + accent);
   const boxHeight = Math.round(fontPx * 1.3) + 2 * padY;
@@ -85,7 +85,7 @@ export function drawLabel(text: string, style: LabelStyle, unit: number, maxWidt
   } else {
     shadowOn();
   }
-  ctx.font = cssFont(style.weight, fontPx);
+  ctx.font = cssFont(style.weight, fontPx, style.family);
   ctx.fillStyle = style.color;
   ctx.textBaseline = 'middle';
   ctx.fillText(part.reveal === undefined ? shown : [...shown].slice(0, Math.max(0, part.reveal)).join(''), accent + padX, boxHeight / 2);

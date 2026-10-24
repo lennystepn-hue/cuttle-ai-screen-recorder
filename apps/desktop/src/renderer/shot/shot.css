@@ -337,6 +337,19 @@ body.transparent #root {
   color: var(--text);
   background: var(--raised);
 }
+.shot-colors input[type='text'] {
+  flex: 1;
+  min-width: 0;
+}
+.shot-colors button.ghost:disabled {
+  opacity: 0.5;
+}
+.shot-hint {
+  margin: 0;
+  font-size: var(--size-s);
+  line-height: 1.4;
+  color: var(--text-2);
+}
 .shot-range {
   display: flex;
   align-items: center;

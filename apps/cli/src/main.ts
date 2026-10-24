@@ -17,7 +17,7 @@ import { webcamBackgroundCommand } from './commands/webcam';
 import { motionAddCommand, motionCheckCommand, motionNewCommand, motionTemplatesCommand } from './commands/motion';
 import { musicCheckCommand, musicNewCommand, musicSetCommand, musicTemplatesCommand, soundAddCommand, soundListCommand } from './commands/music';
 import { previewCommand } from './commands/preview';
-import { shotFrameCommand, shotTakeCommand, type ShotFrameArgs, type ShotTakeArgs } from './commands/shot';
+import { shotFrameCommand, shotStylesCommand, shotTakeCommand, type ShotFrameArgs, type ShotTakeArgs } from './commands/shot';
 import { recordCommand } from './commands/record';
 import { recoverCommand } from './commands/recover';
 import { renderAllCommand, renderCommand, renderStillCommand } from './commands/render';
@@ -75,6 +75,14 @@ const points = (value: string): number => {
   if (!Number.isFinite(parsed) || parsed < 0 || parsed > 1000) throw new InvalidArgumentError('expected points from 0 to 1000');
   return parsed;
 };
+/** A share of a shot past its edge: 0 to 0.6. */
+const bleedShare = (value: string): number => {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed < 0 || parsed > 0.6) throw new InvalidArgumentError('expected a share from 0 to 0.6');
+  return parsed;
+};
+/** An option given again adds to the ones before. */
+const collectText = (value: string, previous: string[] = []): string[] => [...previous, value];
 /** Pixels per point: more than 0, at most 8. */
 const scale = (value: string): number => {
   const parsed = Number(value);
@@ -372,11 +380,27 @@ export async function runCli(argv: readonly string[], streams?: Streams): Promis
       .option('--shadow', 'a soft shadow under it (the default)')
       .option('--no-shadow', 'no shadow')
       .option('--padding <points>', 'space around it (default 64)', points)
-      .option('--size <size>', 'auto (it and its padding, pixel for pixel), a ratio the canvas grows to (16:9, 1:1, 4:5, 9:16, 1.91:1) or pixels it is fitted into (1200x630)')
+      .option('--size <size>', 'auto (it and its padding, pixel for pixel), a ratio the canvas grows to (16:9, 1:1, 4:5, 9:16, 1.91:1), pixels it is fitted into (1200x630), or what it is for: x, youtube, square, instagram, linkedin, story, og, x-header, app-store-iphone, app-store-mac')
       .option('--crop <x,y,w,h>', 'only this part of the image, in its pixels')
       .option('--shot-scale <n>', "the image's pixels per point: 2 from a Retina display (default: from a PNG's resolution, else 1)", scale)
       .option('--scale <n>', 'the output\'s pixels per point (default: the image\'s own, pixel for pixel)', scale)
-      .option('--quality <0-1>', 'a JPEG\'s or WebP\'s quality', fraction);
+      .option('--quality <0-1>', 'a JPEG\'s or WebP\'s quality', fraction)
+      .option('--align <side>', 'where the shot sits in a canvas larger than it: center (default), top, bottom, left or right')
+      .option('--bleed <0-0.6>', 'the share of the shot that reaches past the edge it is aligned to (a product shot cut off by it)', bleedShare)
+      .option('--headline <title>', 'a title on the background, above the shot (a launch image, a feature card)')
+      .option('--no-headline', 'no headline')
+      .option('--subtitle <text>', 'a line under the headline')
+      .option('--headline-position <side>', 'the headline above (default) or below the shot')
+      .option('--headline-color <hex>', "the headline's colour (default white; dark on nothing)")
+      .option('--font <name>', "the headline's and a watermark's font: Archivo (default), Inter, Space Grotesk, Fraunces, Instrument Serif or Bebas Neue")
+      .option('--mask <x,y,w,h>', 'a part of the image blurred, in its pixels (again for another)', collectText)
+      .option('--redact', "read the shot's text on this computer (Windows' OCR, macOS's Vision) and mask what is private in it: email addresses, keys, tokens, IBANs, card and phone numbers")
+      .option('--clear-masks', 'no masks (before the ones given)')
+      .option('--brand <name>', "a brand kit's background, frame, font and logo (cuttle brand list)")
+      .option('--style <name>', "a saved style's look (cuttle shot styles)")
+      .option('--save-style <name>', 'keep the look as a style, to frame other shots with')
+      .option('--watermark <logo or text>', 'a logo (an image file) or a name in a corner')
+      .option('--no-watermark', 'no watermark');
   const shot = program.command('shot').description('screenshots framed as the videos are: the image in a window, a browser, a phone or alone, on a background, with rounded corners and a shadow, pixel for pixel');
   shotLook(
     shot
@@ -393,6 +417,11 @@ export async function runCli(argv: readonly string[], streams?: Streams): Promis
     .option('-o, --out <file>', 'the framed image: .png, .jpg or .webp (default: shot.png in the shot\'s folder)')
     .option('--save <folder>', `the shot's folder (default: a new one in ${process.platform === 'win32' ? 'Pictures\\Cuttle' : 'Pictures/Cuttle'})`)
     .action(action((output, _project, options: ShotTakeArgs) => withSignal(output, (signal) => shotTakeCommand(options, output, signal))));
+  shot
+    .command('styles')
+    .description('the saved screenshot styles (shot frame --save-style), and where they are kept')
+    .option('--remove <name>', 'forget a style')
+    .action(action((output, _project, options: { remove?: string }) => shotStylesCommand(options, output)));
   shotLook(shot.command('frame <image>').description('frames a PNG, JPEG or WebP (or a shot folder made with --save) and writes it as a PNG, JPEG or WebP'))
     .option('-o, --out <file>', 'the image to write: .png, .jpg or .webp (default: <image>-framed.png beside it; a shot folder\'s shot.png)')
     .option('--save <folder>', 'also keep the shot as a folder (shot.json, its image, shot.png), to frame it again with other options')

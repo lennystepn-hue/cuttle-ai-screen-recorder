@@ -3,7 +3,9 @@ import type { TextStyle } from '@cuttle/project';
 /** How a piece of text is drawn into a sprite. Sizes are in units (1 px at 1080p); colours are CSS colours. */
 export interface LabelStyle {
   size: number;
-  weight: 400 | 600;
+  weight: number;
+  /** The font family, loaded before (default the engine's Inter). */
+  family?: string;
   color: string;
   /** Box behind the text; without it only the text is drawn. */
   fill?: string;

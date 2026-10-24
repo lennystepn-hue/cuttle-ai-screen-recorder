@@ -649,6 +649,37 @@ describe.runIf(enabled)('cuttle in Electron', () => {
     }
   }, 120_000);
 
+  it('makes a screenshot ready to publish: an Open Graph image with a headline over the shot cut off at the bottom, a watermark and a mask, its look a style for the next shot', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'cuttle-shot-'));
+    const styles = process.env.CUTTLE_SHOT_STYLES;
+    process.env.CUTTLE_SHOT_STYLES = join(dir, 'shot-styles.json');
+    try {
+      writeFileSync(join(dir, 'screen.png'), pngWith(800, 500, 144));
+      const kept = join(dir, 'kept');
+      const og = cuttle('shot', 'frame', join(dir, 'screen.png'), '--size', 'og', '--align', 'bottom', '--bleed', '0.25', '--headline', 'Ship it', '--subtitle', 'In one go', '--font', 'space-grotesk', '--watermark', 'ACME', '--mask', '0,0,200,100', '--save-style', 'Launch', '--save', kept);
+      expect(og.code).toBe(0);
+      expect(pngSize(join(kept, 'shot.png'))).toEqual([1200, 630]);
+      expect(JSON.parse(readFileSync(join(kept, 'shot.json'), 'utf8'))).toMatchObject({ size: { width: 1200, height: 630 }, align: 'bottom', bleed: 0.25, headline: { title: 'Ship it', subtitle: 'In one go' }, font: 'Space Grotesk', watermark: { text: 'ACME' }, masks: [{ rect: [0, 0, 200, 100], style: 'blur' }] });
+      // the headline's white letters on the background above the shot (which starts below row 280)
+      const out = PNG.sync.read(readFileSync(join(kept, 'shot.png')));
+      let white = 0;
+      for (let i = 0; i < 1200 * 280 * 4; i += 4) if (out.data[i]! > 235 && out.data[i + 1]! > 235 && out.data[i + 2]! > 235) white++;
+      expect(white).toBeGreaterThan(500);
+      // another screenshot in that style: its look, without the first one's headline and mask
+      writeFileSync(join(dir, 'other.png'), pngWith(400, 300));
+      const styled = cuttle('shot', 'frame', join(dir, 'other.png'), '--style', 'Launch', '--save', join(dir, 'other'));
+      expect(styled.code).toBe(0);
+      expect(pngSize(join(dir, 'other', 'shot.png'))).toEqual([1200, 630]);
+      const other = JSON.parse(readFileSync(join(dir, 'other', 'shot.json'), 'utf8')) as Record<string, unknown>;
+      expect(other).toMatchObject({ align: 'bottom', bleed: 0.25, font: 'Space Grotesk', watermark: { text: 'ACME' } });
+      expect([other.headline, other.masks ?? []]).toEqual([undefined, []]);
+    } finally {
+      if (styles === undefined) delete process.env.CUTTLE_SHOT_STYLES;
+      else process.env.CUTTLE_SHOT_STYLES = styles;
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }, 120_000);
+
   it('fails on an unknown format before rendering, and on a page that does not exist', () => {
     expect(cuttle('-C', project, 'render', '--format', '4:3').code).toBe(1);
     expect(cuttle('-C', project, 'capture-page', join(project, 'missing.html')).code).toBe(1);

@@ -1,12 +1,14 @@
 // The screenshot editor: the shot as it comes out (the engine draws it here, as the export does),
-// its look beside it (the background, the window, the size), the library of shots on the left, and
+// its look beside it (a brand kit or a style, the background, the window, the size and where the shot
+// sits, a headline, masks over what is private, a watermark), the library of shots on the left, and
 // Copy, Save and drag it out on top. Each change goes into the shot's shot.json and shot.png as it is
 // made, and the next screenshot takes this look.
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { drawShot, loadEngineAssets, type ShotLayout } from '@cuttle/engine';
-import { BACKGROUND_PRESETS, FRAME_STYLES, SOLID_DEFAULT, backgroundColors, isColouredBackground, parseShot, switchBackground, type BackgroundPreset, type FrameStyle, type Shot } from '@cuttle/project';
-import type { ShotEntry, ShotView } from '../../shared/ipc';
-import { BACKGROUND_NAMES, FRAME_NAMES } from '../../shared/names';
+import { drawShot, loadEngineAssets, loadHeadingFont, type ShotLayout } from '@cuttle/engine';
+import { svgBitmap } from '@cuttle/export/svg';
+import { BACKGROUND_PRESETS, FRAME_STYLES, SHOT_ALIGNS, SOLID_DEFAULT, THEME_FONTS, WEBCAM_CORNERS, backgroundColors, isColouredBackground, parseShot, switchBackground, type BackgroundPreset, type FrameStyle, type Shot } from '@cuttle/project';
+import type { ShotEntry, ShotLookAnswer, ShotView } from '../../shared/ipc';
+import { BACKGROUND_NAMES, CORNER_NAMES, FRAME_NAMES } from '../../shared/names';
 import { swatchStyle } from '../background-swatch';
 import { bridge } from '../bridge';
 import { CheckIcon, CopyIcon, ExportIcon, FolderIcon, ShotIcon, WarningIcon } from '../icons';
@@ -24,7 +26,13 @@ const SIZES: { value: string; label: string }[] = [
   { value: '9:16', label: '9:16 · stories' },
   { value: '1.91:1', label: '1.91:1 · link preview' },
   { value: '1200x630', label: '1200 × 630 · Open Graph' },
+  { value: '1500x500', label: '1500 × 500 · X header' },
+  { value: '1290x2796', label: '1290 × 2796 · App Store, iPhone' },
+  { value: '2880x1800', label: '2880 × 1800 · Mac App Store' },
 ];
+/** What each heading font is like, beside its name in the list. */
+const FONT_NOTES: Record<(typeof THEME_FONTS)[number], string> = { Archivo: 'bold grotesque', Inter: 'plain and clear', 'Space Grotesk': 'geometric', Fraunces: 'display serif', 'Instrument Serif': 'light serif', 'Bebas Neue': 'tall capitals' };
+const ALIGN_NAMES: Record<(typeof SHOT_ALIGNS)[number], string> = { center: 'In the middle', top: 'At the top', bottom: 'At the bottom', left: 'On the left', right: 'On the right' };
 /** The output's pixels per point: '' for the shot's own (pixel for pixel). */
 const SCALES = [
   { value: '', label: 'Pixel for pixel' },
@@ -41,19 +49,28 @@ const sizeOf = (value: string): Shot['size'] => {
   const pixels = /^(\d+)x(\d+)$/.exec(value);
   return pixels ? { width: Number(pixels[1]), height: Number(pixels[2]) } : value;
 };
-const bitmapOf = (bytes: Uint8Array) => createImageBitmap(new Blob([new Uint8Array(bytes)]), { premultiplyAlpha: 'premultiply', imageOrientation: 'from-image' });
+// an SVG (a brand's logo) is no image createImageBitmap reads: an image draws it
+const bitmapOf = (bytes: Uint8Array) => createImageBitmap(new Blob([new Uint8Array(bytes)]), { premultiplyAlpha: 'premultiply', imageOrientation: 'from-image' }).catch((error: unknown) => svgBitmap(new Uint8Array(bytes)).catch(() => Promise.reject(error)));
+
+/** The pictures a shot is drawn from: its image, and a background's and a watermark's when it has them. */
+interface Pictures {
+  image: ImageBitmap;
+  background?: ImageBitmap;
+  logo?: ImageBitmap;
+}
 
 /** Draws the shot into a canvas of its own: its pixels, in a format, or as a bitmap for the preview. */
-function draw(shot: Shot, image: ImageBitmap, background: ImageBitmap | undefined, scale: number | undefined): { canvas: OffscreenCanvas; layout: ShotLayout; free: () => void } {
+function draw(shot: Shot, pictures: Pictures, scale: number | undefined): { canvas: OffscreenCanvas; layout: ShotLayout; free: () => void } {
   const canvas = new OffscreenCanvas(1, 1);
-  const layout = drawShot(canvas, shot, image, { ...(scale !== undefined && { scale }), ...(background && { backgroundImage: background }) });
+  const layout = drawShot(canvas, shot, pictures.image, { ...(scale !== undefined && { scale }), ...(pictures.background && { backgroundImage: pictures.background }), ...(pictures.logo && { watermarkImage: pictures.logo }) });
   // a context a draw: free it now (browsers keep only a few)
   const free = () => (canvas.getContext('webgl2') as WebGL2RenderingContext | null)?.getExtension('WEBGL_lose_context')?.loseContext();
   return { canvas, layout, free };
 }
 
-async function encode(shot: Shot, image: ImageBitmap, background: ImageBitmap | undefined, scale: number | undefined, format: Format): Promise<Uint8Array> {
-  const { canvas, free } = draw(shot, image, background, scale);
+async function encode(shot: Shot, pictures: Pictures, scale: number | undefined, format: Format): Promise<Uint8Array> {
+  await loadHeadingFont(shot.font);
+  const { canvas, free } = draw(shot, pictures, scale);
   try {
     const blob = await canvas.convertToBlob({ type: `image/${format}`, ...(format !== 'png' && { quality: 0.92 }) });
     return new Uint8Array(await blob.arrayBuffer());
@@ -67,6 +84,12 @@ export function Shot() {
   const [raw, setRaw] = useState<Raw>();
   const [image, setImage] = useState<ImageBitmap>();
   const [background, setBackground] = useState<ImageBitmap>();
+  const [logo, setLogo] = useState<ImageBitmap>();
+  const pictures = useMemo(() => (image ? { image, ...(background && { background }), ...(logo && { logo }) } : undefined), [image, background, logo]);
+  const [brands, setBrands] = useState<string[]>([]);
+  const [styles, setStyles] = useState<string[]>([]);
+  const [styleName, setStyleName] = useState('');
+  const [reading, setReading] = useState(false);
   const [scale, setScale] = useState('');
   const [size, setSize] = useState<{ width: number; height: number; scale: number }>();
   const [note, setNote] = useState<{ text: string; tone: 'ok' | 'warn' }>();
@@ -77,12 +100,16 @@ export function Shot() {
 
   // the shot shown: the one the window opened on, a new one, one from the library
   const show = useCallback(async (next: ShotView) => {
-    const [bitmap, behind] = await Promise.all([bitmapOf(next.image), next.backgroundImage ? bitmapOf(next.backgroundImage) : undefined]);
+    const [bitmap, behind, mark] = await Promise.all([bitmapOf(next.image), next.backgroundImage ? bitmapOf(next.backgroundImage) : undefined, next.watermarkImage ? bitmapOf(next.watermarkImage) : undefined]);
+    // the kits and the styles as they are now (one may have been made meanwhile)
+    void bridge.invoke('shot:brands').then(setBrands);
+    void bridge.invoke('shot:styles').then(setStyles);
     changed.current = false;
     setView(next);
     setRaw(next.raw);
     setImage(bitmap);
     setBackground(behind);
+    setLogo(mark);
     setNote(undefined);
   }, []);
   const loadLibrary = useCallback(async () => {
@@ -107,13 +134,13 @@ export function Shot() {
 
   // the preview: drawn whenever the shot changes, a frame after the change
   useEffect(() => {
-    if (!shot || !image) return;
+    if (!shot || !pictures) return;
     let cancelled = false;
     const frame = requestAnimationFrame(() => {
-      void ready.then(() => {
+      void Promise.all([ready, loadHeadingFont(shot.font)]).then(() => {
         if (cancelled) return;
         try {
-          const { canvas, layout, free } = draw(shot, image, background, outScale);
+          const { canvas, layout, free } = draw(shot, pictures, outScale);
           // copied before the context goes (its pictures go with it)
           const target = preview.current;
           if (target) {
@@ -134,20 +161,20 @@ export function Shot() {
       cancelled = true;
       cancelAnimationFrame(frame);
     };
-  }, [shot, image, background, outScale, ready]);
+  }, [shot, pictures, outScale, ready]);
 
   // each change written a moment later: shot.json, then its shot.png
   useEffect(() => {
-    if (!raw || !changed.current || !shot || !image) return;
+    if (!raw || !changed.current || !shot || !pictures) return;
     const timer = setTimeout(() => {
       void (async () => {
         const answer = await bridge.invoke('shot:change', { raw });
         if (answer.issues) return setNote({ text: answer.issues.join('; '), tone: 'warn' });
-        await bridge.invoke('shot:save', { data: await encode(shot, image, background, outScale, 'png'), format: 'png', as: false });
+        await bridge.invoke('shot:save', { data: await encode(shot, pictures, outScale, 'png'), format: 'png', as: false });
       })();
     }, WRITE_MS);
     return () => clearTimeout(timer);
-  }, [raw, shot, image, background, outScale]);
+  }, [raw, shot, pictures, outScale]);
 
   const change = (update: (before: Raw) => Raw) => {
     changed.current = true;
@@ -158,19 +185,62 @@ export function Shot() {
   const setBackgroundField = (fields: Raw) => change((before) => ({ ...before, transparent: false, background: { ...((before.background as Raw | undefined) ?? { preset: 'sunset-sky' }), ...fields } }));
 
   const copy = useCallback(async () => {
-    if (!shot || !image) return;
-    await bridge.invoke('shot:copy', { png: await encode(shot, image, background, outScale, 'png') });
+    if (!shot || !pictures) return;
+    await bridge.invoke('shot:copy', { png: await encode(shot, pictures, outScale, 'png') });
     setNote({ text: 'Copied', tone: 'ok' });
-  }, [shot, image, background, outScale]);
+  }, [shot, pictures, outScale]);
   const save = useCallback(
     async (format: Format) => {
-      if (!shot || !image) return;
+      if (!shot || !pictures) return;
       if (format === 'jpeg' && shot.transparent) return setNote({ text: 'A JPEG has no transparency: save it as PNG or WebP', tone: 'warn' });
-      const where = await bridge.invoke('shot:save', { data: await encode(shot, image, background, outScale, format), format, as: true });
+      const where = await bridge.invoke('shot:save', { data: await encode(shot, pictures, outScale, format), format, as: true });
       if (where) setNote({ text: `Saved to ${where}`, tone: 'ok' });
     },
-    [shot, image, background, outScale],
+    [shot, pictures, outScale],
   );
+  /** A brand kit's or a style's look over the shot's: its fields, and the pictures they name. */
+  const takeLook = async (answer: ShotLookAnswer, from: 'brand' | 'style') => {
+    const { fields } = answer;
+    if (answer.backgroundImage) setBackground(await bitmapOf(answer.backgroundImage));
+    // a kit without a logo or a name keeps the shot's watermark; a style brings its own, or none
+    if (from === 'style' || fields.watermark) setLogo(answer.watermarkImage ? await bitmapOf(answer.watermarkImage) : undefined);
+    change((before) =>
+      from === 'brand'
+        ? { ...before, transparent: false, background: fields.background, frame: { ...((before.frame as Raw | undefined) ?? {}), ...(fields.frame as Raw) }, font: fields.font, ...(fields.watermark ? { watermark: fields.watermark } : {}) }
+        : { version: before.version, source: before.source, ...(before.scale !== undefined && { scale: before.scale }), ...(before.crop !== undefined && { crop: before.crop }), ...(before.masks !== undefined && { masks: before.masks }), ...(before.headline !== undefined && { headline: before.headline }), ...fields },
+    );
+    setNote({ text: from === 'brand' ? 'The brand kit is on' : 'The style is on', tone: 'ok' });
+  };
+  /** Masks over what the shot's text shows that is private, read on this computer (those found before go). */
+  const redact = async () => {
+    setReading(true);
+    try {
+      const { masks } = await bridge.invoke('shot:redact');
+      change((before) => ({ ...before, masks: [...((before.masks as Raw[] | undefined) ?? []).filter((mask) => mask.auto !== 'privacy'), ...masks] }));
+      setNote({ text: masks.length === 0 ? 'Nothing private found: still look yourself' : `${masks.length} private ${masks.length === 1 ? 'thing' : 'things'} masked: still look yourself`, tone: masks.length === 0 ? 'ok' : 'warn' });
+    } catch (error) {
+      setNote({ text: `The text could not be read: ${(error as Error).message}`, tone: 'warn' });
+    } finally {
+      setReading(false);
+    }
+  };
+  /** A kit or a style put on, or what kept it from that (one removed meanwhile). */
+  const putOn = (from: 'brand' | 'style', name: string) =>
+    void (from === 'brand' ? bridge.invoke('shot:brand', { name }) : bridge.invoke('shot:style', { name }))
+      .then((answer) => takeLook(answer, from))
+      .catch((error: Error) => setNote({ text: error.message, tone: 'warn' }));
+  const saveStyle = async () => {
+    const name = styleName.trim();
+    if (!name) return;
+    try {
+      await bridge.invoke('shot:style-save', { name });
+    } catch (error) {
+      return setNote({ text: (error as Error).message, tone: 'warn' });
+    }
+    setStyles(await bridge.invoke('shot:styles'));
+    setStyleName('');
+    setNote({ text: `Saved as the style “${name}”`, tone: 'ok' });
+  };
   const chooseImage = async (kind: 'choose' | 'wallpaper') => {
     const chosen = await bridge.invoke('shot:background-image', kind);
     if (!chosen) return;
@@ -274,6 +344,38 @@ export function Shot() {
         </footer>
       </main>
       <section className="shot-inspector" aria-label="The screenshot's look">
+        <Part title="Brand and style">
+          <Field label="Brand">
+            <Select
+              value={undefined}
+              placeholder={brands.length === 0 ? 'No brand kits yet' : 'Choose a kit…'}
+              disabled={brands.length === 0}
+              options={brands.map((name) => ({ value: name, label: name }))}
+              onChange={(name) => putOn('brand', name)}
+              label="Brand kit"
+              testId="shot-brand"
+            />
+          </Field>
+          <Field label="Style">
+            <Select
+              value={undefined}
+              placeholder={styles.length === 0 ? 'No styles yet' : 'Choose a style…'}
+              disabled={styles.length === 0}
+              options={styles.map((name) => ({ value: name, label: name }))}
+              onChange={(name) => putOn('style', name)}
+              label="Style"
+              testId="shot-style"
+            />
+          </Field>
+          <Field label="Keep as">
+            <span className="shot-colors">
+              <input type="text" value={styleName} placeholder="A name for this look" maxLength={80} onChange={(event) => setStyleName(event.target.value)} onKeyDown={(event) => event.key === 'Enter' && void saveStyle()} aria-label="Style name" data-testid="shot-style-name" />
+              <button type="button" className="ghost small" disabled={!styleName.trim()} onClick={() => void saveStyle()} data-testid="shot-style-save">
+                Save
+              </button>
+            </span>
+          </Field>
+        </Part>
         <Part title="Background">
           <div className="swatches" role="group" aria-label="Background">
             <button type="button" className="swatch-button bg-none" aria-pressed={look?.transparent === true} title="Nothing: the shot and its shadow on transparency" onClick={() => setField('transparent', true)} data-testid="shot-bg-none">
@@ -369,9 +471,84 @@ export function Shot() {
           <Field label="Canvas">
             <Select value={sizeValue(look?.size ?? 'auto')} options={SIZES} onChange={(value) => setField('size', sizeOf(value))} label="Canvas size" testId="shot-size-select" />
           </Field>
+          {look && look.size !== 'auto' && (
+            <>
+              <Field label="Sits">
+                <Select value={look.align} options={SHOT_ALIGNS.map((align) => ({ value: align, label: ALIGN_NAMES[align] }))} onChange={(align) => setField('align', align)} label="Where the shot sits" testId="shot-align" />
+              </Field>
+              {look.align !== 'center' && (
+                <Field label="Bleed">
+                  <Range value={Math.round(look.bleed * 100)} max={60} label="How much of the shot reaches past the edge" onChange={(value) => setField('bleed', value / 100)} testId="shot-bleed" />
+                </Field>
+              )}
+            </>
+          )}
           <Field label="Scale">
             <Select value={scale} options={SCALES} onChange={setScale} label="Scale" />
           </Field>
+        </Part>
+        <Part title="Headline">
+          <HeadlineFields key={view.dir} headline={look?.headline} onChange={(headline) => change((before) => { const { headline: _old, ...rest } = before; return headline ? { ...rest, headline } : rest; })} />
+          <Field label="Font">
+            <Select value={look?.font} options={THEME_FONTS.map((font) => ({ value: font, label: font, note: FONT_NOTES[font] }))} onChange={(font) => setField('font', font)} label="The headline's and the watermark's font" testId="shot-font" />
+          </Field>
+        </Part>
+        <Part title="Private data">
+          <span className="shot-colors">
+            <button type="button" className="ghost small" disabled={reading} onClick={() => void redact()} data-testid="shot-redact">
+              {reading ? 'Reading the text…' : 'Hide private data'}
+            </button>
+            {(look?.masks.length ?? 0) > 0 && (
+              <button type="button" className="ghost small" onClick={() => setField('masks', [])} data-testid="shot-masks-clear">
+                Remove {look!.masks.length} {look!.masks.length === 1 ? 'mask' : 'masks'}
+              </button>
+            )}
+          </span>
+          <p className="shot-hint">Email addresses, keys and tokens, card and phone numbers, read on this computer and filled in. It misses things: look yourself before you share.</p>
+        </Part>
+        <Part title="Watermark">
+          <Field label="Text">
+            <input
+              type="text"
+              key={`${view.dir}:${look?.watermark?.image ?? ''}`}
+              defaultValue={look?.watermark?.image ? '' : (look?.watermark?.text ?? '')}
+              placeholder={look?.watermark?.image ? 'The brand’s logo' : 'A name in a corner'}
+              maxLength={80}
+              onChange={(event) => {
+                const text = event.target.value.trim();
+                change((before) => {
+                  const { watermark: _old, ...rest } = before;
+                  return text ? { ...rest, watermark: { ...((before.watermark as Raw | undefined) ?? {}), image: undefined, text } } : rest;
+                });
+                if (text) setLogo(undefined);
+              }}
+              aria-label="Watermark"
+              data-testid="shot-watermark"
+            />
+          </Field>
+          {look?.watermark && (
+            <>
+              <Field label="Corner">
+                <Select value={look.watermark.corner} options={WEBCAM_CORNERS.map((corner) => ({ value: corner, label: CORNER_NAMES[corner] }))} onChange={(corner) => change((before) => ({ ...before, watermark: { ...(before.watermark as Raw), corner } }))} label="Watermark corner" testId="shot-watermark-corner" />
+              </Field>
+              <span className="shot-colors">
+                <button
+                  type="button"
+                  className="ghost small"
+                  onClick={() => {
+                    change((before) => {
+                      const { watermark: _old, ...rest } = before;
+                      return rest;
+                    });
+                    setLogo(undefined);
+                  }}
+                  data-testid="shot-watermark-remove"
+                >
+                  No watermark
+                </button>
+              </span>
+            </>
+          )}
         </Part>
       </section>
     </div>
@@ -379,6 +556,34 @@ export function Shot() {
 }
 
 const FRAME_DEVICES = new Set<FrameStyle>(['iphone', 'android']);
+
+/** The headline's fields: a title makes one, an empty title takes it away. */
+function HeadlineFields({ headline, onChange }: { headline: Shot['headline']; onChange: (headline: Raw | undefined) => void }) {
+  const set = (fields: Raw) => {
+    const next = { ...(headline ?? {}), ...fields } as Raw;
+    onChange(typeof next.title === 'string' && next.title.trim() !== '' ? next : undefined);
+  };
+  return (
+    <>
+      <Field label="Title">
+        <input type="text" defaultValue={headline?.title ?? ''} placeholder="A title over the shot" maxLength={120} onChange={(event) => set({ title: event.target.value })} aria-label="Headline" data-testid="shot-headline" />
+      </Field>
+      {headline && (
+        <>
+          <Field label="Line">
+            <input type="text" defaultValue={headline.subtitle ?? ''} placeholder="A line under it" maxLength={240} onChange={(event) => set({ subtitle: event.target.value || undefined })} aria-label="Line under the headline" />
+          </Field>
+          <Field label="Place">
+            <Select value={headline.position} options={[{ value: 'above', label: 'Above the shot' }, { value: 'below', label: 'Below the shot' }]} onChange={(position) => set({ position })} label="Where the headline goes" />
+          </Field>
+          <Field label="Colour">
+            <input type="color" value={headline.color ?? '#ffffff'} onChange={(event) => set({ color: event.target.value })} aria-label="Headline colour" />
+          </Field>
+        </>
+      )}
+    </>
+  );
+}
 
 function Part({ title, children }: { title: string; children: ReactNode }) {
   return (

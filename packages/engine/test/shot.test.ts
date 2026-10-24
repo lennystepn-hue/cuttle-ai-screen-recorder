@@ -80,6 +80,52 @@ describe('shotLayout', () => {
     expect(placed.layout.window).toEqual([20, 20, 390 + 2 * band, 844 + 2 * band]);
   });
 
+  it('puts the shot where align says in a canvas larger than it', () => {
+    const at = (align: 'top' | 'bottom' | 'left' | 'right') => shotLayout(shot({ padding: 10, size: '1:1', align, frame: flat }), { width: 200, height: 100 }).layout.content;
+    // a 220×120 shot in a 220×220 canvas
+    expect(at('top')).toEqual([10, 10, 200, 100]);
+    expect(at('bottom')).toEqual([10, 110, 200, 100]);
+    const wide = (align: 'left' | 'right') => shotLayout(shot({ padding: 10, size: '16:9', align, frame: flat }), { width: 100, height: 100 }).layout.content;
+    // a 120×120 shot in a 213×120 canvas
+    expect(wide('left')).toEqual([10, 10, 100, 100]);
+    expect(wide('right')).toEqual([103, 10, 100, 100]);
+  });
+
+  it('lets the shot bleed past the edge it is aligned to: that share of it cut off there', () => {
+    const placed = shotLayout(shot({ padding: 20, size: '1:1', align: 'bottom', bleed: 0.25, frame: flat }), { width: 400, height: 200 });
+    const [, y, , h] = placed.layout.window;
+    expect(h).toBe(200);
+    // a quarter of it past the bottom edge, none of the padding there
+    expect(y + h - placed.output.height).toBe(50);
+    expect(placed.output).toEqual({ width: 440, height: 440 });
+    const top = shotLayout(shot({ padding: 20, size: '1:1', align: 'top', bleed: 0.25, frame: flat }), { width: 400, height: 200 });
+    expect(top.layout.window[1]).toBe(-50);
+  });
+
+  it('makes room for a headline above or below the shot, and keeps it away from an edge the shot bleeds past', () => {
+    const headline = { title: 'Ship it', subtitle: 'In one go' };
+    const above = shotLayout(shot({ padding: 10, headline, frame: flat }), { width: 300, height: 100 });
+    // 40 pt and 20 pt lines (1.3 em), 8 pt between them, 28 pt to the shot
+    const band = 52 + 8 + 26 + 28;
+    expect(above.output).toEqual({ width: 320, height: 120 + band });
+    expect(above.headline).toMatchObject({ title: 10, subtitle: 10 + 52 + 8, maxWidth: 300 });
+    expect(above.layout.content).toEqual([10, 10 + band, 300, 100]);
+    const below = shotLayout(shot({ padding: 10, headline: { ...headline, position: 'below' }, frame: flat }), { width: 300, height: 100 });
+    expect(below.layout.content).toEqual([10, 10, 300, 100]);
+    expect(below.headline?.title).toBe(10 + 100 + 28);
+    const bleeding = shotLayout(shot({ padding: 10, size: '1:1', align: 'top', bleed: 0.2, headline, frame: flat }), { width: 300, height: 100 });
+    expect(bleeding.headline!.title).toBeGreaterThan(bleeding.layout.window[1] + 100);
+  });
+
+  it("grows a large shot's headline with it: the title 6 % of its width, all of its type alike", () => {
+    // 1280 points wide (a Retina screenshot of 2560 px): a 76.8 pt title, a 38.4 pt line under it
+    const large = shotLayout(shot({ scale: 2, padding: 10, headline: { title: 'Ship it', subtitle: 'In one go' }, frame: flat }), { width: 2560, height: 1600 });
+    expect(large.headline!.type).toEqual({ title: 76.8, subtitle: 38.4, gap: 15.36, space: 53.76 });
+    // its band at 2 px a point
+    const band = Math.round(Math.round(76.8 * 2) * 1.3) + Math.round(15.36 * 2) + Math.round(Math.round(38.4 * 2) * 1.3) + Math.round(53.76 * 2);
+    expect(large.layout.content[1]).toBe(20 + band);
+  });
+
   it('refuses a canvas larger than a canvas can be', () => {
     expect(() => shotLayout(shot({ padding: 0, frame: flat }), { width: 9000, height: 9000 }, 2)).toThrow(/more than 16384 px/);
   });

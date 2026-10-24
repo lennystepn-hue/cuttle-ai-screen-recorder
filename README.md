@@ -431,8 +431,13 @@ dragged region, with a timer of 3, 5 or 10 s for what only shows while you point
 comes out framed in the last look (a window, a browser or a phone around it, or just rounded corners
 and a shadow, on any of the video backgrounds or on nothing), pixel for pixel at the display's own
 scale, and is copied; a note in the corner opens it in the screenshot editor. There the look changes
-live (background, frame and title, corners, shadow, padding, a canvas of 16:9, 4:5, 9:16 or 1200×630),
-and the shot is copied, saved as PNG, JPEG or WebP, or dragged straight into a chat. Every shot keeps
+live (background, frame and title, corners, shadow, padding, a canvas of 16:9, 4:5, 9:16, Open Graph's
+1200×630, X's header or the App Store's sizes, the shot on an edge of it or cut off by it), with a
+headline over it in one of the videos' heading fonts, a brand kit's background, frame, font and logo
+in one click, "Hide private data" (its
+text read on this computer: email addresses, keys and tokens, card and phone numbers filled in) and a
+watermark; a look is kept as a style by name for the next shots. The shot is copied, saved as PNG,
+JPEG or WebP, or dragged straight into a chat. Every shot keeps
 a folder of its own in `Pictures/Cuttle/<date time>` (its picture, `shot.json` and the framed
 `shot.png`), listed beside the editor; the settings choose the folder, and whether a shot is copied at
 once or opens in the editor. During a take, the HUD's camera (or Ctrl+Shift+Alt+C) takes a
@@ -479,6 +484,7 @@ cuttle chapters                      # those chapters as lines for a YouTube des
 cuttle open                          # the project in the app's editor, which follows every change to it (Claude's too)
 cuttle shot frame screen.png --frame browser-dark --background gradient --from shot   # a screenshot framed as the videos are, pixel for pixel (Retina at 2×), as PNG, JPEG or WebP
 cuttle shot take --window "Claude"     # takes the window by itself and frames it, kept in Pictures/Cuttle
+cuttle shot frame screen.png --size og --align bottom --bleed 0.3 --headline "Ship it" --brand Acme --redact   # an Open Graph image: a headline, the brand's look and logo, private text filled in
 cuttle render --still 12.5             # the video's frame at 12.5 s as a PNG (a thumbnail), as the export draws it
 cuttle recover takes/2               # after a crash
 ```

@@ -13,6 +13,10 @@ describe('shot.json', () => {
       background: { preset: 'sunset-sky' },
       transparent: false,
       frame: { style: 'none', title: '', radius: 12, shadow: true },
+      align: 'center',
+      bleed: 0,
+      font: 'Archivo',
+      masks: [],
     });
   });
 
@@ -25,6 +29,14 @@ describe('shot.json', () => {
     }
     expect(shotRatio('16:9')).toBeCloseTo(16 / 9);
     expect(shotRatio('auto')).toBeUndefined();
+  });
+
+  it('takes a headline, masks and a watermark, and names what is missing', () => {
+    const parsed = parseShot({ version: 1, source: 's.png', headline: { title: 'Ship it' }, masks: [{ rect: [1, 2, 30, 10] }], watermark: { text: 'acme' } });
+    expect(parsed.ok && [parsed.shot.headline, parsed.shot.masks, parsed.shot.watermark]).toEqual([{ title: 'Ship it', position: 'above' }, [{ rect: [1, 2, 30, 10], style: 'blur' }], { text: 'acme', corner: 'bottom-right', size: 0.05, opacity: 0.8 }]);
+    const empty = parseShot({ version: 1, source: 's.png', watermark: { corner: 'top-left' } });
+    expect(empty.ok ? [] : empty.issues.map((issue) => issue.message)).toEqual(['a watermark needs an image or a text']);
+    expect(parseShot({ version: 1, source: 's.png', bleed: 0.9 }).ok).toBe(false);
   });
 
   it('reads a file with a byte order mark, and says where its JSON breaks', () => {

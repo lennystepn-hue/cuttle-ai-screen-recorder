@@ -43,7 +43,7 @@ export { BRAND_FILE, PROJECT_BRAND_DIR, applyBrand, brandFields, brandSlug, bran
 export { keepInProject } from './keep-file';
 export { PALETTE_RULES, imagePalette, paletteOf, takePalette } from './palette';
 export { importWallpaper, wallpaperFile } from './wallpaper';
-export { newShotFolder, pngScale } from './shots';
+export { findShotStyle, imageSize, listShotStyles, lookFrom, lookInto, newShotFolder, pngScale, redactShot, saveShotStyle, secretMasks, shotBrand, shotLook, shotStyleFor, shotStylesFile } from './shots';
 export { parseRegWallpaper } from './wallpaper-win32';
 export { DEFAULT_VOICE, LOCAL_VOICES, downloadVoice, localVoice, removeVoice, untar, voiceDir, voiceFiles, voiceInstalled, voiceUrl, type LocalVoice } from './voice/voices';
 export { ELEVENLABS_MODEL, elevenLabsKey, elevenLabsVoices, speakElevenLabs, wordsFromCharacters } from './voice/elevenlabs';

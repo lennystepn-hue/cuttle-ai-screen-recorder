@@ -3017,6 +3017,78 @@ describe.runIf(enabled)('the Cuttle app', () => {
     expect((await invokeIn<{ dir: string; thumb?: Uint8Array }[]>(page, 'shot:library')).map((entry) => entry.dir)).toContain(dir);
   }, 60_000);
 
+  it('makes the screenshot ready to publish: a brand kit with its logo and font, a headline in another font, a size for Open Graph with the shot at the bottom, a style kept and put on again, the logo moved and taken off, masks taken off', async () => {
+    const page = await waitForPage(app, async (candidate) => candidate.url().includes('/shot.html'));
+    const [dir] = shotFolders();
+    const written = () => JSON.parse(readFileSync(join(dir!, 'shot.json'), 'utf8')) as Record<string, unknown>;
+    const before = written();
+    // a kit with a logo, made while the editor is open: there once a shot is shown again
+    const kit = join(root, 'brands', 'orbit');
+    mkdirSync(kit, { recursive: true });
+    writeFileSync(join(kit, 'logo.svg'), '<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64"><circle cx="32" cy="32" r="30" fill="#ff8800"/></svg>');
+    const look = { background: { preset: 'solid', color: '#102030' }, frame: { style: 'browser-dark' }, cursor: { style: 'system', color: '#ffffff' } };
+    writeFileSync(join(kit, 'brand.json'), JSON.stringify({ version: 1, name: 'Orbit', theme: { name: 'Orbit', logo: 'logo.svg', font: 'Fraunces' }, look }));
+    const settled = async (size: [number, number]) => expect.poll(() => pngSize(join(dir!, 'shot.png')), { timeout: 15_000 }).toEqual(size);
+    try {
+      await invokeIn(page, 'shot:open', { dir });
+      await expect.poll(() => page.locator('[data-testid=shot-brand]').isDisabled(), { timeout: 10_000 }).toBe(false);
+      await chooseIn(page, '[data-testid=shot-brand]', 'Orbit');
+      // its background, its frame (the shot's title stays), its logo copied in, in a corner
+      await expect.poll(() => (written().watermark as { image?: string } | undefined)?.image, { timeout: 10_000 }).toBe('brand/orbit-logo.svg');
+      expect(written()).toMatchObject({ transparent: false, background: { preset: 'solid', color: '#102030' }, frame: { style: 'browser-dark', title: 'acme.app' }, font: 'Fraunces' });
+      expect(existsSync(join(dir!, 'brand', 'orbit-logo.svg'))).toBe(true);
+      await page.fill('[data-testid=shot-headline]', 'Ship it today');
+      await expect.poll(() => (written().headline as { title?: string } | undefined)?.title, { timeout: 10_000 }).toBe('Ship it today');
+      // the headline in another of the videos' heading fonts
+      await chooseIn(page, '[data-testid=shot-font]', 'Bebas Neue');
+      await expect.poll(() => written().font, { timeout: 10_000 }).toBe('Bebas Neue');
+      await chooseIn(page, '[data-testid=shot-size-select]', '1200 × 630 · Open Graph');
+      await page.waitForSelector('[data-testid=shot-align]', { state: 'attached' });
+      await chooseIn(page, '[data-testid=shot-align]', 'At the bottom');
+      // aligned to an edge, it may reach past it
+      await page.waitForSelector('[data-testid=shot-bleed]', { state: 'attached' });
+      await expect.poll(() => written().align, { timeout: 10_000 }).toBe('bottom');
+      expect(written().size).toEqual({ width: 1200, height: 630 });
+      await settled([1200, 630]);
+      const scrollInspector = (top: number) => page.evaluate((to) => document.querySelector('.shot-inspector')!.scrollTo(0, to), top);
+      await scrollInspector(0);
+      await shotOf('63b-shot-editor-publish', '/shot.html');
+      await scrollInspector(1e6);
+      await shotOf('63c-shot-editor-publish-end', '/shot.html');
+      // kept as a style: its look with the logo's full path, not its headline
+      await page.fill('[data-testid=shot-style-name]', 'Launch');
+      await click(page, '[data-testid=shot-style-save]');
+      const styles = () => (existsSync(join(root, 'shot-styles.json')) ? (JSON.parse(readFileSync(join(root, 'shot-styles.json'), 'utf8')) as { styles: Record<string, Record<string, unknown>> }).styles : {});
+      await expect.poll(() => Object.keys(styles()), { timeout: 10_000 }).toEqual(['Launch']);
+      expect(styles().Launch).toMatchObject({ size: { width: 1200, height: 630 }, align: 'bottom', watermark: { image: join(dir!, 'brand', 'orbit-logo.svg') } });
+      expect(styles().Launch!.headline).toBeUndefined();
+      // the next shot takes the logo along: its full path in the settings
+      expect(JSON.parse(readFileSync(join(root, 'user-data', 'settings.json'), 'utf8')).shots.look.watermark.image).toBe(join(dir!, 'brand', 'orbit-logo.svg'));
+      // as it was, with a mask: the style puts the look on again, the shot keeps its mask
+      expect(await invokeIn(page, 'shot:change', { raw: { ...before, masks: [{ rect: [0, 0, 40, 20], style: 'fill' }] } })).toEqual({});
+      await invokeIn(page, 'shot:open', { dir });
+      await expect.poll(() => page.locator('[data-testid=shot-style]').isDisabled(), { timeout: 10_000 }).toBe(false);
+      await chooseIn(page, '[data-testid=shot-style]', 'Launch');
+      await expect.poll(() => written().size, { timeout: 10_000 }).toEqual({ width: 1200, height: 630 });
+      expect(written()).toMatchObject({ align: 'bottom', masks: [{ rect: [0, 0, 40, 20] }], watermark: { image: expect.stringMatching(/^images\//) } });
+      await settled([1200, 630]);
+      // the logo in another corner, then none
+      await chooseIn(page, '[data-testid=shot-watermark-corner]', 'Top left');
+      await expect.poll(() => (written().watermark as { corner?: string } | undefined)?.corner, { timeout: 10_000 }).toBe('top-left');
+      await click(page, '[data-testid=shot-watermark-remove]');
+      await expect.poll(() => written().watermark, { timeout: 10_000 }).toBeUndefined();
+      expect(await page.locator('[data-testid=shot-masks-clear]').textContent()).toBe('Remove 1 mask');
+      await click(page, '[data-testid=shot-masks-clear]');
+      await expect.poll(() => written().masks, { timeout: 10_000 }).toEqual([]);
+    } finally {
+      // the look as it was, for the shots after this one; the kit and the style gone again
+      await expect.poll(() => invokeIn(page, 'shot:change', { raw: before }), { timeout: 10_000 }).toEqual({});
+      await invokeIn(page, 'shot:open', { dir });
+      await rm(join(root, 'shot-styles.json'), { force: true });
+      await rm(kit, { recursive: true, force: true });
+    }
+  }, 90_000);
+
   it('takes a window by itself into the editor when the settings say edit, the timer counting down first', async () => {
     // the settings' Screenshots: Edit it
     await launchAgain(['--settings']);

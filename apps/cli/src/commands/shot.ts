@@ -1,10 +1,10 @@
 import { existsSync } from 'node:fs';
-import { copyFile, mkdir, readFile, stat, writeFile } from 'node:fs/promises';
-import { homedir } from 'node:os';
+import { copyFile, mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { homedir, tmpdir } from 'node:os';
 import { basename, dirname, extname, isAbsolute, join, resolve } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
-import { imagePalette, keepInProject, newShotFolder, pngScale, wallpaperFile } from '@cuttle/core';
-import { BACKGROUND_PRESETS, FRAME_STYLES, SHOT_FILE, SHOT_VERSION, isColouredBackground, parseShot, parseShotJson, shotRatio, switchBackground, type BackgroundPreset, type Shot } from '@cuttle/project';
+import { imagePalette, imageSize, keepInProject, listShotStyles, newShotFolder, pngScale, redactShot, saveShotStyle, shotBrand, shotStyleFor, shotStylesFile, wallpaperFile } from '@cuttle/core';
+import { BACKGROUND_PRESETS, FRAME_STYLES, SHOT_ALIGNS, SHOT_FILE, SHOT_SIZE_PRESETS, SHOT_VERSION, THEME_FONTS, isColouredBackground, parseShot, parseShotJson, shotRatio, switchBackground, type BackgroundPreset, type Shot, type ShotSizePreset, type ThemeFont } from '@cuttle/project';
 import { listDevices, takeShot, type Backend } from '@cuttle/recorder';
 import { runInElectron } from '../electron-runner';
 import { CliError } from '../errors';
@@ -41,6 +41,25 @@ export interface ShotFrameArgs {
   quality?: number;
   out?: string;
   save?: string;
+  align?: string;
+  bleed?: number;
+  /** A headline's title; false: none (`--no-headline`). */
+  headline?: string | false;
+  subtitle?: string;
+  headlinePosition?: string;
+  headlineColor?: string;
+  /** The headline's and a watermark's font, by name (`space-grotesk` or `Space Grotesk`). */
+  font?: string;
+  /** Rects to blur, `x,y,w,h` each (the image's pixels). */
+  mask?: string[];
+  /** Mask what the image's text shows that is private (read on this computer). */
+  redact?: boolean;
+  clearMasks?: boolean;
+  brand?: string;
+  style?: string;
+  saveStyle?: string;
+  /** A logo (an image file) or a name in a corner; false: none (`--no-watermark`). */
+  watermark?: string | false;
 }
 
 export interface ShotFrameResult {
@@ -53,24 +72,38 @@ export interface ShotFrameResult {
   scale: number;
   /** The shot's folder (shot.json, its image, shot.png), when it has one: to draw it again with other settings. */
   shot?: string;
+  /** With `--redact`: how many private things were masked. */
+  masked?: number;
 }
 
 const isFile = (path: string) => stat(path).then((info) => info.isFile(), () => false);
 const isDirectory = (path: string) => stat(path).then((info) => info.isDirectory(), () => false);
 
-/** `--size`: auto, a ratio (16:9) or pixels (1200x630). */
+/** `--size`: auto, a ratio (16:9), pixels (1200x630) or a canvas by name (og, x-header, story, …). */
 function sizeOf(size: string): Shot['size'] {
+  if (size in SHOT_SIZE_PRESETS) {
+    const preset = SHOT_SIZE_PRESETS[size as ShotSizePreset];
+    return typeof preset === 'string' ? preset : { ...preset };
+  }
   if (size === 'auto' || shotRatio(size) !== undefined) return size;
   const pixels = /^(\d+)\s*[x×]\s*(\d+)$/i.exec(size);
   if (pixels) return { width: Number(pixels[1]), height: Number(pixels[2]) };
-  throw new CliError('usage', `--size ${size}: auto, a ratio like 16:9, or pixels like 1200x630`);
+  throw new CliError('usage', `--size ${size}: auto, a ratio like 16:9, pixels like 1200x630, or ${Object.keys(SHOT_SIZE_PRESETS).join(', ')}`);
 }
 
-/** `--crop x,y,w,h` in image pixels. */
-function cropOf(crop: string): [number, number, number, number] {
+/** A heading font by its name, in any case, with dashes for spaces (`bebas-neue`). */
+function fontOf(name: string): ThemeFont {
+  const wanted = name.trim().toLowerCase().replace(/[-_]+/g, ' ');
+  const font = THEME_FONTS.find((candidate) => candidate.toLowerCase() === wanted);
+  if (!font) throw new CliError('usage', `--font ${name}: ${THEME_FONTS.join(', ')}`);
+  return font;
+}
+
+/** `--crop x,y,w,h` (or a `--mask`) in image pixels. */
+function cropOf(crop: string, flag = '--crop'): [number, number, number, number] {
   const values = crop.split(',').map((value) => Number(value.trim()));
   if (values.length !== 4 || !values.every((value) => Number.isFinite(value)) || values[2]! <= 0 || values[3]! <= 0) {
-    throw new CliError('usage', `--crop ${crop}: x,y,w,h in the image's pixels, w and h more than 0`);
+    throw new CliError('usage', `${flag} ${crop}: x,y,w,h in the image's pixels, w and h more than 0`);
   }
   return values as [number, number, number, number];
 }
@@ -164,6 +197,23 @@ export async function shotFrameCommand(target: string, args: ShotFrameArgs, outp
 
 /** Frames an image or a shot's folder (see `shotFrameCommand`); says nothing but its progress. */
 async function frameShot(target: string, args: ShotFrameArgs, output: Output, signal: AbortSignal): Promise<ShotFrameResult> {
+  // a style's or a brand's images for an image without a folder: a folder of their own meanwhile
+  let scratch: string | undefined;
+  try {
+    return await frameShotWith(target, args, output, signal, async () => (scratch ??= await mkdtemp(join(tmpdir(), 'cuttle-shot-'))));
+  } finally {
+    if (scratch) await rm(scratch, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
+/** A look's images (a background's, a watermark's) as full paths from `dir`. */
+function fromDir<T extends Record<string, unknown>>(part: T, dir: string): T {
+  return typeof part.image === 'string' && !isAbsolute(part.image) ? { ...part, image: join(dir, part.image) } : part;
+}
+
+async function frameShotWith(target: string, args: ShotFrameArgs, output: Output, signal: AbortSignal, scratch: () => Promise<string>): Promise<ShotFrameResult> {
+  if (args.align !== undefined && !(SHOT_ALIGNS as readonly string[]).includes(args.align)) throw new CliError('usage', `--align ${args.align}: ${SHOT_ALIGNS.join(', ')}`);
+  if (args.headlinePosition !== undefined && !['above', 'below'].includes(args.headlinePosition)) throw new CliError('usage', `--headline-position ${args.headlinePosition}: above or below`);
   if (args.background !== undefined && !(BACKGROUND_PRESETS as readonly string[]).includes(args.background)) {
     throw new CliError('usage', `no background "${args.background}" (${BACKGROUND_PRESETS.join(', ')})`);
   }
@@ -207,6 +257,24 @@ async function frameShot(target: string, args: ShotFrameArgs, output: Output, si
     }
   }
 
+  // a saved style, then a brand kit, then the options, each over the one before; their images in the
+  // shot's folder (from an image alone: in a folder of their own, as full paths)
+  const assets = async () => folder ?? (await scratch());
+  if (args.style !== undefined) {
+    const dir = await assets();
+    const look = await shotStyleFor(args.style, dir);
+    for (const [key, value] of Object.entries(look)) raw[key] = folder || !value || typeof value !== 'object' ? value : fromDir(value as Record<string, unknown>, dir);
+  }
+  if (args.brand !== undefined) {
+    const dir = await assets();
+    const kit = await shotBrand(args.brand, dir);
+    raw.background = folder ? kit.background : fromDir(kit.background, dir);
+    raw.frame = { ...(raw.frame && typeof raw.frame === 'object' ? (raw.frame as Record<string, unknown>) : {}), ...kit.frame };
+    if (kit.watermark) raw.watermark = folder ? kit.watermark : fromDir(kit.watermark, dir);
+    raw.font = kit.font;
+  }
+  if (args.font !== undefined) raw.font = fontOf(args.font);
+
   // the background, as `cuttle background` changes a project's
   const current = (raw.background && typeof raw.background === 'object' ? raw.background : { preset: 'sunset-sky' }) as Record<string, unknown>;
   const preset = (args.background ??
@@ -242,6 +310,39 @@ async function frameShot(target: string, args: ShotFrameArgs, output: Output, si
   if (args.size !== undefined) raw.size = sizeOf(args.size);
   if (args.crop !== undefined) raw.crop = cropOf(args.crop);
   if (args.shotScale !== undefined) raw.scale = args.shotScale;
+  if (args.align !== undefined) raw.align = args.align;
+  if (args.bleed !== undefined) raw.bleed = args.bleed;
+  // the headline: a new title makes one; its other options change the one there is
+  const before = raw.headline && typeof raw.headline === 'object' ? (raw.headline as Record<string, unknown>) : undefined;
+  if (args.headline === false) delete raw.headline;
+  else if (args.headline !== undefined || before) {
+    const headline: Record<string, unknown> = { ...before, ...(typeof args.headline === 'string' && { title: args.headline }) };
+    if (args.subtitle !== undefined) headline.subtitle = args.subtitle;
+    if (args.headlinePosition !== undefined) headline.position = args.headlinePosition;
+    if (args.headlineColor !== undefined) headline.color = args.headlineColor;
+    raw.headline = headline;
+  } else if (args.subtitle !== undefined || args.headlinePosition !== undefined || args.headlineColor !== undefined) {
+    throw new CliError('usage', '--subtitle, --headline-position and --headline-color change a headline: give it with --headline "<title>"');
+  }
+  // a logo (an image file) or a name in a corner
+  if (args.watermark === false) delete raw.watermark;
+  else if (args.watermark !== undefined) {
+    const logo = IMAGE_EXTENSIONS.includes(extname(args.watermark).toLowerCase()) || extname(args.watermark).toLowerCase() === '.svg';
+    const kept = raw.watermark && typeof raw.watermark === 'object' ? (raw.watermark as Record<string, unknown>) : {};
+    const { image: _image, text: _text, ...placed } = kept;
+    raw.watermark = logo ? { ...placed, image: await imageFor(folder, args.watermark, 'logo') } : { ...placed, text: args.watermark };
+  }
+  // masks: cleared, drawn by hand, and found by reading the image's text (those found before go)
+  const masks = args.clearMasks || !Array.isArray(raw.masks) ? [] : (raw.masks as Record<string, unknown>[]);
+  const drawn = (args.mask ?? []).map((rect) => ({ rect: cropOf(rect, '--mask'), style: 'blur' }));
+  let found: Record<string, unknown>[] | undefined;
+  if (args.redact) {
+    const size = imageSize(await readFile(source));
+    if (!size) throw new CliError('usage', `${basename(source)}: its size cannot be read for --redact`);
+    output.info('reading the shot\'s text …');
+    found = await redactShot(source, size);
+  }
+  if (args.clearMasks || drawn.length > 0 || found) raw.masks = [...(found ? masks.filter((mask) => mask.auto !== 'privacy') : masks), ...drawn, ...(found ?? [])];
   const parsed = parseShot(raw);
   if (!parsed.ok) throw new CliError('usage', parsed.issues.map((issue) => `${issue.path}: ${issue.message}`).join('; '));
 
@@ -251,11 +352,21 @@ async function frameShot(target: string, args: ShotFrameArgs, output: Output, si
   if (!IMAGE_EXTENSIONS.includes(format)) throw new CliError('usage', `-o ${args.out}: name the image .png, .jpg or .webp`);
   if (parsed.shot.transparent && (format === '.jpg' || format === '.jpeg')) throw new CliError('usage', 'a JPEG has no transparency: write the transparent shot as .png or .webp, or give --no-transparent');
   output.info(`framing ${basename(source)} …`);
-  const drawn = await runInElectron<{ file: string; format: string; width: number; height: number; scale: number }>(
+  const picture = await runInElectron<{ file: string; format: string; width: number; height: number; scale: number }>(
     { command: 'shot', shot: parsed.shot, dir: folder ?? dirname(source), out, quiet: true, ...(args.scale !== undefined && { scale: args.scale }), ...(args.quality !== undefined && { quality: args.quality }) },
     signal,
   );
   // the shot changes only once it is drawn
   if (folder) await writeFile(join(folder, SHOT_FILE), `${JSON.stringify(raw, null, 2)}\n`);
-  return { file: drawn.file, format: drawn.format, width: drawn.width, height: drawn.height, scale: Math.round(drawn.scale * 1000) / 1000, ...(folder && { shot: folder }) };
+  if (args.saveStyle !== undefined) await saveShotStyle(args.saveStyle, raw, undefined, folder ?? dirname(source));
+  return { file: picture.file, format: picture.format, width: picture.width, height: picture.height, scale: Math.round(picture.scale * 1000) / 1000, ...(folder && { shot: folder }), ...(found && { masked: found.length }) };
+}
+
+/** `cuttle shot styles`: the saved styles' names and looks (`--remove`: forget one), and their file. */
+export async function shotStylesCommand(args: { remove?: string }, output: Output): Promise<{ file: string; styles: Record<string, Record<string, unknown>> }> {
+  if (args.remove !== undefined) await saveShotStyle(args.remove, undefined);
+  const result = { file: shotStylesFile(), styles: await listShotStyles() };
+  const names = Object.keys(result.styles);
+  output.result(result, () => (names.length > 0 ? names.join('\n') : `no styles yet (shot frame --save-style <name>); they are kept in ${result.file}`));
+  return result;
 }

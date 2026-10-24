@@ -1,4 +1,4 @@
-import { FONT_FAMILY, createRenderer, drawShot, loadEngineAssets, type Renderer } from '@cuttle/engine';
+import { FONT_FAMILY, createRenderer, drawShot, loadEngineAssets, loadHeadingFont, type Renderer } from '@cuttle/engine';
 import { createCursorTrack, createTimeline, type Timeline } from '@cuttle/timeline';
 import { planFrames, planStills, shownSourceTime, stillFrames, type FramePlan } from '../frame-plan';
 import type { ExportJob, PageResult, PageShotSuccess, PageStillsSuccess, PageSuccess, ShotJob, StillsJob } from '../job';
@@ -225,13 +225,15 @@ async function renderStills(job: StillsJob): Promise<PageStillsSuccess> {
 /** A framed screenshot: its image pixel for pixel (never scaled down to fit a texture: too large is an error), encoded as the job asks. */
 async function renderShot(job: ShotJob): Promise<PageShotSuccess> {
   const started = performance.now();
-  await loadEngineAssets();
+  await Promise.all([loadEngineAssets(), loadHeadingFont(job.shot.font)]);
   const image = await loadImage(job.source, Number.POSITIVE_INFINITY, 'the shot');
   let background: ImageBitmap | undefined;
+  let watermark: ImageBitmap | undefined;
   const canvas = new OffscreenCanvas(1, 1);
   try {
     if (job.backgroundImage) background = await loadImage(job.backgroundImage, probeMaxTextureSize(), 'the background image');
-    const placed = drawShot(canvas, job.shot, image, { ...(job.scale !== undefined && { scale: job.scale }), ...(background && { backgroundImage: background }) });
+    if (job.watermarkImage) watermark = await loadImage(job.watermarkImage, probeMaxTextureSize(), 'the watermark image');
+    const placed = drawShot(canvas, job.shot, image, { ...(job.scale !== undefined && { scale: job.scale }), ...(background && { backgroundImage: background }), ...(watermark && { watermarkImage: watermark }) });
     const gl = canvas.getContext('webgl2')!;
     const type = `image/${job.format}`;
     const blob = await canvas.convertToBlob({ type, ...(job.quality !== undefined && { quality: job.quality }) });
@@ -243,6 +245,7 @@ async function renderShot(job: ShotJob): Promise<PageShotSuccess> {
     (canvas.getContext('webgl2') as WebGL2RenderingContext | null)?.getExtension('WEBGL_lose_context')?.loseContext();
     image.close();
     background?.close();
+    watermark?.close();
   }
 }
 

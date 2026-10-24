@@ -121,6 +121,8 @@ export interface ShotJob {
   source: string;
   /** Image for `shot.background.preset: 'image'`. */
   backgroundImage?: string;
+  /** The watermark's image (`shot.watermark.image`). */
+  watermarkImage?: string;
   /** Output px per point; default the shot's own scale (the image pixel for pixel). */
   scale?: number;
   format: ShotFormat;

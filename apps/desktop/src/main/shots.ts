@@ -8,10 +8,10 @@ import { copyFile, mkdir, mkdtemp, readdir, readFile, rename, rm, stat, writeFil
 import { tmpdir } from 'node:os';
 import { basename, extname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { app, BrowserWindow, clipboard, ClipboardItem, dialog, nativeImage, screen, session, shell, type Rectangle } from 'electron';
-import { imagePalette, importWallpaper, keepInProject, newShotFolder, pngScale } from '@cuttle/core';
+import { imagePalette, imageSize, importWallpaper, keepInProject, listBrands, listShotStyles, lookFrom, lookInto, newShotFolder, pngScale, redactShot, saveShotStyle, shotBrand, shotStyleFor } from '@cuttle/core';
 import { renderShot } from '@cuttle/export';
 import { SHOT_FILE, SHOT_VERSION, parseShot, parseShotJson } from '@cuttle/project';
-import type { ShotDelay, ShotEntry, ShotView } from '../shared/ipc';
+import type { ShotDelay, ShotEntry, ShotLookAnswer, ShotView } from '../shared/ipc';
 import type { PickedTarget, PickerDisplay } from '../shared/recording';
 import { CHECK, CHECK_IMAGE, HIDDEN } from './check';
 import { bindRequests, send } from './ipc';
@@ -23,8 +23,6 @@ import { bringToFront, guard, lockDown, titleBar, webPreferences } from './windo
 /** The shot's picture as taken, and its last render, in its folder. */
 const SOURCE = 'source.png';
 const RENDER = 'shot.png';
-/** What a shot's look is not: its own image, scale and crop (the next shot keeps the rest). */
-const NOT_LOOK = new Set(['version', 'source', 'scale', 'crop']);
 /** The toast's window (its card and a margin for the shadow), and how long it stays unless pointed at. */
 const TOAST_SIZE = { width: 340, height: 264 };
 const TOAST_SECONDS = 6;
@@ -121,7 +119,8 @@ export async function takePicked(target: PickedTarget, display: PickerDisplay, d
 /** A shot's shot.json for its source.png: the last shot's look, when it still makes a shot. */
 async function writeShot(folder: string, scale: number, look: Record<string, unknown> | undefined): Promise<void> {
   const base = { version: SHOT_VERSION, source: SOURCE, ...(scale !== 1 && { scale }) };
-  const withLook = { ...(look ?? {}), ...base };
+  // the images the look names (a background, a logo) come along into the shot's folder
+  const withLook = { ...(look ? await lookInto(look, folder) : {}), ...base };
   await writeJson(join(folder, SHOT_FILE), parseShot(withLook).ok ? withLook : base);
 }
 
@@ -265,7 +264,24 @@ async function viewOf(dir: string): Promise<ShotView> {
   const source = isAbsolute(parsed.shot.source) ? parsed.shot.source : join(dir, parsed.shot.source);
   const background = parsed.shot.background.preset === 'image' && parsed.shot.background.image ? resolve(dir, parsed.shot.background.image) : undefined;
   const backgroundImage = background && existsSync(background) ? new Uint8Array(await readFile(background)) : undefined;
-  return { dir, name: basename(dir), raw, image: new Uint8Array(await readFile(source)), ...(backgroundImage && { backgroundImage }) };
+  const watermarkImage = await bytesOf(dir, parsed.shot.watermark?.image);
+  return { dir, name: basename(dir), raw, image: new Uint8Array(await readFile(source)), ...(backgroundImage && { backgroundImage }), ...(watermarkImage && { watermarkImage }) };
+}
+
+/** The bytes of an image a shot names (from its folder), when it is there. */
+async function bytesOf(dir: string, image: string | undefined): Promise<Uint8Array | undefined> {
+  const path = image ? resolve(dir, image) : undefined;
+  return path && existsSync(path) ? new Uint8Array(await readFile(path)) : undefined;
+}
+
+/** A look for the editor (a brand kit's, a style's) with the bytes of the images it names. */
+async function lookAnswer(dir: string, fields: Record<string, unknown>): Promise<ShotLookAnswer> {
+  const image = (key: 'background' | 'watermark') => {
+    const value = (fields[key] as Record<string, unknown> | undefined)?.image;
+    return typeof value === 'string' ? value : undefined;
+  };
+  const [backgroundImage, watermarkImage] = await Promise.all([bytesOf(dir, image('background')), bytesOf(dir, image('watermark'))]);
+  return { fields, ...(backgroundImage && { backgroundImage }), ...(watermarkImage && { watermarkImage }) };
 }
 
 /** Shows a shot in the screenshot editor (one window, for one shot at a time). */
@@ -313,14 +329,16 @@ export async function openShotEditor(dir: string): Promise<void> {
       const before = (await viewOf(current.dir)).raw;
       // the shot keeps its own image; a background image stays inside its folder
       const next: Record<string, unknown> = { ...raw, version: SHOT_VERSION, source: before.source };
-      const background = next.background as Record<string, unknown> | undefined;
-      if (background && typeof background.image === 'string' && !inside(current.dir, background.image)) return { issues: ['background.image: not an image of this shot'] };
+      for (const key of ['background', 'watermark'] as const) {
+        const image = (next[key] as Record<string, unknown> | undefined)?.image;
+        if (typeof image === 'string' && !inside(current.dir, image)) return { issues: [`${key}.image: not an image of this shot`] };
+      }
       const parsed = parseShot(next);
       if (!parsed.ok) return { issues: parsed.issues.map((issue) => `${issue.path}: ${issue.message}`) };
       await writeJson(shotJson(), next);
       // the next shot takes this look
       await updateSettings((settings) => {
-        settings.shots.look = Object.fromEntries(Object.entries(next).filter(([key]) => !NOT_LOOK.has(key)));
+        settings.shots.look = lookFrom(next, current.dir);
       });
       return {};
     },
@@ -369,6 +387,21 @@ export async function openShotEditor(dir: string): Promise<void> {
       current.dir = dir;
       send(contents, 'shot:show', await viewOf(dir));
     },
+    'shot:redact': async () => {
+      const raw = (await viewOf(current.dir)).raw;
+      const source = resolve(current.dir, String(raw.source));
+      const size = imageSize(await readFile(source));
+      if (!size) throw new Error('the size of the shot\'s image cannot be read');
+      return { masks: await redactShot(source, size, (await loadSettings()).privacy.words) };
+    },
+    'shot:brands': async () => (await listBrands()).map((brand) => brand.kit.name),
+    'shot:brand': async ({ name }) => {
+      const kit = await shotBrand(name, current.dir);
+      return lookAnswer(current.dir, { background: kit.background, frame: kit.frame, font: kit.font, ...(kit.watermark && { watermark: kit.watermark }) });
+    },
+    'shot:styles': async () => Object.keys(await listShotStyles()),
+    'shot:style': async ({ name }) => lookAnswer(current.dir, await shotStyleFor(name, current.dir)),
+    'shot:style-save': async ({ name }) => saveShotStyle(name, (await viewOf(current.dir)).raw, undefined, current.dir),
     'shot:new': async () => {
       // the editor steps aside: it is not in the shot, and the shot opens in it again
       window.hide();

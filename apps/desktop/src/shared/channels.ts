@@ -68,7 +68,7 @@ export const WINDOW_CHANNELS = {
   },
   pill: {
     requests: ['pill:recent', 'pill:open', 'pill:hide', 'pill:menu', 'pill:record', 'pill:shot', 'pill:size'],
-    events: ['pill:recent', 'app:motion'],
+    events: ['pill:recent', 'pill:drawer', 'app:motion'],
   },
   picker: {
     requests: ['picker:setup', 'picker:hover', 'picker:choices', 'picker:record', 'picker:frozen', 'picker:shot', 'picker:cancel', 'picker:claude-folder', 'picker:retry', 'picker:script', 'picker:permission'],

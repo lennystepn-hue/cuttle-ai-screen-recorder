@@ -8,7 +8,7 @@ import { PROJECT_FILE, backupFile, writeProjectFile, type ProjectFile } from '@c
 import { renderStills } from '@cuttle/export';
 import { parseProject } from '@cuttle/project';
 import { plainIssue } from '../shared/format';
-import type { Event, Events, ExportEnd, ProjectFileEvent, ProjectStatus } from '../shared/ipc';
+import type { Event, Events, ExportEnd, PillPlace, ProjectFileEvent, ProjectStatus } from '../shared/ipc';
 import { isInside } from '../shared/media-path';
 import { takeKey } from '../shared/take';
 import { CHECK, CHECK_IMAGE, HIDDEN } from './check';
@@ -22,7 +22,8 @@ import { EditorSound } from './sound-service';
 import { LockedError, lockProject, openProjectFile, projectInfo } from './project';
 import { importImage, ProjectFileWatch } from './project-watch';
 import { APP_ORIGIN, assetPath, bundlePath, serveApp, serveMedia } from './protocols';
-import { cutIfPending, recut, startPicking, startShooting, takesBusy, undoRestart } from './recording';
+import { closeDrawer, keepDrawer, showDrawer, startDrawer, stopDrawer, type DrawerHost } from './drawer';
+import { cutIfPending, recordingBusy, recut, startPicking, startShooting, takesBusy, undoRestart } from './recording';
 import { copyImage, openAsShot } from './shots';
 import { deletableTakes, sizeText, trashName } from '../shared/takes';
 import { addRecent, loadSettings, motionSetting, updateSettings } from './settings';
@@ -359,7 +360,7 @@ async function editorWindow(dir: string, key: string, file: ProjectFile, release
     editor.run?.cancel();
     void release();
     // Closing the last editor returns to the pill (not while an editor is reopened on a new take).
-    if (editors.size === 0 && opening.size === 0 && reopening === 0 && !quitting) void showPill();
+    if (editors.size === 0 && opening.size === 0 && reopening === 0 && !quitting) void showPill('back');
   });
   window.once('ready-to-show', () => bringToFront(window));
   // The end-to-end check asks for a hook to drive the player (CUTTLE_CHECK=1) and for frames from
@@ -656,6 +657,39 @@ async function pillPosition(display = screen.getDisplayNearestPoint(screen.getCu
   };
 }
 
+/** Where the pill waits now (the settings' "Where Cuttle waits"). */
+let place: PillPlace = 'screen';
+/** The pill in the drawer at the top centre: the window, its size, and when it must stay shut. */
+const drawerHost: DrawerHost = {
+  window: () => createPill(),
+  size: () => ({ width: pillWidth, height: PILL_SIZE.height }),
+  busy: () => recordingBusy(),
+};
+
+/**
+ * Puts the pill where the settings say: on screen (as it always was), in the drawer at the top
+ * centre (above the menu bar, on every Space and over full-screen apps), or nowhere (the menu bar's
+ * icon and the keys only).
+ */
+export async function applyPillPlace(next: PillPlace, show = false): Promise<void> {
+  place = next;
+  const window = await createPill();
+  if (next === 'top') {
+    window.hide();
+    // above the menu bar (macOS keeps normal windows under it), on every Space and over full-screen apps
+    window.setAlwaysOnTop(true, 'screen-saver');
+    window.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+    await (show ? showDrawer(drawerHost) : startDrawer(drawerHost));
+    return;
+  }
+  stopDrawer();
+  window.setAlwaysOnTop(true, 'floating');
+  window.setVisibleOnAllWorkspaces(false);
+  send(window.webContents, 'pill:drawer', { open: false, onScreen: true });
+  if (next === 'menu-bar') window.hide();
+  else if (show) await showPill();
+}
+
 /** The pill: a small launcher near the top of the screen, kept out of every recording. Closing it hides it. */
 export async function createPill(): Promise<BrowserWindow> {
   if (pill && !pill.isDestroyed()) return pill;
@@ -676,6 +710,8 @@ export async function createPill(): Promise<BrowserWindow> {
     skipTaskbar: true,
     alwaysOnTop: true,
     hasShadow: false,
+    // the drawer sits over the menu bar, which macOS keeps windows out of otherwise
+    enableLargerThanScreen: true,
     backgroundColor: '#00000000',
     title: 'Cuttle',
     webPreferences: webPreferences('pill.cjs', ses),
@@ -690,16 +726,19 @@ export async function createPill(): Promise<BrowserWindow> {
       if (target) await openEditorOrSay(target.dir);
       else await chooseAndOpen();
     },
-    'pill:hide': () => window.hide(),
+    // in the drawer: Esc closes it, and it comes back at the top edge
+    'pill:hide': () => (place === 'top' ? closeDrawer() : window.hide()),
     'pill:record': () => void startPicking(undefined, { fromPill: true }),
     'pill:shot': () => void startShooting({ fromPill: true }),
     'pill:size': async ({ width }) => {
       const fitted = Math.round(Math.min(PILL_WIDTHS.max, Math.max(PILL_WIDTHS.min, width)));
       if (fitted === pillWidth || window.isDestroyed()) return;
       pillWidth = fitted;
+      // the drawer takes its new width when it opens next
+      if (place === 'top') return;
       // placed again on its display at the new width: where it was left (a move saves it), else centred
-      const place = await pillPosition(screen.getDisplayMatching(window.getBounds()));
-      if (!window.isDestroyed()) window.setBounds({ ...place, width: fitted, height: PILL_SIZE.height });
+      const at = await pillPosition(screen.getDisplayMatching(window.getBounds()));
+      if (!window.isDestroyed()) window.setBounds({ ...at, width: fitted, height: PILL_SIZE.height });
     },
     'pill:menu': async () => {
       const recent = (await loadSettings()).recent;
@@ -710,10 +749,14 @@ export async function createPill(): Promise<BrowserWindow> {
         { type: 'separator' },
         { label: 'Open folder…', click: () => void chooseAndOpen() },
         { label: 'Settings…', click: () => void openSettings() },
-      ]).popup({ window });
+        // the drawer stays open while its menu is
+      ]).popup({ window, callback: () => keepDrawer(false) });
+      keepDrawer(true);
     },
   });
   window.on('moved', () => {
+    // the drawer's place is the top centre, not one the pill was left at
+    if (place === 'top') return;
     const [x, y] = window.getPosition();
     const on = screen.getDisplayMatching(window.getBounds());
     void updateSettings((settings) => {
@@ -733,12 +776,24 @@ export async function createPill(): Promise<BrowserWindow> {
   return window;
 }
 
-/** Hides the pill: a recording is picked from it (it is not to be in the video). */
+/** Hides the pill, or closes its drawer: a recording is picked from it (it is not to be in the video). */
 export function hidePill(): void {
-  if (pill && !pill.isDestroyed()) pill.hide();
+  if (place === 'top') closeDrawer();
+  else if (pill && !pill.isDestroyed()) pill.hide();
 }
 
-export async function showPill(): Promise<void> {
+/**
+ * Shows Cuttle's pill, as the settings place it, for a reason: `asked` (the tray, a second launch,
+ * the Dock's icon), `start` (the app's start), `back` (after a take, a picker, the last editor).
+ * On screen it shows each time; the drawer opens a while when asked or at the start, and otherwise
+ * waits at the top edge; with only the menu bar it shows when asked.
+ */
+export async function showPill(why: 'asked' | 'start' | 'back' = 'asked'): Promise<void> {
+  if (place === 'top') {
+    await (why === 'back' ? startDrawer(drawerHost) : showDrawer(drawerHost));
+    return;
+  }
+  if (place === 'menu-bar' && why !== 'asked') return;
   const window = await createPill();
   const { x, y } = await pillPosition();
   window.setPosition(x, y);

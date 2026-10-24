@@ -455,7 +455,12 @@ request, the `cuttle` command (the app's own copy of the CLI, run by the app its
 `%LOCALAPPDATA%\Cuttle\bin`, which goes on your PATH; `~/.local/bin` on macOS) and the Claude skill. The settings (the tray,
 the pill's menu, Ctrl+, in the editor) hold the projects folder, the countdown, the default camera
 and mic, speech (the model, the language, the live captions), starting at sign-in, motion, and the
-recent projects (open, rename, show, remove).
+recent projects (open, rename, show, remove). *Where Cuttle waits* puts the pill on screen (where you
+leave it), at the top edge, or only in the menu bar (the tray on Windows). At the top edge it is out
+of sight until the pointer rests on the middle of the screen's top: then it comes out of the notch
+on a Mac that has one (black, as wide as the notch), from under the menu bar's middle on one that
+has none, from the top edge on Windows, on a spring, and goes again a moment after the pointer left
+it. Passing over the edge, or dragging a window there, does not open it.
 
 ## The CLI
 

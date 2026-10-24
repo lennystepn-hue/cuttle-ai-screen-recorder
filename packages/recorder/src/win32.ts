@@ -15,6 +15,8 @@ export interface Win32 {
   cursorPosition(): { x: number; y: number };
   /** Brings a window (`WindowInfo.id`) to the front; false when it is gone or Windows refused. */
   focus(id: number): boolean;
+  /** Whether a mouse button is held now (the left, the right or the middle one). */
+  mouseButtonDown(): boolean;
   cursorShape(): CursorShape;
   /**
    * The system caret of a thread (the foreground's when 0) in physical desktop pixels, at least 1 px
@@ -144,6 +146,7 @@ async function create(): Promise<Win32> {
   // Physical pixels whatever the process's DPI awareness (GetCursorPos would be logical in a process
   // that was already made system-aware).
   const GetPhysicalCursorPos = user32.func('__stdcall', 'GetPhysicalCursorPos', 'int', [koffi.out(koffi.pointer(POINT))]);
+  const GetAsyncKeyState = user32.func('__stdcall', 'GetAsyncKeyState', 'int16', ['int32']);
   const GetCursorInfo = user32.func('__stdcall', 'GetCursorInfo', 'int', [koffi.inout(koffi.pointer(CURSORINFO))]);
   const GetGUIThreadInfo = user32.func('__stdcall', 'GetGUIThreadInfo', 'int', ['uint32', koffi.inout(koffi.pointer(GUITHREADINFO))]);
   const ClientToScreen = user32.func('__stdcall', 'ClientToScreen', 'int', ['void *', koffi.inout(koffi.pointer(POINT))]);
@@ -347,6 +350,8 @@ async function create(): Promise<Win32> {
       const handle = id >= 2 ** 31 ? id - 2 ** 32 : id;
       return IsWindow(handle) !== 0 && SetForegroundWindow(handle) !== 0;
     },
+    // VK_LBUTTON, VK_RBUTTON and VK_MBUTTON; the high bit: down now (left and right as the mouse has them, swapped or not)
+    mouseButtonDown: () => [0x01, 0x02, 0x04].some((key) => (GetAsyncKeyState(key) & 0x8000) !== 0),
     cursorShape() {
       if (!GetCursorInfo(info) || info.hCursor === null) return 'arrow';
       return cursorShapes.get(koffi.address(info.hCursor)) ?? 'arrow';

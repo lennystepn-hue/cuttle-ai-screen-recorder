@@ -1926,6 +1926,75 @@ describe.runIf(enabled)('the Cuttle app', () => {
     await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find((window) => window.webContents.getURL().includes('/settings.html'))?.close());
   }, 60_000);
 
+  it('waits in the drawer at the top centre when the settings say so: out of the notch when the pointer rests there, not when it passes or a button is held, closed a moment after it left; under the menu bar without a notch', async () => {
+    await launchAgain(['--settings']);
+    const settings = await waitForPage(app, async (page) => page.url().includes('/settings.html') && (await page.locator('[data-testid=countdown] [aria-checked=true]').count()) === 1);
+    await click(settings, '[data-testid=settings-page-general]');
+    await settings.waitForSelector('[data-testid=pill-place]');
+    const pill = app.windows().find((page) => page.url().includes('/pill.html'))!;
+    const wrap = () => pill.locator('[data-testid=pill-wrap]');
+    const state = () => wrap().getAttribute('data-state');
+    const pillBounds = () => app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find((window) => window.webContents.getURL().includes('/pill.html'))!.getBounds());
+    const display = await app.evaluate(({ screen }) => {
+      const main = screen.getPrimaryDisplay();
+      return { bounds: main.bounds, workArea: main.workArea };
+    });
+    const centre = display.bounds.x + Math.round(display.bounds.width / 2);
+    const top = display.bounds.y;
+    // the pointer, a held button and a notch on the main display, as the check gives them in their place
+    const pretend = (drawer: { pointer: { x: number; y: number }; buttons?: boolean; notch?: { width: number; height: number } }) =>
+      app.evaluate((_electron, value) => void ((globalThis as { __drawerCheck?: unknown }).__drawerCheck = value), drawer);
+    const notch = { width: 200, height: 32 };
+    const away = { x: centre, y: top + 400 };
+    await pretend({ pointer: away, notch });
+    try {
+      await click(settings, '[data-testid=pill-place] button:nth-child(2)');
+      await expect.poll(() => (JSON.parse(readFileSync(join(root, 'user-data', 'settings.json'), 'utf8')) as { pillPlace?: string }).pillPlace).toBe('top');
+      // chosen: it opens a while to show where it is, and closes with the pointer elsewhere
+      await expect.poll(state, { timeout: 5_000 }).toBe('open');
+      await expect.poll(state, { timeout: 8_000 }).toBe('closed');
+      // the pointer passes over the top edge on its way somewhere: nothing
+      await pretend({ pointer: { x: centre, y: top }, notch });
+      await wait(100);
+      await pretend({ pointer: away, notch });
+      await wait(500);
+      expect(await state()).toBe('closed');
+      // a button held there (a window dragged to the top): nothing
+      await pretend({ pointer: { x: centre, y: top }, buttons: true, notch });
+      await wait(700);
+      expect(await state()).toBe('closed');
+      // resting on the notch: out of it, from the top of the screen, centred on it
+      await pretend({ pointer: { x: centre, y: top + 5 }, notch });
+      await expect.poll(state, { timeout: 3_000 }).toBe('open');
+      expect(await wrap().getAttribute('data-origin')).toBe('notch');
+      const bounds = await pillBounds();
+      expect([bounds.y, bounds.height]).toEqual([top, notch.height + 64]);
+      expect(Math.abs(bounds.x + bounds.width / 2 - centre)).toBeLessThanOrEqual(1);
+      // the spring settled
+      await wait(600);
+      await shotOf('24b-drawer-notch', '/pill.html');
+      // on it, it stays; gone, it closes a moment later
+      await pretend({ pointer: { x: centre + 100, y: top + 50 }, notch });
+      await wait(1000);
+      expect(await state()).toBe('open');
+      await pretend({ pointer: away, notch });
+      await expect.poll(state, { timeout: 3_000 }).toBe('closed');
+      // without a notch: from under the menu bar's middle (macOS), from the top edge (Windows)
+      await pretend({ pointer: { x: centre, y: top } });
+      await expect.poll(state, { timeout: 3_000 }).toBe('open');
+      expect(await wrap().getAttribute('data-origin')).toBe(process.platform === 'darwin' ? 'bar' : 'edge');
+      expect((await pillBounds()).y).toBe(display.workArea.y);
+      await wait(600);
+      await shotOf('24c-drawer-bar', '/pill.html');
+    } finally {
+      await pretend({ pointer: away });
+      // on screen again, as the pill always was
+      await click(settings, '[data-testid=pill-place] button:nth-child(1)');
+      await expect.poll(() => wrap().getAttribute('data-origin')).toBeNull();
+      await app.evaluate(() => void delete (globalThis as { __drawerCheck?: unknown }).__drawerCheck);
+    }
+  }, 60_000);
+
   it('downloads a speech model in the settings (checked, cancelled, failed), and transcribes a spoken take from the Auto tab: its filler words and pauses cut as one step', async () => {
     await launchAgain(['--settings']);
     const settings = await waitForPage(app, async (page) => page.url().includes('/settings.html') && (await page.locator('[data-testid=settings-page-speech]').count()) === 1);

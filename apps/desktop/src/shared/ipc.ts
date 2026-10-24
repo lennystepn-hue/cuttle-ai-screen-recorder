@@ -398,6 +398,8 @@ export const REQUESTS = {
   'pill:hide': z.undefined(),
   'pill:menu': z.undefined(),
   'pill:record': z.undefined(),
+  /** The width the pill needs (DIP, its margins included): the window takes it. */
+  'pill:size': z.strictObject({ width: z.number().finite().positive().max(4000) }),
   // editor (recording)
   'project:record': z.undefined(),
   'project:takes': z.undefined(),
@@ -613,6 +615,7 @@ export interface Responses {
   'pill:hide': void;
   'pill:menu': void;
   'pill:record': void;
+  'pill:size': void;
   'project:record': void;
   'project:takes': void;
   'project:cut': void;

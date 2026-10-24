@@ -89,8 +89,14 @@
   --slow: 320ms;
 
   --shadow-float: 0 16px 48px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.06);
-  /* the HUD's: a bar that floats close to what is under it */
+  /* a bar that floats close to what is under it, with room around it (the picker's, the editor's) */
   --shadow-bar: 0 6px 18px rgba(0, 0, 0, 0.45), 0 0 0 1px rgba(255, 255, 255, 0.07);
+  /*
+   * A bar or card in a transparent window of its own (the HUD, its captions, the prompter, the pill):
+   * short enough to end inside the window's margin of 8 DIP, where the window's edge would cut a
+   * longer one into a grey box; a dark hairline keeps the edge on a light screen.
+   */
+  --shadow-window: 0 2px 6px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(0, 0, 0, 0.25), inset 0 0 0 1px rgba(255, 255, 255, 0.07);
   --focus: 0 0 0 2px var(--bg), 0 0 0 4px var(--accent);
 }
 

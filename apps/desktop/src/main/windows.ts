@@ -597,17 +597,19 @@ export const recentLabel = (entry: { dir: string; name: string }) => `${entry.na
 let pill: BrowserWindow | undefined;
 let quitting = false;
 app.on('before-quit', () => (quitting = true));
+/** The pill's window: the pill and a margin for its shadow. Its width follows the pill's (the hotkey is longer on Windows). */
 const PILL_SIZE = { width: 420, height: 64 };
+const PILL_WIDTHS = { min: 240, max: 800 };
+let pillWidth = PILL_SIZE.width;
 
-/** The pill's place on the display under the pointer: where it was left there (kept on screen), else the top centre. */
-async function pillPosition(): Promise<{ x: number; y: number }> {
-  const display = screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
+/** The pill's place on a display (the one under the pointer): where it was left there (kept on screen), else the top centre. */
+async function pillPosition(display = screen.getDisplayNearestPoint(screen.getCursorScreenPoint())): Promise<{ x: number; y: number }> {
   const area = display.workArea;
   const saved = (await loadSettings()).pill[String(display.id)];
-  const x = saved?.x ?? Math.round(area.x + (area.width - PILL_SIZE.width) / 2);
+  const x = saved?.x ?? Math.round(area.x + (area.width - pillWidth) / 2);
   const y = saved?.y ?? area.y + 24;
   return {
-    x: Math.min(Math.max(x, area.x), area.x + area.width - PILL_SIZE.width),
+    x: Math.min(Math.max(x, area.x), area.x + area.width - pillWidth),
     y: Math.min(Math.max(y, area.y), area.y + area.height - PILL_SIZE.height),
   };
 }
@@ -620,6 +622,7 @@ export async function createPill(): Promise<BrowserWindow> {
   serveApp(ses, bundlePath('renderer'));
   const window = new BrowserWindow({
     ...PILL_SIZE,
+    width: pillWidth,
     ...(await pillPosition()),
     show: false,
     frame: false,
@@ -647,6 +650,14 @@ export async function createPill(): Promise<BrowserWindow> {
     },
     'pill:hide': () => window.hide(),
     'pill:record': () => void startPicking(undefined, { fromPill: true }),
+    'pill:size': async ({ width }) => {
+      const fitted = Math.round(Math.min(PILL_WIDTHS.max, Math.max(PILL_WIDTHS.min, width)));
+      if (fitted === pillWidth || window.isDestroyed()) return;
+      pillWidth = fitted;
+      // placed again on its display at the new width: where it was left (a move saves it), else centred
+      const place = await pillPosition(screen.getDisplayMatching(window.getBounds()));
+      if (!window.isDestroyed()) window.setBounds({ ...place, width: fitted, height: PILL_SIZE.height });
+    },
     'pill:menu': async () => {
       const recent = (await loadSettings()).recent;
       Menu.buildFromTemplate([

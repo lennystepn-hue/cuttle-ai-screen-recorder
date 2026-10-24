@@ -433,7 +433,7 @@ body.transparent #root {
   padding: 12px 14px 12px 16px;
   border-radius: 16px;
   background: var(--overlay);
-  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45), 0 0 0 1px rgba(255, 255, 255, 0.07);
+  box-shadow: var(--shadow-window);
   -webkit-app-region: drag;
   display: flex;
   flex-direction: column;

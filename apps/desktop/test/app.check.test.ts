@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
 import { createServer, type Server, type ServerResponse } from 'node:http';
 import { createRequire } from 'node:module';
@@ -3228,8 +3228,15 @@ describe.runIf(enabled)('the first run', () => {
     // installed meanwhile (winget): Check again finds it, without a restart
     const ffmpeg = spawnSync(process.platform === 'win32' ? 'where' : 'which', ['ffmpeg'], { encoding: 'utf8' }).stdout.split(/\r?\n/)[0]!;
     // elsewhere than Windows the app cannot put its command's folder on PATH (it gives the line for the
-    // shell profile): here the profile has it, as ~/.local/bin is on most Macs' PATH
-    writeFileSync(pathFile(), process.platform === 'win32' ? dirname(ffmpeg) : [dirname(ffmpeg), join(root, 'bin')].join(delimiter));
+    // shell profile): here the profile has it, as ~/.local/bin is on most Macs' PATH. ffmpeg comes
+    // alone, linked into a folder of the check's own: its folder may hold the person's own cuttle
+    // command (~/.local/bin), which the app leaves alone and does not install over
+    const tools = join(root, 'tools');
+    if (process.platform !== 'win32') {
+      mkdirSync(tools, { recursive: true });
+      symlinkSync(ffmpeg, join(tools, 'ffmpeg'));
+    }
+    writeFileSync(pathFile(), process.platform === 'win32' ? dirname(ffmpeg) : [tools, join(root, 'bin')].join(delimiter));
     await click(page, '[data-testid=check-again]');
     await page.waitForSelector('[data-testid=tool-ffmpeg][data-state=ok]');
     await click(page, '[data-testid=install-tools]');
@@ -3241,7 +3248,12 @@ describe.runIf(enabled)('the first run', () => {
       process.platform === 'win32'
         ? spawnSync('cmd', ['/c', join(root, 'bin', 'cuttle.cmd'), '--version'], { encoding: 'utf8', windowsHide: true })
         : spawnSync('sh', [join(root, 'bin', 'cuttle'), '--version'], { encoding: 'utf8' });
-    expect(version.stdout.trim()).toMatch(/^\d+\.\d+\.\d+$/);
+    expect(version.stdout.trim(), version.stderr).toMatch(/^\d+\.\d+\.\d+$/);
+    // a copy started from the repository names Electron through node_modules' link, not pnpm's store
+    // folder behind it, which gets another name when a dependency changes
+    const shim = readFileSync(join(root, 'bin', 'cuttle'), 'utf8');
+    expect(shim).toContain('/node_modules/electron/dist/');
+    expect(shim).not.toContain('/.pnpm/');
     const skill = readFileSync(join(root, 'claude', 'skills', 'cuttle', 'SKILL.md'), 'utf8');
     expect(skill).toContain("open Cuttle's settings");
     expect(skill).not.toContain('{{');

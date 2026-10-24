@@ -1,10 +1,15 @@
+import { existsSync } from 'node:fs';
 import { copyFile, mkdir, readFile, stat, writeFile } from 'node:fs/promises';
+import { homedir } from 'node:os';
 import { basename, dirname, extname, isAbsolute, join, resolve } from 'node:path';
+import { setTimeout as sleep } from 'node:timers/promises';
 import { imagePalette, keepInProject, wallpaperFile } from '@cuttle/core';
 import { BACKGROUND_PRESETS, FRAME_STYLES, SHOT_FILE, SHOT_VERSION, isColouredBackground, parseShot, parseShotJson, shotRatio, switchBackground, type BackgroundPreset, type Shot } from '@cuttle/project';
+import { listDevices, takeShot, type Backend } from '@cuttle/recorder';
 import { runInElectron } from '../electron-runner';
 import { CliError } from '../errors';
 import type { Output } from '../output';
+import { captureSource, type RecordArgs } from './record';
 
 /** How soft a wallpaper is made when nothing says otherwise: it sits behind the shot. */
 const WALLPAPER_BLUR = 0.6;
@@ -113,6 +118,70 @@ async function imageFor(folder: string | undefined, given: string, stem: string)
   return keepInProject(folder, await readFile(path), 'images', stem, extname(path).toLowerCase());
 }
 
+/** Where `cuttle shot take` keeps its shots: CUTTLE_SHOTS_DIR, else Cuttle in the pictures folder. */
+export function shotsFolder(): string {
+  return process.env.CUTTLE_SHOTS_DIR || join(homedir(), 'Pictures', 'Cuttle');
+}
+
+/** A new shot's folder in `parent`, named by the local time as a screenshot is (`2026-10-24 19.42.10`), a number after it when taken. */
+function newShotFolder(parent: string, now = new Date()): string {
+  const two = (value: number) => String(value).padStart(2, '0');
+  const name = `${now.getFullYear()}-${two(now.getMonth() + 1)}-${two(now.getDate())} ${two(now.getHours())}.${two(now.getMinutes())}.${two(now.getSeconds())}`;
+  for (let n = 1; ; n++) {
+    const folder = join(parent, n === 1 ? name : `${name} ${n}`);
+    if (!existsSync(folder)) return folder;
+  }
+}
+
+export interface ShotTakeArgs extends ShotFrameArgs, Pick<RecordArgs, 'monitor' | 'region' | 'window'> {
+  /** Seconds to wait before the shot. */
+  delay?: number;
+  /** With the pointer. */
+  cursor?: boolean;
+  /** The picture alone, not framed. */
+  raw?: boolean;
+  backend?: Backend;
+}
+
+export interface ShotTakeResult extends ShotFrameResult {
+  /** The picture as taken (`source.png` in the shot's folder). */
+  source: string;
+  /** A window's shot: its title. */
+  window?: string;
+  warnings?: string[];
+}
+
+/**
+ * `cuttle shot take`: a screenshot of the primary monitor, another one (`--monitor`), a region of it
+ * or a window, kept as a shot's folder (in Cuttle in the pictures folder, or `--save`) and framed
+ * with the options `shot frame` takes (`--raw`: not framed).
+ */
+export async function shotTakeCommand(args: ShotTakeArgs, output: Output, signal: AbortSignal): Promise<ShotTakeResult> {
+  const backend = args.backend ?? 'auto';
+  const devices = await listDevices({ backend, media: false });
+  const primary = devices.monitors.find((monitor) => monitor.primary)?.index ?? devices.monitors[0]?.index ?? 0;
+  const source = captureSource(args, primary);
+  const folder = args.save ? resolve(args.save) : newShotFolder(shotsFolder());
+  if (existsSync(join(folder, SHOT_FILE))) throw new CliError('usage', `${folder} holds a shot already: name another folder`);
+  if (args.delay) {
+    output.info(`taking the shot in ${args.delay} s …`);
+    await sleep(args.delay * 1000, undefined, { signal }).catch(() => {
+      throw new CliError('cancelled', 'the shot was cancelled');
+    });
+  }
+  await mkdir(folder, { recursive: true });
+  const taken = await takeShot({ source, out: join(folder, 'source.png'), backend, devices, ...(args.cursor && { cursor: true }) });
+  for (const warning of taken.warnings) output.warn(warning);
+  const raw = { version: SHOT_VERSION, source: 'source.png', ...(taken.scale !== 1 && { scale: taken.scale }) };
+  await writeFile(join(folder, SHOT_FILE), `${JSON.stringify(raw, null, 2)}\n`);
+  const about = { source: taken.file, ...(taken.window !== undefined && { window: taken.window }), ...(taken.warnings.length > 0 && { warnings: taken.warnings }) };
+  const result: ShotTakeResult = args.raw
+    ? { file: taken.file, format: 'png', width: taken.width, height: taken.height, scale: taken.scale, shot: folder, ...about }
+    : { ...(await frameShot(folder, { ...args, save: undefined }, output, signal)), ...about };
+  output.result(result, () => [`${result.file}  ${result.width}×${result.height} px (${result.scale}× a point)${taken.window ? `: ${taken.window}` : ''}`, `shot  ${folder} (frame it again with "cuttle shot frame")`].join('\n'));
+  return result;
+}
+
 /**
  * `cuttle shot frame <image | shot folder>`: a screenshot framed as the videos are, written as a
  * PNG, JPEG or WebP. From an image, its options make the shot (`--save` keeps it as a folder); from a
@@ -121,6 +190,13 @@ async function imageFor(folder: string | undefined, given: string, stem: string)
  * resolution, else 1, or `--shot-scale`).
  */
 export async function shotFrameCommand(target: string, args: ShotFrameArgs, output: Output, signal: AbortSignal): Promise<ShotFrameResult> {
+  const result = await frameShot(target, args, output, signal);
+  output.result(result, () => [`${result.file}  ${result.width}×${result.height} px (${result.scale}× a point)`, ...(result.shot ? [`shot  ${result.shot} (frame it again with other options)`] : [])].join('\n'));
+  return result;
+}
+
+/** Frames an image or a shot's folder (see `shotFrameCommand`); says nothing but its progress. */
+async function frameShot(target: string, args: ShotFrameArgs, output: Output, signal: AbortSignal): Promise<ShotFrameResult> {
   if (args.background !== undefined && !(BACKGROUND_PRESETS as readonly string[]).includes(args.background)) {
     throw new CliError('usage', `no background "${args.background}" (${BACKGROUND_PRESETS.join(', ')})`);
   }
@@ -214,7 +290,5 @@ export async function shotFrameCommand(target: string, args: ShotFrameArgs, outp
   );
   // the shot changes only once it is drawn
   if (folder) await writeFile(join(folder, SHOT_FILE), `${JSON.stringify(raw, null, 2)}\n`);
-  const result: ShotFrameResult = { file: drawn.file, format: drawn.format, width: drawn.width, height: drawn.height, scale: Math.round(drawn.scale * 1000) / 1000, ...(folder && { shot: folder }) };
-  output.result(result, () => [`${result.file}  ${result.width}×${result.height} px (${result.scale}× a point)`, ...(folder ? [`shot  ${folder} (frame it again with other options)`] : [])].join('\n'));
-  return result;
+  return { file: drawn.file, format: drawn.format, width: drawn.width, height: drawn.height, scale: Math.round(drawn.scale * 1000) / 1000, ...(folder && { shot: folder }) };
 }

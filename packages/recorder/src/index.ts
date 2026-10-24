@@ -2,6 +2,7 @@ export { record, allocateTake, CLAUDE_BACKGROUND_SECONDS, CLAUDE_TAIL_SECONDS } 
 export { VIDEO_CHAIN } from './args';
 export { joinSegments } from './join';
 export { listDevices } from './devices';
+export { takeShot, type ScreenShot, type ShotOptions } from './shot';
 export { RecorderError, type RecorderErrorCode } from './errors';
 export { HOTKEYS } from './input';
 export { LEVEL_FLOOR, PCM_RATE, levelMeter, wholeSamples, type MicLevel } from './level';

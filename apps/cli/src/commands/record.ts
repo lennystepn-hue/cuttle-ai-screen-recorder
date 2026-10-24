@@ -149,7 +149,8 @@ export async function recordCommand(projectDir: string, args: RecordArgs, output
   return result;
 }
 
-function captureSource(args: RecordArgs, primary: number): CaptureSource {
+/** What `--window`, `--monitor` and `--region` pick (record's, and a screenshot's). */
+export function captureSource(args: Pick<RecordArgs, 'monitor' | 'region' | 'window'>, primary: number): CaptureSource {
   if (args.window !== undefined) {
     if (args.region !== undefined || args.monitor !== undefined) throw new CliError('usage', '--window cannot be combined with --monitor or --region');
     return { kind: 'window', title: args.window };

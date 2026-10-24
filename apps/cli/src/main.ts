@@ -17,7 +17,7 @@ import { webcamBackgroundCommand } from './commands/webcam';
 import { motionAddCommand, motionCheckCommand, motionNewCommand, motionTemplatesCommand } from './commands/motion';
 import { musicCheckCommand, musicNewCommand, musicSetCommand, musicTemplatesCommand, soundAddCommand, soundListCommand } from './commands/music';
 import { previewCommand } from './commands/preview';
-import { shotFrameCommand, type ShotFrameArgs } from './commands/shot';
+import { shotFrameCommand, shotTakeCommand, type ShotFrameArgs, type ShotTakeArgs } from './commands/shot';
 import { recordCommand } from './commands/record';
 import { recoverCommand } from './commands/recover';
 import { renderAllCommand, renderCommand } from './commands/render';
@@ -350,34 +350,50 @@ export async function runCli(argv: readonly string[], streams?: Streams): Promis
     .option('--dim <0-0.8>', 'how much darker the image is', fraction)
     .action(action((output, project, preset: string | undefined, options: BackgroundArgs) => backgroundCommand(project, preset, options, output)));
 
+  /** A screenshot's look: what `shot take` and `shot frame` both take. */
+  const shotLook = (command: Command): Command =>
+    command
+      .option('--background <preset>', `sunset-sky, aurora, mesh, solid, image, gradient, flow, bokeh or dots (default: sunset-sky, or what the options ask for)`)
+      .option('--colors <list>', 'colours, comma-separated: a gradient\'s stops (2 to 4), or the tints of mesh, flow, bokeh and dots')
+      .option('--from <source>', 'the colours read off "shot" (the image itself) or an image file')
+      .option('--angle <degrees>', 'a gradient\'s direction: 0 to the top, 90 to the right (default 135)', degrees)
+      .option('--radial', 'a gradient from the centre out')
+      .option('--linear', 'a gradient along its angle (the default)')
+      .option('--color <hex>', 'the solid background\'s colour')
+      .option('--image <file>', 'an image behind the shot')
+      .option('--wallpaper', 'the desktop\'s wallpaper behind the shot, softened')
+      .option('--blur <0-1>', 'how soft the image is: 0 sharp, 1 a wash of its colours', fraction)
+      .option('--dim <0-0.8>', 'how much darker the image is', fraction)
+      .option('--transparent', 'no background: the framed shot and its shadow on nothing (PNG or WebP)')
+      .option('--no-transparent', 'the background again')
+      .option('--frame <style>', 'none (the image alone, rounded), mac-dark, mac-light, browser-light, browser-dark, windows-light, windows-dark, terminal, iphone or android (default none)')
+      .option('--title <text>', 'the title bar\'s text: a window\'s title, a browser\'s address, a terminal\'s path')
+      .option('--radius <points>', 'the corner radius (default 12)', points)
+      .option('--shadow', 'a soft shadow under it (the default)')
+      .option('--no-shadow', 'no shadow')
+      .option('--padding <points>', 'space around it (default 64)', points)
+      .option('--size <size>', 'auto (it and its padding, pixel for pixel), a ratio the canvas grows to (16:9, 1:1, 4:5, 9:16, 1.91:1) or pixels it is fitted into (1200x630)')
+      .option('--crop <x,y,w,h>', 'only this part of the image, in its pixels')
+      .option('--shot-scale <n>', "the image's pixels per point: 2 from a Retina display (default: from a PNG's resolution, else 1)", scale)
+      .option('--scale <n>', 'the output\'s pixels per point (default: the image\'s own, pixel for pixel)', scale)
+      .option('--quality <0-1>', 'a JPEG\'s or WebP\'s quality', fraction);
   const shot = program.command('shot').description('screenshots framed as the videos are: the image in a window, a browser, a phone or alone, on a background, with rounded corners and a shadow, pixel for pixel');
-  shot
-    .command('frame <image>')
-    .description('frames a PNG, JPEG or WebP (or a shot folder made with --save) and writes it as a PNG, JPEG or WebP')
-    .option('--background <preset>', `sunset-sky, aurora, mesh, solid, image, gradient, flow, bokeh or dots (default: sunset-sky, or what the options ask for)`)
-    .option('--colors <list>', 'colours, comma-separated: a gradient\'s stops (2 to 4), or the tints of mesh, flow, bokeh and dots')
-    .option('--from <source>', 'the colours read off "shot" (the image itself) or an image file')
-    .option('--angle <degrees>', 'a gradient\'s direction: 0 to the top, 90 to the right (default 135)', degrees)
-    .option('--radial', 'a gradient from the centre out')
-    .option('--linear', 'a gradient along its angle (the default)')
-    .option('--color <hex>', 'the solid background\'s colour')
-    .option('--image <file>', 'an image behind the shot')
-    .option('--wallpaper', 'the desktop\'s wallpaper behind the shot, softened')
-    .option('--blur <0-1>', 'how soft the image is: 0 sharp, 1 a wash of its colours', fraction)
-    .option('--dim <0-0.8>', 'how much darker the image is', fraction)
-    .option('--transparent', 'no background: the framed shot and its shadow on nothing (PNG or WebP)')
-    .option('--no-transparent', 'the background again')
-    .option('--frame <style>', 'none (the image alone, rounded), mac-dark, mac-light, browser-light, browser-dark, windows-light, windows-dark, terminal, iphone or android (default none)')
-    .option('--title <text>', 'the title bar\'s text: a window\'s title, a browser\'s address, a terminal\'s path')
-    .option('--radius <points>', 'the corner radius (default 12)', points)
-    .option('--shadow', 'a soft shadow under it (the default)')
-    .option('--no-shadow', 'no shadow')
-    .option('--padding <points>', 'space around it (default 64)', points)
-    .option('--size <size>', 'auto (it and its padding, pixel for pixel), a ratio the canvas grows to (16:9, 1:1, 4:5, 9:16, 1.91:1) or pixels it is fitted into (1200x630)')
-    .option('--crop <x,y,w,h>', 'only this part of the image, in its pixels')
-    .option('--shot-scale <n>', "the image's pixels per point: 2 from a Retina display (default: from a PNG's resolution, else 1)", scale)
-    .option('--scale <n>', 'the output\'s pixels per point (default: the image\'s own, pixel for pixel)', scale)
-    .option('--quality <0-1>', 'a JPEG\'s or WebP\'s quality', fraction)
+  shotLook(
+    shot
+      .command('take', { isDefault: true })
+      .description('takes a screenshot of the primary monitor, another one, a region of it or a window (by itself), keeps it as a shot folder and frames it')
+      .option('--monitor <n>', 'monitor index from "cuttle devices" (default: the primary monitor)', integer)
+      .option('--region <x,y,w,h...>', 'a region of the monitor in its pixels, e.g. 0,0,1920,1080')
+      .option('--window <title>', 'a window by itself, by (part of) its title')
+      .option('--delay <seconds>', 'wait this long first (to open a menu)', seconds)
+      .option('--cursor', 'with the pointer')
+      .option('--raw', 'the picture alone, not framed')
+      .addOption(new Option('--backend <name>', 'capture backend').choices(['auto', 'test']).default('auto').hideHelp()),
+  )
+    .option('-o, --out <file>', 'the framed image: .png, .jpg or .webp (default: shot.png in the shot\'s folder)')
+    .option('--save <folder>', `the shot's folder (default: a new one in ${process.platform === 'win32' ? 'Pictures\\Cuttle' : 'Pictures/Cuttle'})`)
+    .action(action((output, _project, options: ShotTakeArgs) => withSignal(output, (signal) => shotTakeCommand(options, output, signal))));
+  shotLook(shot.command('frame <image>').description('frames a PNG, JPEG or WebP (or a shot folder made with --save) and writes it as a PNG, JPEG or WebP'))
     .option('-o, --out <file>', 'the image to write: .png, .jpg or .webp (default: <image>-framed.png beside it; a shot folder\'s shot.png)')
     .option('--save <folder>', 'also keep the shot as a folder (shot.json, its image, shot.png), to frame it again with other options')
     .action(action((output, _project, image: string, options: ShotFrameArgs) => withSignal(output, (signal) => shotFrameCommand(image, options, output, signal))));

@@ -1,7 +1,7 @@
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 import { pngScale } from '../src/commands/shot';
 import { runCli } from '../src/main';
@@ -59,5 +59,36 @@ describe('cuttle shot frame', () => {
     expect(await message('-o', image)).toMatch(/the shot's own image/);
     writeFileSync(join(dir, 'notes.txt'), 'hello');
     expect(((await cli('--json', 'shot', 'frame', join(dir, 'notes.txt'))).json.error as { message: string }).message).toMatch(/not a PNG, JPEG or WebP/);
+  });
+});
+
+describe('cuttle shot take', () => {
+  it('takes a region at its exact size into a new shot folder, named by the time, raw when asked', async () => {
+    const library = temp();
+    const before = process.env.CUTTLE_SHOTS_DIR;
+    process.env.CUTTLE_SHOTS_DIR = library;
+    try {
+      const taken = await cli('--json', 'shot', 'take', '--backend', 'test', '--region', '10,20,301,201', '--raw');
+      expect(taken.code).toBe(0);
+      const folder = taken.json.shot as string;
+      expect(folder.startsWith(library)).toBe(true);
+      expect(basename(folder)).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}\.\d{2}\.\d{2}$/);
+      expect(taken.json).toMatchObject({ file: join(folder, 'source.png'), source: join(folder, 'source.png'), width: 301, height: 201, scale: 1 });
+      expect(JSON.parse(readFileSync(join(folder, 'shot.json'), 'utf8'))).toEqual({ version: 1, source: 'source.png' });
+      // a second one in the same second gets a folder of its own
+      const again = await cli('--json', 'shot', '--backend', 'test', '--window', 'Test Window', '--raw');
+      expect(again.json).toMatchObject({ width: 640, height: 360, window: 'Test Window' });
+      expect(again.json.shot).not.toBe(folder);
+    } finally {
+      if (before === undefined) delete process.env.CUTTLE_SHOTS_DIR;
+      else process.env.CUTTLE_SHOTS_DIR = before;
+    }
+  });
+
+  it('refuses a folder that holds a shot, and a source it cannot take', async () => {
+    const folder = temp();
+    writeFileSync(join(folder, 'shot.json'), '{}');
+    expect(((await cli('--json', 'shot', 'take', '--backend', 'test', '--save', folder)).json.error as { message: string }).message).toMatch(/holds a shot already/);
+    expect(((await cli('--json', 'shot', 'take', '--backend', 'test', '--monitor', '5', '--save', join(temp(), 'new'))).json.error as { code: string }).code).toBe('device-not-found');
   });
 });

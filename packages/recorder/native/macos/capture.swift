@@ -17,6 +17,15 @@
 // samples on stdout, silence where nothing played, so they keep time with the clock; first a line on
 // stderr that says when the first sample played, `start <Unix seconds>`. Exit codes as above.
 //
+//   cuttle-capture shot --display <CGDirectDisplayID> [--crop x,y,w,h] [--cursor] [--exclude-pid <pid>]... --out <file.png>
+//   cuttle-capture shot --display <CGDirectDisplayID> --window <CGWindowID> [--cursor] --out <file.png>
+//
+// One picture of the display (a screenshot) as a PNG, without the windows of the given processes,
+// cropped in its backing pixels; or with --window that window by itself, at its own pixels, without
+// its shadow, what lies outside its rounded corners transparent. The PNG says its resolution (144 dpi
+// from a Retina display), and a line on stdout its size and scale ({"width", "height", "scale"}).
+// Exit codes as above.
+//
 //   cuttle-capture ocr
 //
 // Reads the text of pictures with the Vision framework, for the privacy masks: as Windows' OCR helper
@@ -31,6 +40,7 @@ import CoreVideo
 import Foundation
 import ImageIO
 import ScreenCaptureKit
+import VideoToolbox
 import Vision
 
 func fail(_ code: Int32, _ message: String) -> Never {
@@ -53,10 +63,11 @@ struct Options {
   var verbose = false
   var window: CGWindowID?
   var size: CGSize?
+  var out: String?
 }
 
-/** The options after the command (`audio` takes --window without --size). */
-func parse(_ given: ArraySlice<String>, audio: Bool = false) -> Options {
+/** The options after the command (`audio` and `shot` take --window without --size). */
+func parse(_ given: ArraySlice<String>, audio: Bool = false, shot: Bool = false) -> Options {
   var options = Options()
   var args = given.makeIterator()
   while let arg = args.next() {
@@ -75,10 +86,12 @@ func parse(_ given: ArraySlice<String>, audio: Bool = false) -> Options {
       let parts = (args.next() ?? "").split(separator: ",").compactMap { Double($0) }
       guard parts.count == 4 else { fail(2, "--crop needs x,y,w,h") }
       options.crop = CGRect(x: parts[0], y: parts[1], width: parts[2], height: parts[3])
+    case "--out": options.out = required(args.next(), "--out needs a file")
     default: fail(2, "unknown argument \(arg)")
     }
   }
-  if options.window != nil && options.size == nil && !audio { fail(2, "--window needs --size") }
+  if options.window != nil && options.size == nil && !audio && !shot { fail(2, "--window needs --size") }
+  if shot && options.out == nil { fail(2, "shot needs --out <file.png>") }
   return options
 }
 
@@ -328,7 +341,8 @@ signal(SIGPIPE, SIG_IGN)
 let command = CommandLine.arguments.dropFirst().first
 if command == "ocr" { readText() }
 let audio = command == "audio"
-let options = parse(CommandLine.arguments.dropFirst(audio ? 2 : 1), audio: audio)
+let shot = command == "shot"
+let options = parse(CommandLine.arguments.dropFirst(audio || shot ? 2 : 1), audio: audio, shot: shot)
 func say(_ message: String) {
   if options.verbose { FileHandle.standardError.write("cuttle-capture: \(message)\n".data(using: .utf8)!) }
 }
@@ -373,6 +387,99 @@ func startSound(_ content: SCShareableContent, _ display: SCDisplay) async throw
   sounding = (stream, sound, timer)
 }
 
+/** The first complete frame of a stream, as a picture: a screenshot where SCScreenshotManager is missing (macOS 13). */
+final class FirstFrame: NSObject, SCStreamOutput, SCStreamDelegate {
+  private let lock = NSLock()
+  private var waiting: CheckedContinuation<CGImage, Error>?
+
+  func wait(for stream: SCStream) async throws -> CGImage {
+    try await withCheckedThrowingContinuation { continuation in
+      lock.lock()
+      waiting = continuation
+      lock.unlock()
+      Task {
+        do { try await stream.startCapture() } catch { self.finish(.failure(error)) }
+      }
+    }
+  }
+
+  private func finish(_ result: Result<CGImage, Error>) {
+    lock.lock()
+    let continuation = waiting
+    waiting = nil
+    lock.unlock()
+    continuation?.resume(with: result)
+  }
+
+  func stream(_ stream: SCStream, didOutputSampleBuffer buffer: CMSampleBuffer, of type: SCStreamOutputType) {
+    guard type == .screen, buffer.isValid,
+          let attachments = CMSampleBufferGetSampleAttachmentsArray(buffer, createIfNecessary: false) as? [[SCStreamFrameInfo: Any]],
+          let status = attachments.first?[.status] as? Int, SCFrameStatus(rawValue: status) == .complete,
+          let pixels = CMSampleBufferGetImageBuffer(buffer) else { return }
+    var image: CGImage?
+    VTCreateCGImageFromCVPixelBuffer(pixels, options: nil, imageOut: &image)
+    if let image { finish(.success(image)) }
+  }
+
+  func stream(_ stream: SCStream, didStopWithError error: Error) {
+    finish(.failure(error))
+  }
+}
+
+/** `cuttle-capture shot`: one picture of the display or of a window, written as a PNG. */
+func takeShot(_ content: SCShareableContent, _ display: SCDisplay) async throws -> Never {
+  let out = options.out!
+  let mode = CGDisplayCopyDisplayMode(options.display)
+  let pixelWidth = mode?.pixelWidth ?? display.width
+  let pixelHeight = mode?.pixelHeight ?? display.height
+  var scale = Double(pixelWidth) / Double(display.width)
+  let config = SCStreamConfiguration()
+  let filter: SCContentFilter
+  if let id = options.window {
+    // the window by itself, without its shadow, at its own pixels (on the display it is on)
+    guard let window = content.windows.first(where: { $0.windowID == id }) else { fail(2, "there is no window \(id) (closed, or on another desktop)") }
+    filter = SCContentFilter(desktopIndependentWindow: window)
+    var size = window.frame.size
+    if #available(macOS 14.0, *) {
+      scale = Double(filter.pointPixelScale)
+      size = filter.contentRect.size
+      config.ignoreShadowsSingleWindow = true
+    }
+    config.width = Int((size.width * scale).rounded())
+    config.height = Int((size.height * scale).rounded())
+  } else {
+    let excluded = content.applications.filter { options.excluded.contains($0.processID) }
+    filter = SCContentFilter(display: display, excludingApplications: excluded, exceptingWindows: [])
+    let crop = options.crop ?? CGRect(x: 0, y: 0, width: pixelWidth, height: pixelHeight)
+    if options.crop != nil {
+      config.sourceRect = CGRect(x: crop.minX / scale, y: crop.minY / scale, width: crop.width / scale, height: crop.height / scale)
+    }
+    config.width = Int(crop.width)
+    config.height = Int(crop.height)
+  }
+  config.pixelFormat = kCVPixelFormatType_32BGRA
+  config.colorSpaceName = CGColorSpace.sRGB
+  config.showsCursor = options.cursor
+  config.capturesAudio = false
+  let image: CGImage
+  if #available(macOS 14.0, *) {
+    image = try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: config)
+  } else {
+    let first = FirstFrame()
+    let stream = SCStream(filter: filter, configuration: config, delegate: first)
+    try stream.addStreamOutput(first, type: .screen, sampleHandlerQueue: DispatchQueue(label: "cuttle.shot"))
+    image = try await first.wait(for: stream)
+    try? await stream.stopCapture()
+  }
+  // the resolution says the scale: 72 dpi a point
+  guard let destination = CGImageDestinationCreateWithURL(URL(fileURLWithPath: out) as CFURL, "public.png" as CFString, 1, nil) else { fail(2, "cannot write \(out)") }
+  let dpi = 72 * scale
+  CGImageDestinationAddImage(destination, image, [kCGImagePropertyDPIWidth: dpi, kCGImagePropertyDPIHeight: dpi] as CFDictionary)
+  guard CGImageDestinationFinalize(destination) else { fail(2, "cannot write \(out)") }
+  answer(["width": image.width, "height": image.height, "scale": scale])
+  exit(0)
+}
+
 Task {
   do {
     say("listing the displays")
@@ -380,6 +487,7 @@ Task {
     say("\(content.displays.count) displays, \(content.applications.count) apps")
     guard let display = content.displays.first(where: { $0.displayID == options.display }) else { fail(2, "there is no display \(options.display)") }
     if audio { return try await startSound(content, display) }
+    if shot { try await takeShot(content, display) }
     let mode = CGDisplayCopyDisplayMode(options.display)
     let pixelWidth = mode?.pixelWidth ?? display.width
     let pixelHeight = mode?.pixelHeight ?? display.height

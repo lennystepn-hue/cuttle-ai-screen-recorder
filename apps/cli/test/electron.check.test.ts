@@ -633,6 +633,11 @@ describe.runIf(enabled)('cuttle in Electron', () => {
       expect(again.code).toBe(0);
       expect(readFileSync(join(dir, 'shot.webp')).subarray(8, 12).toString()).toBe('WEBP');
       expect(JSON.parse(readFileSync(join(kept, 'shot.json'), 'utf8'))).toMatchObject({ source: 'source.png', scale: 2, transparent: true, frame: { style: 'mac-dark', shadow: true } });
+      // taken (the test backend's monitor) and framed in one go
+      const taken = cuttle('shot', 'take', '--backend', 'test', '--region', '0,0,320,180', '--padding', '20', '--no-shadow', '--save', join(dir, 'taken'));
+      expect(taken.code).toBe(0);
+      expect(taken.json).toMatchObject({ file: join(dir, 'taken', 'shot.png'), width: 360, height: 220, source: join(dir, 'taken', 'source.png') });
+      expect(pngSize(join(dir, 'taken', 'source.png'))).toEqual([320, 180]);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

@@ -75,10 +75,11 @@ function pixelRect(rect: Rectangle, display: PickerDisplay, size: { width: numbe
 
 /**
  * Takes a pick into a new shot folder: a window by itself (as it is now), else the frozen display or
- * its region; after a timer, the screen as it is then. Then frames it in the last look and copies it
- * (quick) or opens it in the editor. Says nothing itself: a failure is thrown.
+ * its region; after a timer, the screen as it is then. Answers what comes next, once the picture is
+ * in its folder: framed in the last look and copied (quick), or opened in the editor. Says nothing
+ * itself: a failure is thrown.
  */
-export async function takePicked(target: PickedTarget, display: PickerDisplay, delay: ShotDelay): Promise<void> {
+export async function takePicked(target: PickedTarget, display: PickerDisplay, delay: ShotDelay): Promise<() => Promise<void>> {
   const settings = await loadSettings();
   await updateSettings((next) => {
     next.shots.delay = delay;
@@ -118,8 +119,7 @@ export async function takePicked(target: PickedTarget, display: PickerDisplay, d
   const withLook = { ...(settings.shots.look ?? {}), ...base };
   const raw = parseShot(withLook).ok ? withLook : base;
   await writeJson(join(folder, SHOT_FILE), raw);
-  if (settings.shots.quick) await quickShot(folder, display);
-  else await openShotEditor(folder);
+  return () => (settings.shots.quick ? quickShot(folder, display) : openShotEditor(folder));
 }
 
 /** Puts a PNG into the clipboard as an image other apps paste; the check keeps it instead (the person's clipboard stays theirs). */
@@ -226,7 +226,7 @@ export const toastFolder = (): string | undefined => toast?.folder;
 // The screenshot editor
 
 let editor: { window: BrowserWindow; dir: string } | undefined;
-/** Starts a new screenshot (the pickers); set by the recording module, which owns them. */
+/** Starts a new screenshot (the pickers) and resolves once it is taken or cancelled; set by the recording module, which owns them. */
 let shoot: (() => Promise<void>) | undefined;
 export function onNewShot(start: () => Promise<void>): void {
   shoot = start;
@@ -362,8 +362,9 @@ export async function openShotEditor(dir: string): Promise<void> {
       }
     },
   });
-  await window.loadURL(`${APP_ORIGIN}/shot.html`);
-  bringToFront(window);
+  // shown once its page is there; a window closed meanwhile never stalls the one who opened it
+  window.once('ready-to-show', () => bringToFront(window));
+  void window.loadURL(`${APP_ORIGIN}/shot.html`).catch(() => {});
 }
 
 /** The shots in the library folder, newest first, each with a small picture. */

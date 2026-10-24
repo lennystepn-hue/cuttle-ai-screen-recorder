@@ -3034,7 +3034,7 @@ describe.runIf(enabled)('the Cuttle app', () => {
       await waitForPage(app, async (candidate) => candidate.url().includes('/countdown.html'), 10_000);
       await expect.poll(() => shotFolders().length, { timeout: 30_000 }).toBe(shotsBefore + 1);
       const dir = shotFolders().at(-1)!;
-      await expect.poll(() => existsSync(join(dir, 'source.png')), { timeout: 10_000 }).toBe(true);
+      await expect.poll(() => existsSync(join(dir, 'shot.json')), { timeout: 10_000 }).toBe(true);
       expect(pngSize(join(dir, 'source.png'))).toEqual([640, 360]);
       expect(JSON.parse(readFileSync(join(dir, 'shot.json'), 'utf8'))).toMatchObject({ padding: 10, frame: { style: 'mac-dark' }, transparent: true });
       const editorPage = await waitForPage(app, async (candidate) => candidate.url().includes('/shot.html') && (await invokeIn<{ dir: string }>(candidate, 'shot:view')).dir === dir);

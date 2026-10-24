@@ -48,6 +48,14 @@ let busy = false;
 let pillHidden = false;
 /** The pick is for a screenshot, not a take. */
 let shooting = false;
+/** Who waits for the screenshot's pick to end, taken or cancelled. */
+const shotWaiters: (() => void)[] = [];
+const endShooting = () => {
+  shooting = false;
+  for (const done of shotWaiters.splice(0)) done();
+};
+/** Resolves once the screenshot being picked is taken or cancelled (at once when none is). */
+const shootingEnded = (): Promise<void> => (shooting ? new Promise((done) => shotWaiters.push(done)) : Promise.resolve());
 /** Projects whose take is being finished or cut: they record again once their editor has the cut. */
 const finishing = new Set<string>();
 /** The running recording until its take is written into the project, for a quit to wait on. */
@@ -405,7 +413,7 @@ function endPicking(cancelled: boolean): void {
   for (const picker of closing) if (!picker.window.isDestroyed()) picker.window.destroy();
   if (!cancelled) return;
   if (shooting) void thawDisplays();
-  shooting = false;
+  endShooting();
   busy = false;
   if (pillHidden) void showPill();
   pillHidden = false;
@@ -548,7 +556,11 @@ async function beginRecording(target: PickedTarget, displays: PickerDisplay[]): 
 export function startShooting(options: { fromPill?: boolean } = {}): Promise<void> {
   return startPicking(undefined, { ...options, shot: true });
 }
-onNewShot(() => startShooting());
+// the screenshot editor's New: it steps aside until the pick is taken or cancelled
+onNewShot(async () => {
+  await startShooting();
+  await shootingEnded();
+});
 
 /** Takes the screenshot of a pick, after its timer (the countdown over what it takes). */
 async function beginShot(target: PickedTarget, delay: ShotDelay, displays: PickerDisplay[]): Promise<void> {
@@ -557,6 +569,8 @@ async function beginShot(target: PickedTarget, delay: ShotDelay, displays: Picke
   const picked = pickers.find((picker) => picker.display === target.display)?.setup;
   let finished: () => void = () => {};
   writing = new Promise<void>((done) => (finished = done));
+  /** What comes once the shot is in its folder: the next pick or take need not wait for it. */
+  let then: (() => Promise<void>) | undefined;
   try {
     endPicking(false);
     if (!display || picked?.problem) {
@@ -564,7 +578,7 @@ async function beginShot(target: PickedTarget, delay: ShotDelay, displays: Picke
       return;
     }
     if (delay > 0) await countDown(inside(targetRect(target, display, picked), display.workArea), delay);
-    await takePicked(target, display, delay);
+    then = await takePicked(target, display, delay);
   } catch (error) {
     say(`Cuttle cannot take the screenshot: ${(error as Error).message}`);
   } finally {
@@ -572,10 +586,11 @@ async function beginShot(target: PickedTarget, delay: ShotDelay, displays: Picke
     writing = undefined;
     finished();
     busy = false;
-    shooting = false;
+    endShooting();
     if (pillHidden && !quitting) void showPill();
     pillHidden = false;
   }
+  await then?.().catch((error: Error) => say(`Cuttle cannot show the screenshot: ${error.message}`));
 }
 
 /** The countdown over `area` for `seconds` (never in the shot: Cuttle's windows are left out). */

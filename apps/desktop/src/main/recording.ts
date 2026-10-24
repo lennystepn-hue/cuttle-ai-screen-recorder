@@ -10,6 +10,7 @@ import { usedIds } from '@cuttle/project';
 import { focusWindow, inputAllowed, recentClaudeFolders, type Devices, type RecorderEvent, type Take } from '@cuttle/recorder';
 import type { HudState, PermissionNote, PickedTarget, PickerSetup, RecordChoices, ShotDelay } from '../shared/ipc';
 import { captureSourceFor, hudPosition, hudWarning, recordingFailure, scriptForTake, stopOptionsFor, type PickerDisplay, type PickerWindow, type ScriptStep } from '../shared/recording';
+import { takeSeconds, type TakeActions } from '../shared/take-status';
 import { displayPixels, monitorOf, setMonitors, toDesktopPixels, toDip } from './desktop-pixels';
 import { CHECK, COUNTDOWN, HIDDEN, TEST_BACKEND } from './check';
 import { bindRequests, send } from './ipc';
@@ -24,6 +25,7 @@ import { openPrompter, type Prompter } from './prompter';
 import { liveRequest, transcribeProject } from './speech';
 import { editorWindowOf, expectSuggest, guard, hidePill, reopenEditor, sendToEditor, setEditorStatus, showPill, webPreferences } from './windows';
 import { freezeDisplays, frozenDisplay, onNewShot, takePicked, thawDisplays } from './shots';
+import { showTake, takeChanged } from './tray';
 
 /** The HUD's window (the HUD and a margin for its shadow): never in the video, and a dead zone for the input log. */
 const HUD_SIZE = { width: 552, height: 64 };
@@ -661,8 +663,13 @@ async function record(target: PickedTarget, display: PickerDisplay, displays: Pi
       );
       const hud = overlay({ ...hudPosition(displays, display.id, area, hudSize), ...hudSize }, 'hud.cjs', { focusable: false, movable: true });
       const hudState: HudState = { phase: 'countdown', markers: 0, ...(choices.mic && { mic: true }), ...(live && { captions: {} }) };
+      /** The script's step the take is at (from its `step` markers). */
+      let stepIndex = 0;
       // a check of the drive or the window still under way may note something after the HUD closed
-      const showHud = () => !hud.isDestroyed() && send(hud.webContents, 'hud:state', { ...hudState });
+      const showHud = () => {
+        takeChanged();
+        if (!hud.isDestroyed()) send(hud.webContents, 'hud:state', { ...hudState });
+      };
       /** The last warning: a pause shows its own note, the resume brings the warning back. */
       let warning: { message: string; detail: string } | undefined;
       const note = (message: string, detail: string, tone: HudState['tone']) => {
@@ -672,17 +679,30 @@ async function record(target: PickedTarget, display: PickerDisplay, displays: Pi
         hudState.tone = tone;
         showHud();
       };
-      bindRequests(hud.webContents, 'hud', {
-        'hud:stop': () => {
+      // what the HUD's buttons do, and the take's menu in the menu bar (the tray on Windows)
+      const actions: TakeActions = {
+        stop: () => {
+          if (hudState.phase === 'stopping') return;
           hudState.phase = 'stopping';
           note('Stopping…', 'Writing the take', 'info');
           recorderHost.stop();
         },
-        'hud:marker': () => recorderHost.marker(),
-        'hud:retake': () => recorderHost.retake(),
-        'hud:shot': () => recorderHost.takeShot(),
-        'hud:pause': () => recorderHost.pause(),
-        'hud:resume': () => recorderHost.resume(),
+        pause: () => recorderHost.pause(),
+        resume: () => recorderHost.resume(),
+        retake: () => recorderHost.retake(),
+        marker: () => recorderHost.marker(),
+        shot: () => recorderHost.takeShot(),
+        nextStep: () => recorderHost.nextStep(),
+        previousStep: () => recorderHost.previousStep(),
+      };
+      const endTakeInTray = showTake(() => ({ phase: hudState.phase, seconds: takeSeconds(hudState, Date.now()), ...(script.length > 0 && { step: { index: stepIndex, count: script.length } }) }), actions);
+      bindRequests(hud.webContents, 'hud', {
+        'hud:stop': () => actions.stop(),
+        'hud:marker': () => actions.marker(),
+        'hud:retake': () => actions.retake(),
+        'hud:shot': () => actions.shot(),
+        'hud:pause': () => actions.pause(),
+        'hud:resume': () => actions.resume(),
         'hud:restart': () => {
           if (hudState.phase === 'stopping' || hudState.phase === 'countdown') return;
           restarting = true;
@@ -788,7 +808,11 @@ async function record(target: PickedTarget, display: PickerDisplay, displays: Pi
             return;
           case 'marker':
             // a step of the script moves the prompter; the mistake key's marker is a retake: neither is one of the person's markers
-            if (event.marker.kind === 'step') return prompter?.reached(event.marker.label ?? '');
+            if (event.marker.kind === 'step') {
+              stepIndex = Math.max(0, script.findIndex((step) => step.id === event.marker.label));
+              takeChanged();
+              return prompter?.reached(event.marker.label ?? '');
+            }
             if (event.marker.kind === 'retake') hudState.retakes = (hudState.retakes ?? 0) + 1;
             else if (event.marker.kind === 'shot') hudState.shots = (hudState.shots ?? 0) + 1;
             else hudState.markers++;
@@ -839,6 +863,7 @@ async function record(target: PickedTarget, display: PickerDisplay, displays: Pi
         clearInterval(watch);
         closeOverlays();
         if (!hud.isDestroyed()) hud.destroy();
+        endTakeInTray();
         prompter?.destroy();
         if (error instanceof RecordingError && error.code === 'cancelled') {
           // cancelled after a restart: the take put aside is the take after all
@@ -879,6 +904,7 @@ async function record(target: PickedTarget, display: PickerDisplay, displays: Pi
       clearInterval(watch);
       closeOverlays();
       if (!hud.isDestroyed()) hud.destroy();
+      endTakeInTray();
       prompter?.destroy();
       if (restarting && !quitting) {
         // put aside, not deleted ("Undo restart" in the editor), and counted down again

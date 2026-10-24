@@ -1,6 +1,7 @@
 // Draws Cuttle's icons for both platforms into apps/desktop/assets/, and the app's own mark into
 // apps/desktop/src/renderer/mark.ts:
-// - Windows: icon.ico (16–256 px), icon.png (256 px, the windows' icon) and tray.png / tray@2x.png;
+// - Windows: icon.ico (16–256 px), icon.png (256 px, the windows' icon), tray.png / tray@2x.png and
+//   tray-recording.png / tray-recording@2x.png (the tray during a take: a red dot in its corner);
 // - macOS: icon.icns (16–1024 px), icon-mac.png (1024 px, the Dock icon while developing) and
 //   trayTemplate.png / trayTemplate@2x.png (a template image, tinted for light and dark menu bars).
 //
@@ -24,6 +25,8 @@ const MARK = fileURLToPath(new URL('../apps/desktop/src/renderer/mark.ts', impor
 const INK = '#1b0f0a';
 const CREAM = '#fff1e6';
 const ORANGE = '#f0956f';
+/** The recording dot's red: the HUD's (`--recording` in tokens.css). */
+const RECORDING = '#ff4d4f';
 
 const f = (value) => Math.round(value * 10) / 10;
 const pathOf = (points) => `M${points.map(([x, y]) => `${f(x)} ${f(y)}`).join('L')}Z`;
@@ -207,6 +210,11 @@ function smallTile() {
 </svg>`;
 }
 
+/** Windows' tray during a take: the small tile with a red recording dot in its corner, ringed in white to stand off the tile. */
+function recordingTile() {
+  return smallTile().replace('</svg>', `<circle cx="780" cy="780" r="230" fill="${RECORDING}" stroke="#fff" stroke-width="64"/>\n</svg>`);
+}
+
 /** macOS's menu bar: the silhouette alone, black, its eye cut out. */
 function trayIcon() {
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${SILHOUETTE_BOX}">
@@ -281,7 +289,10 @@ async function main() {
     writeFileSync(join(OUT, 'icon.png'), images.at(-1).png);
     writeFileSync(join(OUT, 'tray.png'), await render(small, 16));
     writeFileSync(join(OUT, 'tray@2x.png'), await render(small, 32));
-    wrote.push('icon.ico', 'icon.png', 'tray.png', 'tray@2x.png');
+    const recording = recordingTile();
+    writeFileSync(join(OUT, 'tray-recording.png'), await render(recording, 16));
+    writeFileSync(join(OUT, 'tray-recording@2x.png'), await render(recording, 32));
+    wrote.push('icon.ico', 'icon.png', 'tray.png', 'tray@2x.png', 'tray-recording.png', 'tray-recording@2x.png');
 
     // macOS: the squircle, packed by iconutil where there is one
     const icon = appIcon();

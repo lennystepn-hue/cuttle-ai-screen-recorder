@@ -250,3 +250,186 @@ body.transparent #root {
 :root[data-motion='reduce'] .captions .said > span {
   animation: none;
 }
+
+/* At the top edge during a take (#171): an island while the pointer is elsewhere, beside the notch
+   (black like it, the dot and the level left of it, the time right) or a small pill under the menu
+   bar's middle; the whole HUD comes out of it on the pill's drawer spring and goes back quicker. */
+.hud-wrap.top {
+  justify-content: flex-start;
+  position: relative;
+  /* the shadow follows the clipped shape */
+  filter: drop-shadow(0 10px 22px rgba(0, 0, 0, 0.38));
+  --island-w: calc(var(--notch-w, 4px) + 128px);
+}
+.hud-wrap.top:not([data-origin='notch']) {
+  padding-top: 6px;
+  --island-w: 132px;
+}
+.hud-wrap.top .hud {
+  -webkit-app-region: no-drag;
+  box-shadow: none;
+  transform-origin: top center;
+  transition:
+    clip-path var(--drawer-close) cubic-bezier(0.4, 0, 1, 1),
+    transform var(--drawer-close) cubic-bezier(0.4, 0, 1, 1);
+}
+.hud-wrap.top[data-state='open'] .hud {
+  transition: clip-path var(--drawer-open) var(--drawer-spring);
+  animation: hud-settle var(--drawer-open) ease-in-out;
+}
+@keyframes hud-settle {
+  0%,
+  30% {
+    transform: none;
+  }
+  55% {
+    transform: scale(1.02, 1.06);
+  }
+  100% {
+    transform: none;
+  }
+}
+.hud-wrap.top .hud > * {
+  opacity: 0;
+  transition: opacity 90ms linear;
+}
+.hud-wrap.top[data-state='open'] .hud > * {
+  opacity: 1;
+  transition: opacity 180ms linear 90ms;
+}
+.hud-wrap.top .captions {
+  transition: opacity 150ms linear;
+}
+.hud-wrap.top[data-state='closed'] .captions {
+  opacity: 0;
+}
+
+/* the island */
+.island {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  z-index: 1;
+  width: var(--island-w);
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  pointer-events: none;
+  color: var(--text);
+  font-size: var(--size-s);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  transition: opacity 150ms linear;
+}
+.island-left,
+.island-right {
+  width: 52px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+.island-right {
+  justify-content: flex-end;
+}
+.island .dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex: none;
+  background: var(--recording);
+  box-shadow: 0 0 0 3px rgba(255, 77, 79, 0.22);
+  animation: pulse 1.6s ease-in-out infinite;
+}
+.island.stopping .dot,
+.island.resuming .dot,
+.island.countdown .dot {
+  background: var(--muted);
+  box-shadow: none;
+  animation: none;
+}
+.island.paused .dot {
+  background: var(--card);
+  box-shadow: 0 0 0 3px rgba(242, 179, 74, 0.2);
+  animation: none;
+}
+.island.paused .island-right {
+  color: var(--card);
+}
+.island .level {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 14px;
+}
+.island .level i {
+  width: 2px;
+  border-radius: 1px;
+  background: var(--raised-active);
+}
+.island .level i.on {
+  background: var(--caption);
+}
+.island .level i.clip {
+  background: var(--recording);
+}
+
+/* beside the notch: from the top of the screen, black like the notch; the island stays above the
+   open HUD's row, whose own dot, time and level it shows */
+.hud-wrap.top[data-origin='notch'] .island {
+  height: var(--notch-h);
+  padding: 0 12px;
+}
+.hud-wrap.top[data-origin='notch'] .hud {
+  height: calc(48px + var(--notch-h));
+  padding-top: calc(6px + var(--notch-h));
+  border-radius: 0 0 22px 22px;
+  background: #000;
+  clip-path: inset(0 calc(50% - var(--island-w) / 2) calc(100% - var(--notch-h)) calc(50% - var(--island-w) / 2) round 0 0 12px 12px);
+}
+.hud-wrap.top[data-origin='notch'][data-state='open'] .hud {
+  clip-path: inset(0 0 0 0 round 0 0 22px 22px);
+}
+.hud-wrap.top[data-origin='notch'] .hud > .dot,
+.hud-wrap.top[data-origin='notch'] .hud > .time,
+.hud-wrap.top[data-origin='notch'] .hud > .level {
+  display: none;
+}
+
+/* under the menu bar's middle (macOS) or the top edge (Windows): a small pill in the middle of where
+   the HUD's bar opens, which goes as the bar comes */
+.hud-wrap.top:not([data-origin='notch']) .island {
+  top: 15px;
+  height: 30px;
+  padding: 0 12px;
+  border-radius: 15px;
+  background: var(--overlay);
+}
+.hud-wrap.top:not([data-origin='notch'])[data-state='open'] .island {
+  opacity: 0;
+}
+.hud-wrap.top:not([data-origin='notch']) .hud {
+  clip-path: inset(9px calc(50% - var(--island-w) / 2) 9px calc(50% - var(--island-w) / 2) round 15px);
+}
+.hud-wrap.top:not([data-origin='notch'])[data-state='open'] .hud {
+  clip-path: inset(0 0 0 0 round 16px);
+}
+
+/* reduced motion: it only fades */
+@media (prefers-reduced-motion: reduce) {
+  :root:not([data-motion='full']) .hud-wrap.top .hud {
+    transition: none;
+    animation: none;
+  }
+  :root:not([data-motion='full']) .island .dot {
+    animation: none;
+  }
+}
+:root[data-motion='reduce'] .hud-wrap.top .hud {
+  transition: none;
+  animation: none;
+}
+:root[data-motion='reduce'] .island .dot {
+  animation: none;
+}

@@ -77,10 +77,13 @@ export interface DrawerInput {
   keep: boolean;
 }
 
-/** The drawer one tick later: its state, and `open` (on a display, at a window) or `close` when it changes. */
-export function drawerNext(state: DrawerState, input: DrawerInput, place: (display: DrawerDisplay) => Rect): { state: DrawerState; action?: { open: DrawerDisplay } | 'close' } {
+/**
+ * The drawer one tick later: its state, and `open` (on a display, at a window) or `close` when it
+ * changes. `zone`: what the pointer rests on to open it (the top edge's middle; the HUD's island).
+ */
+export function drawerNext(state: DrawerState, input: DrawerInput, place: (display: DrawerDisplay) => Rect, zone: (display: DrawerDisplay) => Rect = drawerZone): { state: DrawerState; action?: { open: DrawerDisplay } | 'close' } {
   const { now, pointer } = input;
-  const zoneOf = () => input.displays.find((display) => inside(drawerZone(display), pointer.x, pointer.y));
+  const zoneOf = () => input.displays.find((display) => inside(zone(display), pointer.x, pointer.y));
   switch (state.phase) {
     case 'closed': {
       const display = input.buttons ? undefined : zoneOf();
@@ -94,7 +97,8 @@ export function drawerNext(state: DrawerState, input: DrawerInput, place: (displ
     }
     case 'open':
     case 'leaving': {
-      const over = inside(state.window, pointer.x, pointer.y, DRAWER.slack) || inside(drawerZone(input.displays.find((display) => display.id === state.display) ?? { id: -1, bounds: state.window, workArea: state.window }), pointer.x, pointer.y);
+      const display = input.displays.find((candidate) => candidate.id === state.display);
+      const over = inside(state.window, pointer.x, pointer.y, DRAWER.slack) || (display !== undefined && inside(zone(display), pointer.x, pointer.y));
       const held = input.keep || (state.phase === 'open' && state.until !== undefined && now < state.until);
       if (over || held) return { state: { phase: 'open', display: state.display, window: state.window } };
       if (state.phase === 'open') return { state: { phase: 'leaving', display: state.display, window: state.window, since: now } };
@@ -102,6 +106,25 @@ export function drawerNext(state: DrawerState, input: DrawerInput, place: (displ
       return { state: { phase: 'closed' }, action: 'close' };
     }
   }
+}
+
+/**
+ * The HUD's island: beside the notch this much wider than it on each side (the dot and the level
+ * left of it, the time right); without a notch this wide and high, `gap` under the menu bar (the
+ * middle of the HUD's bar, which sits 6 px under it: its CSS).
+ */
+export const ISLAND = { beside: 64, width: 132, height: 30, gap: 15 } as const;
+
+/**
+ * The HUD's island during a take at the top edge, collapsed: a strip as high as the notch and wider
+ * than it on both sides, or a small pill under the menu bar's middle (macOS) or at the top edge
+ * (Windows). DIP, on the display.
+ */
+export function islandRect(display: DrawerDisplay): Rect {
+  const { bounds, workArea, notch } = display;
+  const width = notch ? notch.width + 2 * ISLAND.beside : ISLAND.width;
+  const x = Math.round(bounds.x + (bounds.width - width) / 2);
+  return notch ? { x, y: bounds.y, width, height: notch.height } : { x, y: workArea.y + ISLAND.gap, width, height: ISLAND.height };
 }
 
 /** Where a spring of this damping ratio is at `t` (0 to 1 of the animation), settled by its end. */

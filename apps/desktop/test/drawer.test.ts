@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { DRAWER, drawerNext, drawerPlace, drawerZone, springAt, springEasing, type DrawerDisplay, type DrawerInput, type DrawerState } from '../src/shared/drawer';
+import { DRAWER, ISLAND, drawerNext, drawerPlace, drawerZone, islandRect, springAt, springEasing, type DrawerDisplay, type DrawerInput, type DrawerState } from '../src/shared/drawer';
 
 // a MacBook with a notch, and a display beside it without one (its menu bar 25 points high)
 const laptop: DrawerDisplay = { id: 1, bounds: { x: 0, y: 0, width: 1512, height: 982 }, workArea: { x: 0, y: 38, width: 1512, height: 944 }, notch: { width: 200, height: 38 } };
@@ -59,6 +59,26 @@ describe('the drawer at the top centre', () => {
     const shown: DrawerState = { phase: 'open', display: 1, window: place(laptop), until: 1000 + DRAWER.shownMs };
     expect(run([[1000, 700, 500], [1000 + DRAWER.shownMs - 100, 700, 500]], shown).actions).toEqual([]);
     expect(run([[1000 + DRAWER.shownMs, 700, 500], [1000 + DRAWER.shownMs + DRAWER.closeMs + 10, 700, 500]], shown).actions).toEqual(['close']);
+  });
+});
+
+describe("the HUD's island during a take at the top edge", () => {
+  it('sits beside the notch on both sides, or as a small pill under the menu bar', () => {
+    expect(islandRect(laptop)).toEqual({ x: 656 - ISLAND.beside, y: 0, width: 200 + 2 * ISLAND.beside, height: 38 });
+    expect(islandRect(monitor)).toEqual({ x: 1512 + Math.round((1920 - ISLAND.width) / 2), y: 25 + ISLAND.gap, width: ISLAND.width, height: ISLAND.height });
+  });
+
+  it('opens the HUD when the pointer rests on the island, and keeps it open while it is on the HUD', () => {
+    const hud = (display: DrawerDisplay) => drawerPlace(display, { width: 552, height: 64 }, true).window;
+    const step = (state: DrawerState, now: number, x: number, y: number) => drawerNext(state, { now, pointer: { x, y }, buttons: false, displays: [monitor], keep: false }, hud, islandRect);
+    const island = islandRect(monitor);
+    const resting = step({ phase: 'closed' }, 0, island.x + 10, island.y + 10);
+    const opened = step(resting.state, DRAWER.dwellMs + 10, island.x + 10, island.y + 10);
+    expect(opened.action).toEqual({ open: monitor });
+    // the island is not the top edge's strip: resting on the edge above it opens nothing
+    expect(step(step({ phase: 'closed' }, 0, island.x + 10, 0).state, 300, island.x + 10, 0).action).toBeUndefined();
+    // on the HUD's buttons, past the island: it stays
+    expect(step(opened.state, 1500, hud(monitor).x + 500, hud(monitor).y + 40).state.phase).toBe('open');
   });
 });
 

@@ -409,7 +409,11 @@ screen). After the countdown only a small HUD remains, which never appears in th
 mic, its bars show the mic's level, so a mic that hears nothing shows at once, and once a speech
 model is downloaded, a line under it shows what the mic hears as you speak (live captions, about
 two seconds behind, with the fastest model there; nothing of it is saved);
-Ctrl+Shift+Alt+S stops and Ctrl+Shift+Alt+M sets a marker. The take shows in the menu bar too: a
+Ctrl+Shift+Alt+S stops and Ctrl+Shift+Alt+M sets a marker. The settings can put the HUD at the
+top edge instead: a small island at the top centre (beside the notch on a Mac that has one: the dot
+and the mic's level left of it, the time right; else a small pill under the menu bar's middle),
+which opens into the whole HUD, and the prompter under it, when the pointer rests on it, and shows
+a marker, a slip or a screenshot for a moment. The take shows in the menu bar too: a
 red dot and its time beside Cuttle's icon on macOS (`❚❚` while paused, the step with a script), a
 red dot on the tray icon on Windows (the time in its tooltip), and a click opens Stop, Pause, Mark
 slip, Marker, Screenshot and the steps. The bar's Script holds the steps of

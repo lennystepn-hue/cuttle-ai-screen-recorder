@@ -1,7 +1,7 @@
 // The settings window, and the first run in the same window (#welcome): ffmpeg, the cuttle command
 // and the Claude skill, then the pill. Every change is kept at once; there is no Save.
 import { useEffect, useLayoutEffect, useRef, useState, type ComponentType, type KeyboardEvent, type ReactNode } from 'react';
-import type { Motion, Permission, PillPlace, PermissionView, RequestArgument, SettingsPage, SettingsView, SpeechLanguage, SpeechModelName, SpeechStatus, ToolsStatus, UpdateStatus } from '../../shared/ipc';
+import type { HudPlace, Motion, Permission, PillPlace, PermissionView, RequestArgument, SettingsPage, SettingsView, SpeechLanguage, SpeechModelName, SpeechStatus, ToolsStatus, UpdateStatus } from '../../shared/ipc';
 import { bridge } from '../bridge';
 import { CheckIcon, CloseIcon, CopyIcon, FolderIcon, GearIcon, Mark, MaskIcon, MicIcon, RecordIcon, TerminalIcon, WarningIcon } from '../icons';
 import { hotkeyKeys } from '../keys';
@@ -163,6 +163,25 @@ export function Settings() {
                         onChange={(countdown) => change({ countdown })}
                         label="Countdown"
                         testid="countdown"
+                      />
+                    </Row>
+                    <Row
+                      label="The HUD"
+                      hint={
+                        view?.hudPlace === 'top'
+                          ? `A small island at the top centre${MAC ? ' (beside the notch, where there is one)' : ''} with the time; rest the pointer on it for the whole HUD.`
+                          : "Above or below the recorded area, wherever it doesn't cover it."
+                      }
+                    >
+                      <Segmented<HudPlace>
+                        value={view?.hudPlace}
+                        options={[
+                          ['screen', 'By the recording'],
+                          ['top', 'At the top edge'],
+                        ]}
+                        onChange={(hudPlace) => change({ hudPlace })}
+                        label="Where the HUD is during a take"
+                        testid="hud-place"
                       />
                     </Row>
                     <Row label="Camera" hint={devices?.problem ?? 'Shown as a bubble in the corner. The picker can change it for one recording.'}>

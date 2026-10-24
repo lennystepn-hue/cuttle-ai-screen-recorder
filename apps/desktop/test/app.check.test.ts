@@ -335,6 +335,9 @@ describe.runIf(enabled)('the Cuttle app', () => {
     return page;
   };
   /** Asks the running app to open `argv` as a second launch would, `times` times at once. */
+  /** The pointer, a held button and a notch on the main display, as the check gives them in their place (`main/drawer.ts`). */
+  const pretendDrawer = (drawer: { pointer: { x: number; y: number }; buttons?: boolean; notch?: { width: number; height: number } }) =>
+    app.evaluate((_electron, value) => void ((globalThis as { __drawerCheck?: unknown }).__drawerCheck = value), drawer);
   const launchAgain = (argv: string[], times = 1) =>
     app.evaluate(
       ({ app: electronApp }, { args, count }) => {
@@ -1941,9 +1944,7 @@ describe.runIf(enabled)('the Cuttle app', () => {
     });
     const centre = display.bounds.x + Math.round(display.bounds.width / 2);
     const top = display.bounds.y;
-    // the pointer, a held button and a notch on the main display, as the check gives them in their place
-    const pretend = (drawer: { pointer: { x: number; y: number }; buttons?: boolean; notch?: { width: number; height: number } }) =>
-      app.evaluate((_electron, value) => void ((globalThis as { __drawerCheck?: unknown }).__drawerCheck = value), drawer);
+    const pretend = pretendDrawer;
     const notch = { width: 200, height: 32 };
     const away = { x: centre, y: top + 400 };
     await pretend({ pointer: away, notch });
@@ -1994,6 +1995,61 @@ describe.runIf(enabled)('the Cuttle app', () => {
       await app.evaluate(() => void delete (globalThis as { __drawerCheck?: unknown }).__drawerCheck);
     }
   }, 60_000);
+
+  it('puts the HUD at the top edge during a take when the settings say so: an island beside the notch with the time, the whole HUD when the pointer rests on it, a marker in the island, the island again after', async () => {
+    await launchAgain(['--settings']);
+    // on whichever page it was left: its Recording page
+    const settings = await waitForPage(app, async (page) => page.url().includes('/settings.html') && (await page.locator('[data-testid=settings-page-recording]').count()) === 1);
+    await click(settings, '[data-testid=settings-page-recording]');
+    await settings.waitForSelector('[data-testid=hud-place] [aria-checked=true]');
+    const display = await app.evaluate(({ screen }) => {
+      const main = screen.getPrimaryDisplay();
+      return { bounds: main.bounds, workArea: main.workArea };
+    });
+    const centre = display.bounds.x + Math.round(display.bounds.width / 2);
+    const top = display.bounds.y;
+    const notch = { width: 200, height: 32 };
+    const away = { x: centre, y: top + 400 };
+    await pretendDrawer({ pointer: away, notch });
+    try {
+      await click(settings, '[data-testid=hud-place] button:nth-child(2)');
+      await expect.poll(() => (JSON.parse(readFileSync(join(root, 'user-data', 'settings.json'), 'utf8')) as { hudPlace?: string }).hudPlace).toBe('top');
+      const before = new Set(existsSync(join(root, 'projects')) ? readdirSync(join(root, 'projects')) : []);
+      await recordThroughPicker(pillRecord, { stop: 'none', camera: undefined }, false);
+      const hud = await runningHud();
+      const wrap = hud.locator('[data-testid=hud-wrap]');
+      const state = () => wrap.getAttribute('data-state');
+      const island = () => hud.locator('[data-testid=hud-island] .island-right').textContent();
+      // collapsed into the island beside the notch: the time in it, the window at the top centre
+      await expect.poll(() => wrap.getAttribute('data-origin'), { timeout: 5_000 }).toBe('notch');
+      expect(await state()).toBe('closed');
+      expect(await island()).toMatch(/^\d+:\d\d$/);
+      const bounds = await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find((window) => window.webContents.getURL().includes('/hud.html'))!.getBounds());
+      expect([bounds.y, bounds.height]).toEqual([top, notch.height + 64]);
+      expect(Math.abs(bounds.x + bounds.width / 2 - centre)).toBeLessThanOrEqual(1);
+      await shotOf('31c-hud-island', '/hud.html');
+      // resting on the island: the whole HUD comes out of it
+      await pretendDrawer({ pointer: { x: centre - 150, y: top + 10 }, notch });
+      await expect.poll(state, { timeout: 3_000 }).toBe('open');
+      await wait(600);
+      await shotOf('31d-hud-top-open', '/hud.html');
+      // a marker from it shows in the island for a moment
+      await click(hud, 'button.marker');
+      await expect.poll(island, { timeout: 5_000 }).toBe('Marker');
+      // the pointer gone: the island again, with the time
+      await pretendDrawer({ pointer: away, notch });
+      await expect.poll(state, { timeout: 3_000 }).toBe('closed');
+      await expect.poll(island, { timeout: 3_000 }).toMatch(/^\d+:\d\d$/);
+      await click(hud, '[data-testid=hud-stop]');
+      const dir = await newProject(before);
+      await projectWhen(dir, (written) => written.scenes[0]?.id !== undefined);
+    } finally {
+      await pretendDrawer({ pointer: away });
+      await click(settings, '[data-testid=hud-place] button:nth-child(1)');
+      await expect.poll(() => (JSON.parse(readFileSync(join(root, 'user-data', 'settings.json'), 'utf8')) as { hudPlace?: string }).hudPlace).toBe('screen');
+      await app.evaluate(() => void delete (globalThis as { __drawerCheck?: unknown }).__drawerCheck);
+    }
+  }, 120_000);
 
   it('downloads a speech model in the settings (checked, cancelled, failed), and transcribes a spoken take from the Auto tab: its filler words and pauses cut as one step', async () => {
     await launchAgain(['--settings']);

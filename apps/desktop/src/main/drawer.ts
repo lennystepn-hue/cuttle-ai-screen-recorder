@@ -37,7 +37,8 @@ let edge: Awaited<ReturnType<typeof topEdge>> | undefined;
 let notches: { display: number; width: number; height: number }[] = [];
 let watchingDisplays = false;
 
-function displays(): DrawerDisplay[] {
+/** The displays with their notches (the check's pretend one on the main display). */
+export function drawerDisplays(): DrawerDisplay[] {
   const fake = checkDrawer()?.notch;
   const primary = screen.getPrimaryDisplay().id;
   return screen.getAllDisplays().map((display) => {
@@ -76,12 +77,24 @@ function tick(): void {
     if (state.phase !== 'closed') void close();
     return;
   }
-  const fake = checkDrawer();
-  const input = { now: Date.now(), pointer: fake?.pointer ?? screen.getCursorScreenPoint(), buttons: fake?.buttons ?? edge.mouseButtonDown(), displays: displays(), keep };
+  const input = { now: Date.now(), pointer: pointerNow(), buttons: buttonHeld(), displays: drawerDisplays(), keep };
   const next = drawerNext(state, input, (display) => placeOn(display).window);
   state = next.state;
   if (next.action === 'close') void close();
   else if (next.action) void open(next.action.open);
+}
+
+/** The pointer now (DIP), or the check's. */
+export const pointerNow = (): { x: number; y: number } => checkDrawer()?.pointer ?? screen.getCursorScreenPoint();
+
+/** Whether a mouse button is held now (or the check says so). */
+export const buttonHeld = (): boolean => checkDrawer()?.buttons ?? edge?.mouseButtonDown() ?? false;
+
+/** Reads the notches and a held button from here on (the HUD at the top edge asks too). */
+export async function watchTopEdge(): Promise<void> {
+  edge ??= await topEdge({ backend: TEST_BACKEND ? 'test' : undefined });
+  notches = edge.notches();
+  watchDisplays();
 }
 
 /** The notches again, when a display comes, goes or changes (a lid opened, a resolution picked). */
@@ -97,9 +110,7 @@ function watchDisplays(): void {
 /** The drawer watches the top edge: the pill waits there. */
 export async function startDrawer(drawerHost: DrawerHost): Promise<void> {
   host = drawerHost;
-  edge ??= await topEdge({ backend: TEST_BACKEND ? 'test' : undefined });
-  notches = edge.notches();
-  watchDisplays();
+  await watchTopEdge();
   timer ??= setInterval(tick, TICK_MS);
 }
 
@@ -114,9 +125,8 @@ export function stopDrawer(): void {
 export async function showDrawer(drawerHost: DrawerHost): Promise<void> {
   await startDrawer(drawerHost);
   if (drawerHost.busy()) return;
-  const pointer = checkDrawer()?.pointer ?? screen.getCursorScreenPoint();
-  const on = screen.getDisplayNearestPoint(pointer);
-  const display = displays().find((candidate) => candidate.id === on.id);
+  const on = screen.getDisplayNearestPoint(pointerNow());
+  const display = drawerDisplays().find((candidate) => candidate.id === on.id);
   if (display) await open(display, Date.now() + DRAWER.shownMs);
 }
 

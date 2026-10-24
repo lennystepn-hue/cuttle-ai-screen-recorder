@@ -65,11 +65,11 @@ export const WINDOW_CHANNELS = {
     ],
   },
   pill: {
-    requests: ['pill:recent', 'pill:open', 'pill:hide', 'pill:menu', 'pill:record', 'pill:size'],
+    requests: ['pill:recent', 'pill:open', 'pill:hide', 'pill:menu', 'pill:record', 'pill:shot', 'pill:size'],
     events: ['pill:recent', 'app:motion'],
   },
   picker: {
-    requests: ['picker:setup', 'picker:hover', 'picker:choices', 'picker:record', 'picker:cancel', 'picker:claude-folder', 'picker:retry', 'picker:script', 'picker:permission'],
+    requests: ['picker:setup', 'picker:hover', 'picker:choices', 'picker:record', 'picker:frozen', 'picker:shot', 'picker:cancel', 'picker:claude-folder', 'picker:retry', 'picker:script', 'picker:permission'],
     events: ['picker:open', 'picker:active', 'picker:choices', 'picker:devices', 'picker:script', 'app:motion'],
   },
   hud: {
@@ -79,6 +79,14 @@ export const WINDOW_CHANNELS = {
   prompter: {
     requests: ['prompter:next', 'prompter:previous', 'prompter:size'],
     events: ['prompter:state', 'app:motion'],
+  },
+  toast: {
+    requests: ['toast:edit', 'toast:reveal', 'toast:close', 'toast:hover'],
+    events: ['toast:show', 'app:motion'],
+  },
+  shot: {
+    requests: ['shot:view', 'shot:change', 'shot:palette', 'shot:background-image', 'shot:copy', 'shot:save', 'shot:drag', 'shot:reveal', 'shot:library', 'shot:open', 'shot:new'],
+    events: ['shot:show', 'app:motion'],
   },
   countdown: {
     requests: [],

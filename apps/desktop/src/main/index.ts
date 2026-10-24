@@ -7,7 +7,7 @@ import { app, globalShortcut, Menu, session } from 'electron';
 import { HIDDEN } from './check';
 import { mediaWorker } from './media-service';
 import { recorderHost } from './recorder-host';
-import { startPicking, stopForQuit, recordingRuns } from './recording';
+import { startPicking, startShooting, stopForQuit, recordingRuns } from './recording';
 import { assetPath, registerSchemes } from './protocols';
 import { loadSettings, onSettingsChange } from './settings';
 import { openSettings } from './settings-window';
@@ -56,6 +56,7 @@ if (!app.requestSingleInstanceLock(launched)) {
 
   const actions: TrayActions = {
     record: () => void startPicking(),
+    shot: () => void startShooting(),
     showPill: () => void showPill(),
     open: (dir) => void (dir ? openEditorOrSay(dir) : chooseAndOpen()),
     settings: () => void openSettings(),
@@ -104,8 +105,9 @@ if (!app.requestSingleInstanceLock(launched)) {
     const trayIcon = process.platform === 'win32' ? 'tray.png' : process.platform === 'darwin' ? 'trayTemplate.png' : 'tray@2x.png';
     if (!HIDDEN) createTray(assetPath(trayIcon), settings.recent, actions);
     await createPill();
-    // A new recording from anywhere (the recorder's own keys stop it and set markers).
+    // A new recording and a screenshot from anywhere (the recorder's own keys stop a take and set markers).
     if (!HIDDEN) globalShortcut.register('Control+Shift+Alt+R', () => void startPicking());
+    if (!HIDDEN) globalShortcut.register('Control+Shift+Alt+C', () => void startShooting());
     if (launched.open) await openEditorOrSay(launched.open);
     else if (launched.settings) await openSettings();
     // the first plain start welcomes (ffmpeg, the cuttle command and the skill), then the pill

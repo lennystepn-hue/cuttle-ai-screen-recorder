@@ -8,6 +8,15 @@ body.transparent #root {
   cursor: crosshair;
   font-size: var(--size-s);
 }
+/* a screenshot's picker: the display as it was when the shot was asked for, under the dim */
+.still {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  user-select: none;
+}
 .dim {
   position: absolute;
   inset: 0;
@@ -285,6 +294,17 @@ body.transparent #root {
   background: none;
   color: #fff;
   padding: 0;
+}
+/* a screenshot's Take: the accent, not the recording's red */
+.rec.shot {
+  background: var(--accent);
+  color: var(--accent-text);
+}
+.rec.shot:hover:not(:disabled) {
+  background: var(--accent-hover);
+}
+.rec.shot kbd {
+  color: var(--accent-text);
 }
 .bubble {
   position: absolute;

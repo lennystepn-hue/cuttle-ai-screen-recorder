@@ -23,6 +23,8 @@ export default defineConfig({
         prompter: fileURLToPath(new URL('./src/renderer/prompter.html', import.meta.url)),
         countdown: fileURLToPath(new URL('./src/renderer/countdown.html', import.meta.url)),
         settings: fileURLToPath(new URL('./src/renderer/settings.html', import.meta.url)),
+        toast: fileURLToPath(new URL('./src/renderer/toast.html', import.meta.url)),
+        shot: fileURLToPath(new URL('./src/renderer/shot.html', import.meta.url)),
       },
     },
   },

@@ -357,7 +357,7 @@ describe.runIf(enabled)('the Cuttle app', () => {
     mkdirSync(join(root, 'user-data'));
     // The screen is read after a take's cut only where the check asks for it (it says so in the settings),
     // and updates are looked for only when the check asks.
-    writeFileSync(join(root, 'user-data', 'settings.json'), JSON.stringify({ projectsFolder: join(root, 'projects'), privacy: { read: false }, updates: false }));
+    writeFileSync(join(root, 'user-data', 'settings.json'), JSON.stringify({ projectsFolder: join(root, 'projects'), shots: { folder: join(root, 'screenshots') }, privacy: { read: false }, updates: false }));
     // the desktop's wallpaper the check gives the app
     spawnSync('ffmpeg', ['-v', 'error', '-y', '-f', 'lavfi', '-i', 'testsrc2=s=1280x720', '-frames:v', '1', join(root, 'wallpaper.png')], { windowsHide: true });
     // the logo the brand's file dialog picks
@@ -2919,6 +2919,130 @@ describe.runIf(enabled)('the Cuttle app', () => {
     expect(await page.locator('.scene').count()).toBe(1);
     await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find((window) => window.getTitle() === 'reel · Cuttle')?.close());
   });
+
+  /** A window's bridge, from the check: invokes a request and answers what the main process said. */
+  const invokeIn = <T,>(page: Page, channel: string, argument?: unknown) =>
+    page.evaluate(([name, value]) => (window as unknown as { cuttle: { invoke(channel: string, argument?: unknown): Promise<unknown> } }).cuttle.invoke(name as string, value), [channel, argument] as const) as Promise<T>;
+  /** The shots in the check's screenshots folder, oldest first. */
+  const shotFolders = () => (existsSync(join(root, 'screenshots')) ? readdirSync(join(root, 'screenshots')).sort().map((name) => join(root, 'screenshots', name)) : []);
+  const copiedImage = () => app.evaluate(() => (globalThis as { __copiedImage?: Uint8Array }).__copiedImage?.length ?? 0);
+  /** Width and height of a PNG, from its IHDR chunk. */
+  const pngSize = (file: string) => {
+    const bytes = readFileSync(file);
+    return [bytes.readUInt32BE(16), bytes.readUInt32BE(20)];
+  };
+
+  it('takes a screenshot from the pill: the pickers over the screen as it was, a region of it framed in the last look and copied, a toast that opens the editor', async () => {
+    const pill = app.windows().find((page) => page.url().includes('/pill.html'))!;
+    await invokeIn(pill, 'pill:shot');
+    const { page, display } = await firstMonitorPicker();
+    const setup = await invokeIn<{ shot?: { delay: number }; display: { bounds: { x: number; y: number; width: number; height: number } } }>(page, 'picker:setup');
+    expect(setup.shot).toEqual({ delay: 0 });
+    // the display as it was when the shot was asked for: a PNG under the picker
+    const frozen = await page.evaluate(async () => {
+      const bytes = await (window as unknown as { cuttle: { invoke(channel: string): Promise<Uint8Array | undefined> } }).cuttle.invoke('picker:frozen');
+      return bytes ? [...bytes.subarray(1, 4)] : [];
+    });
+    expect(frozen).toEqual([0x50, 0x4e, 0x47]);
+    await invokeIn(page, 'picker:hover');
+    await page.waitForSelector('[data-testid=picker-still]', { state: 'attached' });
+    await page.waitForSelector('[data-testid=picker-shot]', { state: 'attached' });
+    // a screenshot's bar: a timer and Take, none of a take's choices
+    expect(await page.locator('[data-testid=picker-record]').count()).toBe(0);
+    expect(await page.locator('[data-testid=shot-timer]').count()).toBe(1);
+    await shotOfPicker('60-shot-picker', page);
+    const { bounds } = setup.display;
+    // the pickers close as the shot is taken (the page goes before it answers)
+    await invokeIn(page, 'picker:shot', { target: { kind: 'region', display, rect: { x: bounds.x + 10, y: bounds.y + 10, width: 320, height: 180 } }, delay: 0 }).catch(() => {});
+    // its folder: the region of the frozen picture (the test monitor's pixels), shot.json, the framed shot.png
+    await expect.poll(() => shotFolders().some((dir) => existsSync(join(dir, 'shot.png'))), { timeout: 30_000 }).toBe(true);
+    const [dir] = shotFolders();
+    const ratio = 1280 / bounds.width;
+    expect(pngSize(join(dir!, 'source.png'))).toEqual([Math.round(320 * ratio), Math.round(180 * ratio)]);
+    expect(JSON.parse(readFileSync(join(dir!, 'shot.json'), 'utf8'))).toMatchObject({ version: 1, source: 'source.png' });
+    // copied (the check keeps it), and the toast says so; Edit opens the screenshot editor on it
+    expect(await copiedImage()).toBeGreaterThan(0);
+    const toast = await waitForPage(app, async (candidate) => candidate.url().includes('/toast.html') && (await candidate.locator('[data-testid=toast]').count()) === 1);
+    await shotOf('61-shot-toast', '/toast.html');
+    // the toast goes as the editor opens (before it answers)
+    await invokeIn(toast, 'toast:edit').catch(() => {});
+    const editorPage = await waitForPage(app, async (candidate) => candidate.url().includes('/shot.html') && (await candidate.locator('[data-testid=shot-size]').count()) === 1);
+    expect(await invokeIn<{ dir: string }>(editorPage, 'shot:view')).toMatchObject({ dir });
+    await shotOf('62-shot-editor', '/shot.html');
+    // the pickers are gone, and so is the toast
+    await expect.poll(() => app.windows().filter((candidate) => candidate.url().includes('/picker.html') || candidate.url().includes('/toast.html')).length, { timeout: 10_000 }).toBe(0);
+  }, 90_000);
+
+  it('edits the screenshot: a frame and padding written to its shot.json and taken by the next shot, drawn on nothing, copied, saved as WebP, in the library', async () => {
+    const page = await waitForPage(app, async (candidate) => candidate.url().includes('/shot.html'));
+    const [dir] = shotFolders();
+    const view = await invokeIn<{ raw: Record<string, unknown>; name: string }>(page, 'shot:view');
+    expect(await invokeIn(page, 'shot:change', { raw: { ...view.raw, padding: 10, frame: { style: 'mac-dark', title: 'acme.app', shadow: false } } })).toEqual({});
+    const written = () => JSON.parse(readFileSync(join(dir!, 'shot.json'), 'utf8')) as Record<string, unknown>;
+    expect(written()).toMatchObject({ padding: 10, frame: { style: 'mac-dark', title: 'acme.app' } });
+    // not a shot: nothing written, the problem named
+    expect((await invokeIn<{ issues?: string[] }>(page, 'shot:change', { raw: { ...view.raw, padding: -5 } })).issues?.[0]).toMatch(/padding/);
+    expect(written().padding).toBe(10);
+    // a shot that points at another file keeps its own image
+    await invokeIn(page, 'shot:change', { raw: { ...written(), source: '../../../../etc/hosts' } });
+    expect(written().source).toBe('source.png');
+    // the next shot takes this look
+    expect(JSON.parse(readFileSync(join(root, 'user-data', 'settings.json'), 'utf8')).shots.look).toMatchObject({ padding: 10, frame: { style: 'mac-dark' } });
+    // opened again (as from the library), the editor shows the shot as written: its new size
+    const sizeText = () => page.locator('[data-testid=shot-size]').textContent();
+    const first = await sizeText();
+    await invokeIn(page, 'shot:open', { dir });
+    await expect.poll(sizeText, { timeout: 10_000 }).not.toBe(first);
+    // the inspector: on nothing, written a moment later with its shot.png
+    await click(page, '[data-testid=shot-bg-none]');
+    await expect.poll(() => written().transparent, { timeout: 10_000 }).toBe(true);
+    await shotOf('63-shot-editor-transparent', '/shot.html');
+    // Copy: the framed shot as the preview shows it (its size in the footer)
+    const before = await copiedImage();
+    await click(page, '[data-testid=shot-copy]');
+    await expect.poll(copiedImage, { timeout: 10_000 }).not.toBe(before);
+    const shown = (await page.locator('[data-testid=shot-size]').textContent()) ?? '';
+    const [width, height] = pngSize(join(dir!, 'shot.png'));
+    expect(shown).toContain(`${width} × ${height} px`);
+    // saved as WebP where the person chooses (the check's own place)
+    const saved = await page.evaluate(async () => {
+      const canvas = document.querySelector('[data-testid=shot-preview]') as HTMLCanvasElement;
+      const blob = await new Promise<Blob>((resolve) => canvas.toBlob((made) => resolve(made!), 'image/webp'));
+      const bridge = (window as unknown as { cuttle: { invoke(channel: string, argument: unknown): Promise<string | undefined> } }).cuttle;
+      return bridge.invoke('shot:save', { data: new Uint8Array(await blob.arrayBuffer()), format: 'webp', as: true });
+    });
+    expect(saved).toBe(join(dir!, 'saved.webp'));
+    expect(readFileSync(saved!).subarray(8, 12).toString()).toBe('WEBP');
+    // in the library
+    expect((await invokeIn<{ dir: string; thumb?: Uint8Array }[]>(page, 'shot:library')).map((entry) => entry.dir)).toContain(dir);
+  }, 60_000);
+
+  it('takes a window by itself into the editor when the settings say edit, the timer counting down first', async () => {
+    // the settings' Screenshots: Edit it
+    await launchAgain(['--settings']);
+    const settings = await waitForPage(app, async (page) => page.url().includes('/settings.html') && (await page.locator('[data-testid=shots-after]').count()) === 1);
+    expect(await settings.locator('[data-testid=shots-folder]').textContent()).toContain('screenshots');
+    await invokeIn(settings, 'settings:set', { shotsQuick: false });
+    const pill = app.windows().find((page) => page.url().includes('/pill.html'))!;
+    await invokeIn(pill, 'pill:shot');
+    const { page, display } = await firstMonitorPicker();
+    const shotsBefore = shotFolders().length;
+    await invokeIn(page, 'picker:shot', { target: { kind: 'window', display, window: 1001 }, delay: 3 }).catch(() => {});
+    // the countdown over the window, then its shot: the test backend's window at its size, the last look
+    await waitForPage(app, async (candidate) => candidate.url().includes('/countdown.html'), 10_000);
+    await expect.poll(() => shotFolders().length, { timeout: 30_000 }).toBe(shotsBefore + 1);
+    const dir = shotFolders().at(-1)!;
+    await expect.poll(() => existsSync(join(dir, 'source.png')), { timeout: 10_000 }).toBe(true);
+    expect(pngSize(join(dir, 'source.png'))).toEqual([640, 360]);
+    expect(JSON.parse(readFileSync(join(dir, 'shot.json'), 'utf8'))).toMatchObject({ padding: 10, frame: { style: 'mac-dark' }, transparent: true });
+    const editorPage = await waitForPage(app, async (candidate) => candidate.url().includes('/shot.html') && (await invokeIn<{ dir: string }>(candidate, 'shot:view')).dir === dir);
+    expect(editorPage).toBeDefined();
+    await invokeIn(settings, 'settings:set', { shotsQuick: true });
+    // the editor's and the settings' windows close: none left for the tests after this one
+    await app.evaluate(({ BrowserWindow }) => {
+      for (const window of BrowserWindow.getAllWindows()) if (/\/(shot|settings)\.html/.test(window.webContents.getURL())) window.destroy();
+    });
+  }, 90_000);
 
   it('had no unhandled rejection in the main process, and no error in the editor', async () => {
     expect(await app.evaluate(() => (globalThis as unknown as { __rejections: string[] }).__rejections)).toEqual([]);

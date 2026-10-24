@@ -2,11 +2,13 @@
 // the pointer (the display where there is none), dragging draws a region; the bar sets the camera,
 // the mic, when to stop and the script, and Enter records. Never in a recording (content protection).
 // The bar, the label and the camera bubble keep clear of what is about to be recorded where there is room.
+// For a screenshot the display shows as it was when the shot was asked for (frozen: an open menu
+// stays), the bar has a timer instead of the take's choices, and Enter takes the shot.
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
-import type { PickedTarget, PickerSetup, Rect, RecordChoices, ScriptStep } from '../../shared/ipc';
+import { SHOT_DELAYS, type PickedTarget, type PickerSetup, type Rect, type RecordChoices, type ScriptStep, type ShotDelay } from '../../shared/ipc';
 import { barPlacement, bubblePlacement, bubbleSize, dragRect, labelPlacement, matchMediaDevice, noticePlacement, windowsAt } from '../../shared/recording';
 import { bridge } from '../bridge';
-import { FolderIcon, MicIcon, SoundIcon, WarningIcon } from '../icons';
+import { FolderIcon, MicIcon, ShotIcon, SoundIcon, TimerIcon, WarningIcon } from '../icons';
 import { Select } from '../Select';
 import { hotkey } from '../keys';
 import { ScriptIcon, ScriptPanel, writtenSteps } from './Script';
@@ -80,6 +82,9 @@ export function Picker() {
   const [cycle, setCycle] = useState(0);
   const [region, setRegion] = useState<Rect>();
   const [frozen, setFrozen] = useState<Shown>();
+  /** A screenshot's: the display's picture under the picker, and the timer. */
+  const [still, setStill] = useState<string>();
+  const [delay, setDelay] = useState<ShotDelay>(0);
   const drag = useRef<{ from: { x: number; y: number }; handle?: string; start?: Rect; moved: boolean }>(undefined);
   const [barRef, barSize] = useSize<HTMLDivElement>({ width: 1000, height: 52 });
   const [labelRef, labelSize] = useSize<HTMLDivElement>({ width: 260, height: 28 });
@@ -116,6 +121,23 @@ export function Picker() {
     };
   }, [setup?.display.id]);
 
+  const shooting = setup?.shot !== undefined;
+  useEffect(() => {
+    if (!setup?.shot) return;
+    setDelay(setup.shot.delay);
+    let url: string | undefined;
+    let gone = false;
+    void bridge.invoke('picker:frozen').then((bytes) => {
+      if (!bytes || gone) return;
+      url = URL.createObjectURL(new Blob([new Uint8Array(bytes)], { type: 'image/png' }));
+      setStill(url);
+    });
+    return () => {
+      gone = true;
+      if (url) URL.revokeObjectURL(url);
+    };
+  }, [setup?.display.id, shooting]);
+
   const display = setup?.display;
   const local = useMemo(
     () => (setup ? setup.windows.map((window) => ({ ...window, bounds: { ...window.bounds, x: window.bounds.x - setup.display.bounds.x, y: window.bounds.y - setup.display.bounds.y } })) : []),
@@ -142,7 +164,7 @@ export function Picker() {
   }, [display, frozen, region, mode, pointer, local, cycle, full.width, full.height]);
 
   const blocked = setup?.problem;
-  const needsFolder = choices.stop === 'claude' && !choices.claudeFolder;
+  const needsFolder = !shooting && choices.stop === 'claude' && !choices.claudeFolder;
   const recordReason = blocked ?? (!shown ? 'Pick a window, a display or a region first' : needsFolder ? 'Choose the folder Claude Code runs in first' : undefined);
 
   // One pick records once (Enter held, or a click and then Enter, would ask again).
@@ -156,8 +178,9 @@ export function Picker() {
         : shown.kind === 'window'
           ? { kind: 'window', display: display.id, window: shown.window! }
           : { kind: 'region', display: display.id, rect: { ...shown.rect, x: shown.rect.x + display.bounds.x, y: shown.rect.y + display.bounds.y } };
-    void bridge.invoke('picker:record', target);
-  }, [display, shown, recordReason]);
+    if (shooting) void bridge.invoke('picker:shot', { target, delay });
+    else void bridge.invoke('picker:record', target);
+  }, [display, shown, recordReason, shooting, delay]);
 
   const updateScript = (steps: ScriptStep[]) => {
     setScript(steps);
@@ -204,11 +227,13 @@ export function Picker() {
         setFrozen(undefined);
         return;
       }
-      if (lower === 'c' && setup && setup.cameras.length > 0) return updateChoices({ camera: choices.camera ? undefined : firstCamera(setup.cameras) });
-      if (lower === 'm' && setup && setup.mics.length > 0) return updateChoices({ mic: choices.mic ? undefined : setup.mics[0] });
-      if (lower === 'a') return updateChoices({ systemAudio: !choices.systemAudio });
-      if (lower === 'o') return updateChoices({ stop: STOPS[(STOPS.indexOf(choices.stop) + 1) % STOPS.length]! });
-      if (lower === 'p') return setScriptOpen((open) => !open);
+      if (shooting) {
+        if (lower === 't') setDelay((current) => SHOT_DELAYS[(SHOT_DELAYS.indexOf(current) + 1) % SHOT_DELAYS.length]!);
+      } else if (lower === 'c' && setup && setup.cameras.length > 0) return updateChoices({ camera: choices.camera ? undefined : firstCamera(setup.cameras) });
+      else if (lower === 'm' && setup && setup.mics.length > 0) return updateChoices({ mic: choices.mic ? undefined : setup.mics[0] });
+      else if (lower === 'a') return updateChoices({ systemAudio: !choices.systemAudio });
+      else if (lower === 'o') return updateChoices({ stop: STOPS[(STOPS.indexOf(choices.stop) + 1) % STOPS.length]! });
+      else if (lower === 'p') return setScriptOpen((open) => !open);
       if (region && key.startsWith('Arrow')) {
         event.preventDefault();
         const step = event.shiftKey ? 10 : 1 / (display?.scaleFactor ?? 1);
@@ -219,7 +244,7 @@ export function Picker() {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [record, region, display, full.width, full.height, choices, setup]);
+  }, [record, region, display, full.width, full.height, choices, setup, shooting]);
 
   const onMove = (event: ReactPointerEvent) => {
     const at = { x: event.clientX, y: event.clientY };
@@ -292,9 +317,10 @@ export function Picker() {
   const steps = writtenSteps(script);
 
   return (
-    <div className={`picker${active ? '' : ' inactive'}`} onPointerMove={onMove} onPointerDown={onDown} onPointerUp={onUp} data-testid="picker">
+    <div className={`picker${active ? '' : ' inactive'}${shooting ? ' shooting' : ''}`} onPointerMove={onMove} onPointerDown={onDown} onPointerUp={onUp} data-testid="picker">
+      {still && <img className="still" src={still} alt="" draggable={false} data-testid="picker-still" />}
       <div className="dim" style={{ clipPath: active ? hole : undefined }} />
-      {!active && <div className="point-here">Point here to record this display</div>}
+      {!active && <div className="point-here">{shooting ? 'Point here for a screenshot of this display' : 'Point here to record this display'}</div>}
       {active && rect && (
         <>
           <div className={`target ${shown!.kind}${atEdge ? ' edge' : ''}`} style={{ left: rect.x, top: rect.y, width: rect.width, height: rect.height }} />
@@ -305,7 +331,7 @@ export function Picker() {
             </b>
             <span>
               {shown!.pixels.width} × {shown!.pixels.height} px
-              {shown!.kind === 'window' ? (MAC ? ' · records this window' : ' · records this area') : ''}
+              {shown!.kind === 'window' ? (shooting ? ' · this window by itself' : MAC ? ' · records this window' : ' · records this area') : ''}
               {shown!.of ? ` · ${shown!.of[0]} of ${shown!.of[1]} here (Tab)` : ''}
             </span>
           </div>
@@ -324,15 +350,21 @@ export function Picker() {
               <kbd>Esc</kbd> cancel
             </span>
             <span>
-              <kbd>Enter</kbd> record
+              <kbd>Enter</kbd> {shooting ? 'take it' : 'record'}
             </span>
             <span>
               <kbd>Tab</kbd> next window
             </span>
             <span>drag for a region</span>
-            <span>
-              <kbd>{hotkey('Ctrl+Shift+Alt+S')}</kbd> stops
-            </span>
+            {shooting ? (
+              <span>
+                <kbd>T</kbd> timer
+              </span>
+            ) : (
+              <span>
+                <kbd>{hotkey('Ctrl+Shift+Alt+S')}</kbd> stops
+              </span>
+            )}
           </div>
           {choices.camera && bubbleAt && <CameraBubble name={choices.camera} size={bubble} left={bubbleAt.left} top={bubbleAt.top} />}
           {noticed && (
@@ -394,86 +426,115 @@ export function Picker() {
               ))}
             </div>
             <div className="divider" />
-            <Device label="Camera" keyName="C" icon={<Camera />} names={setup.cameras} listing={setup.listingDevices} chosen={choices.camera} pick={firstCamera} onChange={(camera) => updateChoices({ camera })} />
-            <Device
-              label="Mic"
-              keyName="M"
-              icon={<MicIcon />}
-              names={setup.mics}
-              listing={setup.listingDevices}
-              chosen={choices.mic}
-              pick={(names) => names[0]}
-              onChange={(mic) => updateChoices({ mic })}
-              meter={choices.mic && active ? <MicMeter name={choices.mic} /> : undefined}
-            />
-            <div className={`opt${choices.systemAudio ? ' on' : ''}`} title={`What the computer plays: its apps' sound, beside the mic (A turns it ${choices.systemAudio ? 'off' : 'on'})`}>
-              <button
-                className="toggle"
-                onClick={() => updateChoices({ systemAudio: !choices.systemAudio })}
-                aria-pressed={choices.systemAudio === true}
-                aria-label={`Computer sound ${choices.systemAudio ? 'on' : 'off'}`}
-                data-testid="system-audio"
-              >
-                <SoundIcon />
-                <span className="name">
-                  Sound
-                  <small>{choices.systemAudio ? "the computer's" : 'off'}</small>
+            {shooting ? (
+              <>
+                <div className={`opt${delay > 0 ? ' on' : ''}`} title="Wait first: to open a menu, or point at something (T)">
+                  <TimerIcon />
+                  <div className="name">
+                    Timer
+                    <Select
+                      value={String(delay)}
+                      options={SHOT_DELAYS.map((seconds) => ({ value: String(seconds), label: seconds === 0 ? 'None' : `${seconds} s` }))}
+                      onChange={(value) => setDelay(Number(value) as ShotDelay)}
+                      label="Timer"
+                      variant="bare"
+                      className="stop"
+                      testId="shot-timer"
+                    />
+                  </div>
+                </div>
+                <div className="divider" />
+                <span title={recordReason ?? 'Take the screenshot (Enter)'}>
+                  <button className="rec shot" onClick={record} disabled={!!recordReason} data-testid="picker-shot">
+                    <ShotIcon />
+                    Take <kbd>Enter</kbd>
+                  </button>
                 </span>
-              </button>
-            </div>
-            <div className={`opt${choices.stop !== 'none' ? ' on' : ''}`} title="When the recording stops (O)">
-              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true">
-                <path d="M8 1.5v3M8 11.5v3M1.5 8h3M11.5 8h3" />
-                <circle cx="8" cy="8" r="2" />
-              </svg>
-              <div className="name">
-                Stop on
-                <Select
-                  value={choices.stop}
-                  options={STOPS.map((stop) => ({ value: stop, label: STOP_NAMES[stop] }))}
-                  onChange={(stop) => updateChoices({ stop })}
-                  label="Stop on"
-                  variant="bare"
-                  className="stop"
-                  testId="stop-on"
+              </>
+            ) : (
+              <>
+                <Device label="Camera" keyName="C" icon={<Camera />} names={setup.cameras} listing={setup.listingDevices} chosen={choices.camera} pick={firstCamera} onChange={(camera) => updateChoices({ camera })} />
+                <Device
+                  label="Mic"
+                  keyName="M"
+                  icon={<MicIcon />}
+                  names={setup.mics}
+                  listing={setup.listingDevices}
+                  chosen={choices.mic}
+                  pick={(names) => names[0]}
+                  onChange={(mic) => updateChoices({ mic })}
+                  meter={choices.mic && active ? <MicMeter name={choices.mic} /> : undefined}
                 />
-              </div>
-              {choices.stop === 'claude' &&
-                (choices.claudeFolder ? (
-                  <button type="button" className="folder" onClick={chooseFolder} title={`Claude Code runs in ${choices.claudeFolder}; choose another folder`}>
-                    <FolderIcon size={13} />
-                    <span>{choices.claudeFolder.split(/[\\/]/).at(-1)}</span>
+                <div className={`opt${choices.systemAudio ? ' on' : ''}`} title={`What the computer plays: its apps' sound, beside the mic (A turns it ${choices.systemAudio ? 'off' : 'on'})`}>
+                  <button
+                    className="toggle"
+                    onClick={() => updateChoices({ systemAudio: !choices.systemAudio })}
+                    aria-pressed={choices.systemAudio === true}
+                    aria-label={`Computer sound ${choices.systemAudio ? 'on' : 'off'}`}
+                    data-testid="system-audio"
+                  >
+                    <SoundIcon />
+                    <span className="name">
+                      Sound
+                      <small>{choices.systemAudio ? "the computer's" : 'off'}</small>
+                    </span>
                   </button>
-                ) : (
-                  <button type="button" className="folder need" onClick={chooseFolder}>
-                    Choose Claude's folder
+                </div>
+                <div className={`opt${choices.stop !== 'none' ? ' on' : ''}`} title="When the recording stops (O)">
+                  <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true">
+                    <path d="M8 1.5v3M8 11.5v3M1.5 8h3M11.5 8h3" />
+                    <circle cx="8" cy="8" r="2" />
+                  </svg>
+                  <div className="name">
+                    Stop on
+                    <Select
+                      value={choices.stop}
+                      options={STOPS.map((stop) => ({ value: stop, label: STOP_NAMES[stop] }))}
+                      onChange={(stop) => updateChoices({ stop })}
+                      label="Stop on"
+                      variant="bare"
+                      className="stop"
+                      testId="stop-on"
+                    />
+                  </div>
+                  {choices.stop === 'claude' &&
+                    (choices.claudeFolder ? (
+                      <button type="button" className="folder" onClick={chooseFolder} title={`Claude Code runs in ${choices.claudeFolder}; choose another folder`}>
+                        <FolderIcon size={13} />
+                        <span>{choices.claudeFolder.split(/[\\/]/).at(-1)}</span>
+                      </button>
+                    ) : (
+                      <button type="button" className="folder need" onClick={chooseFolder}>
+                        Choose Claude's folder
+                      </button>
+                    ))}
+                </div>
+                <div className={`opt${steps > 0 ? ' on' : ''}`}>
+                  <button
+                    className="toggle"
+                    onClick={() => setScriptOpen((open) => !open)}
+                    aria-expanded={scriptOpen}
+                    aria-controls="script-panel"
+                    title="The script: steps the prompter shows while you record, never in the video (P)"
+                    data-testid="picker-script"
+                  >
+                    <ScriptIcon />
+                    <span className="name">
+                      Script
+                      <small>{steps === 0 ? 'none' : `${steps} step${steps === 1 ? '' : 's'}`}</small>
+                    </span>
                   </button>
-                ))}
-            </div>
-            <div className={`opt${steps > 0 ? ' on' : ''}`}>
-              <button
-                className="toggle"
-                onClick={() => setScriptOpen((open) => !open)}
-                aria-expanded={scriptOpen}
-                aria-controls="script-panel"
-                title="The script: steps the prompter shows while you record, never in the video (P)"
-                data-testid="picker-script"
-              >
-                <ScriptIcon />
-                <span className="name">
-                  Script
-                  <small>{steps === 0 ? 'none' : `${steps} step${steps === 1 ? '' : 's'}`}</small>
+                </div>
+                {scriptOpen && <ScriptPanel steps={script} onChange={updateScript} onClose={() => setScriptOpen(false)} place={barAt.y > work.y + work.height / 2 ? 'above' : 'below'} />}
+                <div className="divider" />
+                <span title={recordReason ?? 'Record (Enter)'}>
+                  <button className="rec" onClick={record} disabled={!!recordReason} data-testid="picker-record">
+                    <i />
+                    Record <kbd>Enter</kbd>
+                  </button>
                 </span>
-              </button>
-            </div>
-            {scriptOpen && <ScriptPanel steps={script} onChange={updateScript} onClose={() => setScriptOpen(false)} place={barAt.y > work.y + work.height / 2 ? 'above' : 'below'} />}
-            <div className="divider" />
-            <span title={recordReason ?? 'Record (Enter)'}>
-              <button className="rec" onClick={record} disabled={!!recordReason} data-testid="picker-record">
-                <i />
-                Record <kbd>Enter</kbd>
-              </button>
-            </span>
+              </>
+            )}
           </div>
         </>
       )}

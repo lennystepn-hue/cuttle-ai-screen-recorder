@@ -1,9 +1,9 @@
 // The pill: a small launcher near the top of the screen (never in a recording). New recording, open
-// a project (the recent ones in a menu), and Esc to hide it until the tray brings it back. The
+// a project (the recent ones in a menu), a screenshot, and Esc to hide it until the tray brings it back. The
 // window takes the pill's width: its hotkey is longer on Windows than on a Mac.
 import { useEffect, useLayoutEffect, useRef } from 'react';
 import { bridge } from '../bridge';
-import { ChevronIcon, CloseIcon, FolderIcon, Mark } from '../icons';
+import { ChevronIcon, CloseIcon, FolderIcon, Mark, ShotIcon } from '../icons';
 import { hotkey } from '../keys';
 
 /** The window's margin left and right of the pill (its shadow), as the main process sizes it. */
@@ -40,6 +40,9 @@ export function Pill() {
         <button className="main" onClick={() => void bridge.invoke('pill:record')} title={`Pick a screen, a window or a region (${hotkey('Ctrl+Shift+Alt+R')})`} data-testid="new-recording">
           <i />
           New recording <kbd>{hotkey('Ctrl+Shift+Alt+R')}</kbd>
+        </button>
+        <button className="icon-only" onClick={() => void bridge.invoke('pill:shot')} aria-label="Screenshot" title={`Screenshot: a window, a display or a region, framed (${hotkey('Ctrl+Shift+Alt+C')})`} data-testid="pill-shot">
+          <ShotIcon size={15} />
         </button>
         <button onClick={() => void bridge.invoke('pill:open')} title="Open a project folder">
           <FolderIcon size={15} />

@@ -48,6 +48,7 @@ import { narrationCues, sceneSpans, type SceneSpan } from '@cuttle/timeline';
 import type { Command, ListName } from '../../shared/document';
 import { MEDIA_ORIGIN, type BrandView, type MotionParams, type MotionStatusView, type SoundStatusView, type VoiceState } from '../../shared/ipc';
 import { formatDuration, formatSource, formatSpeed, formatTime } from '../../shared/format';
+import { swatchStyle } from '../background-swatch';
 import {
   BACKGROUND_NAMES,
   CAPTION_STYLE_NAMES,
@@ -2307,17 +2308,6 @@ function BrandFields({ project }: { project: CuttleProject }) {
       </Row>
     </>
   );
-}
-
-/**
- * The swatch of the current gradient or mesh in its own colours (a gradient as laid out); the
- * others keep their picture.
- */
-function swatchStyle(background: CuttleProject['look']['background'], preset: (typeof BACKGROUND_PRESETS)[number]): CSSProperties | undefined {
-  if ((preset !== 'gradient' && preset !== 'mesh') || !background.colors || background.preset !== preset) return undefined;
-  const stops = background.colors.join(', ');
-  if (preset === 'mesh') return { backgroundImage: `linear-gradient(135deg in oklab, ${stops})` };
-  return { backgroundImage: background.kind === 'radial' ? `radial-gradient(circle, ${stops})` : `linear-gradient(${background.angle ?? 135}deg in oklab, ${stops})` };
 }
 
 /**

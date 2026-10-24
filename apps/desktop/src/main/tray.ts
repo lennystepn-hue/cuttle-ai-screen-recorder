@@ -6,16 +6,18 @@ const label = (entry: { dir: string; name: string }) => `${entry.name} — ${ent
 
 export interface TrayActions {
   record(): void;
+  shot(): void;
   showPill(): void;
   open(dir?: string): void;
   settings(): void;
   quit(): void;
 }
 
-/** The tray menu: a new recording, show the pill, the recent projects, open a folder, the settings, quit. */
+/** The tray menu: a new recording, a screenshot, show the pill, the recent projects, open a folder, the settings, quit. */
 export function trayMenu(recent: Settings['recent'], actions: TrayActions): MenuItemConstructorOptions[] {
   return [
     { label: 'New recording', accelerator: 'Control+Shift+Alt+R', click: () => actions.record() },
+    { label: 'Screenshot', accelerator: 'Control+Shift+Alt+C', click: () => actions.shot() },
     { label: 'Show Cuttle', click: () => actions.showPill() },
     { type: 'separator' },
     ...(recent.length === 0

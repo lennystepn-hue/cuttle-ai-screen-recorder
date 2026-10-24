@@ -8,7 +8,7 @@ import { BrowserWindow, desktopCapturer, dialog, globalShortcut, screen, session
 import { PROJECT_FILE, newProjectFile, projectExists, readProjectFile, recoverTake, useTake, writeProjectFile } from '@cuttle/core';
 import { usedIds } from '@cuttle/project';
 import { focusWindow, inputAllowed, recentClaudeFolders, type Devices, type RecorderEvent, type Take } from '@cuttle/recorder';
-import type { HudState, PermissionNote, PickedTarget, PickerSetup, RecordChoices } from '../shared/ipc';
+import type { HudState, PermissionNote, PickedTarget, PickerSetup, RecordChoices, ShotDelay } from '../shared/ipc';
 import { captureSourceFor, hudPosition, hudWarning, recordingFailure, scriptForTake, stopOptionsFor, type PickerDisplay, type PickerWindow, type ScriptStep } from '../shared/recording';
 import { displayPixels, monitorOf, setMonitors, toDesktopPixels, toDip } from './desktop-pixels';
 import { CHECK, COUNTDOWN, HIDDEN, TEST_BACKEND } from './check';
@@ -23,6 +23,7 @@ import { openPermission } from './permissions';
 import { openPrompter, type Prompter } from './prompter';
 import { liveRequest, transcribeProject } from './speech';
 import { editorWindowOf, expectSuggest, guard, hidePill, reopenEditor, sendToEditor, setEditorStatus, showPill, webPreferences } from './windows';
+import { freezeDisplays, frozenDisplay, onNewShot, takePicked, thawDisplays } from './shots';
 
 /** The HUD's window (the HUD and a margin for its shadow): never in the video, and a dead zone for the input log. */
 const HUD_SIZE = { width: 512, height: 64 };
@@ -45,6 +46,8 @@ let pickingFor: string | undefined;
 let busy = false;
 /** The pill was shown when "New recording" hid it: it comes back when the pick is cancelled. */
 let pillHidden = false;
+/** The pick is for a screenshot, not a take. */
+let shooting = false;
 /** Projects whose take is being finished or cut: they record again once their editor has the cut. */
 const finishing = new Set<string>();
 /** The running recording until its take is written into the project, for a quit to wait on. */
@@ -215,13 +218,14 @@ function listingProblem(error: unknown): string {
  * (fast); the cameras and mics follow (DirectShow takes a moment). Does nothing while one records
  * or picks.
  */
-export async function startPicking(projectDir?: string, options: { fromPill?: boolean } = {}): Promise<void> {
+export async function startPicking(projectDir?: string, options: { fromPill?: boolean; shot?: boolean } = {}): Promise<void> {
   if (busy || recorderHost.recording || quitting) return;
-  if (projectDir && finishing.has(keyOf(projectDir))) {
+  if (!options.shot && projectDir && finishing.has(keyOf(projectDir))) {
     return say('Cuttle is still cutting the last take of this project. Record again once the cut is in the editor.');
   }
   if (!(await screenAllowed())) return;
   busy = true;
+  shooting = options.shot ?? false;
   // "New recording" on the pill: the pill is not in the video; it comes back when no editor opens.
   pillHidden = options.fromPill ?? false;
   if (pillHidden) hidePill();
@@ -236,19 +240,22 @@ export async function startPicking(projectDir?: string, options: { fromPill?: bo
       problem = listingProblem(error);
     }
     const displays = pickerDisplays(devices);
+    // a screenshot: each display as it is now, under its picker (an open menu stays)
+    if (shooting && !problem) await freezeDisplays(displays);
+    const shot = shooting ? { delay: (await loadSettings()).shots.delay } : undefined;
     const choices = await choicesNow();
     const saved = JSON.stringify(projectDir ? await savedScript(projectDir) : []);
     const draft = scriptDrafts.get(draftKey(projectDir));
     pickBase = saved;
     pickScript = draft && draft.base === saved ? draft.steps : (JSON.parse(saved) as ScriptStep[]);
-    const free = await freeBytes(projectDir ?? (await loadSettings()).projectsFolder);
+    const free = shot ? undefined : await freeBytes(projectDir ?? (await loadSettings()).projectsFolder);
     const short = free !== undefined && free < tenMinutes(displays) ? `Only ${gigabytes(free)} free on this drive: a take longer than a few minutes may not fit.` : undefined;
-    const permissions = [await inputNote(), accessibilityNote()].filter((note) => note !== undefined);
+    const permissions = shot ? [] : [await inputNote(), accessibilityNote()].filter((note) => note !== undefined);
     const countdown = await countdownSeconds();
     const cursor = screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
     for (const picker of pickers) if (!picker.window.isDestroyed()) picker.window.destroy();
-    pickers = displays.map((display) => openPicker(display, displays, devices, choices, countdown, cursor.id, problem, short, permissions));
-    if (!problem) void listMedia();
+    pickers = displays.map((display) => openPicker(display, displays, devices, choices, countdown, cursor.id, problem, short, permissions, shot));
+    if (!problem && !shot) void listMedia();
   } catch (error) {
     endPicking(true);
     say(`Cuttle cannot record: ${(error as Error).message}`);
@@ -265,6 +272,7 @@ function openPicker(
   problem: string | undefined,
   warning: string | undefined,
   permissions: PermissionNote[],
+  shot: PickerSetup['shot'],
 ): Picker {
   const window = overlay(display.bounds, 'picker.cjs', { focusable: true });
   const picker: Picker = { window, display: display.id };
@@ -277,7 +285,8 @@ function openPicker(
     choices,
     active: display.id === active,
     countdown,
-    listingDevices: !problem,
+    listingDevices: !problem && !shot,
+    ...(shot && { shot }),
     ...((problem ?? unknown) && { problem: problem ?? unknown }),
     ...(warning && { warning }),
     ...(permissions.length > 0 && { permissions }),
@@ -307,6 +316,8 @@ function openPicker(
       }
     },
     'picker:record': (target) => void beginRecording(target, displays),
+    'picker:frozen': () => frozenDisplay(display.id),
+    'picker:shot': ({ target, delay }) => void beginShot(target, delay, displays),
     'picker:cancel': () => endPicking(true),
     'picker:retry': async () => {
       const project = pickingFor;
@@ -393,6 +404,8 @@ function endPicking(cancelled: boolean): void {
   pickers = [];
   for (const picker of closing) if (!picker.window.isDestroyed()) picker.window.destroy();
   if (!cancelled) return;
+  if (shooting) void thawDisplays();
+  shooting = false;
   busy = false;
   if (pillHidden) void showPill();
   pillHidden = false;
@@ -529,6 +542,59 @@ async function beginRecording(target: PickedTarget, displays: PickerDisplay[]): 
     if (pillHidden && !opened && !quitting) void showPill();
     pillHidden = false;
   }
+}
+
+/** A screenshot from the pill, the tray or its hotkey: the pickers over the screen as it is now. */
+export function startShooting(options: { fromPill?: boolean } = {}): Promise<void> {
+  return startPicking(undefined, { ...options, shot: true });
+}
+onNewShot(() => startShooting());
+
+/** Takes the screenshot of a pick, after its timer (the countdown over what it takes). */
+async function beginShot(target: PickedTarget, delay: ShotDelay, displays: PickerDisplay[]): Promise<void> {
+  if (writing || !shooting || !pickers.some((picker) => picker.display === target.display)) return;
+  const display = displays.find((candidate) => candidate.id === target.display);
+  const picked = pickers.find((picker) => picker.display === target.display)?.setup;
+  let finished: () => void = () => {};
+  writing = new Promise<void>((done) => (finished = done));
+  try {
+    endPicking(false);
+    if (!display || picked?.problem) {
+      if (picked?.problem) say(picked.problem);
+      return;
+    }
+    if (delay > 0) await countDown(inside(targetRect(target, display, picked), display.workArea), delay);
+    await takePicked(target, display, delay);
+  } catch (error) {
+    say(`Cuttle cannot take the screenshot: ${(error as Error).message}`);
+  } finally {
+    await thawDisplays();
+    writing = undefined;
+    finished();
+    busy = false;
+    shooting = false;
+    if (pillHidden && !quitting) void showPill();
+    pillHidden = false;
+  }
+}
+
+/** The countdown over `area` for `seconds` (never in the shot: Cuttle's windows are left out). */
+async function countDown(area: Rectangle, seconds: number): Promise<void> {
+  const countdown = overlay(area, 'countdown.cjs', { focusable: false });
+  countdown.setIgnoreMouseEvents(true);
+  bindRequests(countdown.webContents, 'countdown', {});
+  try {
+    await countdown.loadURL(`${APP_ORIGIN}/countdown.html`).catch(() => {});
+    if (!HIDDEN && !countdown.isDestroyed()) countdown.showInactive();
+    for (let left = seconds; left > 0; left--) {
+      if (!countdown.isDestroyed()) send(countdown.webContents, 'countdown:tick', { seconds: left });
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+    }
+  } finally {
+    if (!countdown.isDestroyed()) countdown.destroy();
+  }
+  // the overlay is gone from the screen before the shot
+  await new Promise((resolve) => setTimeout(resolve, 120));
 }
 
 /** Records a pick into its project, with the script typed for it; returns whether the editor opens on the take. */

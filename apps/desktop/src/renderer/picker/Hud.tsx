@@ -5,11 +5,11 @@
 // pointer. Restart asks for a press held 600 ms, so a stray click does not put a take aside.
 import { useEffect, useRef, useState } from 'react';
 import type { HudState } from '../../shared/ipc';
+import { takeClock as clock, takeSeconds } from '../../shared/take-status';
 import { bridge } from '../bridge';
 import { Mark, ShotIcon, WarningIcon } from '../icons';
 import { hotkey } from '../keys';
 
-const clock = (seconds: number) => `${Math.floor(seconds / 60)}:${String(Math.floor(seconds % 60)).padStart(2, '0')}`;
 /** How long Restart must be held. */
 const HOLD_MS = 600;
 
@@ -48,8 +48,8 @@ export function Hud() {
       clearInterval(timer);
     };
   }, []);
-  // The take's time: what was recorded before, plus the running stretch (it stands still while paused).
-  const seconds = (state.recorded ?? 0) + (state.startedAt ? Math.max(0, (now - state.startedAt) / 1000) : 0);
+  // The take's time, as the menu bar shows it
+  const seconds = takeSeconds(state, now);
   const paused = state.phase === 'paused';
   const live = state.phase === 'recording' || paused;
   return (

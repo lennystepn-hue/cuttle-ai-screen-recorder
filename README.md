@@ -409,7 +409,10 @@ screen). After the countdown only a small HUD remains, which never appears in th
 mic, its bars show the mic's level, so a mic that hears nothing shows at once, and once a speech
 model is downloaded, a line under it shows what the mic hears as you speak (live captions, about
 two seconds behind, with the fastest model there; nothing of it is saved);
-Ctrl+Shift+Alt+S stops and Ctrl+Shift+Alt+M sets a marker. The bar's Script holds the steps of
+Ctrl+Shift+Alt+S stops and Ctrl+Shift+Alt+M sets a marker. The take shows in the menu bar too: a
+red dot and its time beside Cuttle's icon on macOS (`❚❚` while paused, the step with a script), a
+red dot on the tray icon on Windows (the time in its tooltip), and a click opens Stop, Pause, Mark
+slip, Marker, Screenshot and the steps. The bar's Script holds the steps of
 the demo (a title each, and what to say; a pasted list becomes steps). While recording, a prompter
 by the HUD shows the step now, its note and the step after it, never in the video:
 Ctrl+Shift+Alt+N (or Next) goes on, Ctrl+Shift+Alt+B back, each step is a marker of the take, and

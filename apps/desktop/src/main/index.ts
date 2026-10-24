@@ -103,7 +103,7 @@ if (!app.requestSingleInstanceLock(launched)) {
     // and the menu bar a template image, which it tints for light and dark menu bars
     if (process.platform === 'darwin') app.dock?.setIcon(assetPath('icon-mac.png'));
     const trayIcon = process.platform === 'win32' ? 'tray.png' : process.platform === 'darwin' ? 'trayTemplate.png' : 'tray@2x.png';
-    if (!HIDDEN) createTray(assetPath(trayIcon), settings.recent, actions);
+    if (!HIDDEN) createTray(assetPath(trayIcon), process.platform === 'win32' ? assetPath('tray-recording.png') : undefined, settings.recent, actions);
     await createPill();
     // A new recording and a screenshot from anywhere (the recorder's own keys stop a take and set markers).
     if (!HIDDEN) globalShortcut.register('Control+Shift+Alt+R', () => void startPicking());

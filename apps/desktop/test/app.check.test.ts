@@ -1614,23 +1614,46 @@ describe.runIf(enabled)('the Cuttle app', () => {
   const runningHud = () => waitForPage(app, async (page) => page.url().includes('/hud.html') && (await page.locator('.hud.recording').count()) === 1 && (await page.locator('[data-testid=hud-time]').textContent()) !== '0:00');
   const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-  it('pauses from the HUD: nothing is recorded while paused, and the pieces are joined into the take', async () => {
+  it('pauses from the HUD: nothing is recorded while paused, and the pieces are joined into the take; the take in the menu bar, whose menu resumes, marks and stops it', async () => {
+    // the app has no tray in the check: the tray publishes what it would show, and clicks its menu's items
+    type TrayTake = { title: string; tooltip: string; items: { label: string; enabled: boolean }[]; click(label: string): void };
+    const trayTake = () =>
+      app.evaluate(() => {
+        const take = (globalThis as { __trayTake?: TrayTake }).__trayTake;
+        return take && { title: take.title, tooltip: take.tooltip, items: take.items };
+      });
+    const choose = (label: string) => app.evaluate((_electron, item) => (globalThis as { __trayTake?: TrayTake }).__trayTake!.click(item), label);
     const before = new Set(readdirSync(join(root, 'projects')));
     await recordThroughPicker(pillRecord, { stop: 'none', camera: undefined }, false);
     const hud = await runningHud();
+    // the red dot (an ANSI colour, which macOS's menu bar draws) and the time beside the icon
+    await expect.poll(async () => (await trayTake())?.title, { timeout: 10_000 }).toMatch(/^\u001b\[31m●\u001b\[0m \d+:\d\d$/);
+    expect((await trayTake())!.tooltip).toMatch(/^Cuttle · Recording \d+:\d\d$/);
+    expect((await trayTake())!.items.map((item) => item.label)).toEqual(['Recording', 'Stop', 'Pause', 'Mark slip', 'Marker', 'Screenshot']);
     await wait(1000);
     await click(hud, '[data-testid=hud-pause]');
     await hud.waitForSelector('.hud.paused');
-    // the clock stands still while paused
+    // the clock stands still while paused, in the HUD and in the menu bar
     const shown = await hud.locator('[data-testid=hud-time]').textContent();
+    await expect.poll(async () => (await trayTake())?.title).toBe(`❚❚ ${shown}`);
     await wait(2000);
     expect(await hud.locator('[data-testid=hud-time]').textContent()).toBe(shown);
-    await click(hud, '[data-testid=hud-pause]');
+    expect((await trayTake())!.title).toBe(`❚❚ ${shown}`);
+    expect((await trayTake())!.items.filter((item) => !item.enabled).map((item) => item.label)).toEqual(['Paused', 'Mark slip', 'Marker', 'Screenshot']);
+    // resumed from the menu bar's menu: the HUD records again
+    await choose('Resume');
     await hud.waitForSelector('.hud.recording');
+    // a marker from the menu, counted by the HUD
+    await expect.poll(async () => (await trayTake())?.items.find((item) => item.label === 'Marker')?.enabled).toBe(true);
+    await choose('Marker');
+    await expect.poll(() => hud.locator('button.marker small').textContent().catch(() => null), { timeout: 5_000 }).toBe('1');
     await wait(1000);
-    await click(hud, '[data-testid=hud-stop]');
+    await choose('Stop');
     const dir = await newProject(before);
     await projectWhen(dir, (written) => written.scenes[0]?.id !== undefined);
+    // the take is over: the tray is the usual one again
+    await expect.poll(trayTake).toBeUndefined();
+    expect((JSON.parse(readFileSync(join(dir, 'takes', '1', 'markers.json'), 'utf8')) as { markers: { kind: string }[] }).markers.filter((marker) => marker.kind === 'manual')).toHaveLength(1);
     const { segments, joined } = JSON.parse(readFileSync(join(dir, 'takes', '1', 'segments.json'), 'utf8')) as { segments: { duration: number; screen: { start: number } }[]; joined?: boolean };
     expect(joined).toBe(true);
     expect(segments).toHaveLength(2);

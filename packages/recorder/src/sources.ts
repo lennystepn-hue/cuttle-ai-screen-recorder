@@ -51,10 +51,12 @@ export function areaGeometry(area: ScreenArea): { size: { width: number; height:
   return { size: { width: crop.width, height: crop.height }, origin: { x: bounds.x + crop.x, y: bounds.y + crop.y } };
 }
 
-const even = (value: number) => Math.floor(value / 2) * 2;
-
-/** Resolves a capture source against the device list. */
-export function resolveArea(source: CaptureSource, devices: Devices): ScreenArea {
+/**
+ * Resolves a capture source against the device list. A video's sizes are even (H.264 4:2:0 needs
+ * them); `exact` keeps a screenshot's as they are.
+ */
+export function resolveArea(source: CaptureSource, devices: Devices, exact = false): ScreenArea {
+  const even = (value: number) => (exact ? value : Math.floor(value / 2) * 2);
   const monitorAt = (index: number) => {
     const monitor = devices.monitors.find((candidate) => candidate.index === index);
     if (monitor) return monitor;
@@ -101,6 +103,7 @@ export function resolveArea(source: CaptureSource, devices: Devices): ScreenArea
  * corner, as the window gate's.
  */
 export function wholeWindow(area: ScreenArea): ScreenArea {
+  const even = (value: number) => Math.floor(value / 2) * 2;
   const { frame, monitor } = area;
   if (!frame) return area;
   return { ...area, crop: { x: frame.x - monitor.bounds.x, y: frame.y - monitor.bounds.y, width: even(frame.width), height: even(frame.height) } };

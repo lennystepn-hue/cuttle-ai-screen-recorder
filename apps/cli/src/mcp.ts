@@ -2,7 +2,7 @@
 // `cuttle mcp`: Cuttle as an MCP server over stdio, for any agent (Claude Desktop, Claude Code,
 // Cursor). Each tool runs a cuttle command in this process, its typed input as the command's options,
 // and answers with the command's JSON; the stills a preview, a frame or a check draws come along as
-// images. The guides the skill holds are tools too. Recording stays with the person: no tool records.
+// images. The guides the skill holds are tools too. Recording stays with the person: no tool records (screenshot_take takes a single picture).
 import { existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
@@ -301,6 +301,48 @@ export const COMMAND_TOOLS: readonly CommandTool[] = [
     description: 'What shows behind the person in the camera, in the bubble and every camera layout: keep (the room as filmed), blur, color (with color, a hex) or remove (only the person, without the bubble). A model finds the person in each frame, on this computer.',
     input: { project, mode: z.enum(['keep', 'blur', 'color', 'remove']), color: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional() },
     argv: (input) => ['webcam', 'background', input.mode, ...option('color', input.color)],
+  }),
+  tool({
+    name: 'screenshot_take',
+    title: 'Take a screenshot',
+    description:
+      "Takes a screenshot of the person's screen (the primary monitor, another one, a region of it in its pixels, or a window by itself, by part of its title), keeps it as a shot folder (Pictures/Cuttle, or save) and frames it as screenshot_frame does (raw: not framed); answered as an image. It shows what is on their screen: ask them first, and look for private data before it goes anywhere. macOS asks them to allow Screen Recording for the app that runs Cuttle.",
+    input: {
+      monitor: z.number().int().min(0).optional().describe('monitor index from devices (default: the primary monitor)'),
+      region: z.array(z.number()).length(4).optional().describe("x, y, w, h in the monitor's pixels"),
+      window: z.string().optional().describe('a window by itself, by part of its title'),
+      delay: z.number().min(0).max(60).optional().describe('seconds to wait first'),
+      cursor: z.boolean().optional().describe('with the pointer'),
+      raw: z.boolean().optional().describe('the picture alone, not framed'),
+      frame: z.enum(['none', 'mac-dark', 'mac-light', 'browser-light', 'browser-dark', 'windows-light', 'windows-dark', 'terminal', 'iphone', 'android']).optional(),
+      title: z.string().optional(),
+      background: z.enum(['sunset-sky', 'aurora', 'mesh', 'solid', 'image', 'gradient', 'flow', 'bokeh', 'dots']).optional(),
+      transparent: z.boolean().optional(),
+      padding: z.number().min(0).max(1000).optional(),
+      size: z.string().optional().describe('auto, a ratio (16:9) or pixels (1200x630)'),
+      out: z.string().optional().describe('the framed image, .png, .jpg or .webp (default: shot.png in the shot folder)'),
+      save: z.string().optional().describe("the shot folder (default: a new one in Pictures/Cuttle)"),
+    },
+    global: true,
+    argv: (input) => [
+      'shot',
+      'take',
+      ...option('monitor', input.monitor),
+      ...option('region', input.region?.join(',')),
+      ...option('window', input.window),
+      ...option('delay', input.delay),
+      ...on('cursor', input.cursor),
+      ...on('raw', input.raw),
+      ...option('frame', input.frame),
+      ...option('title', input.title),
+      ...option('background', input.background),
+      ...on('transparent', input.transparent),
+      ...off('transparent', input.transparent),
+      ...option('padding', input.padding),
+      ...option('size', input.size),
+      ...option('out', input.out),
+      ...option('save', input.save),
+    ],
   }),
   tool({
     name: 'screenshot_frame',

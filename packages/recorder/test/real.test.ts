@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, it } from 'vitest';
 import { parseEventsJsonl, parseTakeJson } from '@cuttle/project';
-import { listDevices, record } from '../src/index';
+import { listDevices, record, takeShot } from '../src/index';
 
 /**
  * A real capture of the primary monitor (and the first microphone), then of a region of it. Runs only
@@ -33,6 +33,38 @@ it.runIf(process.env.MODE === 'real')('records the primary monitor and a region 
     expect(JSON.parse(probe(region.screen))).toMatchObject({ streams: [{ width: 640, height: 360 }] });
   } finally {
     rmSync(projectDir, { recursive: true, force: true });
+  }
+}, 60_000);
+
+/**
+ * Screenshots of the primary monitor, a region of it and the first window: each at its pixels, the
+ * display's scale in its resolution. Reads only the PNGs' sizes and deletes them.
+ */
+it.runIf(process.env.MODE === 'real')('takes screenshots of the primary monitor, a region of it and a window', async () => {
+  const devices = await listDevices({ media: false });
+  const monitor = devices.monitors.find((candidate) => candidate.primary) ?? devices.monitors[0];
+  if (!monitor) throw new Error('no monitor found');
+  const dir = mkdtempSync(join(tmpdir(), 'cuttle-real-shot-'));
+  const size = (file: string) => {
+    const bytes = readFileSync(file);
+    return [bytes.readUInt32BE(16), bytes.readUInt32BE(20)];
+  };
+  try {
+    const whole = await takeShot({ source: { kind: 'monitor', index: monitor.index }, out: join(dir, 'monitor.png'), devices });
+    expect(size(whole.file)).toEqual([monitor.bounds.width, monitor.bounds.height]);
+    expect(whole.scale).toBe(monitor.scale);
+    const region = await takeShot({ source: { kind: 'region', monitor: monitor.index, rect: [100, 100, 641, 361] }, out: join(dir, 'region.png'), devices });
+    expect(size(region.file)).toEqual([641, 361]);
+    const window = devices.windows[0];
+    if (window) {
+      const shot = await takeShot({ source: { kind: 'window', id: window.id }, out: join(dir, 'window.png'), devices });
+      console.log(`window "${window.title}" ${window.bounds.width}×${window.bounds.height}: ${shot.width}×${shot.height}, warnings ${JSON.stringify(shot.warnings)}`);
+      const [width, height] = size(shot.file);
+      expect(Math.abs(width! - window.bounds.width)).toBeLessThanOrEqual(2);
+      expect(Math.abs(height! - window.bounds.height)).toBeLessThanOrEqual(2);
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
   }
 }, 60_000);
 

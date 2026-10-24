@@ -411,6 +411,12 @@ cuttle --json shot frame "<image.png>" --frame browser-dark --title "acme.app" -
   as a folder (`shot.json`, its image, `shot.png`); `cuttle --json shot frame "<folder>" --frame
   mac-light` changes it and draws it again. [project.md](project.md) has `shot.json`'s fields.
 
+To take one, `cuttle --json shot take --window "<part of its title>"` (or `--monitor <n>`,
+`--region x,y,w,h` in that monitor's pixels, `--delay 3` to open a menu first) takes it at the
+display's own pixels (a window by itself, without its shadow) and frames it with the same options,
+into a new folder in Pictures/Cuttle (`--save "<folder>"` names another; `--raw` leaves it
+unframed). It is the person's screen: take one only when they ask for it.
+
 Read the image before you hand it over, and look for private data as in a video's stills: a
 screenshot has no masks yet, so crop it away (`--crop`).
 

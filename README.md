@@ -462,6 +462,7 @@ cuttle transcript --translate de     # the sentences to translate (Claude writes
 cuttle chapters                      # those chapters as lines for a YouTube description
 cuttle open                          # the project in the app's editor, which follows every change to it (Claude's too)
 cuttle shot frame screen.png --frame browser-dark --background gradient --from shot   # a screenshot framed as the videos are, pixel for pixel (Retina at 2×), as PNG, JPEG or WebP
+cuttle shot take --window "Claude"     # takes the window by itself and frames it, kept in Pictures/Cuttle
 cuttle recover takes/2               # after a crash
 ```
 

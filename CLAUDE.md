@@ -60,6 +60,11 @@ Cuttle runs on **Windows and macOS**. A change made on one has to keep working o
   editor and the export. The editor's bundle has its files as URLs (`segment-files.ts`); the export
   page reads them from `segment/` beside it through its host and hands them over as blob: URLs (its
   CSP allows those and `wasm-unsafe-eval`, as the app's does).
+- **Screenshots** (`cuttle shot take`, `recorder/src/shot.ts`): macOS through the helper's `shot`
+  (ScreenCaptureKit's SCScreenshotManager, the first frame of a stream on macOS 13; a window by
+  itself without its shadow, its corners transparent), Windows through a take's own ffmpeg inputs,
+  one frame (ddagrab, gfxcapture for a window by itself). Both write a PNG at the display's pixels
+  with its scale in its resolution (72 dpi a point), at a region's exact size (a video's are even).
 - **The screen's text**: Windows' own OCR through a PowerShell helper, macOS's Vision through
   `cuttle-capture ocr`; both speak the protocol in `core/src/privacy/ocr.ts`. Vision's boxes jitter
   around still text, which the privacy masks allow for (`MASK_RULES.jitter`).

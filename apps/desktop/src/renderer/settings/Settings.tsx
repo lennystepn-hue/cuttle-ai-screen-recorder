@@ -63,6 +63,7 @@ const PAGES: { id: SettingsPage; title: string; lead: string; icon: ComponentTyp
 /** The recording hotkeys (HOTKEYS in @cuttle/recorder's input.ts, and the one that starts a take). */
 const HOTKEY_LIST: [string, string][] = [
   ['Start a recording', 'Ctrl+Shift+Alt+R'],
+  ['A screenshot', 'Ctrl+Shift+Alt+C'],
   ['Stop', 'Ctrl+Shift+Alt+S'],
   ['Pause and resume', 'Ctrl+Shift+Alt+P'],
   ['A slip: cut back to the pause before', 'Ctrl+Shift+Alt+X'],
@@ -169,6 +170,30 @@ export function Settings() {
                     </Row>
                     <Row label="Microphone">
                       <DeviceSelect kind="mic" value={view?.mic} devices={devices?.mics} onChange={(mic) => change({ mic })} />
+                    </Row>
+                  </Section>
+                  <Section title="Screenshots">
+                    <Row label="Screenshots folder" hint="Every screenshot gets a folder here: the picture as taken, its look, and the framed picture." stacked>
+                      <div className="path-row">
+                        <span className="path" title={view?.shots.folder} data-testid="shots-folder">
+                          {view ? middlePath(shortPath(view.shots.folder)) : ''}
+                        </span>
+                        <button className="ghost" onClick={() => void bridge.invoke('settings:choose-folder', 'shots').then(setView)} data-testid="choose-shots-folder">
+                          Change…
+                        </button>
+                      </div>
+                    </Row>
+                    <Row label="After a screenshot" hint="Framed in the last look and copied, with a note to edit it; or straight into the screenshot editor.">
+                      <Segmented
+                        value={view ? (view.shots.quick ? 'copy' : 'edit') : undefined}
+                        options={[
+                          ['copy', 'Copy it'],
+                          ['edit', 'Edit it'],
+                        ]}
+                        onChange={(after) => change({ shotsQuick: after === 'copy' })}
+                        label="After a screenshot"
+                        testid="shots-after"
+                      />
                     </Row>
                   </Section>
                   <Permissions />

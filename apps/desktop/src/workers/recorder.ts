@@ -3,7 +3,7 @@
 // samples. One recording at a time; the main process sees every event and kills the capture
 // processes if this process dies.
 import { liveCaptions } from '@cuttle/core';
-import { listDevices, record, RecorderError, type Backend, type Recording } from '@cuttle/recorder';
+import { listDevices, record, RecorderError, takeShot, type Backend, type Recording } from '@cuttle/recorder';
 import type { HostReply, HostRequest } from '../shared/recording';
 
 interface ParentPort {
@@ -24,6 +24,12 @@ port.on('message', ({ data }) => {
       listDevices({ backend, media: data.media }).then(
         (devices) => reply({ type: 'devices', id: data.id, devices }),
         (error: Error) => reply({ type: 'devices', id: data.id, error: error.message }),
+      );
+      return;
+    case 'shot':
+      takeShot({ ...data.options, backend }).then(
+        (shot) => reply({ type: 'shot', id: data.id, shot }),
+        (error: unknown) => reply({ type: 'shot', id: data.id, code: error instanceof RecorderError ? error.code : 'capture', error: error instanceof Error ? error.message : String(error) }),
       );
       return;
     case 'start': {

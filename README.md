@@ -424,6 +424,19 @@ opens on the take at once while `suggest` cuts it in the background. "Record aga
 the project; the earlier one stays restorable ("Back to take 1"). New projects go into
 `~/Cuttle/<date time>`.
 
+**Screenshots.** The camera on the pill, "Screenshot" in the tray, or Ctrl+Shift+Alt+C
+(Ctrl+Shift+Option+C on a Mac) freezes every display and shows the picker over it, so an open menu or
+a tooltip stays in the shot: a window (by itself, also where something lies over it), a display or a
+dragged region, with a timer of 3, 5 or 10 s for what only shows while you point elsewhere. The shot
+comes out framed in the last look (a window, a browser or a phone around it, or just rounded corners
+and a shadow, on any of the video backgrounds or on nothing), pixel for pixel at the display's own
+scale, and is copied; a note in the corner opens it in the screenshot editor. There the look changes
+live (background, frame and title, corners, shadow, padding, a canvas of 16:9, 4:5, 9:16 or 1200×630),
+and the shot is copied, saved as PNG, JPEG or WebP, or dragged straight into a chat. Every shot keeps
+a folder of its own in `Pictures/Cuttle/<date time>` (its picture, `shot.json` and the framed
+`shot.png`), listed beside the editor; the settings choose the folder, and whether a shot is copied at
+once or opens in the editor.
+
 **First run and settings.** The first start looks for ffmpeg where Windows has it now (also right
 after `winget install Gyan.FFmpeg`: "Check again", no restart), on macOS also in Homebrew's folders
 and `~/.local/bin` (an app started from the Dock does not see a terminal's PATH), and installs, on

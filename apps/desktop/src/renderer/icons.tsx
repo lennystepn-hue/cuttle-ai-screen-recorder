@@ -104,6 +104,9 @@ export const BrandIcon = icon(<path d="M2.5 2.5h5.2l5.8 5.8-5.2 5.2-5.8-5.8zM5.4
 export const BackgroundIcon = icon(<path d="M2.5 3.5h11v9h-11zM2.5 10l3.2-3 2.6 2.4L10.5 7.5l3 2.8" />);
 export const WindowIcon = icon(<path d="M2 3.5h12v9H2zM2 6h12M3.8 4.8h.1M5.3 4.8h.1" />);
 export const CameraIcon = icon(<path d="M8 8.2a2.3 2.3 0 1 0 0-4.6 2.3 2.3 0 0 0 0 4.6zM3.6 13.5c.6-2.3 2.3-3.5 4.4-3.5s3.8 1.2 4.4 3.5" />);
+/** A screenshot: a camera's body and lens. */
+export const ShotIcon = icon(<path d="M2 5.5A1.5 1.5 0 0 1 3.5 4h1.8l1.2-1.8h3l1.2 1.8h1.8A1.5 1.5 0 0 1 14 5.5v6a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 2 11.5zM8 10.9a2.4 2.4 0 1 0 0-4.8 2.4 2.4 0 0 0 0 4.8z" />);
+export const TimerIcon = icon(<path d="M8 14.5a5.5 5.5 0 1 0 0-11 5.5 5.5 0 0 0 0 11zM8 6v3l2 1.5M6.5 1.5h3" />);
 export const SubtitlesIcon = icon(<path d="M2 3.5h12v9H2zM4.5 10h3M9 10h2.5M4.5 7.5h7" />);
 export const TerminalIcon = icon(<path d="M2 3h12v10H2zM4.5 6.5 6.5 8l-2 1.5M8 10h3" />);
 export const GearIcon = icon(

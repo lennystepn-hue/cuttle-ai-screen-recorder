@@ -1,6 +1,6 @@
 // Messages between the main process and the recorder host (a utility process running `record()`),
 // and the pure geometry of picking what to record.
-import type { Bounds, CaptureSource, Devices, RecordOptions, RecorderEvent, StopOptions, Take } from '@cuttle/recorder';
+import type { Bounds, CaptureSource, Devices, RecordOptions, RecorderEvent, ScreenShot, ShotOptions, StopOptions, Take } from '@cuttle/recorder';
 
 /** Live captions for a take: the speech model's file and the language spoken (`auto` or a code). */
 export interface LiveRequest {
@@ -11,6 +11,8 @@ export interface LiveRequest {
 /** What the main process asks of the host. */
 export type HostRequest =
   | { type: 'devices'; id: number; media: boolean }
+  /** A screenshot into a PNG (`takeShot`). */
+  | { type: 'shot'; id: number; options: Omit<ShotOptions, 'backend' | 'devices'> }
   | { type: 'start'; options: Omit<RecordOptions, 'onEvent' | 'onAudio'>; live?: LiveRequest }
   | { type: 'stop' }
   | { type: 'marker'; label?: string }
@@ -24,6 +26,7 @@ export type HostRequest =
 /** What the host answers and reports. */
 export type HostReply =
   | { type: 'devices'; id: number; devices?: Devices; error?: string }
+  | { type: 'shot'; id: number; shot?: ScreenShot; code?: string; error?: string }
   | { type: 'event'; event: RecorderEvent }
   /** Words the live captions heard, newest last. */
   | { type: 'live'; words: string[] }

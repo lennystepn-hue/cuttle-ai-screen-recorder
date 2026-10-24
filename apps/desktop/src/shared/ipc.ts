@@ -118,6 +118,8 @@ export interface PickerSetup {
   permissions?: PermissionNote[];
   /** Cameras and mics are still being listed (DirectShow takes a moment): the bar says so. */
   listingDevices?: boolean;
+  /** A screenshot instead of a take: the display frozen under the picker (`picker:frozen`), and the timer. */
+  shot?: { delay: ShotDelay };
   /** The script the take records with: the project's (`script` in cuttle.json), or what was typed for it since. */
   script: ScriptStep[];
 }
@@ -236,6 +238,8 @@ export interface SettingsView {
   version: string;
   /** Check for a new version once a day and download it. */
   updates: boolean;
+  /** Screenshots: the folder each gets a folder of its own in; `quick`: framed and copied at once (else the editor opens). */
+  shots: { folder: string; quick: boolean };
 }
 
 /** The params a motion page declares (its `cuttle-params`), and what is wrong with the declaration. */
@@ -366,6 +370,49 @@ const motionRequest = z.strictObject({
   between: z.strictObject({ from: pixels, to: pixels }).optional(),
 });
 const deviceName = z.string().min(1).max(512);
+/** What a picker picked: a display, a window on it, or a region of it (DIP). */
+const pickedTarget = z.discriminatedUnion('kind', [
+  z.strictObject({ kind: z.literal('screen'), display: z.number().int() }),
+  z.strictObject({ kind: z.literal('window'), display: z.number().int(), window: z.number().int().nonnegative() }),
+  z.strictObject({ kind: z.literal('region'), display: z.number().int(), rect }),
+]);
+/** An image a window made (a screenshot drawn): at most this many bytes. */
+const imageBytes = z.custom<Uint8Array>((value) => value instanceof Uint8Array && value.byteLength > 0 && value.byteLength <= 256 * 1024 * 1024, 'image bytes');
+
+/** A screenshot's timer in seconds (0: none). */
+export const SHOT_DELAYS = [0, 3, 5, 10] as const;
+export type ShotDelay = (typeof SHOT_DELAYS)[number];
+const shotDelay = z.union([z.literal(0), z.literal(3), z.literal(5), z.literal(10)]);
+/** The image formats the screenshot editor saves (as @cuttle/export's SHOT_FORMATS). */
+export const SHOT_SAVE_FORMATS = ['png', 'jpeg', 'webp'] as const;
+
+/** A shot in the screenshot editor: its folder, shot.json as written, its image, and the background's image when it has one. */
+export interface ShotView {
+  dir: string;
+  /** The folder's name (its time). */
+  name: string;
+  raw: Record<string, unknown>;
+  image: Uint8Array;
+  backgroundImage?: Uint8Array;
+}
+
+/** A shot in the library: its folder, and a small picture of it (its last render, else its image). */
+export interface ShotEntry {
+  dir: string;
+  name: string;
+  thumb?: Uint8Array;
+}
+
+/** What the toast after a quick shot shows. */
+export interface ShotToast {
+  name: string;
+  /** A small picture of the framed shot (PNG). */
+  thumb: Uint8Array;
+  width: number;
+  height: number;
+  /** It is in the clipboard. */
+  copied: boolean;
+}
 
 /** Requests (window → main), each with the schema of its argument. */
 export const REQUESTS = {
@@ -398,6 +445,8 @@ export const REQUESTS = {
   'pill:hide': z.undefined(),
   'pill:menu': z.undefined(),
   'pill:record': z.undefined(),
+  /** A screenshot: the pickers, the screen frozen under them. */
+  'pill:shot': z.undefined(),
   /** The width the pill needs (DIP, its margins included): the window takes it. */
   'pill:size': z.strictObject({ width: z.number().finite().positive().max(4000) }),
   // editor (recording)
@@ -417,11 +466,11 @@ export const REQUESTS = {
     systemAudio: z.boolean().optional(),
     claudeFolder: z.string().min(1).max(4096).optional(),
   }),
-  'picker:record': z.discriminatedUnion('kind', [
-    z.strictObject({ kind: z.literal('screen'), display: z.number().int() }),
-    z.strictObject({ kind: z.literal('window'), display: z.number().int(), window: z.number().int().nonnegative() }),
-    z.strictObject({ kind: z.literal('region'), display: z.number().int(), rect }),
-  ]),
+  'picker:record': pickedTarget,
+  /** The display as it was when the screenshot was asked for (a PNG at its pixels), shown under the picker. */
+  'picker:frozen': z.undefined(),
+  /** Takes the screenshot of what was picked, after the timer. */
+  'picker:shot': z.strictObject({ target: pickedTarget, delay: shotDelay }),
   'picker:cancel': z.undefined(),
   'picker:claude-folder': z.undefined(),
   'picker:retry': z.undefined(),
@@ -437,6 +486,31 @@ export const REQUESTS = {
       }),
     )
     .max(SCRIPT_MAX_STEPS),
+  // the toast after a quick screenshot
+  'toast:edit': z.undefined(),
+  'toast:reveal': z.undefined(),
+  'toast:close': z.undefined(),
+  /** The pointer is over it (it stays) or left it. */
+  'toast:hover': z.boolean(),
+  // the screenshot editor
+  'shot:view': z.undefined(),
+  /** shot.json as changed in the editor: written when it is a valid shot. */
+  'shot:change': z.strictObject({ raw: z.record(z.string(), z.unknown()) }),
+  /** The colours of the shot's image, for a gradient. */
+  'shot:palette': z.undefined(),
+  /** An image behind the shot: one to choose, or the desktop's wallpaper. */
+  'shot:background-image': z.enum(['choose', 'wallpaper']),
+  /** The shot as drawn (PNG): into the clipboard, and kept as its shot.png. */
+  'shot:copy': z.strictObject({ png: imageBytes }),
+  /** The shot as drawn: kept as its shot.png (`as`: also where the person chooses, in its format). */
+  'shot:save': z.strictObject({ data: imageBytes, format: z.enum(SHOT_SAVE_FORMATS), as: z.boolean() }),
+  /** Drags its shot.png out of the window (into a chat, a mail, Figma). */
+  'shot:drag': z.undefined(),
+  'shot:reveal': z.undefined(),
+  'shot:library': z.undefined(),
+  'shot:open': z.strictObject({ dir: z.string().min(1).max(4096) }),
+  /** A new screenshot (the editor steps aside meanwhile). */
+  'shot:new': z.undefined(),
   // prompter
   'prompter:next': z.undefined(),
   'prompter:previous': z.undefined(),
@@ -497,9 +571,10 @@ export const REQUESTS = {
     privacyRead: z.boolean().optional(),
     privacyWords: z.array(z.string().trim().min(1).max(PRIVACY_WORD_MAX)).max(PRIVACY_WORDS_MAX).optional(),
     updates: z.boolean().optional(),
+    shotsQuick: z.boolean().optional(),
   }),
-  /** Asks for the projects folder (a folder dialog) and keeps it. */
-  'settings:choose-folder': z.undefined(),
+  /** Asks for the projects folder (or the screenshots', `shots`) with a folder dialog and keeps it. */
+  'settings:choose-folder': z.enum(['projects', 'shots']).optional(),
   'settings:devices': z.undefined(),
   /** The first run is done: the window closes and the pill shows; `record`: the picker opens too. */
   'settings:welcomed': z.strictObject({ record: z.boolean().optional() }).optional(),
@@ -615,6 +690,7 @@ export interface Responses {
   'pill:hide': void;
   'pill:menu': void;
   'pill:record': void;
+  'pill:shot': void;
   'pill:size': void;
   'project:record': void;
   'project:takes': void;
@@ -625,11 +701,31 @@ export interface Responses {
   'picker:hover': void;
   'picker:choices': void;
   'picker:record': void;
+  'picker:frozen': Uint8Array | undefined;
+  'picker:shot': void;
   'picker:cancel': void;
   'picker:claude-folder': string | undefined;
   'picker:retry': void;
   'picker:permission': void;
   'picker:script': void;
+  'toast:edit': void;
+  'toast:reveal': void;
+  'toast:close': void;
+  'toast:hover': void;
+  'shot:view': ShotView | undefined;
+  /** What makes it no shot (the change is not written). */
+  'shot:change': { issues?: string[] };
+  'shot:palette': string[];
+  /** The image as shot.json names it, and its bytes; none when the choice was cancelled. */
+  'shot:background-image': { image: string; bytes: Uint8Array } | undefined;
+  'shot:copy': void;
+  /** Where the chosen copy went (none when cancelled or not asked for). */
+  'shot:save': string | undefined;
+  'shot:drag': void;
+  'shot:reveal': void;
+  'shot:library': ShotEntry[];
+  'shot:open': void;
+  'shot:new': void;
   'prompter:next': void;
   'prompter:previous': void;
   'prompter:size': void;
@@ -744,6 +840,9 @@ export interface Events {
   'prompter:state': PrompterState;
   /** `restart`: counting down again after a restart (the take before is kept). */
   'countdown:tick': { seconds: number; restart?: boolean };
+  'toast:show': ShotToast;
+  /** The screenshot editor shows another shot (a new one, or one from the library). */
+  'shot:show': ShotView;
   'hud:state': HudState;
   /** The mic's level now (dBFS), ten times a second while the take records. */
   'hud:level': { rms: number; peak: number };

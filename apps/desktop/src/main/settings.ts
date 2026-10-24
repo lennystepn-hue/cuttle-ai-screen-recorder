@@ -55,6 +55,24 @@ const SettingsSchema = z.object({
    * safeStorage: the Keychain on macOS, DPAPI on Windows), as base64; never in a project.
    */
   voice: z.object({ elevenLabsKey: z.string().optional() }).catch({}).default({}),
+  /**
+   * Screenshots: the folder each shot gets a folder of its own in; quick (framed in the last look,
+   * copied, a toast to edit it) or straight into the screenshot editor; the last shot's look (its
+   * shot.json without its image, scale and crop), which the next one takes; the picker's timer.
+   */
+  shots: z
+    .object({
+      folder: z
+        .string()
+        .min(1)
+        .catch(() => join(app.getPath('pictures'), 'Cuttle'))
+        .default(() => join(app.getPath('pictures'), 'Cuttle')),
+      quick: z.boolean().catch(true).default(true),
+      look: z.record(z.string(), z.unknown()).optional().catch(undefined),
+      delay: z.union([z.literal(0), z.literal(3), z.literal(5), z.literal(10)]).catch(0).default(0),
+    })
+    .catch(() => ({ folder: join(app.getPath('pictures'), 'Cuttle'), quick: true, delay: 0 as const }))
+    .default(() => ({ folder: join(app.getPath('pictures'), 'Cuttle'), quick: true, delay: 0 as const })),
   /** The picker bar's choices, kept between recordings (the camera and mic are the defaults in the settings). */
   record: z
     .object({
@@ -158,6 +176,7 @@ export async function settingsView(): Promise<SettingsView> {
     recent: settings.recent,
     version: appVersion(),
     updates: settings.updates,
+    shots: { folder: settings.shots.folder, quick: settings.shots.quick },
   };
 }
 

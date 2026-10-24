@@ -3,7 +3,7 @@ import { copyFile, mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { basename, dirname, extname, isAbsolute, join, resolve } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
-import { imagePalette, keepInProject, wallpaperFile } from '@cuttle/core';
+import { imagePalette, keepInProject, newShotFolder, wallpaperFile } from '@cuttle/core';
 import { BACKGROUND_PRESETS, FRAME_STYLES, SHOT_FILE, SHOT_VERSION, isColouredBackground, parseShot, parseShotJson, shotRatio, switchBackground, type BackgroundPreset, type Shot } from '@cuttle/project';
 import { listDevices, takeShot, type Backend } from '@cuttle/recorder';
 import { runInElectron } from '../electron-runner';
@@ -121,16 +121,6 @@ async function imageFor(folder: string | undefined, given: string, stem: string)
 /** Where `cuttle shot take` keeps its shots: CUTTLE_SHOTS_DIR, else Cuttle in the pictures folder. */
 export function shotsFolder(): string {
   return process.env.CUTTLE_SHOTS_DIR || join(homedir(), 'Pictures', 'Cuttle');
-}
-
-/** A new shot's folder in `parent`, named by the local time as a screenshot is (`2026-10-24 19.42.10`), a number after it when taken. */
-function newShotFolder(parent: string, now = new Date()): string {
-  const two = (value: number) => String(value).padStart(2, '0');
-  const name = `${now.getFullYear()}-${two(now.getMonth() + 1)}-${two(now.getDate())} ${two(now.getHours())}.${two(now.getMinutes())}.${two(now.getSeconds())}`;
-  for (let n = 1; ; n++) {
-    const folder = join(parent, n === 1 ? name : `${name} ${n}`);
-    if (!existsSync(folder)) return folder;
-  }
 }
 
 export interface ShotTakeArgs extends ShotFrameArgs, Pick<RecordArgs, 'monitor' | 'region' | 'window'> {

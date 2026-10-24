@@ -178,9 +178,11 @@ export class WindowPass {
     if (chrome.device) return this.drawDevice(layout, chrome.device);
     if (layout.titleBar === 0) return;
 
+    // the traffic lights' end: a centred title or address field keeps clear of them in a narrow window
+    const lights = chrome.trafficLights ? (TRAFFIC_LIGHT.inset + 2 * TRAFFIC_LIGHT.spacing + TRAFFIC_LIGHT.radius + 10) * u : 0;
     const address: Rect = chrome.address
       ? (() => {
-          const width = Math.round(Math.min(ADDRESS_FIELD.width * u, w * 0.5));
+          const width = Math.round(Math.max(1, Math.min(ADDRESS_FIELD.width * u, w * 0.5, w - 2 * lights)));
           const height = Math.round(ADDRESS_FIELD.height * u);
           return [x + Math.round((w - width) / 2), y + Math.round((layout.titleBar - height) / 2), width, height];
         })()
@@ -188,7 +190,7 @@ export class WindowPass {
     // the caption buttons take the right; a title or a tab on the left stays clear of them
     const buttons = chrome.captionButtons ? CAPTION_BUTTONS.width * 3 * u : 0;
     const text = chrome.tab ? `›_   ${title}`.trimEnd() : title;
-    const maxWidth = chrome.address ? address[2] - 24 * u : chrome.captionButtons ? w - buttons - 2 * CAPTION_BUTTONS.titleInset * u - (chrome.tab ? 2 * TAB.pad * u : 0) : w * 0.6;
+    const maxWidth = chrome.address ? address[2] - 24 * u : chrome.captionButtons ? w - buttons - 2 * CAPTION_BUTTONS.titleInset * u - (chrome.tab ? 2 * TAB.pad * u : 0) : Math.min(w * 0.6, w - 2 * lights);
     const sprite = text === '' ? undefined : this.sprites.label(text, windowTitleStyle(chrome.title), u, Math.max(1, maxWidth));
     const tab: Rect = chrome.tab
       ? [x + Math.round(TAB.inset * u), y + Math.round(TAB.inset * u), Math.round((sprite?.box.width ?? 0) + 2 * TAB.pad * u), layout.titleBar - Math.round(TAB.inset * u)]

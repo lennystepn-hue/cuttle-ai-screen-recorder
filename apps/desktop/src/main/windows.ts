@@ -20,7 +20,7 @@ import { EditorSound } from './sound-service';
 import { LockedError, lockProject, openProjectFile, projectInfo } from './project';
 import { importImage, ProjectFileWatch } from './project-watch';
 import { APP_ORIGIN, assetPath, bundlePath, serveApp, serveMedia } from './protocols';
-import { cutIfPending, recut, startPicking, takesBusy, undoRestart } from './recording';
+import { cutIfPending, recut, startPicking, startShooting, takesBusy, undoRestart } from './recording';
 import { deletableTakes, sizeText, trashName } from '../shared/takes';
 import { addRecent, loadSettings, motionSetting, updateSettings } from './settings';
 import { downloadAppVoice, speakNarration, storeElevenLabsKey, voiceState } from './voice';
@@ -650,6 +650,7 @@ export async function createPill(): Promise<BrowserWindow> {
     },
     'pill:hide': () => window.hide(),
     'pill:record': () => void startPicking(undefined, { fromPill: true }),
+    'pill:shot': () => void startShooting({ fromPill: true }),
     'pill:size': async ({ width }) => {
       const fitted = Math.round(Math.min(PILL_WIDTHS.max, Math.max(PILL_WIDTHS.min, width)));
       if (fitted === pillWidth || window.isDestroyed()) return;

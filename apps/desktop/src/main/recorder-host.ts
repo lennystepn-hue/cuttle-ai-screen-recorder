@@ -1,5 +1,5 @@
 import { utilityProcess, type UtilityProcess } from 'electron';
-import { APP_PID_VARIABLE, type Bounds, type Devices, type RecordOptions, type RecorderEvent, type Take } from '@cuttle/recorder';
+import { APP_PID_VARIABLE, type Bounds, type Devices, type RecordOptions, type RecorderEvent, type ScreenShot, type ShotOptions, type Take } from '@cuttle/recorder';
 import type { HostReply, HostRequest, LiveRequest } from '../shared/recording';
 import { CHECK, TEST_BACKEND } from './check';
 import { bundlePath } from './protocols';
@@ -35,6 +35,7 @@ export class RecorderHost {
   private process: UtilityProcess | undefined;
   private next = 1;
   private readonly listings = new Map<number, { resolve: (devices: Devices) => void; reject: (error: Error) => void }>();
+  private readonly shots = new Map<number, { resolve: (shot: ScreenShot) => void; reject: (error: Error) => void }>();
   private running: Running | undefined;
 
   private start(): UtilityProcess {
@@ -47,8 +48,9 @@ export class RecorderHost {
       // a host let go by refresh(): the new one's listings and recording are not its own
       if (this.process !== child) return;
       this.process = undefined;
-      for (const listing of this.listings.values()) listing.reject(new RecordingError('capture', 'the recorder stopped'));
+      for (const listing of [...this.listings.values(), ...this.shots.values()]) listing.reject(new RecordingError('capture', 'the recorder stopped'));
       this.listings.clear();
+      this.shots.clear();
       const running = this.running;
       if (running) {
         this.running = undefined;
@@ -77,6 +79,13 @@ export class RecorderHost {
         this.listings.delete(message.id);
         if (message.devices) listing?.resolve(message.devices);
         else listing?.reject(new RecordingError('device-not-found', message.error ?? 'the devices could not be listed'));
+        return;
+      }
+      case 'shot': {
+        const shot = this.shots.get(message.id);
+        this.shots.delete(message.id);
+        if (message.shot) shot?.resolve(message.shot);
+        else shot?.reject(new RecordingError(message.code ?? 'capture', message.error ?? 'the screenshot failed'));
         return;
       }
       case 'event':
@@ -111,6 +120,14 @@ export class RecorderHost {
     const id = this.next++;
     const promise = new Promise<Devices>((resolve, reject) => this.listings.set(id, { resolve, reject }));
     this.send({ type: 'devices', id, media });
+    return promise;
+  }
+
+  /** A screenshot into a PNG, as the recorder takes it (`takeShot`). */
+  shot(options: Omit<ShotOptions, 'backend' | 'devices'>): Promise<ScreenShot> {
+    const id = this.next++;
+    const promise = new Promise<ScreenShot>((resolve, reject) => this.shots.set(id, { resolve, reject }));
+    this.send({ type: 'shot', id, options });
     return promise;
   }
 
@@ -170,7 +187,7 @@ export class RecorderHost {
 
   /** Ends the host while it does nothing, so the next one starts with the environment as it is now (ffmpeg found since). */
   refresh(): void {
-    if (this.running || this.listings.size > 0 || !this.process) return;
+    if (this.running || this.listings.size > 0 || this.shots.size > 0 || !this.process) return;
     const old = this.process;
     this.process = undefined;
     old.kill();

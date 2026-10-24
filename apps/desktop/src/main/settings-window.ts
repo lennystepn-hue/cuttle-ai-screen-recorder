@@ -100,24 +100,27 @@ export async function openSettings(options: { welcome?: boolean; page?: Settings
         // each word once, as it was first written
         if (change.privacyWords !== undefined) settings.privacy.words = change.privacyWords.filter((word, k, all) => all.findIndex((other) => other.toLowerCase() === word.toLowerCase()) === k);
         if (change.updates !== undefined) settings.updates = change.updates;
+        if (change.shotsQuick !== undefined) settings.shots.quick = change.shotsQuick;
       });
       if (change.launchAtLogin !== undefined) applyLoginItem(change.launchAtLogin);
       if (change.motion !== undefined) broadcastMotion(change.motion);
       return changed(await viewNow());
     },
-    'settings:choose-folder': async () => {
+    'settings:choose-folder': async (kind = 'projects') => {
+      const settings = await loadSettings();
       const chosen = CHECK
         ? process.env.CUTTLE_CHECK_FOLDER
         : (
             await dialog.showOpenDialog(window, {
-              title: 'Where new recordings go',
-              defaultPath: (await loadSettings()).projectsFolder,
+              title: kind === 'shots' ? 'Where screenshots go' : 'Where new recordings go',
+              defaultPath: kind === 'shots' ? settings.shots.folder : settings.projectsFolder,
               properties: ['openDirectory', 'createDirectory'],
             })
           ).filePaths[0];
       if (chosen) {
-        await updateSettings((settings) => {
-          settings.projectsFolder = chosen;
+        await updateSettings((next) => {
+          if (kind === 'shots') next.shots.folder = chosen;
+          else next.projectsFolder = chosen;
         });
       }
       return changed(await viewNow());

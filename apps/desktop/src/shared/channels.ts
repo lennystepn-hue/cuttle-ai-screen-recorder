@@ -65,7 +65,7 @@ export const WINDOW_CHANNELS = {
     ],
   },
   pill: {
-    requests: ['pill:recent', 'pill:open', 'pill:hide', 'pill:menu', 'pill:record'],
+    requests: ['pill:recent', 'pill:open', 'pill:hide', 'pill:menu', 'pill:record', 'pill:size'],
     events: ['pill:recent', 'app:motion'],
   },
   picker: {

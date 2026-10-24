@@ -1,11 +1,31 @@
 // The pill: a small launcher near the top of the screen (never in a recording). New recording, open
-// a project (the recent ones in a menu), and Esc to hide it until the tray brings it back.
-import { useEffect } from 'react';
+// a project (the recent ones in a menu), and Esc to hide it until the tray brings it back. The
+// window takes the pill's width: its hotkey is longer on Windows than on a Mac.
+import { useEffect, useLayoutEffect, useRef } from 'react';
 import { bridge } from '../bridge';
 import { ChevronIcon, CloseIcon, FolderIcon, Mark } from '../icons';
 import { hotkey } from '../keys';
 
+/** The window's margin left and right of the pill (its shadow), as the main process sizes it. */
+const MARGIN = 10;
+
 export function Pill() {
+  const bar = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const element = bar.current;
+    if (!element) return;
+    let last = 0;
+    const report = () => {
+      const width = Math.ceil(element.getBoundingClientRect().width) + 2 * MARGIN;
+      if (width === last) return;
+      last = width;
+      void bridge.invoke('pill:size', { width });
+    };
+    report();
+    const observer = new ResizeObserver(report);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.key === 'Escape') void bridge.invoke('pill:hide');
@@ -15,7 +35,7 @@ export function Pill() {
   }, []);
   return (
     <div className="pill-wrap">
-      <div className="pill" role="toolbar" aria-label="Cuttle">
+      <div className="pill" ref={bar} role="toolbar" aria-label="Cuttle">
         <Mark size={36} />
         <button className="main" onClick={() => void bridge.invoke('pill:record')} title={`Pick a screen, a window or a region (${hotkey('Ctrl+Shift+Alt+R')})`} data-testid="new-recording">
           <i />

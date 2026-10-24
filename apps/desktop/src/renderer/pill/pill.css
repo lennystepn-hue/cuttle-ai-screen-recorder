@@ -8,6 +8,7 @@ body.transparent #root {
   place-items: center;
 }
 .pill {
+  width: max-content;
   height: 48px;
   display: flex;
   align-items: center;
@@ -15,7 +16,7 @@ body.transparent #root {
   padding: 6px;
   border-radius: 16px;
   background: var(--overlay);
-  box-shadow: var(--shadow-bar);
+  box-shadow: var(--shadow-window);
   -webkit-app-region: drag;
 }
 .pill .mark {

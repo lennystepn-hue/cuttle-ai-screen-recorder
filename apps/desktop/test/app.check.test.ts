@@ -1463,6 +1463,14 @@ describe.runIf(enabled)('the Cuttle app', () => {
     expect(pill).toBeDefined();
     const recent = await pill.evaluate(() => (window as unknown as { cuttle: { invoke(channel: string): Promise<{ name: string }[]> } }).cuttle.invoke('pill:recent'));
     expect(recent.map((entry) => entry.name)).toEqual(['second', 'demo']);
+    // the window takes the pill's width, its margins included (the hotkey is longer on Windows)
+    const margins = () => pill.evaluate(() => window.innerWidth - document.querySelector('.pill')!.getBoundingClientRect().width);
+    await expect
+      .poll(async () => {
+        const margin = await margins();
+        return margin >= 20 && margin < 21;
+      }, { timeout: 10_000 })
+      .toBe(true);
     const editorBridge = await editor.evaluate(() => (window as unknown as { cuttle: { invoke(channel: string): Promise<unknown> } }).cuttle.invoke('pill:recent').then(() => 'reached', (error: Error) => error.message));
     expect(editorBridge).toContain('unknown request');
     // Alt+F4 on the pill hides it; a second launch (or the tray) shows it again

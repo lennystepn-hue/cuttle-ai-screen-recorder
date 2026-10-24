@@ -21,22 +21,31 @@ const DRAWER_STYLE = { '--drawer-spring': springEasing(), '--drawer-open': `${DR
 export function Pill() {
   const bar = useRef<HTMLDivElement>(null);
   /** In the drawer: whether it is open, and where it comes from (kept while it closes); undefined while the pill is on screen. */
-  const [open, setOpen] = useState(false);
+  // `opening`: drawn closed where it comes from, to open right after (its styles taken first, so the
+  // opening always starts from there; a frame would come late in a window never shown)
+  const [phase, setPhase] = useState<'closed' | 'opening' | 'open'>('closed');
+  const open = phase === 'open';
   const [origin, setOrigin] = useState<Pick<Extract<Events['pill:drawer'], { open: true }>, 'origin' | 'notch'>>();
+  const wrap = useRef<HTMLDivElement>(null);
   useEffect(
     () =>
       bridge.on('pill:drawer', (next) => {
         if (!next.open) {
-          setOpen(false);
+          setPhase('closed');
           if (next.onScreen) setOrigin(undefined);
           return;
         }
-        // drawn closed where it comes from first, then opened: the opening always starts from there
         setOrigin({ origin: next.origin, ...(next.notch && { notch: next.notch }) });
-        requestAnimationFrame(() => requestAnimationFrame(() => setOpen(true)));
+        setPhase((before) => (before === 'open' ? 'open' : 'opening'));
       }),
     [],
   );
+  useLayoutEffect(() => {
+    if (phase !== 'opening') return;
+    // the closed shape's styles, computed now
+    void wrap.current?.getBoundingClientRect();
+    setPhase('open');
+  }, [phase]);
   useLayoutEffect(() => {
     const element = bar.current;
     if (!element) return;
@@ -62,7 +71,7 @@ export function Pill() {
   const inDrawer = origin !== undefined;
   const style = { ...DRAWER_STYLE, ...(origin?.notch && { '--notch-w': `${origin.notch.width}px`, '--notch-h': `${origin.notch.height}px` }) } as CSSProperties;
   return (
-    <div className={`pill-wrap${inDrawer ? ' drawer' : ''}`} data-state={open ? 'open' : 'closed'} data-origin={origin?.origin} style={style} data-testid="pill-wrap">
+    <div ref={wrap} className={`pill-wrap${inDrawer ? ' drawer' : ''}`} data-state={open ? 'open' : 'closed'} data-origin={origin?.origin} style={style} data-testid="pill-wrap">
       <div className="pill" ref={bar} role="toolbar" aria-label="Cuttle">
         <Mark size={36} />
         <button className="main" onClick={() => void bridge.invoke('pill:record')} title={`Pick a screen, a window or a region (${hotkey('Ctrl+Shift+Alt+R')})`} data-testid="new-recording">

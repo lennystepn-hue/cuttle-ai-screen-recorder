@@ -2960,8 +2960,8 @@ describe.runIf(enabled)('the Cuttle app', () => {
     const ratio = 1280 / bounds.width;
     expect(pngSize(join(dir!, 'source.png'))).toEqual([Math.round(320 * ratio), Math.round(180 * ratio)]);
     expect(JSON.parse(readFileSync(join(dir!, 'shot.json'), 'utf8'))).toMatchObject({ version: 1, source: 'source.png' });
-    // copied (the check keeps it), and the toast says so; Edit opens the screenshot editor on it
-    expect(await copiedImage()).toBeGreaterThan(0);
+    // copied (the check keeps it: a moment after its shot.png is written), and the toast says so; Edit opens the screenshot editor on it
+    await expect.poll(copiedImage, { timeout: 10_000 }).toBeGreaterThan(0);
     const toast = await waitForPage(app, async (candidate) => candidate.url().includes('/toast.html') && (await candidate.locator('[data-testid=toast]').count()) === 1);
     await shotOf('61-shot-toast', '/toast.html');
     // the toast goes as the editor opens (before it answers)
@@ -3021,27 +3021,31 @@ describe.runIf(enabled)('the Cuttle app', () => {
     // the settings' Screenshots: Edit it
     await launchAgain(['--settings']);
     const settings = await waitForPage(app, async (page) => page.url().includes('/settings.html') && (await page.locator('[data-testid=shots-after]').count()) === 1);
-    expect(await settings.locator('[data-testid=shots-folder]').textContent()).toContain('screenshots');
+    // the folder shows once the settings are read
+    await expect.poll(() => settings.locator('[data-testid=shots-folder]').textContent(), { timeout: 10_000 }).toContain('screenshots');
     await invokeIn(settings, 'settings:set', { shotsQuick: false });
-    const pill = app.windows().find((page) => page.url().includes('/pill.html'))!;
-    await invokeIn(pill, 'pill:shot');
-    const { page, display } = await firstMonitorPicker();
-    const shotsBefore = shotFolders().length;
-    await invokeIn(page, 'picker:shot', { target: { kind: 'window', display, window: 1001 }, delay: 3 }).catch(() => {});
-    // the countdown over the window, then its shot: the test backend's window at its size, the last look
-    await waitForPage(app, async (candidate) => candidate.url().includes('/countdown.html'), 10_000);
-    await expect.poll(() => shotFolders().length, { timeout: 30_000 }).toBe(shotsBefore + 1);
-    const dir = shotFolders().at(-1)!;
-    await expect.poll(() => existsSync(join(dir, 'source.png')), { timeout: 10_000 }).toBe(true);
-    expect(pngSize(join(dir, 'source.png'))).toEqual([640, 360]);
-    expect(JSON.parse(readFileSync(join(dir, 'shot.json'), 'utf8'))).toMatchObject({ padding: 10, frame: { style: 'mac-dark' }, transparent: true });
-    const editorPage = await waitForPage(app, async (candidate) => candidate.url().includes('/shot.html') && (await invokeIn<{ dir: string }>(candidate, 'shot:view')).dir === dir);
-    expect(editorPage).toBeDefined();
-    await invokeIn(settings, 'settings:set', { shotsQuick: true });
-    // the editor's and the settings' windows close: none left for the tests after this one
-    await app.evaluate(({ BrowserWindow }) => {
-      for (const window of BrowserWindow.getAllWindows()) if (/\/(shot|settings)\.html/.test(window.webContents.getURL())) window.destroy();
-    });
+    try {
+      const pill = app.windows().find((page) => page.url().includes('/pill.html'))!;
+      await invokeIn(pill, 'pill:shot');
+      const { page, display } = await firstMonitorPicker();
+      const shotsBefore = shotFolders().length;
+      await invokeIn(page, 'picker:shot', { target: { kind: 'window', display, window: 1001 }, delay: 3 }).catch(() => {});
+      // the countdown over the window, then its shot: the test backend's window at its size, the last look
+      await waitForPage(app, async (candidate) => candidate.url().includes('/countdown.html'), 10_000);
+      await expect.poll(() => shotFolders().length, { timeout: 30_000 }).toBe(shotsBefore + 1);
+      const dir = shotFolders().at(-1)!;
+      await expect.poll(() => existsSync(join(dir, 'source.png')), { timeout: 10_000 }).toBe(true);
+      expect(pngSize(join(dir, 'source.png'))).toEqual([640, 360]);
+      expect(JSON.parse(readFileSync(join(dir, 'shot.json'), 'utf8'))).toMatchObject({ padding: 10, frame: { style: 'mac-dark' }, transparent: true });
+      const editorPage = await waitForPage(app, async (candidate) => candidate.url().includes('/shot.html') && (await invokeIn<{ dir: string }>(candidate, 'shot:view')).dir === dir);
+      expect(editorPage).toBeDefined();
+    } finally {
+      // as it was, and the editor's and the settings' windows closed: none left for the tests after this one
+      await invokeIn(settings, 'settings:set', { shotsQuick: true });
+      await app.evaluate(({ BrowserWindow }) => {
+        for (const window of BrowserWindow.getAllWindows()) if (/\/(shot|settings)\.html/.test(window.webContents.getURL())) window.destroy();
+      });
+    }
   }, 90_000);
 
   it('had no unhandled rejection in the main process, and no error in the editor', async () => {

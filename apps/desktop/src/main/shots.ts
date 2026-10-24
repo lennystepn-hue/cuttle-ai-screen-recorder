@@ -131,8 +131,12 @@ async function copyImage(png: Uint8Array): Promise<void> {
   await clipboard.write([new ClipboardItem({ 'image/png': new Blob([new Uint8Array(png)], { type: 'image/png' }) })]);
 }
 
+/** Each write's own temporary file: two at once (a change and a copy) never rename the same one. */
+let writes = 0;
+const tempOf = (file: string) => `${file}.${process.pid}.${++writes}.tmp`;
+
 async function writeJson(file: string, value: unknown): Promise<void> {
-  const temp = `${file}.${process.pid}.tmp`;
+  const temp = tempOf(file);
   await writeFile(temp, `${JSON.stringify(value, null, 2)}\n`);
   await rename(temp, file);
 }
@@ -282,7 +286,7 @@ export async function openShotEditor(dir: string): Promise<void> {
   const render = () => join(current.dir, RENDER);
   /** Writes a render as the shot's shot.png (temp file and rename, so a reader never sees half). */
   const keep = async (bytes: Uint8Array) => {
-    const temp = `${render()}.${process.pid}.tmp`;
+    const temp = tempOf(render());
     await writeFile(temp, bytes);
     await rename(temp, render());
   };

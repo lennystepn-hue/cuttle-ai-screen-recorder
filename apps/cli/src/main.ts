@@ -31,7 +31,7 @@ import { voiceAddCommand, voiceDownloadCommand, voiceListCommand, voiceRemoveCom
 import { CliError, EXIT, toCliError } from './errors';
 import { createOutput, type Output, type Streams } from './output';
 
-export const VERSION = '0.3.0';
+export const VERSION = '0.3.1';
 
 const seconds = (value: string): number => {
   const parsed = Number(value);

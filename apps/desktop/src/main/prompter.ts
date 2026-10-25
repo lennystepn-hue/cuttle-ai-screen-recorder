@@ -19,12 +19,17 @@ export interface Prompter {
   reached(id: string): void;
   /** The take runs (the buttons work), or it stops. */
   setLive(live: boolean): void;
+  /** Shows it or hides it (by the HUD at the top edge: only while the HUD is open). */
+  setShown(shown: boolean): void;
+  /** Whether it is shown. */
+  readonly shown: boolean;
   destroy(): void;
 }
 
 /**
  * Opens the prompter by the HUD (`hud`, DIP) on the work area of its display; `onBounds` hears
- * every move and new height (its area is a dead zone). `open` makes the overlay window.
+ * every move and new height (its area is a dead zone). `open` makes the overlay window. `hidden`:
+ * not shown until `setShown(true)` (the HUD at the top edge, collapsed).
  */
 export function openPrompter(
   open: (bounds: Rectangle, preload: string, options: BrowserWindowConstructorOptions) => BrowserWindow,
@@ -32,7 +37,9 @@ export function openPrompter(
   workArea: Rectangle,
   steps: readonly ScriptStep[],
   onBounds: () => void,
+  hidden = false,
 ): Prompter {
+  let shown = !hidden;
   const size = { width: PROMPTER_WIDTH, height: 160 };
   const place = prompterPosition(hud, workArea, size);
   const window = open({ x: place.x, y: place.y, ...size }, 'prompter.cjs', { focusable: false, movable: true });
@@ -56,7 +63,7 @@ export function openPrompter(
     () => {
       if (window.isDestroyed()) return;
       show();
-      if (!HIDDEN) window.showInactive();
+      if (!HIDDEN && shown) window.showInactive();
     },
     () => {},
   );
@@ -72,6 +79,15 @@ export function openPrompter(
       if (live === state.live) return;
       state.live = live;
       show();
+    },
+    setShown(next) {
+      shown = next;
+      if (window.isDestroyed()) return;
+      if (!next) window.hide();
+      else if (!HIDDEN) window.showInactive();
+    },
+    get shown() {
+      return shown;
     },
     destroy() {
       if (!window.isDestroyed()) window.destroy();

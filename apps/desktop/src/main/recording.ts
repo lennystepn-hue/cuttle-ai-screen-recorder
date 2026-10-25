@@ -26,6 +26,8 @@ import { liveRequest, transcribeProject } from './speech';
 import { editorWindowOf, expectSuggest, guard, hidePill, reopenEditor, sendToEditor, setEditorStatus, showPill, webPreferences } from './windows';
 import { freezeDisplays, frozenDisplay, onNewShot, takePicked, thawDisplays } from './shots';
 import { showTake, takeChanged } from './tray';
+import { hudAtTop, hudTopPlace, type HudAtTop } from './hud-top';
+import { islandRect } from '../shared/drawer';
 
 /** The HUD's window (the HUD and a margin for its shadow): never in the video, and a dead zone for the input log. */
 const HUD_SIZE = { width: 552, height: 64 };
@@ -663,7 +665,10 @@ async function record(target: PickedTarget, display: PickerDisplay, displays: Pi
         () => !HIDDEN && !countdown.isDestroyed() && countdown.showInactive(),
         () => {},
       );
-      const hud = overlay({ ...hudPosition(displays, display.id, area, hudSize), ...hudSize }, 'hud.cjs', { focusable: false, movable: true });
+      // at the top edge (the settings say so): collapsed into an island at the top centre, open on the pointer
+      const top = (await loadSettings()).hudPlace === 'top' ? await hudTopPlace(display.id, hudSize) : undefined;
+      let atTop: HudAtTop | undefined;
+      const hud = overlay(top ? top.window : { ...hudPosition(displays, display.id, area, hudSize), ...hudSize }, 'hud.cjs', { focusable: false, movable: !top });
       const hudState: HudState = { phase: 'countdown', markers: 0, ...(choices.mic && { mic: true }), ...(live && { captions: {} }) };
       /** The script's step the take is at (from its `step` markers). */
       let stepIndex = 0;
@@ -716,8 +721,12 @@ async function record(target: PickedTarget, display: PickerDisplay, displays: Pi
       bindRequests(countdown.webContents, 'countdown', {});
       // The script's steps in the prompter by the HUD, from the countdown on (the first can be read before the take runs).
       let prompter: Prompter | undefined;
-      const deadZones = () => [hud, ...(prompter ? [prompter.window] : [])].filter((window) => !window.isDestroyed()).map((window) => toDesktopPixels(window.getBounds()));
-      if (script.length > 0) prompter = openPrompter(overlay, hud.getBounds(), display.workArea, script, () => recorderHost.setDeadZones(deadZones()));
+      // the HUD's and the prompter's areas (at the top edge: the island, or the open HUD)
+      const deadZones = () => {
+        const windows = [...(top ? [] : [hud]), ...(prompter?.shown ? [prompter.window] : [])].filter((window) => !window.isDestroyed()).map((window) => window.getBounds());
+        return [...(top ? (atTop?.zones() ?? [islandRect(top.display)]) : []), ...windows].map((rect) => toDesktopPixels(rect));
+      };
+      if (script.length > 0) prompter = openPrompter(overlay, hud.getBounds(), display.workArea, script, () => recorderHost.setDeadZones(deadZones()), top !== undefined);
       hud.on('moved', () => recorderHost.setDeadZones(deadZones()));
       // Windows ends the session (sign out, shut down): the end waits while the take is stopped and written.
       hud.on('query-session-end', (event) => {
@@ -725,7 +734,16 @@ async function record(target: PickedTarget, display: PickerDisplay, displays: Pi
         recorderHost.stop();
       });
       hud.on('session-end', () => recorderHost.stop());
-      void hud.loadURL(`${APP_ORIGIN}/hud.html`).catch(() => {});
+      void hud.loadURL(`${APP_ORIGIN}/hud.html`).then(
+        () => {
+          if (!top || hud.isDestroyed()) return;
+          atTop = hudAtTop(hud, top, () => prompter?.window, (open) => {
+            prompter?.setShown(open);
+            recorderHost.setDeadZones(deadZones());
+          });
+        },
+        () => {},
+      );
       const cancelKey = 'Escape';
       globalShortcut.register(cancelKey, () => recorderHost.stop());
       const closeOverlays = () => {
@@ -866,6 +884,7 @@ async function record(target: PickedTarget, display: PickerDisplay, displays: Pi
         closeOverlays();
         if (!hud.isDestroyed()) hud.destroy();
         endTakeInTray();
+        atTop?.stop();
         prompter?.destroy();
         if (error instanceof RecordingError && error.code === 'cancelled') {
           // cancelled after a restart: the take put aside is the take after all
@@ -907,6 +926,7 @@ async function record(target: PickedTarget, display: PickerDisplay, displays: Pi
       closeOverlays();
       if (!hud.isDestroyed()) hud.destroy();
       endTakeInTray();
+      atTop?.stop();
       prompter?.destroy();
       if (restarting && !quitting) {
         // put aside, not deleted ("Undo restart" in the editor), and counted down again

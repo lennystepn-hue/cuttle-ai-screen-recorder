@@ -4,7 +4,7 @@ import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { app } from 'electron';
 import { z } from 'zod';
-import { MOTIONS, PILL_PLACES, PRIVACY_WORD_MAX, PRIVACY_WORDS_MAX, SPEECH_LANGUAGES, SPEECH_MODEL_NAMES, type Motion, type SettingsView } from '../shared/ipc';
+import { HUD_PLACES, MOTIONS, PILL_PLACES, PRIVACY_WORD_MAX, PRIVACY_WORDS_MAX, SPEECH_LANGUAGES, SPEECH_MODEL_NAMES, type Motion, type SettingsView } from '../shared/ipc';
 
 const RECENT_MAX = 10;
 
@@ -12,6 +12,8 @@ const SettingsSchema = z.object({
   recent: z.array(z.object({ dir: z.string(), name: z.string(), opened: z.number() })).catch([]).default([]),
   /** Where Cuttle waits: the pill on screen (where it was left), the drawer at the top centre, or only the menu bar. */
   pillPlace: z.enum(PILL_PLACES).catch('screen').default('screen'),
+  /** Where the HUD is during a take: on screen by the recorded area, or at the top edge, collapsed into an island. */
+  hudPlace: z.enum(HUD_PLACES).catch('screen').default('screen'),
   /** Where the pill sits, per display (DIP), keyed by the display's id. */
   pill: z.record(z.string(), z.object({ x: z.number(), y: z.number() })).catch({}).default({}),
   /** New recordings go into a new folder here. */
@@ -174,6 +176,7 @@ export async function settingsView(): Promise<SettingsView> {
     launchAtLogin: settings.launchAtLogin,
     motion: settings.motion,
     pillPlace: settings.pillPlace,
+    hudPlace: settings.hudPlace,
     speech: { ...settings.speech },
     privacy: { read: settings.privacy.read, words: [...settings.privacy.words] },
     recent: settings.recent,

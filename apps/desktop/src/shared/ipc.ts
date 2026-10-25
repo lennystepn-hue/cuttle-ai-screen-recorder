@@ -221,6 +221,9 @@ export type Motion = (typeof MOTIONS)[number];
 /** Where Cuttle waits: the pill on screen, the drawer at the top centre (#171), or only the menu bar (the tray on Windows). */
 export const PILL_PLACES = ['screen', 'top', 'menu-bar'] as const;
 export type PillPlace = (typeof PILL_PLACES)[number];
+/** Where the HUD is during a take: on screen by the recorded area, or at the top edge as an island (#171). */
+export const HUD_PLACES = ['screen', 'top'] as const;
+export type HudPlace = (typeof HUD_PLACES)[number];
 /** The settings window's pages, in its sidebar's order. */
 export const SETTINGS_PAGES = ['recording', 'speech', 'privacy', 'claude', 'projects', 'general'] as const;
 export type SettingsPage = (typeof SETTINGS_PAGES)[number];
@@ -235,6 +238,7 @@ export interface SettingsView {
   launchAtLogin: boolean;
   motion: Motion;
   pillPlace: PillPlace;
+  hudPlace: HudPlace;
   /** Transcribing a take after its cut: the model (or off) and the language spoken; `live`: captions in the HUD while it records. */
   speech: { model: SpeechModelName | 'off'; language: SpeechLanguage; live: boolean };
   /** After a take's cut: read the screen's text to mask what it showed, and the words always masked. */
@@ -599,6 +603,7 @@ export const REQUESTS = {
     launchAtLogin: z.boolean().optional(),
     motion: z.enum(MOTIONS).optional(),
     pillPlace: z.enum(PILL_PLACES).optional(),
+    hudPlace: z.enum(HUD_PLACES).optional(),
     speechModel: z.enum(['off', ...SPEECH_MODEL_NAMES]).optional(),
     speechLanguage: z.enum(SPEECH_LANGUAGES).optional(),
     speechLive: z.boolean().optional(),
@@ -876,6 +881,8 @@ export interface Events {
   'pill:recent': Responses['pill:recent'];
   /** The drawer at the top centre opens (out of the notch, the menu bar's middle or the top edge) or closes; `onScreen`: the pill is on screen again, out of the drawer. */
   'pill:drawer': { open: true; origin: 'notch' | 'bar' | 'edge'; notch?: { width: number; height: number } } | { open: false; onScreen?: boolean };
+  /** The HUD at the top edge: open (the whole HUD) or collapsed into its island, and where it comes from. */
+  'hud:top': { open: boolean; origin: 'notch' | 'bar' | 'edge'; notch?: { width: number; height: number } };
   'picker:open': PickerSetup;
   /** The cameras and mics, listed after the pickers opened (DirectShow is slow). */
   'picker:devices': Pick<PickerSetup, 'cameras' | 'mics' | 'choices'>;

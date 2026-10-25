@@ -3,8 +3,14 @@
 // never in the video (content protection), never takes the focus (the recorded window keeps it),
 // and its area is a dead zone for the input log. Its width is fixed, so Stop never moves under the
 // pointer. Restart asks for a press held 600 ms, so a stray click does not put a take aside.
-import { useEffect, useRef, useState } from 'react';
-import type { HudState } from '../../shared/ipc';
+//
+// At the top edge (#171) it is an island while the pointer is elsewhere: beside the notch (the dot
+// and the mic's level left of it, the time right of it) or a small pill under the menu bar's middle.
+// The pointer resting on it opens the whole HUD out of it, on the pill's drawer spring; a marker, a
+// slip or a screenshot shows in the island for a moment.
+import { useEffect, useRef, useState, type CSSProperties } from 'react';
+import { DRAWER, springEasing } from '../../shared/drawer';
+import type { Events, HudState } from '../../shared/ipc';
 import { takeClock as clock, takeSeconds } from '../../shared/take-status';
 import { bridge } from '../bridge';
 import { Mark, ShotIcon, WarningIcon } from '../icons';
@@ -12,6 +18,8 @@ import { hotkey } from '../keys';
 
 /** How long Restart must be held. */
 const HOLD_MS = 600;
+/** The drawer's spring and timing, for the HUD at the top edge. */
+const TOP_STYLE = { '--drawer-spring': springEasing(), '--drawer-open': `${DRAWER.openMs}ms`, '--drawer-close': `${DRAWER.closeAnimMs}ms` } as CSSProperties;
 
 export function Hud() {
   const [state, setState] = useState<HudState>({ phase: 'countdown', markers: 0 });
@@ -26,19 +34,35 @@ export function Hud() {
   const [now, setNow] = useState(Date.now());
   const [flash, setFlash] = useState(false);
   const [shotFlash, setShotFlash] = useState(false);
+  /** At the top edge: open or an island, and where it comes from; undefined on screen. */
+  const [top, setTop] = useState<Events['hud:top']>();
+  useEffect(() => bridge.on('hud:top', setTop), []);
+  /** What the island says for a moment in place of the time (a marker, a slip, a screenshot). */
+  const [islandNote, setIslandNote] = useState<string>();
+  const noteTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const noteInIsland = (text: string) => {
+    clearTimeout(noteTimer.current);
+    setIslandNote(text);
+    noteTimer.current = setTimeout(() => setIslandNote(undefined), 1200);
+  };
   useEffect(() => {
     const off = bridge.on('hud:state', (next) => {
       setState((previous) => {
         if (next.markers > previous.markers) {
           setFlash(true);
           setTimeout(() => setFlash(false), 900);
+          noteInIsland('Marker');
         }
         if ((next.shots ?? 0) > (previous.shots ?? 0)) {
           setShotFlash(true);
           setTimeout(() => setShotFlash(false), 900);
+          noteInIsland('Shot');
         }
         // the mistake key: what Cuttle will do with it, for a moment
-        if ((next.retakes ?? 0) > (previous.retakes ?? 0)) showHint('Slip marked: do it again');
+        if ((next.retakes ?? 0) > (previous.retakes ?? 0)) {
+          showHint('Slip marked: do it again');
+          noteInIsland('Slip');
+        }
         return next;
       });
     });
@@ -53,7 +77,22 @@ export function Hud() {
   const paused = state.phase === 'paused';
   const live = state.phase === 'recording' || paused;
   return (
-    <div className="hud-wrap">
+    <div
+      className={`hud-wrap${top ? ' top' : ''}`}
+      data-state={top?.open ? 'open' : 'closed'}
+      data-origin={top?.origin}
+      style={{ ...TOP_STYLE, ...(top?.notch && { '--notch-w': `${top.notch.width}px`, '--notch-h': `${top.notch.height}px` }) } as CSSProperties}
+      data-testid="hud-wrap"
+    >
+      {top && (
+        <div className={`island ${state.phase}`} aria-hidden={top.open} data-testid="hud-island">
+          <span className="island-left">
+            <span className="dot" />
+            {state.mic && <MicLevel live={state.phase === 'recording'} />}
+          </span>
+          <span className="island-right">{islandNote ?? (state.phase === 'stopping' ? 'Saving…' : clock(seconds))}</span>
+        </div>
+      )}
       <div className={`hud ${state.phase}`} role="toolbar" aria-label="Recording">
         <Mark size={26} />
         <span className="dot" />

@@ -16,7 +16,7 @@ import { loadSettings, sameDir, settingsView, updateSettings } from './settings'
 import { cancelSpeechDownload, downloadSpeechModel, onSpeechStatus, removeSpeechModel, speechStatus } from './speech';
 import { installTools, skillFolder, toolsStatus } from './tools';
 import { installUpdate, openReleases, updates } from './updates';
-import { bringToFront, guard, lockDown, openEditorOrSay, showPill, titleBar, webPreferences } from './windows';
+import { applyPillPlace, bringToFront, guard, lockDown, openEditorOrSay, showPill, titleBar, webPreferences } from './windows';
 
 const BACKGROUND = '#0c0c0f';
 /** As the editor's, so Windows' buttons are the same in both. */
@@ -93,6 +93,7 @@ export async function openSettings(options: { welcome?: boolean; page?: Settings
         if (change.mic !== undefined) settings.record.mic = change.mic ?? undefined;
         if (change.launchAtLogin !== undefined) settings.launchAtLogin = change.launchAtLogin;
         if (change.motion !== undefined) settings.motion = change.motion;
+        if (change.pillPlace !== undefined) settings.pillPlace = change.pillPlace;
         if (change.speechModel !== undefined) settings.speech.model = change.speechModel;
         if (change.speechLanguage !== undefined) settings.speech.language = change.speechLanguage;
         if (change.speechLive !== undefined) settings.speech.live = change.speechLive;
@@ -104,6 +105,8 @@ export async function openSettings(options: { welcome?: boolean; page?: Settings
       });
       if (change.launchAtLogin !== undefined) applyLoginItem(change.launchAtLogin);
       if (change.motion !== undefined) broadcastMotion(change.motion);
+      // shown where it waits now: the pill, or the drawer opening a moment
+      if (change.pillPlace !== undefined) await applyPillPlace(change.pillPlace, true);
       return changed(await viewNow());
     },
     'settings:choose-folder': async (kind = 'projects') => {

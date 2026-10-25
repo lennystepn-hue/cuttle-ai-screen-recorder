@@ -29,6 +29,15 @@ export interface Darwin {
   requestScreenAccess(): void;
   /** Whether this process may watch the keyboard (Input Monitoring); the first call asks macOS for it. */
   keyboardAccess(): boolean;
+  /**
+   * The camera's notch of each display that has one (MacBooks since 2021), by its CGDirectDisplayID
+   * (Electron's display id): its width and height in points, centred at the display's top. NSScreen
+   * tells it: the menu bar's height above its safe area, and the parts beside the notch
+   * (`auxiliaryTopLeftArea`, `auxiliaryTopRightArea`, macOS 12). Main thread only (AppKit).
+   */
+  notches(): { display: number; width: number; height: number }[];
+  /** Whether a mouse button is held now (NSEvent's `pressedMouseButtons`; no permission needed). */
+  mouseButtonDown(): boolean;
   /** The letter or digit a key types on the keyboard's layout now (`Z` on a German Mac's Z key), for a shortcut's badge. */
   keyLabel(keycode: number): string | undefined;
   /** Seconds on the host clock (mach time since startup, as avfoundation stamps captures) as wall-clock seconds. */
@@ -418,6 +427,16 @@ async function create(): Promise<Darwin> {
   const objc_autoreleasePoolPop = objc.func('objc_autoreleasePoolPop', 'void', ['void *']);
   const sendWithObject = objc.func('objc_msgSend', 'long', ['void *', 'void *', 'void *']);
   const sendString = objc.func('objc_msgSend', 'str', ['void *', 'void *']);
+  const sendUnsigned = objc.func('objc_msgSend', 'uint64', ['void *', 'void *']);
+  const sendAtIndex = objc.func('objc_msgSend', 'void *', ['void *', 'void *', 'uint64']);
+  const sendWithText = objc.func('objc_msgSend', 'void *', ['void *', 'void *', 'str']);
+  const sendResponds = objc.func('objc_msgSend', 'bool', ['void *', 'void *', 'void *']);
+  const sendForObject = objc.func('objc_msgSend', 'void *', ['void *', 'void *', 'void *']);
+  // a struct of four doubles comes back in registers on Apple silicon (objc_msgSend_stret on Intel,
+  // whose Macs have no notch)
+  const NSEdgeInsets = koffi.struct(typeName('NSEdgeInsets'), { top: 'double', left: 'double', bottom: 'double', right: 'double' });
+  const sendInsets = process.arch === 'arm64' ? objc.func('objc_msgSend', NSEdgeInsets, ['void *', 'void *']) : undefined;
+  const sendRect = process.arch === 'arm64' ? objc.func('objc_msgSend', CGRect, ['void *', 'void *']) : undefined;
 
   /** A CFString that lives as long as the process (keys and constants). */
   const cfString = (text: string) => CFStringCreateWithCString(null, text, kCFStringEncodingUTF8);
@@ -977,6 +996,38 @@ async function create(): Promise<Darwin> {
     screenAccess: () => CGPreflightScreenCaptureAccess(),
     requestScreenAccess: () => void CGRequestScreenCaptureAccess(),
     keyboardAccess: () => CGPreflightListenEventAccess() || (CGRequestListenEventAccess(), false),
+    notches() {
+      if (!sendInsets || !sendRect) return [];
+      type Rect = { origin: { x: number; y: number }; size: { width: number; height: number } };
+      const pool = objc_autoreleasePoolPush();
+      try {
+        const NSScreen = objc_getClass('NSScreen');
+        const screens = sendObject(NSScreen, sel_registerName('screens'));
+        const count = screens ? Number(sendUnsigned(screens, sel_registerName('count'))) : 0;
+        const key = sendWithText(objc_getClass('NSString'), sel_registerName('stringWithUTF8String:'), 'NSScreenNumber');
+        const found: { display: number; width: number; height: number }[] = [];
+        for (let i = 0; i < count; i++) {
+          const screen = sendAtIndex(screens, sel_registerName('objectAtIndex:'), i);
+          if (!sendResponds(screen, sel_registerName('respondsToSelector:'), sel_registerName('auxiliaryTopLeftArea'))) continue;
+          const top = (sendInsets(screen, sel_registerName('safeAreaInsets')) as { top: number }).top;
+          if (!(top > 0)) continue;
+          const frame = sendRect(screen, sel_registerName('frame')) as Rect;
+          const left = sendRect(screen, sel_registerName('auxiliaryTopLeftArea')) as Rect;
+          const right = sendRect(screen, sel_registerName('auxiliaryTopRightArea')) as Rect;
+          // what the parts beside it leave of the screen's width, whatever space their rects are in
+          const width = frame.size.width - left.size.width - right.size.width;
+          if (!(left.size.width > 0 && right.size.width > 0 && width > 0)) continue;
+          const description = sendObject(screen, sel_registerName('deviceDescription'));
+          const number = description ? sendForObject(description, sel_registerName('objectForKey:'), key) : null;
+          const display = number ? Number(sendUnsigned(number, sel_registerName('unsignedIntValue'))) : 0;
+          if (display) found.push({ display, width: Math.round(width), height: Math.round(top) });
+        }
+        return found;
+      } finally {
+        objc_autoreleasePoolPop(pool);
+      }
+    },
+    mouseButtonDown: () => Number(sendUnsigned(objc_getClass('NSEvent'), sel_registerName('pressedMouseButtons'))) !== 0,
     keyLabel(keycode) {
       const source = TISCopyCurrentKeyboardLayoutInputSource();
       if (!source) return undefined;

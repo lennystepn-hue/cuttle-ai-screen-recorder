@@ -15,7 +15,7 @@ import { findFfmpeg } from './tools';
 import { createTray, updateTray, type TrayActions } from './tray';
 import { startUpdates } from './updates';
 import { launchOf, type Launch } from './launch';
-import { chooseAndOpen, createPill, lockDown, openEditorOrSay, showPill } from './windows';
+import { applyPillPlace, chooseAndOpen, createPill, lockDown, openEditorOrSay, showPill } from './windows';
 
 app.setName('Cuttle');
 if (process.env.CUTTLE_USER_DATA) app.setPath('userData', resolve(process.env.CUTTLE_USER_DATA));
@@ -105,6 +105,7 @@ if (!app.requestSingleInstanceLock(launched)) {
     const trayIcon = process.platform === 'win32' ? 'tray.png' : process.platform === 'darwin' ? 'trayTemplate.png' : 'tray@2x.png';
     if (!HIDDEN) createTray(assetPath(trayIcon), process.platform === 'win32' ? assetPath('tray-recording.png') : undefined, settings.recent, actions);
     await createPill();
+    await applyPillPlace(settings.pillPlace);
     // A new recording and a screenshot from anywhere (the recorder's own keys stop a take and set markers).
     if (!HIDDEN) globalShortcut.register('Control+Shift+Alt+R', () => void startPicking());
     if (!HIDDEN) globalShortcut.register('Control+Shift+Alt+C', () => void startShooting());
@@ -112,7 +113,7 @@ if (!app.requestSingleInstanceLock(launched)) {
     else if (launched.settings) await openSettings();
     // the first plain start welcomes (ffmpeg, the cuttle command and the skill), then the pill
     else if (!settings.welcomed) await openSettings({ welcome: true });
-    else await showPill();
+    else await showPill('start');
     // ffmpeg where the OS has it now (installed since the last login, say): the helpers start with it
     void findFfmpeg().catch(() => undefined);
     // a newer version from GitHub's releases, a little after the start and once a day (the packaged app)

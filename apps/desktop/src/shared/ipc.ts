@@ -218,6 +218,9 @@ export const PRIVACY_WORDS_MAX = 50;
 /** How motion is set: the OS's "reduce motion", or always on, or always off. */
 export const MOTIONS = ['system', 'reduce', 'full'] as const;
 export type Motion = (typeof MOTIONS)[number];
+/** Where Cuttle waits: the pill on screen, the drawer at the top centre (#171), or only the menu bar (the tray on Windows). */
+export const PILL_PLACES = ['screen', 'top', 'menu-bar'] as const;
+export type PillPlace = (typeof PILL_PLACES)[number];
 /** The settings window's pages, in its sidebar's order. */
 export const SETTINGS_PAGES = ['recording', 'speech', 'privacy', 'claude', 'projects', 'general'] as const;
 export type SettingsPage = (typeof SETTINGS_PAGES)[number];
@@ -231,6 +234,7 @@ export interface SettingsView {
   mic?: string;
   launchAtLogin: boolean;
   motion: Motion;
+  pillPlace: PillPlace;
   /** Transcribing a take after its cut: the model (or off) and the language spoken; `live`: captions in the HUD while it records. */
   speech: { model: SpeechModelName | 'off'; language: SpeechLanguage; live: boolean };
   /** After a take's cut: read the screen's text to mask what it showed, and the words always masked. */
@@ -594,6 +598,7 @@ export const REQUESTS = {
     mic: z.string().min(1).max(512).nullable().optional(),
     launchAtLogin: z.boolean().optional(),
     motion: z.enum(MOTIONS).optional(),
+    pillPlace: z.enum(PILL_PLACES).optional(),
     speechModel: z.enum(['off', ...SPEECH_MODEL_NAMES]).optional(),
     speechLanguage: z.enum(SPEECH_LANGUAGES).optional(),
     speechLive: z.boolean().optional(),
@@ -869,6 +874,8 @@ export interface Events {
   'export:progress': ExportProgress;
   'export:end': ExportEnd;
   'pill:recent': Responses['pill:recent'];
+  /** The drawer at the top centre opens (out of the notch, the menu bar's middle or the top edge) or closes; `onScreen`: the pill is on screen again, out of the drawer. */
+  'pill:drawer': { open: true; origin: 'notch' | 'bar' | 'edge'; notch?: { width: number; height: number } } | { open: false; onScreen?: boolean };
   'picker:open': PickerSetup;
   /** The cameras and mics, listed after the pickers opened (DirectShow is slow). */
   'picker:devices': Pick<PickerSetup, 'cameras' | 'mics' | 'choices'>;

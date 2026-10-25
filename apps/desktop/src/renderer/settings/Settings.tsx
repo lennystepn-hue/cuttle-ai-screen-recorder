@@ -1,7 +1,7 @@
 // The settings window, and the first run in the same window (#welcome): ffmpeg, the cuttle command
 // and the Claude skill, then the pill. Every change is kept at once; there is no Save.
 import { useEffect, useLayoutEffect, useRef, useState, type ComponentType, type KeyboardEvent, type ReactNode } from 'react';
-import type { Motion, Permission, PermissionView, RequestArgument, SettingsPage, SettingsView, SpeechLanguage, SpeechModelName, SpeechStatus, ToolsStatus, UpdateStatus } from '../../shared/ipc';
+import type { Motion, Permission, PillPlace, PermissionView, RequestArgument, SettingsPage, SettingsView, SpeechLanguage, SpeechModelName, SpeechStatus, ToolsStatus, UpdateStatus } from '../../shared/ipc';
 import { bridge } from '../bridge';
 import { CheckIcon, CloseIcon, CopyIcon, FolderIcon, GearIcon, Mark, MaskIcon, MicIcon, RecordIcon, TerminalIcon, WarningIcon } from '../icons';
 import { hotkeyKeys } from '../keys';
@@ -256,6 +256,28 @@ export function Settings() {
                       >
                         <i />
                       </button>
+                    </Row>
+                    <Row
+                      label="Where Cuttle waits"
+                      hint={
+                        view?.pillPlace === 'top'
+                          ? `Rest the pointer on the middle of the screen's top edge${MAC ? ' (the notch, where there is one)' : ''}: Cuttle comes out, and goes when the pointer leaves.`
+                          : view?.pillPlace === 'menu-bar'
+                            ? `Only the ${TRAY}'s icon and the keys; "Show Cuttle" there brings the pill.`
+                            : 'The pill stays on screen where you leave it; Esc hides it.'
+                      }
+                    >
+                      <Segmented<PillPlace>
+                        value={view?.pillPlace}
+                        options={[
+                          ['screen', 'On screen'],
+                          ['top', 'At the top edge'],
+                          ['menu-bar', MAC ? 'In the menu bar' : 'In the tray'],
+                        ]}
+                        onChange={(pillPlace) => change({ pillPlace })}
+                        label="Where Cuttle waits"
+                        testid="pill-place"
+                      />
                     </Row>
                     <Row label="Motion" hint="Animations in Cuttle's windows. The video is not affected.">
                       <Segmented<Motion>

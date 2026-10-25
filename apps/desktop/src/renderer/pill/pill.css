@@ -68,3 +68,128 @@ body.transparent #root {
   padding: 0;
   justify-content: center;
 }
+
+/* The drawer at the top centre (#171): the pill comes out of the notch, or down from the menu bar's
+   middle, on a spring (--drawer-spring, a CSS linear() from shared/drawer.ts) and goes back quicker
+   without the bounce. Its shape is clipped (the corners stay round while it grows), its buttons come
+   in a beat after it, one after another. */
+.pill-wrap.drawer {
+  place-items: start center;
+  /* the shadow follows the clipped shape */
+  filter: drop-shadow(0 10px 22px rgba(0, 0, 0, 0.38));
+}
+.pill-wrap.drawer .pill {
+  -webkit-app-region: no-drag;
+  box-shadow: none;
+  transform-origin: top center;
+  transition:
+    clip-path var(--drawer-close) cubic-bezier(0.4, 0, 1, 1),
+    transform var(--drawer-close) cubic-bezier(0.4, 0, 1, 1),
+    opacity var(--drawer-close) linear;
+}
+/* the shape is revealed on the spring, and gives a little as it gets there: a few pixels wider and
+   longer, then back (a clip past its end would show nothing) */
+.pill-wrap.drawer[data-state='open'] .pill {
+  transition:
+    clip-path var(--drawer-open) var(--drawer-spring),
+    opacity 120ms linear;
+  animation: drawer-settle var(--drawer-open) ease-in-out;
+}
+@keyframes drawer-settle {
+  0%,
+  30% {
+    transform: none;
+  }
+  55% {
+    transform: scale(1.025, 1.06);
+  }
+  100% {
+    transform: none;
+  }
+}
+.pill-wrap.drawer .pill > * {
+  opacity: 0;
+  transform: translateY(-6px);
+  transition:
+    opacity 90ms linear,
+    transform 90ms ease-in;
+}
+.pill-wrap.drawer[data-state='open'] .pill > * {
+  opacity: 1;
+  transform: none;
+  transition:
+    opacity 180ms linear,
+    transform 260ms var(--drawer-spring);
+}
+.pill-wrap.drawer[data-state='open'] .pill > :nth-child(1) { transition-delay: 70ms; }
+.pill-wrap.drawer[data-state='open'] .pill > :nth-child(2) { transition-delay: 95ms; }
+.pill-wrap.drawer[data-state='open'] .pill > :nth-child(3) { transition-delay: 120ms; }
+.pill-wrap.drawer[data-state='open'] .pill > :nth-child(4) { transition-delay: 145ms; }
+.pill-wrap.drawer[data-state='open'] .pill > :nth-child(5) { transition-delay: 170ms; }
+.pill-wrap.drawer[data-state='open'] .pill > :nth-child(6) { transition-delay: 195ms; }
+
+/* under the menu bar's middle (macOS) or the top edge (Windows): from a sliver at the top, dropping a little */
+.pill-wrap.drawer:not([data-origin='notch']) {
+  padding-top: 6px;
+}
+.pill-wrap.drawer:not([data-origin='notch']) .pill {
+  clip-path: inset(0 38% 100% 38% round 16px);
+  transform: translateY(-10px);
+  opacity: 0.4;
+}
+.pill-wrap.drawer:not([data-origin='notch'])[data-state='open'] .pill {
+  clip-path: inset(0 0 0 0 round 16px);
+  transform: none;
+  opacity: 1;
+  animation-name: drawer-drop;
+}
+@keyframes drawer-drop {
+  0% {
+    transform: translateY(-10px);
+  }
+  55% {
+    transform: translateY(1px) scale(1.025, 1.06);
+  }
+  100% {
+    transform: none;
+  }
+}
+
+/* out of the notch: black like it, from the top of the screen, its row of buttons under the notch;
+   it grows from the notch's own size */
+.pill-wrap.drawer[data-origin='notch'] .pill {
+  height: calc(48px + var(--notch-h));
+  padding-top: calc(6px + var(--notch-h));
+  border-radius: 0 0 22px 22px;
+  background: #000;
+  clip-path: inset(0 calc(50% - var(--notch-w) / 2) calc(100% - var(--notch-h)) calc(50% - var(--notch-w) / 2) round 0 0 10px 10px);
+}
+.pill-wrap.drawer[data-origin='notch'][data-state='open'] .pill {
+  clip-path: inset(0 0 0 0 round 0 0 22px 22px);
+}
+
+/* reduced motion: it only fades */
+@media (prefers-reduced-motion: reduce) {
+  :root:not([data-motion='full']) .pill-wrap.drawer .pill,
+  :root:not([data-motion='full']) .pill-wrap.drawer .pill > * {
+    clip-path: none;
+    transform: none;
+    animation: none;
+    transition: opacity 150ms linear;
+    transition-delay: 0ms;
+  }
+  :root:not([data-motion='full']) .pill-wrap.drawer[data-state='closed'] .pill {
+    opacity: 0;
+  }
+}
+:root[data-motion='reduce'] .pill-wrap.drawer .pill,
+:root[data-motion='reduce'] .pill-wrap.drawer .pill > * {
+  clip-path: none;
+  transform: none;
+  animation: none;
+  transition: opacity 150ms linear;
+  transition-delay: 0ms;
+}
+:root[data-motion='reduce'] .pill-wrap.drawer[data-state='closed'] .pill {
+  opacity: 0;
+}

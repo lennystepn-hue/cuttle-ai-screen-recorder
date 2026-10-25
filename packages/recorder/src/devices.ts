@@ -57,6 +57,24 @@ export async function inputAllowed(options: { backend?: Backend } = {}): Promise
   return (await loadDarwin()).keyboardAccess();
 }
 
+/**
+ * What the app's drawer at the top centre asks of the system, many times a second: the displays'
+ * notches (macOS; by display id, centred at the top) and whether a mouse button is held. Nothing
+ * with the test backend.
+ */
+export async function topEdge(options: { backend?: Backend } = {}): Promise<{ notches(): { display: number; width: number; height: number }[]; mouseButtonDown(): boolean }> {
+  const platform = platformFor(options.backend);
+  if (platform === 'test') return { notches: () => [], mouseButtonDown: () => false };
+  if (platform === 'macos') {
+    const { loadDarwin } = await import('./darwin');
+    const mac = await loadDarwin();
+    return { notches: () => mac.notches(), mouseButtonDown: () => mac.mouseButtonDown() };
+  }
+  const { loadWin32 } = await import('./win32');
+  const win = await loadWin32();
+  return { notches: () => [], mouseButtonDown: () => win.mouseButtonDown() };
+}
+
 /** The windows now, for a window source that is resolved again when the countdown ends. */
 export async function windowsFor(platform: Platform): Promise<WindowInfo[]> {
   if (platform === 'test') return structuredClone(TEST_DEVICES.windows);

@@ -417,7 +417,7 @@ function endPicking(cancelled: boolean): void {
   if (shooting) void thawDisplays();
   endShooting();
   busy = false;
-  if (pillHidden) void showPill();
+  if (pillHidden) void showPill('back');
   pillHidden = false;
 }
 
@@ -521,6 +521,8 @@ export function stopForQuit(): Promise<void> {
 
 /** Whether a recording runs (or is being written): a quit waits for it. */
 export const recordingRuns = () => writing !== undefined;
+/** A picker, a screenshot or a take is under way (the drawer at the top stays shut). */
+export const recordingBusy = () => busy;
 
 async function beginRecording(target: PickedTarget, displays: PickerDisplay[]): Promise<void> {
   // One recording per pick: a second request (Enter held, or one sent as the picker closed) is late.
@@ -549,7 +551,7 @@ async function beginRecording(target: PickedTarget, displays: PickerDisplay[]): 
     finished();
     busy = false;
     // The pill "New recording" hid comes back when no editor opened (cancelled, failed).
-    if (pillHidden && !opened && !quitting) void showPill();
+    if (pillHidden && !opened && !quitting) void showPill('back');
     pillHidden = false;
   }
 }
@@ -589,7 +591,7 @@ async function beginShot(target: PickedTarget, delay: ShotDelay, displays: Picke
     finished();
     busy = false;
     endShooting();
-    if (pillHidden && !quitting) void showPill();
+    if (pillHidden && !quitting) void showPill('back');
     pillHidden = false;
   }
   await then?.().catch((error: Error) => say(`Cuttle cannot show the screenshot: ${error.message}`));

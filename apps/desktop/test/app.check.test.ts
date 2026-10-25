@@ -2045,7 +2045,10 @@ describe.runIf(enabled)('the Cuttle app', () => {
       await projectWhen(dir, (written) => written.scenes[0]?.id !== undefined);
     } finally {
       await pretendDrawer({ pointer: away });
-      await click(settings, '[data-testid=hud-place] button:nth-child(1)');
+      // the HUD by the recording again, through the settings window as it is now (a failure above may have closed it)
+      if (settings.isClosed()) await launchAgain(['--settings']);
+      const open = settings.isClosed() ? await waitForPage(app, async (page) => page.url().includes('/settings.html') && (await page.locator('[data-testid=settings-page-recording]').count()) === 1) : settings;
+      await invokeIn(open, 'settings:set', { hudPlace: 'screen' });
       await expect.poll(() => (JSON.parse(readFileSync(join(root, 'user-data', 'settings.json'), 'utf8')) as { hudPlace?: string }).hudPlace).toBe('screen');
       await app.evaluate(() => void delete (globalThis as { __drawerCheck?: unknown }).__drawerCheck);
     }

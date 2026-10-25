@@ -360,7 +360,8 @@ describe.runIf(enabled)('the Cuttle app', () => {
     mkdirSync(join(root, 'user-data'));
     // The screen is read after a take's cut only where the check asks for it (it says so in the settings),
     // and updates are looked for only when the check asks.
-    writeFileSync(join(root, 'user-data', 'settings.json'), JSON.stringify({ projectsFolder: join(root, 'projects'), shots: { folder: join(root, 'screenshots') }, privacy: { read: false }, updates: false }));
+    // the pill and the HUD where they were before the top edge became the default: the tests of the top edge choose it
+    writeFileSync(join(root, 'user-data', 'settings.json'), JSON.stringify({ projectsFolder: join(root, 'projects'), shots: { folder: join(root, 'screenshots') }, privacy: { read: false }, updates: false, pillChoice: 'screen', hudChoice: 'screen' }));
     // the desktop's wallpaper the check gives the app
     spawnSync('ffmpeg', ['-v', 'error', '-y', '-f', 'lavfi', '-i', 'testsrc2=s=1280x720', '-frames:v', '1', join(root, 'wallpaper.png')], { windowsHide: true });
     // the logo the brand's file dialog picks
@@ -1950,7 +1951,7 @@ describe.runIf(enabled)('the Cuttle app', () => {
     await pretend({ pointer: away, notch });
     try {
       await click(settings, '[data-testid=pill-place] button:nth-child(2)');
-      await expect.poll(() => (JSON.parse(readFileSync(join(root, 'user-data', 'settings.json'), 'utf8')) as { pillPlace?: string }).pillPlace).toBe('top');
+      await expect.poll(() => (JSON.parse(readFileSync(join(root, 'user-data', 'settings.json'), 'utf8')) as { pillChoice?: string }).pillChoice).toBe('top');
       // chosen: it opens a while to show where it is, and closes with the pointer elsewhere
       await expect.poll(state, { timeout: 5_000 }).toBe('open');
       await expect.poll(state, { timeout: 8_000 }).toBe('closed');
@@ -2013,7 +2014,7 @@ describe.runIf(enabled)('the Cuttle app', () => {
     await pretendDrawer({ pointer: away, notch });
     try {
       await click(settings, '[data-testid=hud-place] button:nth-child(2)');
-      await expect.poll(() => (JSON.parse(readFileSync(join(root, 'user-data', 'settings.json'), 'utf8')) as { hudPlace?: string }).hudPlace).toBe('top');
+      await expect.poll(() => (JSON.parse(readFileSync(join(root, 'user-data', 'settings.json'), 'utf8')) as { hudChoice?: string }).hudChoice).toBe('top');
       const before = new Set(existsSync(join(root, 'projects')) ? readdirSync(join(root, 'projects')) : []);
       await recordThroughPicker(pillRecord, { stop: 'none', camera: undefined }, false);
       const hud = await runningHud();
@@ -2049,7 +2050,7 @@ describe.runIf(enabled)('the Cuttle app', () => {
       if (settings.isClosed()) await launchAgain(['--settings']);
       const open = settings.isClosed() ? await waitForPage(app, async (page) => page.url().includes('/settings.html') && (await page.locator('[data-testid=settings-page-recording]').count()) === 1) : settings;
       await invokeIn(open, 'settings:set', { hudPlace: 'screen' });
-      await expect.poll(() => (JSON.parse(readFileSync(join(root, 'user-data', 'settings.json'), 'utf8')) as { hudPlace?: string }).hudPlace).toBe('screen');
+      await expect.poll(() => (JSON.parse(readFileSync(join(root, 'user-data', 'settings.json'), 'utf8')) as { hudChoice?: string }).hudChoice).toBe('screen');
       await app.evaluate(() => void delete (globalThis as { __drawerCheck?: unknown }).__drawerCheck);
     }
   }, 120_000);
@@ -3410,6 +3411,12 @@ describe.runIf(enabled)('the first run', () => {
     const skill = readFileSync(join(root, 'claude', 'skills', 'cuttle', 'SKILL.md'), 'utf8');
     expect(skill).toContain("open Cuttle's settings");
     expect(skill).not.toContain('{{');
+    // nothing chosen yet: the pill and the HUD at the top edge
+    const places = await page.evaluate(async () => {
+      const view = await (window as unknown as { cuttle: { invoke(channel: string): Promise<{ pillPlace: string; hudPlace: string }> } }).cuttle.invoke('settings:get');
+      return [view.pillPlace, view.hudPlace];
+    });
+    expect(places).toEqual(['top', 'top']);
     await click(page, '[data-testid=welcome-done]');
     await waitForPage(app, async (candidate) => candidate.url().includes('/pill.html'));
     await expect.poll(() => (JSON.parse(readFileSync(join(root, 'user-data', 'settings.json'), 'utf8')) as { welcomed?: boolean }).welcomed).toBe(true);

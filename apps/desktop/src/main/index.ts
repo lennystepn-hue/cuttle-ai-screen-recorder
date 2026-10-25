@@ -9,7 +9,7 @@ import { mediaWorker } from './media-service';
 import { recorderHost } from './recorder-host';
 import { startPicking, startShooting, stopForQuit, recordingRuns } from './recording';
 import { assetPath, registerSchemes } from './protocols';
-import { loadSettings, onSettingsChange } from './settings';
+import { loadSettings, onSettingsChange, pillPlaceOf } from './settings';
 import { openSettings } from './settings-window';
 import { findFfmpeg } from './tools';
 import { createTray, updateTray, type TrayActions } from './tray';
@@ -105,7 +105,7 @@ if (!app.requestSingleInstanceLock(launched)) {
     const trayIcon = process.platform === 'win32' ? 'tray.png' : process.platform === 'darwin' ? 'trayTemplate.png' : 'tray@2x.png';
     if (!HIDDEN) createTray(assetPath(trayIcon), process.platform === 'win32' ? assetPath('tray-recording.png') : undefined, settings.recent, actions);
     await createPill();
-    await applyPillPlace(settings.pillPlace);
+    await applyPillPlace(pillPlaceOf(settings));
     // A new recording and a screenshot from anywhere (the recorder's own keys stop a take and set markers).
     if (!HIDDEN) globalShortcut.register('Control+Shift+Alt+R', () => void startPicking());
     if (!HIDDEN) globalShortcut.register('Control+Shift+Alt+C', () => void startShooting());

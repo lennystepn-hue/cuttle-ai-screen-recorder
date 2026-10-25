@@ -409,8 +409,8 @@ screen). After the countdown only a small HUD remains, which never appears in th
 mic, its bars show the mic's level, so a mic that hears nothing shows at once, and once a speech
 model is downloaded, a line under it shows what the mic hears as you speak (live captions, about
 two seconds behind, with the fastest model there; nothing of it is saved);
-Ctrl+Shift+Alt+S stops and Ctrl+Shift+Alt+M sets a marker. The settings can put the HUD at the
-top edge instead: a small island at the top centre (beside the notch on a Mac that has one: the dot
+Ctrl+Shift+Alt+S stops and Ctrl+Shift+Alt+M sets a marker. The HUD is at the top edge (the
+settings put it by the recording instead): a small island at the top centre (beside the notch on a Mac that has one: the dot
 and the mic's level left of it, the time right; else a small pill under the menu bar's middle),
 which opens into the whole HUD, and the prompter under it, when the pointer rests on it, and shows
 a marker, a slip or a screenshot for a moment. The take shows in the menu bar too: a
@@ -460,7 +460,8 @@ request, the `cuttle` command (the app's own copy of the CLI, run by the app its
 the pill's menu, Ctrl+, in the editor) hold the projects folder, the countdown, the default camera
 and mic, speech (the model, the language, the live captions), starting at sign-in, motion, and the
 recent projects (open, rename, show, remove). *Where Cuttle waits* puts the pill on screen (where you
-leave it), at the top edge, or only in the menu bar (the tray on Windows). At the top edge it is out
+leave it), at the top edge (the default), or only in the menu bar (the tray on Windows). At the
+top edge it is out
 of sight until the pointer rests on the middle of the screen's top: then it comes out of the notch
 on a Mac that has one (black, as wide as the notch), from under the menu bar's middle on one that
 has none, from the top edge on Windows, on a spring, and goes again a moment after the pointer left

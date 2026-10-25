@@ -224,6 +224,9 @@ export type PillPlace = (typeof PILL_PLACES)[number];
 /** Where the HUD is during a take: on screen by the recorded area, or at the top edge as an island (#171). */
 export const HUD_PLACES = ['screen', 'top'] as const;
 export type HudPlace = (typeof HUD_PLACES)[number];
+
+/** Where the pill and the HUD are until the person chooses: at the top edge, on macOS (out of the notch, or the menu bar's middle) and on Windows. */
+export const DEFAULT_PLACE = 'top' satisfies PillPlace & HudPlace;
 /** The settings window's pages, in its sidebar's order. */
 export const SETTINGS_PAGES = ['recording', 'speech', 'privacy', 'claude', 'projects', 'general'] as const;
 export type SettingsPage = (typeof SETTINGS_PAGES)[number];

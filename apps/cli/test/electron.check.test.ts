@@ -18,7 +18,12 @@ const MOTION_PAGE = fileURLToPath(new URL('./motion-page.html', import.meta.url)
 const enabled = process.env.MODE === 'cli';
 
 function cuttle(...argv: string[]): { code: number; json: Record<string, unknown> } {
-  const result = spawnSync('node', [CLI, '--json', ...argv], { encoding: 'utf8', timeout: 120_000 });
+  return cuttleWithin(120_000, ...argv);
+}
+
+/** `cuttle`, given `ms` to finish: a render of motion pages takes up to two minutes on Linux, where Chromium draws in software. */
+function cuttleWithin(ms: number, ...argv: string[]): { code: number; json: Record<string, unknown> } {
+  const result = spawnSync('node', [CLI, '--json', ...argv], { encoding: 'utf8', timeout: ms });
   // What Electron said, for a failure that was not expected
   if (result.status !== 0) process.stderr.write(result.stderr.slice(-4000));
   return { code: result.status ?? -1, json: JSON.parse(result.stdout || '{}') as Record<string, unknown> };
@@ -303,7 +308,7 @@ describe.runIf(enabled)('cuttle in Electron', () => {
       expect(cuttle('init', reel).code).toBe(0);
       expect(cuttle('-C', reel, 'motion', 'new', 'title', '--first').code).toBe(0);
       expect(cuttle('-C', reel, 'motion', 'new', 'end-card').code).toBe(0);
-      const { code, json } = cuttle('-C', reel, 'render');
+      const { code, json } = cuttleWithin(300_000, '-C', reel, 'render');
       expect(code).toBe(0);
       expect(json).toMatchObject({ frames: 225, seconds: 7.5 });
       expect((json.motion as { errors: string[] }[]).flatMap((report) => report.errors)).toEqual([]);
@@ -333,7 +338,7 @@ describe.runIf(enabled)('cuttle in Electron', () => {
     } finally {
       rmSync(dirname(reel), { recursive: true, force: true });
     }
-  }, 180_000);
+  }, 420_000);
 
   it('lands callouts on the take\'s clicks and kinetic captions on its words, over the video', () => {
     const dir = join(mkdtempSync(join(tmpdir(), 'cuttle-take-')), 'take');

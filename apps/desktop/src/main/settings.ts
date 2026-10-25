@@ -4,16 +4,20 @@ import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { app } from 'electron';
 import { z } from 'zod';
-import { HUD_PLACES, MOTIONS, PILL_PLACES, PRIVACY_WORD_MAX, PRIVACY_WORDS_MAX, SPEECH_LANGUAGES, SPEECH_MODEL_NAMES, type Motion, type SettingsView } from '../shared/ipc';
+import { DEFAULT_PLACE, HUD_PLACES, MOTIONS, PILL_PLACES, PRIVACY_WORD_MAX, PRIVACY_WORDS_MAX, SPEECH_LANGUAGES, SPEECH_MODEL_NAMES, type HudPlace, type Motion, type PillPlace, type SettingsView } from '../shared/ipc';
 
 const RECENT_MAX = 10;
 
 const SettingsSchema = z.object({
   recent: z.array(z.object({ dir: z.string(), name: z.string(), opened: z.number() })).catch([]).default([]),
-  /** Where Cuttle waits: the pill on screen (where it was left), the drawer at the top centre, or only the menu bar. */
-  pillPlace: z.enum(PILL_PLACES).catch('screen').default('screen'),
-  /** Where the HUD is during a take: on screen by the recorded area, or at the top edge, collapsed into an island. */
-  hudPlace: z.enum(HUD_PLACES).catch('screen').default('screen'),
+  /**
+   * Where Cuttle waits (the pill on screen, the drawer at the top centre, or only the menu bar) and
+   * where the HUD is during a take, as the person chose them; without a choice, the top edge
+   * (`pillPlaceOf`, `hudPlaceOf`). 0.3.1 wrote its default into the file as `pillPlace` and
+   * `hudPlace`, which are no choice: dropped as unknown keys.
+   */
+  pillChoice: z.enum(PILL_PLACES).optional().catch(undefined),
+  hudChoice: z.enum(HUD_PLACES).optional().catch(undefined),
   /** Where the pill sits, per display (DIP), keyed by the display's id. */
   pill: z.record(z.string(), z.object({ x: z.number(), y: z.number() })).catch({}).default({}),
   /** New recordings go into a new folder here. */
@@ -162,6 +166,11 @@ export function appVersion(): string {
   }
 }
 
+/** Where Cuttle waits: as the person chose, else the top edge. */
+export const pillPlaceOf = (settings: Pick<Settings, 'pillChoice'>): PillPlace => settings.pillChoice ?? DEFAULT_PLACE;
+/** Where the HUD is during a take: as the person chose, else the top edge. */
+export const hudPlaceOf = (settings: Pick<Settings, 'hudChoice'>): HudPlace => settings.hudChoice ?? DEFAULT_PLACE;
+
 /** How motion is set, once the settings were loaded (the windows get it when they are made). */
 export const motionSetting = (): Motion => cached?.motion ?? 'system';
 
@@ -175,8 +184,8 @@ export async function settingsView(): Promise<SettingsView> {
     ...(settings.record.mic !== undefined && { mic: settings.record.mic }),
     launchAtLogin: settings.launchAtLogin,
     motion: settings.motion,
-    pillPlace: settings.pillPlace,
-    hudPlace: settings.hudPlace,
+    pillPlace: pillPlaceOf(settings),
+    hudPlace: hudPlaceOf(settings),
     speech: { ...settings.speech },
     privacy: { read: settings.privacy.read, words: [...settings.privacy.words] },
     recent: settings.recent,

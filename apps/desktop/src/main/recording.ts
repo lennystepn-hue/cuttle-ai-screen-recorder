@@ -18,7 +18,7 @@ import { cutTake } from './media-service';
 import { APP_ORIGIN, serveApp, bundlePath } from './protocols';
 import { recorderHost, RecordingError, type LiveNews } from './recorder-host';
 import { findFfmpeg } from './tools';
-import { loadSettings, updateSettings } from './settings';
+import { hudPlaceOf, loadSettings, updateSettings } from './settings';
 import { maskPrivacy } from './privacy';
 import { openPermission } from './permissions';
 import { openPrompter, type Prompter } from './prompter';
@@ -666,7 +666,7 @@ async function record(target: PickedTarget, display: PickerDisplay, displays: Pi
         () => {},
       );
       // at the top edge (the settings say so): collapsed into an island at the top centre, open on the pointer
-      const top = (await loadSettings()).hudPlace === 'top' ? await hudTopPlace(display.id, hudSize) : undefined;
+      const top = hudPlaceOf(await loadSettings()) === 'top' ? await hudTopPlace(display.id, hudSize) : undefined;
       let atTop: HudAtTop | undefined;
       const hud = overlay(top ? top.window : { ...hudPosition(displays, display.id, area, hudSize), ...hudSize }, 'hud.cjs', { focusable: false, movable: !top });
       const hudState: HudState = { phase: 'countdown', markers: 0, ...(choices.mic && { mic: true }), ...(live && { captions: {} }) };

@@ -93,8 +93,8 @@ export async function openSettings(options: { welcome?: boolean; page?: Settings
         if (change.mic !== undefined) settings.record.mic = change.mic ?? undefined;
         if (change.launchAtLogin !== undefined) settings.launchAtLogin = change.launchAtLogin;
         if (change.motion !== undefined) settings.motion = change.motion;
-        if (change.pillPlace !== undefined) settings.pillPlace = change.pillPlace;
-        if (change.hudPlace !== undefined) settings.hudPlace = change.hudPlace;
+        if (change.pillPlace !== undefined) settings.pillChoice = change.pillPlace;
+        if (change.hudPlace !== undefined) settings.hudChoice = change.hudPlace;
         if (change.speechModel !== undefined) settings.speech.model = change.speechModel;
         if (change.speechLanguage !== undefined) settings.speech.language = change.speechLanguage;
         if (change.speechLive !== undefined) settings.speech.live = change.speechLive;

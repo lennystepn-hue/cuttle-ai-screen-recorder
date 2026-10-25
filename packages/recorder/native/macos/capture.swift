@@ -250,9 +250,11 @@ func hostNow() -> Double {
 
 /** One JSON line on stdout. */
 func answer(_ value: [String: Any]) {
-  let data = (try? JSONSerialization.data(withJSONObject: value)) ?? Data("{\"error\":\"no JSON\"}".utf8)
-  FileHandle.standardOutput.write(data)
-  FileHandle.standardOutput.write(Data("\n".utf8))
+  var data = (try? JSONSerialization.data(withJSONObject: value)) ?? Data("{\"error\":\"no JSON\"}".utf8)
+  data.append(Data("\n".utf8))
+  // the one who asked is gone (the app quit, a read cancelled): end quietly; FileHandle's
+  // write(_:) would raise an Objective-C exception there and abort, a crash report each time
+  do { try FileHandle.standardOutput.write(contentsOf: data) } catch { exit(0) }
 }
 
 /** The words of a recognized line (as Windows' OCR splits them: at spaces), each with its rect in the picture's pixels. */
@@ -267,10 +269,10 @@ func words(of candidate: VNRecognizedText, in size: CGSize) -> [[String: Any]] {
   }
 }
 
-/** A request for a picture's text in `languages`. */
-func textRequest(_ languages: [String]) -> VNRecognizeTextRequest {
+/** A request for a picture's text in `languages`, accurate (the default) or fast. */
+func textRequest(_ languages: [String], _ level: VNRequestTextRecognitionLevel = .accurate) -> VNRecognizeTextRequest {
   let read = VNRecognizeTextRequest()
-  read.recognitionLevel = .accurate
+  read.recognitionLevel = level
   read.recognitionLanguages = languages
   // what is on the screen as it is written: no words "corrected" into others (addresses, keys)
   read.usesLanguageCorrection = false
@@ -300,7 +302,31 @@ func sampleLine() -> CGImage? {
  * them for one at a time here). That took a minute for one helper on an M1, one network at a time
  * for all processes that ask (two helpers at once: 87 s and 113 s); compiled, preparing takes a
  * fraction of a second.
+ *
+ * Where the accurate recognition fails, the fast one reads, and each answer says so (`"level":
+ * "fast"`, `"why"`): macOS 27 once kept the accurate one broken for every program named
+ * cuttle-capture on a Mac (CRImageReaderError 1 on every picture, on the CPU as well, while other
+ * programs read; nothing the person could clear), and a fast read misses more but masks the rest.
+ * That is remembered for a week on this macOS build (`accurateFailed`): the next helpers read fast at
+ * once instead of preparing the accurate recognition for a minute to see it fail again. Where neither
+ * reads, the first answer says why instead of ready.
  */
+/**
+ * Where it is remembered that macOS's accurate text recognition failed for this helper: the macOS
+ * build it failed on, and why, in the user's caches.
+ */
+let accurateFailed = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first?.appendingPathComponent("cuttle-capture/accurate-text-failed")
+let thisBuild = ProcessInfo.processInfo.operatingSystemVersionString
+
+/** Why the accurate recognition failed here lately (on this macOS build, within a week), if it did. */
+func failedLately() -> String? {
+  guard let file = accurateFailed, let kept = try? String(contentsOf: file, encoding: .utf8) else { return nil }
+  let modified = (try? FileManager.default.attributesOfItem(atPath: file.path)[.modificationDate]) as? Date
+  guard let modified, Date().timeIntervalSince(modified) < 7 * 24 * 3600 else { return nil }
+  let parts = kept.split(separator: "\n", maxSplits: 1).map(String.init)
+  return parts.count == 2 && parts[0] == thisBuild ? parts[1] : nil
+}
+
 func readText() -> Never {
   answer(["preparing": true])
   let probe = VNRecognizeTextRequest()
@@ -312,9 +338,44 @@ func readText() -> Never {
   }
   if languages.isEmpty { languages = ["en-US"] }
   languages = languages.reduce(into: []) { if !$0.contains($1) { $0.append($1) } }
-  // should Vision fail on it, each picture asked for says why
-  if let sample = sampleLine() { try? VNImageRequestHandler(cgImage: sample, options: [:]).perform([textRequest(languages)]) }
-  answer(["ready": true, "language": languages.joined(separator: ","), "max": 16384])
+  /** Why the fast recognition reads: what the accurate one said (now, or lately). */
+  var why = failedLately()
+  var level: VNRequestTextRecognitionLevel = why == nil ? .accurate : .fast
+  /** Reads `image` at `level`; where the accurate recognition fails, the fast one from then on. */
+  func recognize(_ image: CGImage) throws -> VNRecognizeTextRequest {
+    let read = textRequest(languages, level)
+    do {
+      try VNImageRequestHandler(cgImage: image, options: [:]).perform([read])
+      return read
+    } catch where level == .accurate {
+      let fast = textRequest(languages, .fast)
+      try VNImageRequestHandler(cgImage: image, options: [:]).perform([fast])
+      level = .fast
+      why = error.localizedDescription
+      if let file = accurateFailed {
+        try? FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try? "\(thisBuild)\n\(error.localizedDescription)".write(to: file, atomically: true, encoding: .utf8)
+      }
+      return fast
+    }
+  }
+  let fell: (inout [String: Any]) -> Void = { value in
+    if let why {
+      value["level"] = "fast"
+      value["why"] = why
+    }
+  }
+  if let sample = sampleLine() {
+    do {
+      _ = try recognize(sample)
+    } catch {
+      answer(["ready": false, "error": "macOS's text recognition does not read here (\(error.localizedDescription))"])
+      exit(0)
+    }
+  }
+  var ready: [String: Any] = ["ready": true, "language": languages.joined(separator: ","), "max": 16384]
+  fell(&ready)
+  answer(ready)
   while let line = readLine() {
     autoreleasepool {
       guard let request = (try? JSONSerialization.jsonObject(with: Data(line.utf8))) as? [String: Any], let path = request["path"] as? String else {
@@ -323,15 +384,17 @@ func readText() -> Never {
       guard let source = CGImageSourceCreateWithURL(URL(fileURLWithPath: path) as CFURL, nil), let image = CGImageSourceCreateImageAtIndex(source, 0, nil) else {
         return answer(["error": "cannot open \(path)"])
       }
-      let read = textRequest(languages)
+      let read: VNRecognizeTextRequest
       do {
-        try VNImageRequestHandler(cgImage: image, options: [:]).perform([read])
+        read = try recognize(image)
       } catch {
         return answer(["error": error.localizedDescription])
       }
       let size = CGSize(width: image.width, height: image.height)
       let lines = (read.results ?? []).compactMap { $0.topCandidates(1).first }.map { words(of: $0, in: size) }.filter { !$0.isEmpty }
-      answer(["lines": lines])
+      var value: [String: Any] = ["lines": lines]
+      fell(&value)
+      answer(value)
     }
   }
   exit(0)

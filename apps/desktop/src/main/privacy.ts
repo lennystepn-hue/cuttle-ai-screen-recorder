@@ -2,7 +2,8 @@
 // clips (the system's own OCR: Windows' or macOS's Vision, in the media worker), then what it showed that is private and the
 // notifications are masked, as one step to undo ("Cuttle's privacy masks").
 import { dirname, join, relative, resolve, sep } from 'node:path';
-import { SCREEN_TEXT_FILE, readProjectFile } from '@cuttle/core';
+import { SCREEN_TEXT_FILE, readProjectFile, readingNote } from '@cuttle/core';
+import type { ReadReport } from '../shared/media-jobs';
 import { mediaWorker } from './media-service';
 import { loadSettings } from './settings';
 import { speechDone } from './speech';
@@ -50,8 +51,11 @@ export async function maskPrivacy(dir: string, asked = false): Promise<{ started
       if (read) {
         try {
           await status(0);
-          await mediaWorker.run({ job: 'read-screen', input: dir, output: '' }, (progress, preparing) => void status(progress, preparing)).promise;
+          const report = await mediaWorker.run<ReadReport>({ job: 'read-screen', input: dir, output: '' }, (progress, preparing) => void status(progress, preparing)).promise;
           link = relative(file.dir, join(dirname(resolve(file.dir, file.project.sources.screen)), SCREEN_TEXT_FILE)).split(sep).join('/');
+          // read, but less well (the fast recognition, frames left out): said, as the masks may miss more
+          const note = report && readingNote(report);
+          if (note) await sendToEditor(dir, 'project:note', { text: `Cuttle read the screen, but ${note}.` });
         } catch (error) {
           if ((error as { code?: string }).code !== 'ocr-missing') throw error;
           if (asked || !toldMissing) await sendToEditor(dir, 'project:note', { text: `Cuttle could not read the screen: ${(error as Error).message}. Look for private things yourself.` });

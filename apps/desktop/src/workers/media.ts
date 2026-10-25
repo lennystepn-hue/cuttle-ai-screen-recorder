@@ -130,11 +130,11 @@ async function run(id: number, job: MediaJob): Promise<JobResult | undefined> {
       const controller = new AbortController();
       controllers.set(id, controller);
       try {
-        await readScreenTake(job.input, { signal: controller.signal, onProgress: (progress) => reply({ id, progress }), onPreparing: () => reply({ id, progress: 0, preparing: true }) });
+        const read = await readScreenTake(job.input, { signal: controller.signal, onProgress: (progress) => reply({ id, progress }), onPreparing: () => reply({ id, progress: 0, preparing: true }) });
+        return { skipped: read.skipped, ...(read.fast !== undefined && { fast: read.fast }) };
       } finally {
         controllers.delete(id);
       }
-      return undefined;
     }
     case 'privacy-edits': {
       await applyPrivacy(job.input, { ...(job.link && { link: job.link }), words: job.words });

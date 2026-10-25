@@ -139,15 +139,15 @@ const clipSpans = (project: CuttleProject) => union(project.scenes.flatMap((scen
  * screen-text.jsonl, not linked yet (`applyPrivacy` links it with the masks, in one write).
  * `onPreparing`: macOS takes long to prepare its text recognition (`readFrames`).
  */
-export async function readScreenTake(dir: string, options: { onProgress?: (fraction: number) => void; onPreparing?: () => void; signal?: AbortSignal } = {}): Promise<{ path: string; frames: number; language: string }> {
+export async function readScreenTake(dir: string, options: { onProgress?: (fraction: number) => void; onPreparing?: () => void; signal?: AbortSignal } = {}): Promise<{ path: string; frames: number; language: string; skipped: number; fast?: string }> {
   const file = await readProjectFile(dir);
   const screen = resolve(file.dir, file.project.sources.screen);
   const size = await probeScreen(screen);
   const times = await framesToRead(screen, clipSpans(file.project), size);
-  const { frames, language } = await readFrames(screen, times, size, options);
+  const { frames, language, skipped, fast } = await readFrames(screen, times, size, options);
   const path = join(dirname(screen), SCREEN_TEXT_FILE);
   writeScreenText(path, frames, file.project.privacy.words);
-  return { path: relative(file.dir, path).split(sep).join('/'), frames: frames.length, language };
+  return { path: relative(file.dir, path).split(sep).join('/'), frames: frames.length, language, skipped, ...(fast !== undefined && { fast }) };
 }
 
 export interface PrivacyResult extends Omit<PrivacyMasksResult, 'masks'> {

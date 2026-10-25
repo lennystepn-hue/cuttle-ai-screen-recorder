@@ -67,7 +67,10 @@ Cuttle runs on **Windows and macOS**. A change made on one has to keep working o
   with its scale in its resolution (72 dpi a point), at a region's exact size (a video's are even).
 - **The screen's text**: Windows' own OCR through a PowerShell helper, macOS's Vision through
   `cuttle-capture ocr`; both speak the protocol in `core/src/privacy/ocr.ts`. Vision's boxes jitter
-  around still text, which the privacy masks allow for (`MASK_RULES.jitter`).
+  around still text, which the privacy masks allow for (`MASK_RULES.jitter`). Where Vision's accurate
+  recognition fails (macOS can keep it broken for one program name), the helper reads with the fast
+  one, says so in its answers and remembers it a week per macOS build; a picture the OCR rejects is
+  left out, and the read fails only when none could be read.
 - **Words for people** name both ways: `winget install Gyan.FFmpeg` and `brew install ffmpeg`,
   Windows' Settings and macOS's System Settings (Privacy & Security for the screen, camera,
   microphone and Input Monitoring).

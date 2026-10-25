@@ -103,8 +103,14 @@ export interface VoiceReport {
 
 export type MediaJob = ProxyJob | ThumbnailsJob | PeaksJob | SuggestJob | TranscribeJob | SpeechEditsJob | ReadScreenJob | PrivacyEditsJob | FitLengthJob | VoiceJob;
 
-/** What a job answers besides being done: the thumbnails' layout, a length fit's report, or a narration's. */
-export type JobResult = ThumbnailsMeta | LengthReport | VoiceReport;
+/** What a job answers besides being done: the thumbnails' layout, a length fit's report, a narration's, or a read of the screen's. */
+export type JobResult = ThumbnailsMeta | LengthReport | VoiceReport | ReadReport;
+
+/** What reading the screen went less well in: frames left out, and why macOS's fast text recognition read (its accurate one failed). */
+export interface ReadReport {
+  skipped: number;
+  fast?: string;
+}
 
 export interface ThumbnailsMeta {
   interval: number;

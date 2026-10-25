@@ -116,7 +116,7 @@ export async function readFrames(
   times: readonly number[],
   size: { width: number; height: number },
   options: { onProgress?: (fraction: number) => void; onPreparing?: () => void; signal?: AbortSignal; helpers?: number } = {},
-): Promise<{ frames: ScreenTextFrame[]; language: string }> {
+): Promise<ScreenRead> {
   const count = options.helpers ?? helpersFor(times.length);
   const start = (helpers: number) => Promise.allSettled(Array.from({ length: helpers }, () => ScreenReader.start({ onPreparing: options.onPreparing })));
   const first = ScreenReader.prepares ? await start(1) : [];
@@ -134,6 +134,8 @@ export async function readFrames(
   let taken = 0;
   let done = 0;
   let failed = false;
+  /** Frames the OCR could not read (a picture it rejected): left out, the others read on. */
+  const skipped: CoreError[] = [];
   /** One helper's share: the next frame not taken yet, written while the helper reads the one before. */
   const work = async (reader: ScreenReader) => {
     let k = taken++;
@@ -145,9 +147,13 @@ export async function readFrames(
         const after = taken++;
         next = after < times.length ? extract(after) : undefined;
         next?.catch(() => {});
-        const lines = await reader.read(path, size.width, size.height);
+        try {
+          frames[k] = { t: times[k]!, lines: await reader.read(path, size.width, size.height) };
+        } catch (error) {
+          if (!(error instanceof CoreError) || error.code !== 'invalid-media') throw error;
+          skipped.push(error);
+        }
         rmSync(path, { force: true });
-        frames[k] = { t: times[k]!, lines };
         options.onProgress?.(++done / times.length);
         k = after;
       }
@@ -164,7 +170,30 @@ export async function readFrames(
     for (const reader of readers) reader.close();
     rmSync(folder, { recursive: true, force: true });
   }
-  return { frames, language: readers[0]!.language };
+  const read = frames.filter((frame) => frame !== undefined);
+  // not one frame read: the screen was not read
+  if (read.length === 0 && skipped.length > 0) throw skipped[0]!;
+  const fast = readers.find((reader) => reader.fast !== undefined)?.fast;
+  return { frames: read, language: readers[0]!.language, skipped: skipped.length, ...(fast !== undefined && { fast }) };
+}
+
+/** What reading the screen gave: the frames read, the OCR's languages, and what went less well. */
+export interface ScreenRead {
+  frames: ScreenTextFrame[];
+  language: string;
+  /** Frames the OCR could not read, left out. */
+  skipped: number;
+  /** Why macOS's fast text recognition read them, not its accurate one (it failed). */
+  fast?: string;
+}
+
+/** What went less well in a read, in a sentence for the person; undefined when nothing did. */
+export function readingNote(read: Pick<ScreenRead, 'skipped' | 'fast'>): string | undefined {
+  const parts = [
+    ...(read.fast !== undefined ? [`macOS's accurate text recognition failed here (${read.fast}), so its fast one read the screen, which misses more`] : []),
+    ...(read.skipped > 0 ? [`${read.skipped} frame${read.skipped === 1 ? '' : 's'} could not be read`] : []),
+  ];
+  return parts.length === 0 ? undefined : `${parts.join('; ')}: look for private things yourself`;
 }
 
 /**

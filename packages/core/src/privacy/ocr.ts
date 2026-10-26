@@ -88,8 +88,11 @@ export function answerWithin(answers: AsyncIterator<string>, seconds: number, wh
   });
 }
 
-/** What the helper answers to a picture: its lines, each a list of words with their rects. */
-type Answer = { lines?: { t: string; r: [number, number, number, number] }[][]; error?: string };
+/**
+ * What the helper answers to a picture: its lines, each a list of words with their rects; `level`
+ * `fast` and `why` where macOS's accurate recognition failed and the fast one read (capture.swift).
+ */
+type Answer = { lines?: { t: string; r: [number, number, number, number] }[][]; error?: string; level?: string; why?: string };
 
 /** The lines of words of an answer, each with the rect that holds its words. */
 export function linesOf(answer: Answer): ScreenTextLine[] {
@@ -116,6 +119,8 @@ export class ScreenReader {
     private readonly upscales: boolean,
     /** Seconds a picture may take (`OCR_TIMEOUT.read`). */
     private readonly readTimeout: number,
+    /** Why macOS's fast text recognition reads, not its accurate one (it failed); undefined while the accurate one reads. */
+    public fast?: string,
   ) {}
 
   /**
@@ -153,7 +158,7 @@ export class ScreenReader {
     const started = new Promise<never>((_, reject) => child.on('error', (error) => reject(new CoreError('ocr-missing', `the OCR helper did not start (${error.message})`))));
     const next = async (seconds: number, what: string) => {
       const line = await Promise.race([answerWithin(answers, seconds, what, () => child.kill()), started]);
-      return line.done ? undefined : (JSON.parse(line.value) as { preparing?: boolean; ready?: boolean; language?: string; max?: number });
+      return line.done ? undefined : (JSON.parse(line.value) as { preparing?: boolean; ready?: boolean; language?: string; max?: number; level?: string; why?: string; error?: string });
     };
     let hello = await next(timeout.start, 'starting');
     if (hello?.preparing) {
@@ -166,9 +171,9 @@ export class ScreenReader {
     }
     if (!hello?.ready) {
       child.kill();
-      throw new CoreError('ocr-missing', hello ? 'Windows has no OCR language installed (Settings > Time & language > Language)' : `the OCR helper did not start${stderr ? `: ${stderr.trim().split(/\r?\n/)[0]}` : ''}`);
+      throw new CoreError('ocr-missing', hello?.error ?? (hello ? 'Windows has no OCR language installed (Settings > Time & language > Language)' : `the OCR helper did not start${stderr ? `: ${stderr.trim().split(/\r?\n/)[0]}` : ''}`));
     }
-    return new ScreenReader(child, answers, hello.max ?? 10_000, (hello.language ?? '').split(',').filter(Boolean).join(', '), process.platform === 'win32', timeout.read);
+    return new ScreenReader(child, answers, hello.max ?? 10_000, (hello.language ?? '').split(',').filter(Boolean).join(', '), process.platform === 'win32', timeout.read, hello.level === 'fast' ? (hello.why ?? 'its accurate recognition failed') : undefined);
   }
 
   /** The text of a PNG of `width` × `height` (on Windows read at up to `OCR_SCALE` times its size); rects in its pixels. */
@@ -178,6 +183,7 @@ export class ScreenReader {
     const next = await answerWithin(this.answers, this.readTimeout, `reading ${path}`, () => this.child.kill());
     if (next.done) throw new CoreError('ocr-missing', 'the OCR helper stopped');
     const answer = JSON.parse(next.value) as Answer;
+    if (answer.level === 'fast') this.fast ??= answer.why ?? 'its accurate recognition failed';
     if (answer.error) throw new CoreError('invalid-media', `the OCR could not read ${path}: ${answer.error}`);
     return linesOf(answer);
   }

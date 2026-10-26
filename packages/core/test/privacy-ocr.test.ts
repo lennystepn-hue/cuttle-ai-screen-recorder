@@ -139,10 +139,21 @@ describe.runIf(process.platform === 'darwin')('an OCR helper that prepares Visio
  * reads gets a mask, the clean lines none. It runs where there is one; elsewhere it is skipped. Each
  * test has the time macOS may take to prepare Vision besides its own (a minute where it compiles).
  */
+/**
+ * These check what the accurate recognition reads: where macOS has it broken for the helper (it reads
+ * with the fast one, `ScreenReader.fast`), they cannot, and say why instead of failing.
+ */
+function skipWhereFast(reader: ScreenReader, context: { skip: (note?: string) => never }): void {
+  if (reader.fast === undefined) return;
+  reader.close();
+  context.skip(`macOS's accurate text recognition does not work for cuttle-capture on this Mac (${reader.fast})`);
+}
+
 describe.runIf(process.platform === 'win32' || process.platform === 'darwin')('reading the screen with the system OCR', () => {
-  it('reads the page and masks what is private on it, and nothing on the clean lines', async () => {
+  it('reads the page and masks what is private on it, and nothing on the clean lines', async (context) => {
     delete process.env.CUTTLE_OCR;
     const reader = await ScreenReader.start();
+    skipWhereFast(reader, context);
     let lines;
     try {
       lines = await reader.read(join(import.meta.dirname, 'fixtures', 'privacy', 'secrets.png'), 1920, 1080);
@@ -178,9 +189,10 @@ describe.runIf(process.platform === 'win32' || process.platform === 'darwin')('r
     expect(privacyMasks(kept, [], { width: 1920, height: 1080 })).toEqual(masks);
   }, 60_000 + OCR_TIMEOUT.prepare * 1000);
 
-  it('masks every email address it reads in an editor in a monospaced font, the spaces and long dashes the OCR reads in them too', async () => {
+  it('masks every email address it reads in an editor in a monospaced font, the spaces and long dashes the OCR reads in them too', async (context) => {
     delete process.env.CUTTLE_OCR;
     const reader = await ScreenReader.start();
+    skipWhereFast(reader, context);
     let lines;
     try {
       // fixtures/privacy/emails.html, rendered at 1920 × 1080 by `cuttle capture-page`: lines of four

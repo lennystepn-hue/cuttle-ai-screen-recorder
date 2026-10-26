@@ -7,7 +7,7 @@ import { readProjectFile, writeProjectFile } from './project-file';
 import { areaStretches, bandCrop, cropPieces, type CropStretch } from './suggest/crop';
 import { dialogZooms } from './suggest/dialogs';
 import { followScreenText, readScreenText, withPrivacyMasks, type RawMask } from './privacy/apply';
-import { SCREEN_TEXT_FILE, framesToRead, keepRedacted, readFrames, writeScreenText } from './privacy/read';
+import { SCREEN_TEXT_FILE, framesToRead, keepRedacted, readFrames, readingNote, writeScreenText } from './privacy/read';
 import { cachedAnalysis, grabGray, grayFrames, screenBands } from './suggest/media';
 import { withLengthFit } from './suggest/length';
 import { suggestClips } from './suggest/plan';
@@ -374,16 +374,19 @@ async function screenTextFor(
     const spans = union(clips.map(({ from: start, to }) => ({ from: start, to })));
     const times = await framesToRead(screen, spans, size);
     let shown = 0;
-    const { frames, language } = await readFrames(screen, times, size, {
+    const read = await readFrames(screen, times, size, {
       onProgress: (fraction) => {
         const percent = Math.floor(fraction * 10) * 10;
         if (percent > shown) args.onStatus?.(`reading the screen … ${(shown = percent)} %`);
       },
       onPreparing: () => args.onStatus?.("reading the screen … preparing macOS's text recognition (about a minute)"),
     });
+    const { frames, language } = read;
     const path = join(dirname(screen), SCREEN_TEXT_FILE);
     const kept = writeScreenText(path, frames, words);
     notes.push(`read the screen's text in ${frames.length} frame${frames.length === 1 ? '' : 's'} (${language}), into ${relative(dir, path).split(sep).join('/')}`);
+    const note = readingNote(read);
+    if (note) notes.push(note);
     return { frames: kept, made: relative(dir, path).split(sep).join('/') };
   } catch (error) {
     if (!(error instanceof CoreError) || error.code !== 'ocr-missing') throw error;

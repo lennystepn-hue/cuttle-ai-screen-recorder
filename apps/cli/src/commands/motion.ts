@@ -176,7 +176,7 @@ const labelOf = (name: string) => `${name.charAt(0).toUpperCase()}${name.slice(1
 const pageName = (src: string) => src.replace(/\/index\.html?$/i, '').replace(/\.html?$/i, '').split('/').at(-1) || 'page';
 
 /** A scene by id or by place from 0; -1 when there is none. */
-function sceneAt(scenes: readonly { id?: string }[], wanted: string): number {
+export function sceneAt(scenes: readonly { id?: string }[], wanted: string): number {
   const byId = scenes.findIndex((candidate) => candidate.id === wanted);
   if (byId >= 0) return byId;
   return /^\d+$/.test(wanted) && Number(wanted) < scenes.length ? Number(wanted) : -1;

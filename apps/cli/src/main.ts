@@ -20,6 +20,7 @@ import { previewCommand } from './commands/preview';
 import { REVIEW_KINDS, reviewCommand } from './commands/review';
 import { blocksAddCommand, blocksSearchCommand, blocksShowCommand } from './commands/blocks';
 import { lookApplyCommand, lookListCommand, lookNewCommand, lookShowCommand } from './commands/look';
+import { mediaAddCommand, mediaSearchCommand, mediaShowCommand } from './commands/media';
 import { shotFrameCommand, shotStylesCommand, shotTakeCommand, type ShotFrameArgs, type ShotTakeArgs } from './commands/shot';
 import { recordCommand } from './commands/record';
 import { recoverCommand } from './commands/recover';
@@ -303,6 +304,31 @@ export async function runCli(argv: readonly string[], streams?: Streams): Promis
     .description("the frame of the video's own look (motion/shared.css and shared.js with the functions every page calls, nothing decided)")
     .option('--force', 'replace a motion/shared.css or shared.js that is there')
     .action(action((output, project, options: { force?: boolean }) => lookNewCommand(project, options, output)));
+
+  const media = program.command('media').description('stock footage, photographs and sounds (Pexels, Pixabay, Freesound) with your own free keys (PEXELS_API_KEY, PIXABAY_API_KEY, FREESOUND_API_KEY), their licences in CREDITS.md');
+  media
+    .command('search <words...>')
+    .description('footage (or --photo, --sound) that shows these words, from the first service with a key')
+    .option('--photo', 'photographs instead of footage')
+    .option('--sound', 'sound effects (Freesound) instead of footage')
+    .option('--source <source>', 'pexels, pixabay or freesound')
+    .option('--orientation <orientation>', 'landscape, portrait or square')
+    .option('--min-duration <seconds>', 'at least this long (footage, sounds)', seconds)
+    .option('--max-duration <seconds>', 'at most this long', seconds)
+    .action(action((output, _project, words: string[], options: { photo?: boolean; sound?: boolean; source?: string; orientation?: string; minDuration?: number; maxDuration?: number }) => withSignal(output, (signal) => mediaSearchCommand(words, options, output, signal))));
+  media
+    .command('show <name>')
+    .description('its preview (a picture, or a sound) into preview/media/ in the project')
+    .action(action((output, project, name: string) => withSignal(output, (signal) => mediaShowCommand(project, name, output, signal))));
+  media
+    .command('add <name>')
+    .description('footage or a photo into media/, a sound into sounds/, with its licence in CREDITS.md; --scene puts footage in the video as a page that plays it, a photo as a still scene')
+    .option('--scene', 'into the video as a scene')
+    .option('--first', 'the scene goes first')
+    .option('--after <scene>', 'the scene goes right after this one, by id or place from 0')
+    .option('--duration <seconds>', 'how long the scene lasts', positive)
+    .option('--name <name>', "footage's page folder in motion/")
+    .action(action((output, project, name: string, options: { scene?: boolean; first?: boolean; after?: string; duration?: number; name?: string }) => withSignal(output, (signal) => mediaAddCommand(project, name, options, output, signal))));
 
   const blocks = program.command('blocks').description("motion blocks, Lottie animations and icons from open collections (HyperFrames' registry, LottieFiles, Iconify), brought into the project to render offline, with their licences in CREDITS.md");
   blocks

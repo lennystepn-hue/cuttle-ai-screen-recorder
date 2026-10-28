@@ -516,6 +516,48 @@ cuttle.timeline(createTimeline({ autoplay: false })).add('#box', { x: [0, 1000],
     }
   }, 300_000);
 
+  it('plays stock footage from Pexels as a scene, converted and drawn frame by frame on the clock', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'cuttle-media-'));
+    // Pexels as a server of its own serves it (the CLI runs while this test waits): its answer, and a
+    // clip whose left half is red for its first second and blue after it
+    const files = join(root, 'files');
+    mkdirSync(join(files, 'api.pexels.com', 'videos', 'videos'), { recursive: true });
+    mkdirSync(join(files, 'videos.pexels.com'), { recursive: true });
+    writeFileSync(join(files, 'api.pexels.com', 'videos', 'videos', '7'), JSON.stringify({ id: 7, width: 1280, height: 720, duration: 2, url: 'https://www.pexels.com/video/red-then-blue-7/', user: { name: 'Test' }, video_files: [{ width: 1280, height: 720, link: 'https://videos.pexels.com/clip.mp4', file_type: 'video/mp4' }] }));
+    spawnSync('ffmpeg', ['-v', 'error', '-f', 'lavfi', '-i', 'color=c=red:size=1280x720:rate=30:duration=1', '-f', 'lavfi', '-i', 'color=c=blue:size=1280x720:rate=30:duration=1', '-filter_complex', '[0][1]concat=n=2:v=1', '-pix_fmt', 'yuv420p', '-y', join(files, 'videos.pexels.com', 'clip.mp4')]);
+    const server = spawn('node', ['-e', `const { readFile } = require('fs'); const { join } = require('path'); require('http').createServer((q, r) => readFile(join(${JSON.stringify(files)}, decodeURIComponent(new URL(q.url, 'http://x').pathname)), (e, b) => (e ? r.writeHead(404).end() : r.writeHead(200).end(b)))).listen(0, '127.0.0.1', function () { console.log(this.address().port); });`], { stdio: ['ignore', 'pipe', 'inherit'] });
+    try {
+      const port = await new Promise<string>((resolve) => server.stdout.once('data', (data: Buffer) => resolve(String(data).trim())));
+      const env = { ...process.env, CUTTLE_BLOCKS_PROXY: `http://127.0.0.1:${port}`, PEXELS_API_KEY: 'test' };
+      const run = (...argv: string[]) => {
+        const result = spawnSync('node', [CLI, '--json', ...argv], { encoding: 'utf8', timeout: 120_000, env });
+        if (result.status !== 0) process.stderr.write(result.stderr.slice(-4000));
+        return { code: result.status ?? -1, json: JSON.parse(result.stdout || '{}') as Record<string, unknown> };
+      };
+      const project = join(root, 'p');
+      expect(run('init', project).code).toBe(0);
+      expect(run('-C', project, 'media', 'add', 'pexels:video:7', '--scene').json).toMatchObject({ file: 'media/pexels-video-7.mp4', added: { src: 'motion/pexels-video-7/index.html' } });
+      server.kill();
+      const checked = run('-C', project, 'motion', 'check', 'motion/pexels-video-7/index.html', '--at', '0.5', '--at', '1.5');
+      expect(checked.code).toBe(0);
+      expect(checked.json).toMatchObject({ errors: [] });
+      // filling the frame: red at half a second, blue after the clip's first second
+      const colour = (file: string) => {
+        const png = PNG.sync.read(readFileSync(file));
+        const i = (540 * png.width + 960) * 4;
+        return [png.data[i]!, png.data[i + 2]!];
+      };
+      const [red, blue] = (checked.json.stills as { file: string }[]).map((still) => colour(still.file));
+      expect(red![0]).toBeGreaterThan(200);
+      expect(red![1]).toBeLessThan(60);
+      expect(blue![1]).toBeGreaterThan(200);
+      expect(blue![0]).toBeLessThan(60);
+    } finally {
+      server.kill();
+      rmSync(root, { recursive: true, force: true });
+    }
+  }, 300_000);
+
   it("renders each of the kit's looks: its sample on its ground, without an error", () => {
     const shows = mkdtempSync(join(tmpdir(), 'cuttle-looks-'));
     try {

@@ -140,6 +140,31 @@ becomes a page that plays it (`loop`, `speed`, `start`, `fit`); an icon of Iconi
 video's own (its params, colours, type, timing); a block left as it came is a template by another
 name. `blocks search --tag transition` (or `chart`, `title`, `3d`, `code`, `camera`) narrows the list.
 
+## Footage, photographs and sounds
+
+A world a browser cannot draw (a city at night, people at work, a desk, rain on a window) comes from
+stock, with the user's own free keys: Pexels and Pixabay for footage and photographs, Freesound for
+sound effects. The keys are read from the environment (`PEXELS_API_KEY`, `PIXABAY_API_KEY`,
+`FREESOUND_API_KEY`); one is enough for its kind. Without one, ask the user for theirs (free accounts:
+the error says where), and never write a key into a file.
+
+```bash
+cuttle --json media search city at night rain --orientation landscape   # footage, best first
+cuttle --json media search desk window --photo
+cuttle --json media search paper tear --sound --max-duration 3
+cuttle -C "<project>" --json media show pexels:video:857195           # its preview picture
+cuttle -C "<project>" --json media add pexels:video:857195 --scene --after s2
+```
+
+`media add` puts footage into `media/`, converted as an import is (30 fps, BT.709, the output's
+size); with `--scene` a page plays it filling the frame (`fit`, `start`, `speed`, a slow `push`),
+or `cuttle.video('/media/<file>')` plays it in a page of your own (under type, in a shape, as a
+texture). A photograph goes into `media/` (`--scene`: a still that moves slowly), a sound into
+`sounds/` (`cuttle sound add sounds/<file> --at <s>`). Each one's author and licence go into
+`credits.json` and `CREDITS.md`: a sound under CC BY needs its author named where the video is
+shown, and one under a non-commercial licence stays out of an ad. Stock is a world for the story,
+not filler between slides: grade it into the look (a shader, a tint, grain) so it belongs.
+
 ## The page's world
 
 - **The clock is the video's.** `performance.now`, `Date`, `setTimeout`, `setInterval`,

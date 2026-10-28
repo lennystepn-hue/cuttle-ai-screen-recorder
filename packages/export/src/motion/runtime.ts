@@ -154,6 +154,13 @@ export interface CuttleApi {
    * animate. A draw that returns a promise (it awaits a frame of the take) is waited for.
    */
   onFrame(draw: (seconds: number) => void | Promise<unknown>): void;
+  /**
+   * Plays a timeline on the video's clock: before every frame (also after a jump) it is paused and
+   * set to that frame's time, `at` seconds into the item being its start. A GSAP timeline or tween
+   * (seconds), an anime.js timeline or animation (milliseconds), a Web Animation, or a function of
+   * seconds. Answers what it was given.
+   */
+  timeline<T>(timeline: T, options?: { at?: number }): T;
   /** Holds the first frame until `promise` settles (fonts, images, models). */
   ready(promise: Promise<unknown>): void;
   /** The take (empty lists when the item has no take). */
@@ -188,6 +195,9 @@ export function motionRuntime(init: MotionInit): void {
   const timers = new Map<number, Timer>();
   const frames = new Map<number, FrameRequestCallback>();
   const drawers: ((seconds: number) => void | Promise<unknown>)[] = [];
+  const timelines: { timeline: unknown; at: number }[] = [];
+  /** Web Animations the page handed over as timelines: set by them, not by when they first showed. */
+  const handed = new WeakSet<Animation>();
   const holds: Promise<unknown>[] = [];
   const errors: string[] = [];
   page.__cuttleErrors = errors;
@@ -408,6 +418,13 @@ export function motionRuntime(init: MotionInit): void {
     params: init.params,
     theme: init.theme,
     onFrame: (draw) => void drawers.push(draw),
+    timeline: (timeline, options = {}) => {
+      const at = Number(options.at ?? 0);
+      if (typeof Animation !== 'undefined' && timeline instanceof Animation) handed.add(timeline);
+      timelines.push({ timeline, at: Number.isFinite(at) ? at : 0 });
+      seek(timeline, now / 1000 - (Number.isFinite(at) ? at : 0));
+      return timeline;
+    },
     ready: (promise) => void holds.push(Promise.resolve(promise).catch(note)),
     take,
     video,
@@ -451,6 +468,54 @@ export function motionRuntime(init: MotionInit): void {
     await Promise.all(holds);
   };
 
+  /** Sets a timeline to `seconds` (none before 0), paused, by what it is. */
+  const seek = (timeline: unknown, seconds: number) => {
+    const t = Math.max(0, seconds);
+    try {
+      if (typeof timeline === 'function') return void timeline(t);
+      if (typeof Animation !== 'undefined' && timeline instanceof Animation) {
+        timeline.pause();
+        timeline.currentTime = t * 1000;
+        return;
+      }
+      const it = timeline as { pause?: () => unknown; totalTime?: (time: number, suppressEvents?: boolean) => unknown; duration?: unknown; seek?: (time: number) => unknown } | null;
+      if (it && typeof it.totalTime === 'function' && typeof it.duration === 'function') {
+        // GSAP: in seconds
+        it.pause?.();
+        it.totalTime(t, false);
+      } else if (it && typeof it.seek === 'function') {
+        // anime.js: in milliseconds
+        it.pause?.();
+        it.seek(t * 1000);
+      } else {
+        note(new Error('cuttle.timeline takes a GSAP or anime.js timeline, a Web Animation, or a function of seconds'));
+      }
+    } catch (error) {
+      note(error);
+    }
+  };
+  /** Whether GSAP's ticker was told to take jumps as they are. */
+  let jumps = false;
+  /**
+   * The timelines at the frame's time: those handed over, and those HyperFrames' pages keep in
+   * `window.__timelines` (a composition's by its id; one nested in another moves with it, so only
+   * the outermost are set). GSAP's own ticker, which plays tweens on no handed timeline, loses its
+   * lag smoothing: it would turn a jump of seconds into a 33 ms step.
+   */
+  const seekTimelines = () => {
+    for (const { timeline, at } of timelines) seek(timeline, now / 1000 - at);
+    const kept = page.__timelines;
+    if (kept && typeof kept === 'object') {
+      const all = Object.values(kept as Record<string, unknown>);
+      for (const timeline of all) if (!all.includes((timeline as { parent?: unknown } | null)?.parent)) seek(timeline, now / 1000);
+    }
+    const gsap = page.gsap as { ticker?: { lagSmoothing?: (threshold: number) => void } } | undefined;
+    if (!jumps && typeof gsap?.ticker?.lagSmoothing === 'function') {
+      gsap.ticker.lagSmoothing(0);
+      jumps = true;
+    }
+  };
+
   let frame = 0;
   /**
    * Moves the clock to `ms` (never back) and draws: due timers in order, one animation frame (and
@@ -488,6 +553,7 @@ export function motionRuntime(init: MotionInit): void {
       call(timer.fn, timer.args);
     }
     now = target;
+    seekTimelines();
     // a draw that returns a promise (it awaits a frame of the take) is waited for, the clock held
     const waits: Promise<unknown>[] = [];
     const awaited = (result: unknown) => {
@@ -502,6 +568,7 @@ export function motionRuntime(init: MotionInit): void {
       mark(++frame);
       sight();
       for (const animation of document.getAnimations()) {
+        if (handed.has(animation)) continue;
         animation.pause();
         animation.currentTime = (now - (started.get(animation) ?? now)) * (animation.playbackRate || 1);
       }

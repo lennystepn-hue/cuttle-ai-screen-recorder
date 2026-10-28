@@ -195,6 +195,15 @@ export const COMMAND_TOOLS: readonly CommandTool[] = [
   }),
   tool({ name: 'motion_templates', title: 'Motion templates', description: 'The motion templates to start a page from (or write one from nothing).', input: {}, global: true, readOnly: true, argv: () => ['motion', 'templates'] }),
   tool({
+    name: 'motion_icons',
+    title: 'Find icons',
+    description: "The kit's icons (Lucide's, about 2,000) that show these words, by name and tags, for icon(name) from 'cuttle/icons' in a page.",
+    input: { words: z.array(z.string().min(1)).min(1).describe('what the icon shows, e.g. ["rocket", "launch"]') },
+    global: true,
+    readOnly: true,
+    argv: (input) => ['motion', 'icons', ...input.words],
+  }),
+  tool({
     name: 'motion_new',
     title: 'A motion page from a template',
     description: "Copies a motion template into motion/<name>/ and adds it: a scene, an overlay or a transition, as the template is.",

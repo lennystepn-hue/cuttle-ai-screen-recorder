@@ -89,6 +89,50 @@ describe('the motion runtime', () => {
     expect(win.getComputedStyle(win.document.getElementById('css')!).transform).toBe('matrix(1, 0, 0, 1, 25, 0)');
   });
 
+  it('plays the timelines a page hands over on the video\'s clock, exactly also after a jump: GSAP in seconds, anime.js in milliseconds, a Web Animation, a function', async () => {
+    const win = page(
+      '<div id="waapi"></div>',
+      `// stand-ins with the methods the runtime calls: GSAP's (duration is a function) and anime.js' (a number)
+       const gsap = { paused: false, time: -1, pause() { this.paused = true; }, duration: () => 5, totalTime(t) { this.time = t; } };
+       const anime = { paused: false, time: -1, duration: 5000, pause() { this.paused = true; }, seek(ms) { this.time = ms; } };
+       const waapi = document.getElementById('waapi').animate([{ opacity: 0 }, { opacity: 1 }], { duration: 1000, fill: 'forwards' });
+       window.handed = { gsap: cuttle.timeline(gsap), anime: cuttle.timeline(anime, { at: 0.5 }), waapi: cuttle.timeline(waapi) };
+       cuttle.timeline((t) => seen.push(t));`,
+    );
+    const handed = (win as unknown as { handed: { gsap: { paused: boolean; time: number }; anime: { paused: boolean; time: number }; waapi: Animation } }).handed;
+    // set at once (the page's first frame may be drawn before any draw call)
+    expect(handed.gsap).toMatchObject({ paused: true, time: 0 });
+    await win.__cuttleDraw(1500);
+    expect(handed.gsap.time).toBe(1.5);
+    // from its start half a second in
+    expect(handed.anime).toMatchObject({ paused: true, time: 1000 });
+    // set by the timeline, not by when it first showed (it showed at 0)
+    expect(handed.waapi.currentTime).toBe(1500);
+    expect(win.getComputedStyle(win.document.getElementById('waapi')!).opacity).toBe('1');
+    expect(win.seen).toEqual([0, 1.5]);
+    expect(win.__cuttleErrors).toEqual([]);
+  });
+
+  it("sets HyperFrames' timelines (window.__timelines), the outermost only, and takes GSAP's lag smoothing off its ticker", async () => {
+    const win = page(
+      '',
+      `const timeline = (name, parent) => ({ parent, pause() {}, duration: () => 4, totalTime(t) { seen.push([name, t]); } });
+       const main = timeline('main');
+       window.__timelines = { main, intro: timeline('intro', main), other: timeline('other') };
+       window.gsap = { ticker: { lagSmoothing: (threshold) => seen.push(['lagSmoothing', threshold]) } };`,
+    );
+    await win.__cuttleDraw(2000);
+    expect(win.seen).toEqual([['main', 2], ['other', 2], ['lagSmoothing', 0]]);
+    await win.__cuttleDraw(2500);
+    // the ticker is told once
+    expect(win.seen.slice(3)).toEqual([['main', 2.5], ['other', 2.5]]);
+  });
+
+  it('says what it cannot play as a timeline', async () => {
+    const win = page('', `cuttle.timeline({ play() {} });`);
+    expect(win.__cuttleErrors).toEqual(['Error: cuttle.timeline takes a GSAP or anime.js timeline, a Web Animation, or a function of seconds']);
+  });
+
   it('gives the page window.cuttle: its time, size, params and theme, and a draw call for every frame', async () => {
     const win = page('<div id="accent" style="color: var(--cuttle-accent)"></div>', `cuttle.onFrame((t) => seen.push(t));`);
     expect(win.cuttle).toMatchObject({ duration: 2, fps: 30, size: { width: 320, height: 180 }, format: '16:9', params: { title: 'Hi' } });

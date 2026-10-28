@@ -2,7 +2,7 @@ import { rm, stat } from 'node:fs/promises';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { readProjectFile, writeProjectFile } from '@cuttle/core';
 import { MOTION_TEMPLATES, type MotionTemplate } from '@cuttle/motion-kit';
-import { copyTemplate, MissingTemplateError } from '@cuttle/motion-kit/files';
+import { copyTemplate, findIcons, iconWords, MissingTemplateError } from '@cuttle/motion-kit/files';
 import { newId, usedIds, type MotionScene } from '@cuttle/project';
 import { crossfadeHalf, occurrences, sceneSpans } from '@cuttle/timeline';
 import { CliError } from '../errors';
@@ -246,6 +246,19 @@ export async function motionTemplatesCommand(output: Output): Promise<{ template
   const ownPage = 'Templates are starting points, not the limit: write any page (motion/<name>/index.html: HTML, CSS, canvas, SVG, WebGL, Three.js) and add it with `cuttle motion add motion/<name>/index.html`.';
   const result = { templates: MOTION_TEMPLATES, ownPage };
   output.result(result, () => [...MOTION_TEMPLATES.map((template) => `${template.name.padEnd(17)}${template.kind.padEnd(8)} ${template.description}`), '', ownPage].join('\n'));
+  return result;
+}
+
+/** `cuttle motion icons <words>`: the kit's icons (Lucide's) that show these words, for `icon(name)` in a page. */
+export async function motionIconsCommand(words: string[], output: Output): Promise<{ icons: { name: string; tags: readonly string[] }[]; count: number }> {
+  const all = await iconWords(import.meta.url);
+  const icons = findIcons(all, words);
+  const result = { icons, count: Object.keys(all).length };
+  output.result(result, () =>
+    icons.length === 0
+      ? `no icon for "${words.join(' ')}" among ${result.count}: try another word (what it shows, not what it means)`
+      : [...icons.map((icon) => `${icon.name.padEnd(28)}${icon.tags.slice(0, 6).join(', ')}`), '', "in a page: import { icon } from 'cuttle/icons'; cuttle.ready(icon('<name>', { size: 160 }).then((svg) => element.append(svg)))"].join('\n'),
+  );
   return result;
 }
 

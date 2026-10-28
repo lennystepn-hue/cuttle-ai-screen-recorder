@@ -1,9 +1,10 @@
+import { spawnSync } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { copyTemplate, MissingTemplateError, templatePage } from '../src/files';
+import { copyTemplate, findIcons, iconWords, MissingTemplateError, templatePage } from '../src/files';
 import { BUILT_IN_SOUNDS, KIT_FONTS, KIT_IMPORTS, KIT_ORIGIN, MOTION_TEMPLATES, MUSIC_TEMPLATES, importMapTag, withImportMap } from '../src/index';
 
 const TEMPLATES = fileURLToPath(new URL('../templates/', import.meta.url));
@@ -14,11 +15,46 @@ describe('the motion kit', () => {
       three: 'cuttle-motion://kit/three/three.module.js',
       'three/addons/': 'cuttle-motion://kit/three/addons/',
       cuttle: 'cuttle-motion://kit/motion.js',
+      'cuttle/icons': 'cuttle-motion://kit/icons.js',
       'cuttle/sound': 'cuttle-motion://kit/sound.js',
       'lottie-web': 'cuttle-motion://kit/lottie/lottie.mjs',
+      animejs: 'cuttle-motion://kit/anime/anime.esm.min.js',
     });
     expect(KIT_FONTS.every((font) => font.src.startsWith(`${KIT_ORIGIN}/fonts/`))).toBe(true);
-    expect([...new Set(KIT_FONTS.map((font) => font.family))]).toEqual(['Inter', 'JetBrains Mono', 'Archivo', 'Space Grotesk', 'Bebas Neue', 'Fraunces', 'Instrument Serif']);
+    expect([...new Set(KIT_FONTS.map((font) => font.family))]).toEqual([
+      'Inter', 'JetBrains Mono', 'Archivo', 'Space Grotesk', 'Bebas Neue', 'Fraunces', 'Instrument Serif',
+      'Syne', 'Unbounded', 'Anton', 'Bricolage Grotesque', 'Big Shoulders Display', 'DM Serif Display', 'Playfair Display', 'Space Mono', 'Rubik Mono One', 'Caveat',
+    ]);
+  });
+
+  it('builds the kit with every file a page reaches: each font, anime.js, the icons, and the licences', async () => {
+    const out = mkdtempSync(join(tmpdir(), 'cuttle-kit-'));
+    try {
+      const built = spawnSync('node', [fileURLToPath(new URL('../scripts/copy.mjs', import.meta.url)), out], { encoding: 'utf8' });
+      expect(built.status, built.stderr).toBe(0);
+      for (const font of KIT_FONTS) expect(existsSync(join(out, font.src.slice(`${KIT_ORIGIN}/`.length))), font.src).toBe(true);
+      for (const url of Object.values(KIT_IMPORTS)) if (!url.endsWith('/')) expect(existsSync(join(out, url.slice(`${KIT_ORIGIN}/`.length))), url).toBe(true);
+      for (const licence of ['animejs', 'lucide', 'syne', 'caveat', 'three.js']) expect(existsSync(join(out, 'licenses', `${licence}.txt`)), licence).toBe(true);
+      // the icons' shapes as a module that icons.js imports, and their words for motion icons
+      const shapes = ((await import(pathToFileURL(join(out, 'icons', 'icons.js')).href)) as { default: Record<string, [string, Record<string, string>][]> }).default;
+      expect(Object.keys(shapes).length).toBeGreaterThan(1500);
+      expect(shapes.rocket![0]![0]).toBe('path');
+      expect(Object.keys(JSON.parse(readFileSync(join(out, 'icons', 'tags.json'), 'utf8')) as object)).toContain('rocket');
+    } finally {
+      rmSync(out, { recursive: true, force: true });
+    }
+  }, 60_000);
+
+  it('finds icons by what they show: a word in the name first, then a tag', async () => {
+    const icons = { rocket: ['launch', 'space'], 'rocket-launch': ['start'], 'chart-bar': ['statistics', 'diagram'], sparkles: ['launch'] };
+    expect(findIcons(icons, ['rocket']).map((icon) => icon.name)).toEqual(['rocket', 'rocket-launch']);
+    expect(findIcons(icons, ['launch']).map((icon) => icon.name)).toEqual(['rocket-launch', 'rocket', 'sparkles']);
+    // every word has to fit
+    expect(findIcons(icons, ['rocket start']).map((icon) => icon.name)).toEqual(['rocket-launch']);
+    expect(findIcons(icons, ['banana'])).toEqual([]);
+    // the real set, from the dependency in a checkout
+    const all = await iconWords(import.meta.url);
+    expect(findIcons(all, ['rocket'])[0]!.name).toBe('rocket');
   });
 
   it('puts the import map first in a page, after its doctype', () => {

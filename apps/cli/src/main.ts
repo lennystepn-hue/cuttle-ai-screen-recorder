@@ -14,7 +14,7 @@ import { zoomPathCommand, type ZoomPathArgs } from './commands/zoom-path';
 import { openCommand } from './commands/open';
 import { watchCommand } from './commands/watch';
 import { webcamBackgroundCommand } from './commands/webcam';
-import { motionAddCommand, motionCheckCommand, motionNewCommand, motionTemplatesCommand } from './commands/motion';
+import { motionAddCommand, motionCheckCommand, motionIconsCommand, motionNewCommand, motionTemplatesCommand } from './commands/motion';
 import { musicCheckCommand, musicNewCommand, musicSetCommand, musicTemplatesCommand, soundAddCommand, soundListCommand } from './commands/music';
 import { previewCommand } from './commands/preview';
 import { REVIEW_KINDS, reviewCommand } from './commands/review';
@@ -315,6 +315,10 @@ export async function runCli(argv: readonly string[], streams?: Streams): Promis
     .command('templates')
     .description('the templates motion new copies (starting points: any page of your own goes in with motion add)')
     .action(action((output) => motionTemplatesCommand(output)));
+  motion
+    .command('icons <words...>')
+    .description("find the kit's icons (Lucide's, about 2,000) by what they show, for icon(name) from 'cuttle/icons' in a page")
+    .action(action((output, _project, words: string[]) => motionIconsCommand(words, output)));
   motion
     .command('check <src>')
     .description('render a motion page frame by frame as the export draws it: PNGs, a contact sheet, its errors and console')

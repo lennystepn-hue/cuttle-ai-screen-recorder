@@ -2,13 +2,15 @@
 // cuttle-motion://kit/ from a folder that scripts/copy.mjs builds next to each bundle (the CLI's,
 // the app's, the export check's):
 //   motion.js            Cuttle's helpers (easing, tweens, text, code)
+//   icons.js             Lucide's icons as SVG (`cuttle/icons`), their shapes in icons/icons.js, their words in icons/tags.json
 //   sound.js             Cuttle's sound kit for music pages (instruments, effects, harmony, the video's parts)
 //   blank.html           the page a video's sounds render in when it has no music page
 //   take-worker.js       reads the screen recording's frames for `cuttle.take.frame`, its masks painted (take.js)
 //   three/               Three.js (three.module.js, three.core.js) and its addons (three/addons/)
 //   lottie/              lottie-web: lottie.mjs (a module) and lottie.min.js (a script)
+//   anime/               anime.js (anime.esm.min.js): timelines, staggers, SVG drawing and morphing
 //   mediabunny/          mediabunny.min.mjs: reads video files for the take's frames
-//   fonts/               Inter, JetBrains Mono and display faces (woff2, Latin; see KIT_FONTS)
+//   fonts/               Inter, JetBrains Mono and display faces with character (woff2, Latin; see KIT_FONTS)
 //   templates/<name>/    the pages `cuttle motion new` copies into a project
 //   licenses/            the licenses of what it bundles
 
@@ -18,13 +20,15 @@ export const KIT_ORIGIN = 'cuttle-motion://kit';
 /** The folder of the kit next to a bundle. */
 export const KIT_FOLDER = 'motion-kit';
 
-/** Bare names a page may import (its import map): Three.js and its addons, Cuttle's helpers and sound kit, lottie-web. */
+/** Bare names a page may import (its import map): Three.js and its addons, Cuttle's helpers, icons and sound kit, lottie-web, anime.js. */
 export const KIT_IMPORTS: Readonly<Record<string, string>> = {
   three: `${KIT_ORIGIN}/three/three.module.js`,
   'three/addons/': `${KIT_ORIGIN}/three/addons/`,
   cuttle: `${KIT_ORIGIN}/motion.js`,
+  'cuttle/icons': `${KIT_ORIGIN}/icons.js`,
   'cuttle/sound': `${KIT_ORIGIN}/sound.js`,
   'lottie-web': `${KIT_ORIGIN}/lottie/lottie.mjs`,
+  animejs: `${KIT_ORIGIN}/anime/anime.esm.min.js`,
 };
 
 /** A font face of the kit: `weight` and `stretch` are ranges for a variable font ("100 900", "62% 125%"). */
@@ -49,7 +53,12 @@ const face = (family: string, file: string, weight: string, style: KitFont['styl
  * - Inter (the theme's `--cuttle-font`) and JetBrains Mono (`--cuttle-mono`);
  * - for display type: Archivo (variable weight and width, from condensed 62% to expanded 125%),
  *   Space Grotesk, Bebas Neue (condensed capitals), Fraunces (a variable display serif) and
- *   Instrument Serif (an editorial serif, upright and italic).
+ *   Instrument Serif (an editorial serif, upright and italic);
+ * - faces with more character: Syne (wide and quirky at its heavy end), Unbounded (round and wide),
+ *   Anton (tall poster capitals), Bricolage Grotesque (variable weight, width and optical size), Big
+ *   Shoulders Display (condensed, Chicago signage), DM Serif Display and Playfair Display (high
+ *   contrast serifs, upright and italic), Space Mono (a geometric mono), Rubik Mono One (heavy
+ *   rounded capitals) and Caveat (handwriting).
  */
 export const KIT_FONTS: readonly KitFont[] = [
   ...[300, 400, 500, 600, 700, 800, 900].map((weight) => face('Inter', `inter-latin-${weight}-normal.woff2`, String(weight))),
@@ -62,6 +71,18 @@ export const KIT_FONTS: readonly KitFont[] = [
   face('Fraunces', 'fraunces-latin-full-italic.woff2', '100 900', 'italic'),
   face('Instrument Serif', 'instrument-serif-latin-400-normal.woff2', '400'),
   face('Instrument Serif', 'instrument-serif-latin-400-italic.woff2', '400', 'italic'),
+  face('Syne', 'syne-latin-wght-normal.woff2', '400 800'),
+  face('Unbounded', 'unbounded-latin-wght-normal.woff2', '200 900'),
+  face('Anton', 'anton-latin-400-normal.woff2', '400'),
+  face('Bricolage Grotesque', 'bricolage-grotesque-latin-standard-normal.woff2', '200 800', 'normal', '75% 100%'),
+  face('Big Shoulders Display', 'big-shoulders-display-latin-wght-normal.woff2', '100 900'),
+  face('DM Serif Display', 'dm-serif-display-latin-400-normal.woff2', '400'),
+  face('DM Serif Display', 'dm-serif-display-latin-400-italic.woff2', '400', 'italic'),
+  face('Playfair Display', 'playfair-display-latin-wght-normal.woff2', '400 900'),
+  face('Playfair Display', 'playfair-display-latin-wght-italic.woff2', '400 900', 'italic'),
+  ...[400, 700].flatMap((weight) => [face('Space Mono', `space-mono-latin-${weight}-normal.woff2`, String(weight)), face('Space Mono', `space-mono-latin-${weight}-italic.woff2`, String(weight), 'italic')]),
+  face('Rubik Mono One', 'rubik-mono-one-latin-400-normal.woff2', '400'),
+  face('Caveat', 'caveat-latin-wght-normal.woff2', '400 700'),
 ];
 
 /** A template `cuttle motion new` copies: a scene of its own, or an overlay over the clips. */

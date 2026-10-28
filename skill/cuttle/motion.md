@@ -164,11 +164,41 @@ for (const click of cuttle.take.clicks) {
   `preserveDrawingBuffer: true` and `setPixelRatio(1)`, and render in `onFrame`.
 - `import lottie from 'lottie-web'`: load with `autoplay: false`, then `goToAndStop(t * 1000)` in
   `onFrame`.
+- **Timelines** for choreography: anime.js, `import { createTimeline, stagger, svg } from 'animejs'`
+  (its timelines, staggers, springs, SVG line drawing with `svg.createDrawable` and shape morphing
+  with `svg.morphTo`). Hand each timeline to the video's clock and build it the way you think about
+  it, in labels and overlaps rather than in sums of seconds:
+
+  ```js
+  import { createTimeline, stagger } from 'animejs';
+  const tl = cuttle.timeline(createTimeline({ autoplay: false, defaults: { ease: 'outExpo', duration: 700 } }));
+  tl.add('.word', { y: ['0.6em', 0], opacity: [0, 1], delay: stagger(70) }, 200)
+    .add('.line', { scaleX: [0, 1], duration: 500 }, '-=400')
+    .add('.card', { x: ['-110vw', 0], ease: 'inOutQuart', duration: 900 }, 1600);
+  ```
+
+  `cuttle.timeline(timeline, { at })` pauses it and sets it to the frame's time before every frame
+  (also after a jump), `at` seconds into the item being its start. It takes an anime.js timeline or
+  animation, a GSAP timeline or tween (GSAP is not in the kit: its licence is its own; a page may
+  bring a copy of it as a file of the project), a Web Animation (`element.animate(…)`) or a function
+  of seconds. Pages written for HyperFrames, whose paused timelines sit in `window.__timelines`,
+  play as they are. Tweens a page starts on no timeline it hands over follow the clock too, but only
+  a handed timeline lands exactly on a frame after a jump.
+- **Icons**: about 2,000 of Lucide's, as SVG, `import { icon, iconImage } from 'cuttle/icons'`:
+  `cuttle.ready(icon('rocket', { size: 180, color: 'var(--cuttle-accent)', stroke: 1.5 }).then((svg) =>
+  stage.append(svg)))`; `iconImage(name, options)` is one to draw on a canvas or as a texture. Find a
+  name by what it shows: `cuttle --json motion icons rocket launch`. A real icon reads at once where
+  a circle with a letter does not.
 - Fonts, ready in every page: `Inter` (the theme's `--cuttle-font`), `JetBrains Mono`
   (`--cuttle-mono`), `Archivo` (variable weight 100–900 and width: `font-stretch` 62% condensed to
   125% expanded, animatable), `Space Grotesk`, `Bebas Neue`, `Fraunces` (a variable display serif)
-  and `Instrument Serif` (upright and italic). Call `cuttle.ready(document.fonts.load('900 200px
-  Archivo'))` before you measure text.
+  and `Instrument Serif` (upright and italic); and faces with more character: `Syne` (400–800, wide
+  and odd at its heavy end), `Unbounded` (200–900, round and wide), `Anton` (tall poster capitals),
+  `Bricolage Grotesque` (200–800, `font-stretch` 75–100%), `Big Shoulders Display` (100–900,
+  condensed signage), `DM Serif Display` and `Playfair Display` (high-contrast serifs, upright and
+  italic), `Space Mono` (400 and 700, italic too), `Rubik Mono One` (heavy rounded capitals) and
+  `Caveat` (handwriting, 400–700). Pick the face from the video's look (story.md), not the first in
+  the list. Call `cuttle.ready(document.fonts.load('900 200px Archivo'))` before you measure text.
 - The theme, the project's brand (project.md, `theme`), as CSS variables: `--cuttle-accent`,
   `--cuttle-bg`, `--cuttle-fg`, `--cuttle-font`, `--cuttle-display` (the brand's heading font),
   `--cuttle-mono`; and `cuttle.theme.name`, `url`, `logo` (a URL, or `""`) and `font`. Use them so

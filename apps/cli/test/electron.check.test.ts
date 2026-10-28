@@ -374,6 +374,48 @@ cuttle.onFrame((t) => { m.style.opacity = Math.min(1, Math.max(0, (t - 0.3) / 0.
     }
   }, 420_000);
 
+  it("plays an anime.js timeline on the video's clock, exactly after a jump, with an icon and a face of the kit", () => {
+    const kit = join(mkdtempSync(join(tmpdir(), 'cuttle-kit-')), 'kit');
+    try {
+      expect(cuttle('init', kit).code).toBe(0);
+      mkdirSync(join(kit, 'motion', 'demo'), { recursive: true });
+      // a square that crosses 1000 px in 2 s on a timeline, a rocket in the corner, a title in Syne
+      writeFileSync(
+        join(kit, 'motion', 'demo', 'index.html'),
+        `<!doctype html><style>html,body{margin:0;height:100%;background:#fff;overflow:hidden}#box{position:absolute;left:0;top:200px;width:200px;height:200px;background:#e2572f}#icon{position:absolute;left:1500px;top:600px;color:#000}h1{position:absolute;left:100px;top:700px;margin:0;font:800 120px Syne}</style>
+<div id="box"></div><div id="icon"></div><h1>Syne</h1>
+<script type="module">
+import { createTimeline } from 'animejs';
+import { icon } from 'cuttle/icons';
+cuttle.ready(icon('square', { size: 300, stroke: 4 }).then((svg) => document.getElementById('icon').append(svg)));
+cuttle.ready(document.fonts.load('800 120px Syne').then((faces) => faces.length === 0 && console.log('no Syne')));
+cuttle.timeline(createTimeline({ autoplay: false })).add('#box', { x: [0, 1000], duration: 2000, ease: 'linear' }, 0);
+</script>`,
+      );
+      expect(cuttle('-C', kit, 'motion', 'add', 'motion/demo/index.html', '--duration', '3').code).toBe(0);
+      // a later moment first: the page draws it, then opens again for the earlier one
+      const { code, json } = cuttle('-C', kit, 'motion', 'check', 'motion/demo/index.html', '--at', '1.5', '--at', '0.5');
+      expect(code).toBe(0);
+      expect(json).toMatchObject({ errors: [], console: [] });
+      const red = (file: string, x: number) => {
+        const png = PNG.sync.read(readFileSync(file));
+        const i = (300 * png.width + x) * 4;
+        return png.data[i]! > 200 && png.data[i + 1]! < 120;
+      };
+      const [late, early] = (json.stills as { t: number; file: string }[]).sort((a, b) => b.t - a.t);
+      // at 1.5 s the square is 750 px in, at 0.5 s 250 px
+      expect([red(late!.file, 760), red(late!.file, 940), red(late!.file, 740), red(late!.file, 960)]).toEqual([true, true, false, false]);
+      expect([red(early!.file, 260), red(early!.file, 440), red(early!.file, 240)]).toEqual([true, true, false]);
+      // the icon's outline: dark where its line runs (Lucide's square: a rounded rect from 3 to 21 of 24)
+      const png = PNG.sync.read(readFileSync(late!.file));
+      let dark = 0;
+      for (let y = 600; y < 900; y += 2) dark += png.data[(y * png.width + 1500 + 38) * 4]! < 80 ? 1 : 0;
+      expect(dark).toBeGreaterThan(40);
+    } finally {
+      rmSync(dirname(kit), { recursive: true, force: true });
+    }
+  }, 300_000);
+
   it('lands callouts on the take\'s clicks and kinetic captions on its words, over the video', () => {
     const dir = join(mkdtempSync(join(tmpdir(), 'cuttle-take-')), 'take');
     cpSync(project, dir, { recursive: true });

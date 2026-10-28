@@ -55,3 +55,39 @@ export async function templatePage(projectDir: string, template: string, bundleU
     throw error;
   });
 }
+
+/**
+ * Lucide's icons with the words they are found by (their tags): the kit's next to a bundle
+ * (`bundleUrl`: its `import.meta.url`), else this package's dependency.
+ */
+export async function iconWords(bundleUrl: string): Promise<Record<string, string[]>> {
+  const built = fileURLToPath(new URL(`./${KIT_FOLDER}/icons/tags.json`, bundleUrl));
+  const file = existsSync(built) ? built : fileURLToPath(new URL('../node_modules/lucide-static/tags.json', import.meta.url));
+  return JSON.parse(await readFile(file, 'utf8')) as Record<string, string[]>;
+}
+
+/**
+ * The icons that fit `words` best, at most `limit`: a word in the name counts most, a tag that is the
+ * word next, a tag that holds it least; every word has to fit somewhere.
+ */
+export function findIcons(icons: Readonly<Record<string, readonly string[]>>, words: readonly string[], limit = 30): { name: string; tags: readonly string[] }[] {
+  const wanted = words.flatMap((word) => word.toLowerCase().split(/[\s,]+/)).filter((word) => word !== '');
+  const scored: { name: string; tags: readonly string[]; score: number }[] = [];
+  for (const [name, tags] of Object.entries(icons)) {
+    let score = 0;
+    for (const word of wanted) {
+      const parts = name.split('-');
+      const fit = parts.includes(word) ? 6 : name.includes(word) ? 4 : tags.some((tag) => tag.toLowerCase() === word) ? 3 : tags.some((tag) => tag.toLowerCase().includes(word)) ? 1 : 0;
+      if (fit === 0) {
+        score = 0;
+        break;
+      }
+      score += fit;
+    }
+    if (score > 0) scored.push({ name, tags, score });
+  }
+  return scored
+    .sort((a, b) => b.score - a.score || a.name.length - b.name.length || a.name.localeCompare(b.name))
+    .slice(0, limit)
+    .map(({ name, tags }) => ({ name, tags }));
+}

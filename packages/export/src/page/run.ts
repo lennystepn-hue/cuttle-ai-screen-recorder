@@ -163,6 +163,16 @@ async function png(canvas: OffscreenCanvas): Promise<Uint8Array> {
   return new Uint8Array(await (await canvas.convertToBlob({ type: 'image/png' })).arrayBuffer());
 }
 
+/** The canvas drawn `width` × `height` (smoothed), as RGB row by row in base64. */
+function thumb(canvas: OffscreenCanvas, small: OffscreenCanvasRenderingContext2D, width: number, height: number): string {
+  small.clearRect(0, 0, width, height);
+  small.drawImage(canvas, 0, 0, width, height);
+  const rgba = small.getImageData(0, 0, width, height).data;
+  let binary = '';
+  for (let i = 0; i < rgba.length; i += 4) binary += String.fromCharCode(rgba[i]!, rgba[i + 1]!, rgba[i + 2]!);
+  return btoa(binary);
+}
+
 async function renderStills(job: StillsJob): Promise<PageStillsSuccess> {
   const started = performance.now();
   const { fps, width, height } = job.project.output;
@@ -177,14 +187,19 @@ async function renderStills(job: StillsJob): Promise<PageStillsSuccess> {
     },
     0,
     async ({ timeline, renderer, canvas, gl, sources }) => {
-      const columns = job.sheet ? Math.max(1, Math.min(job.sheet.columns, job.times.length)) : 0;
+      // the times written as PNGs, and their places on the sheet
+      const written = job.png ? new Set(job.png.filter((n) => n >= 0 && n < job.times.length)) : undefined;
+      const places = new Map((written ? [...written].sort((a, b) => a - b) : job.times.map((_, n) => n)).map((n, place) => [n, place]));
+      const columns = job.sheet ? Math.max(1, Math.min(job.sheet.columns, places.size)) : 0;
       const cellHeight = Math.round((SHEET_CELL_WIDTH * height) / width);
-      const sheet = job.sheet
+      const sheet = job.sheet && places.size > 0
         ? new OffscreenCanvas(
             SHEET_GAP + columns * (SHEET_CELL_WIDTH + SHEET_GAP),
-            SHEET_GAP + Math.ceil(job.times.length / columns) * (cellHeight + SHEET_LABEL_HEIGHT + SHEET_GAP),
+            SHEET_GAP + Math.ceil(places.size / columns) * (cellHeight + SHEET_LABEL_HEIGHT + SHEET_GAP),
           )
         : undefined;
+      const small = job.thumbs ? new OffscreenCanvas(job.thumbs.width, job.thumbs.height).getContext('2d', { willReadFrequently: true }) : null;
+      const thumbs: string[] = [];
       const context = sheet?.getContext('2d');
       if (context) {
         context.fillStyle = '#16161a';
@@ -199,13 +214,18 @@ async function renderStills(job: StillsJob): Promise<PageStillsSuccess> {
         await sources.transition(state, () => renderer.layerPixels(state, frameSources));
         renderer.render(state, frameSources);
         if (gl.isContextLost()) throw new Error('the WebGL context was lost while rendering stills');
-        const image = await png(canvas);
+        const wanted = byTime.some((frameOfTime, n) => frameOfTime === frame && places.has(n));
+        const image = wanted ? await png(canvas) : undefined;
+        const tiny = small && job.thumbs ? thumb(canvas, small, job.thumbs.width, job.thumbs.height) : undefined;
         for (const [n, frameOfTime] of byTime.entries()) {
           if (frameOfTime !== frame) continue;
+          if (tiny !== undefined) thumbs[n] = tiny;
+          const place = places.get(n);
+          if (place === undefined || !image) continue;
           await host().writeStill(`still-${n}`, image);
           if (context) {
-            const x = SHEET_GAP + (n % columns) * (SHEET_CELL_WIDTH + SHEET_GAP);
-            const y = SHEET_GAP + Math.floor(n / columns) * (cellHeight + SHEET_LABEL_HEIGHT + SHEET_GAP);
+            const x = SHEET_GAP + (place % columns) * (SHEET_CELL_WIDTH + SHEET_GAP);
+            const y = SHEET_GAP + Math.floor(place / columns) * (cellHeight + SHEET_LABEL_HEIGHT + SHEET_GAP);
             context.drawImage(canvas, x, y, SHEET_CELL_WIDTH, cellHeight);
             context.fillStyle = '#e8e8ea';
             context.fillText(`${job.times[n]!.toFixed(2)} s`, x, y + cellHeight + SHEET_LABEL_HEIGHT / 2);
@@ -217,7 +237,7 @@ async function renderStills(job: StillsJob): Promise<PageStillsSuccess> {
       if (sheet) await host().writeStill('sheet', await png(sheet));
       // The source second each still shows, from the frame it really is (null on a still or card).
       const shown = byTime.map((frame) => shownSourceTime(timeline.frameAt(frame / fps)) ?? null);
-      return { ok: true, stills: job.times.length, sources: shown, width, height, gpu: gpuName(gl), totalMs: Math.round(performance.now() - started) };
+      return { ok: true, stills: places.size, sources: shown, ...(small && { thumbs }), width, height, gpu: gpuName(gl), totalMs: Math.round(performance.now() - started) };
     },
   );
 }

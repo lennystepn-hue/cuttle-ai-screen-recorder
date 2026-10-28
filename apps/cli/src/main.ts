@@ -17,6 +17,7 @@ import { webcamBackgroundCommand } from './commands/webcam';
 import { motionAddCommand, motionCheckCommand, motionNewCommand, motionTemplatesCommand } from './commands/motion';
 import { musicCheckCommand, musicNewCommand, musicSetCommand, musicTemplatesCommand, soundAddCommand, soundListCommand } from './commands/music';
 import { previewCommand } from './commands/preview';
+import { REVIEW_KINDS, reviewCommand } from './commands/review';
 import { shotFrameCommand, shotStylesCommand, shotTakeCommand, type ShotFrameArgs, type ShotTakeArgs } from './commands/shot';
 import { recordCommand } from './commands/record';
 import { recoverCommand } from './commands/recover';
@@ -264,6 +265,19 @@ export async function runCli(argv: readonly string[], streams?: Streams): Promis
     .action(
       action((output, project, options: { at?: number[]; masks?: boolean; sheet?: boolean; format?: string; out?: string; alpha?: boolean }) =>
         withSignal(output, (signal) => previewCommand(project, options, output, signal)),
+      ),
+    );
+
+  program
+    .command('review')
+    .description("what makes the video dull or hard to follow, measured before it renders, with stills to look at: an empty first frame, stretches where nothing changes, scenes that look alike or all come in the same way, lines too short to read or too small for a phone, no sound, the look of a recent video")
+    .option('--format <format>', '16:9, 1:1 or 9:16 (default: the project output)')
+    .option('-o, --out <dir>', 'folder for the stills (default: preview/review/ in the project)')
+    .option('--ignore <kinds...>', `leave out these notes: ${REVIEW_KINDS.join(', ')}`, collectText)
+    .option('--no-remember', 'keep no fingerprint of this video, and compare it with no earlier one')
+    .action(
+      action((output, project, options: { format?: string; out?: string; ignore?: string[]; remember?: boolean }) =>
+        withSignal(output, (signal) => reviewCommand(project, options, output, signal)),
       ),
     );
 

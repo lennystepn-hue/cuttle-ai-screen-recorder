@@ -6,6 +6,7 @@ import { CHANNELS, type MotionFrameRequest, type MotionPages } from '../job';
 import { motionInit } from '../motion/init';
 import { declaredParams, paramDefaults } from '../motion/params';
 import { takeData, type TakeInputs } from '../motion/take';
+import type { PageText } from '../motion/text';
 import { MotionPage, type MotionFrame, type MotionPageOptions } from './motion';
 
 /** What one motion item's page said while it rendered: its errors and its console, every showing together. */
@@ -16,6 +17,10 @@ export interface MotionItemReport {
   src: string;
   errors: string[];
   console: string[];
+  /** With `text`: the text each frame it drew showed (`t`: output seconds), for `cuttle review`. A scene's or an overlay's, not a transition's. */
+  text?: { t: number; blocks: PageText[] }[];
+  /** With `text`: how many sounds its pages asked for. */
+  sounds?: number;
 }
 
 interface Showing {
@@ -44,7 +49,7 @@ export class MotionHost {
     private readonly project: CuttleProject,
     private readonly pages: MotionPages,
     private readonly take: TakeInputs,
-    private readonly options: Pick<MotionPageOptions, 'frameTimeout' | 'loadTimeout' | 'kitDir'> = {},
+    private readonly options: Pick<MotionPageOptions, 'frameTimeout' | 'loadTimeout' | 'kitDir'> & { text?: boolean } = {},
   ) {}
 
   private item(request: MotionFrameRequest): { item: MotionScene | MotionOverlay | SceneTransition; name: string; file: string } {
@@ -74,7 +79,8 @@ export class MotionHost {
       transition: request.kind === 'transition',
     });
     const blur = 'motionBlur' in item ? item.motionBlur : undefined;
-    return MotionPage.open({ file, root: this.pages.root, init, network: item.network, ...(blur && { motionBlur: blur }), ...this.options });
+    const { text: _text, ...options } = this.options;
+    return MotionPage.open({ file, root: this.pages.root, init, network: item.network, ...(blur && { motionBlur: blur }), ...options });
   }
 
   private open(request: MotionFrameRequest): Showing {
@@ -109,6 +115,11 @@ export class MotionHost {
     try {
       const frame = await this.run(showing, (page) => page.frame(request.frame, request.view, request.between));
       showing.last = { frame: request.frame, data: frame };
+      if (this.options.text && request.kind !== 'transition') {
+        const blocks = await this.run(showing, (page) => page.text());
+        const report = this.reports.get(showing.name)!;
+        (report.text ??= []).push({ t: Math.round((request.start + request.frame / this.project.output.fps) * 1000) / 1000, blocks });
+      }
       return frame;
     } catch (error) {
       throw new Error(`${showing.name} (${this.reports.get(showing.name)?.src}): ${(error as Error).message}`, { cause: error });
@@ -123,9 +134,11 @@ export class MotionHost {
     const page = await showing.queue.then(() => showing.page).catch(() => undefined);
     if (!page) return;
     const said = await page.report().catch(() => undefined);
+    const sounds = this.options.text ? await page.sounds().catch(() => []) : [];
     page.close();
     const report = this.reports.get(showing.name);
     if (!said || !report) return;
+    if (this.options.text) report.sounds = Math.max(report.sounds ?? 0, sounds.length);
     for (const error of said.errors) if (!report.errors.includes(error)) report.errors.push(error);
     for (const line of said.console) if (!report.console.includes(line)) report.console.push(line);
   }

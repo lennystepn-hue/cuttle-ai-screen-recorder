@@ -340,6 +340,40 @@ describe.runIf(enabled)('cuttle in Electron', () => {
     }
   }, 420_000);
 
+  it('reviews a video of slides: an empty first frame, scenes alike that all build up, a line too short to read, text too small', () => {
+    const slides = join(mkdtempSync(join(tmpdir(), 'cuttle-review-')), 'slides');
+    try {
+      expect(cuttle('init', slides).code).toBe(0);
+      mkdirSync(join(slides, 'motion', 'slide'), { recursive: true });
+      // a heading that fades in from 0.3 s, a line of six words for half a second, a note at 14 px
+      writeFileSync(
+        join(slides, 'motion', 'slide', 'index.html'),
+        `<!doctype html><style>html,body{margin:0;height:100%;background:#15151c;color:#fff;font-family:Inter}main{padding:20vh 15vw}h1{font:800 120px Archivo;margin:0}p{font-size:40px}small{font-size:14px}</style>
+<main id="m"><h1>Zoom paths</h1><p id="p">Each move picked and timed well</p><small>Available on macOS and Windows</small></main>
+<script type="module">
+const m = document.getElementById('m'), p = document.getElementById('p');
+cuttle.onFrame((t) => { m.style.opacity = Math.min(1, Math.max(0, (t - 0.3) / 0.5)); p.style.visibility = t >= 0.8 && t < 1.3 ? 'visible' : 'hidden'; });
+</script>`,
+      );
+      for (let i = 0; i < 3; i++) expect(cuttle('-C', slides, 'motion', 'add', 'motion/slide/index.html', '--duration', '2.5').code).toBe(0);
+      const { code, json } = cuttleWithin(300_000, '-C', slides, 'review', '--no-remember');
+      expect(code).toBe(0);
+      const notes = json.notes as { weight: string; kind: string; t: number }[];
+      expect(notes[0]).toMatchObject({ weight: 'P0', kind: 'first-frame', t: 0 });
+      expect(new Set(notes.map((note) => note.kind))).toEqual(new Set(['first-frame', 'alike', 'entrances', 'unread', 'small-text']));
+      expect(json.measured).toMatchObject({ step: 0.25, seconds: 7.5 });
+      // each scene after it came in and at its middle, 0.2 s before each seam, on the sheet
+      expect((json.stills as unknown[]).length).toBe(8);
+      expect(pngSize(json.sheet as string)[0]).toBeGreaterThan(1900);
+      expect((json.motion as { errors: string[] }[]).flatMap((report) => report.errors)).toEqual([]);
+      // leaving kinds out
+      const quiet = cuttleWithin(300_000, '-C', slides, 'review', '--no-remember', '--ignore', 'alike', '--ignore', 'entrances');
+      expect((quiet.json.notes as { kind: string }[]).map((note) => note.kind)).not.toContain('alike');
+    } finally {
+      rmSync(dirname(slides), { recursive: true, force: true });
+    }
+  }, 420_000);
+
   it('lands callouts on the take\'s clicks and kinetic captions on its words, over the video', () => {
     const dir = join(mkdtempSync(join(tmpdir(), 'cuttle-take-')), 'take');
     cpSync(project, dir, { recursive: true });

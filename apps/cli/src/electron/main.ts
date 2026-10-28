@@ -95,6 +95,9 @@ async function handle(request: ElectronRequest): Promise<unknown> {
         ...(request.sheet && { sheet: request.sheet }),
         ...(request.motion && { project: (project: CuttleProject) => motionCheckProject(project, request.motion!) }),
         ...(request.transparent && { transparent: true }),
+        ...(request.png && { png: request.png }),
+        ...(request.thumbs !== undefined && { thumbs: request.thumbs }),
+        ...(request.text && { text: true }),
         signal: cancel.signal,
         onProgress: progress('stills', request.quiet),
       });

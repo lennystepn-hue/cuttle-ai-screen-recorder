@@ -3380,13 +3380,14 @@ describe.runIf(enabled)('the skill after an update', () => {
 
   it("installs the app's skill again when another version installed it, without a click", async () => {
     const version = await app.evaluate(({ app: electron }) => electron.getVersion());
-    await expect.poll(() => (JSON.parse(readFileSync(join(skill(), '.cuttle-skill.json'), 'utf8')) as { version?: string }).version, { timeout: 20_000 }).toBe(version);
-    const files = (JSON.parse(readFileSync(join(skill(), '.cuttle-skill.json'), 'utf8')) as { files: string[] }).files;
-    expect(files).toContain('story.md');
-    expect(existsSync(join(skill(), 'gone.md'))).toBe(false);
-    const installed = readFileSync(join(skill(), 'SKILL.md'), 'utf8');
-    expect(installed).toContain("open Cuttle's settings");
-    expect(installed).not.toContain('{{');
+    // the marker is written first (an install cut short still belongs to Cuttle), the guides after it
+    const installed = () => {
+      const read = (name: string) => (existsSync(join(skill(), name)) ? readFileSync(join(skill(), name), 'utf8') : '');
+      const marker = JSON.parse(read('.cuttle-skill.json') || '{}') as { version?: string; files?: string[] };
+      return { version: marker.version, story: marker.files?.includes('story.md') && read('story.md') !== '', gone: existsSync(join(skill(), 'gone.md')), app: read('SKILL.md').includes("open Cuttle's settings") };
+    };
+    await expect.poll(installed, { timeout: 20_000 }).toEqual({ version, story: true, gone: false, app: true });
+    expect(readFileSync(join(skill(), 'SKILL.md'), 'utf8')).not.toContain('{{');
   });
 });
 

@@ -76,7 +76,7 @@ body.transparent #root {
 .pill-wrap.drawer {
   place-items: start center;
   /* the shadow follows the clipped shape */
-  filter: drop-shadow(0 10px 22px rgba(0, 0, 0, 0.38));
+  filter: var(--shadow-drawer);
 }
 .pill-wrap.drawer .pill {
   -webkit-app-region: no-drag;

@@ -258,7 +258,7 @@ body.transparent #root {
   justify-content: flex-start;
   position: relative;
   /* the shadow follows the clipped shape */
-  filter: drop-shadow(0 10px 22px rgba(0, 0, 0, 0.38));
+  filter: var(--shadow-drawer);
   --island-w: calc(var(--notch-w, 4px) + 128px);
 }
 .hud-wrap.top:not([data-origin='notch']) {

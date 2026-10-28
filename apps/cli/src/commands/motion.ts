@@ -323,15 +323,27 @@ const OWN_SECONDS = { scene: 3, overlay: 3, transition: 0.8 } as const;
  * `--at`), or the transition into a scene (`--as transition --into`).
  */
 export async function motionAddCommand(projectDir: string, page: string, args: MotionAddArgs, output: Output): Promise<MotionAddResult> {
+  const result = await addMotionPage(projectDir, page, args);
+  output.result(result, () => `${saidAdded(result.kind, result.src, result.item, result.into, whereOf(args))}\ncheck it: cuttle motion check ${result.src}`);
+  return result;
+}
+
+/**
+ * A page of the project into cuttle.json as `motion add` puts it, written and not said: `seconds` long
+ * unless `args` says (default: a scene 3 s, a transition 0.8 s, an overlay the rest of the clips).
+ */
+export async function addMotionPage(projectDir: string, page: string, args: MotionAddArgs, seconds?: number): Promise<MotionAddResult> {
   const kind = (args.as ?? 'scene') as MotionTemplate['kind'];
   if (!KINDS.includes(kind)) throw new CliError('usage', `--as ${args.as}: scene, overlay or transition`);
   const file = await readProjectFile(projectDir);
   const src = await pageOf(file.dir, page);
   if (!/\.html?$/i.test(src)) throw new CliError('usage', `${src} is not a page: a motion item is an .html file`);
   const label = args.label?.trim() || labelOf(pageName(src));
-  const { item, into } = place(file, kind, src, label, args, { duration: OWN_SECONDS[kind], ...(kind === 'overlay' && args.duration === undefined && { whole: true }) });
+  const own = seconds === undefined || (kind === 'overlay' && args.duration === undefined);
+  const { item, into } = place(file, kind, src, label, args, { duration: seconds ?? OWN_SECONDS[kind], ...(kind === 'overlay' && args.duration === undefined && own && { whole: true }) });
   await writeProjectFile(file, 'motion add');
-  const result: MotionAddResult = { kind, src, item, ...(into !== undefined && { into }) };
-  output.result(result, () => `${saidAdded(kind, src, item, into, whereOf(args))}\ncheck it: cuttle motion check ${src}`);
-  return result;
+  return { kind, src, item, ...(into !== undefined && { into }) };
 }
+
+/** What `motion add` says it did (`blocks add` says the same). */
+export const saidMotionAdded = (result: MotionAddResult, args: MotionAddArgs): string => saidAdded(result.kind, result.src, result.item, result.into, whereOf(args));

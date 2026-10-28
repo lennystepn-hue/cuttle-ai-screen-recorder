@@ -83,6 +83,30 @@ page in `motion/` you did not write.
 - **Mix:** pages between clips, over them, and as the way between scenes; `card` and `still` scenes
   and recorded clips in the same video.
 
+## Blocks from open collections
+
+A beat that needs one thing done really well (a bar chart race, an extruded 3D logo, a shader
+dissolve, a carousel, a camera move, a Lottie character) may start from what others made:
+
+```bash
+cuttle --json blocks search chart race            # HyperFrames' registry: about 200 blocks, best first
+cuttle -C "<project>" --json blocks show bar-chart-race   # its preview picture, its params
+cuttle -C "<project>" --json blocks add bar-chart-race --after s2
+cuttle -C "<project>" --json blocks add https://lottie.host/<id>/<name>.json   # a Lottie animation
+cuttle --json blocks search rocket --source icons           # Iconify's sets, then blocks add icons:ph:rocket-launch
+```
+
+`blocks add` brings a block into `motion/<name>/` with what its page loads from the network
+(GSAP, Google Fonts, modules; Three.js is the kit's own): it renders offline and the same every
+time. The block's variables become the item's params (the app's inspector shows them), `fit` says
+how its 1920×1080 frame sits in the format (`contain` or `cover`), and its timeline follows the
+video's clock. A Lottie JSON (LottieFiles' free animations: the "Lottie JSON" link on its page)
+becomes a page that plays it (`loop`, `speed`, `start`, `fit`); an icon of Iconify's becomes
+`media/icons/<set>-<name>.svg`. Where each came from and its licence go into `credits.json` and
+`CREDITS.md`: say them to the user. Look at a block before you bring it in, then make it this
+video's own (its params, colours, type, timing); a block left as it came is a template by another
+name. `blocks search --tag transition` (or `chart`, `title`, `3d`, `code`, `camera`) narrows the list.
+
 ## The page's world
 
 - **The clock is the video's.** `performance.now`, `Date`, `setTimeout`, `setInterval`,

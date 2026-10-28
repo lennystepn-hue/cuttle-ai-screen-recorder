@@ -1,4 +1,4 @@
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { copyFileSync, cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -454,6 +454,67 @@ cuttle.timeline(createTimeline({ autoplay: false })).add('#box', { x: [0, 1000],
       rmSync(dirname(cut), { recursive: true, force: true });
     }
   }, 900_000);
+
+  it("brings in a block of HyperFrames' registry: what it loads beside it, its variables as params, its timeline on the video's clock", async () => {
+    const root = mkdtempSync(join(tmpdir(), 'cuttle-blocks-'));
+    // the registry and the CDN, from a server of their own (the CLI runs while this test waits for it)
+    const block = `<!doctype html><html><head><script src="https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"></script>
+<style>html,body{width:1920px;height:1080px;margin:0;background:#fff}#bar{position:absolute;left:0;top:300px;width:200px;height:200px;background:#e2572f}#title{position:absolute;left:100px;top:700px;font:800 100px Inter}</style></head>
+<body><div id="root" data-composition-id="race"><div id="bar"></div><div id="title"></div></div>
+<script>
+  var vars = window.__hfVariables || {};
+  document.getElementById('title').textContent = vars.title || 'none';
+  document.getElementById('bar').style.background = vars.accent || '#e2572f';
+  window.__timelines = { race: gsap.timeline({ paused: true }) };
+</script></body></html>`;
+    // GSAP as far as the block uses it: a paused timeline that moves the bar 500 px a second
+    const gsap = `window.gsap = { timeline: function () { return { pause: function () {}, duration: function () { return 2; }, totalTime: function (t) { document.getElementById('bar').style.transform = 'translateX(' + t * 500 + 'px)'; } }; } };`;
+    const files = {
+      'api.github.com/repos/heygen-com/hyperframes/commits/main': JSON.stringify({ sha: 'fix' }),
+      'raw.githubusercontent.com/heygen-com/hyperframes/fix/registry/registry.json': JSON.stringify({ items: [{ name: 'race', type: 'hyperframes:block' }] }),
+      'raw.githubusercontent.com/heygen-com/hyperframes/fix/registry/blocks/race/registry-item.json': JSON.stringify({ title: 'Race', description: 'a bar runs', tags: ['chart'], duration: 2, files: [{ path: 'race.html', type: 'hyperframes:composition' }], variables: [{ id: 'title', type: 'string', default: 'Hello' }, { id: 'accent', type: 'color', default: '#e2572f' }] }),
+      'raw.githubusercontent.com/heygen-com/hyperframes/fix/registry/blocks/race/race.html': block,
+      'cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js': gsap,
+    };
+    writeFileSync(join(root, 'files.json'), JSON.stringify(files));
+    const server = spawn('node', ['-e', `const files = require(${JSON.stringify(join(root, 'files.json'))}); require('http').createServer((q, r) => { const f = files[decodeURIComponent(new URL(q.url, 'http://x').pathname.slice(1))]; f === undefined ? r.writeHead(404).end() : r.writeHead(200).end(f); }).listen(0, '127.0.0.1', function () { console.log(this.address().port); });`], { stdio: ['ignore', 'pipe', 'inherit'] });
+    try {
+      const port = await new Promise<string>((resolve) => server.stdout.once('data', (data: Buffer) => resolve(String(data).trim())));
+      const env = { ...process.env, CUTTLE_BLOCKS_PROXY: `http://127.0.0.1:${port}`, CUTTLE_BLOCKS_CACHE: join(root, 'cache') };
+      const run = (...argv: string[]) => {
+        const result = spawnSync('node', [CLI, '--json', ...argv], { encoding: 'utf8', timeout: 120_000, env });
+        if (result.status !== 0) process.stderr.write(result.stderr.slice(-4000));
+        return { code: result.status ?? -1, json: JSON.parse(result.stdout || '{}') as Record<string, unknown> };
+      };
+      const project = join(root, 'p');
+      expect(run('init', project).code).toBe(0);
+      expect(run('blocks', 'search', 'chart').json).toMatchObject({ blocks: [{ name: 'hyperframes:race', duration: 2 }] });
+      const added = run('-C', project, 'blocks', 'add', 'race');
+      expect(added.code).toBe(0);
+      expect(added.json).toMatchObject({ src: 'motion/race/index.html', credit: { license: 'Apache-2.0' }, added: { kind: 'scene' } });
+      expect(added.json.left).toBeUndefined();
+      // GSAP is the project's now; the page renders without the network
+      expect(readFileSync(join(project, 'motion', 'race', 'index.html'), 'utf8')).toMatch(/src="vendor\/jsdelivr-npm-gsap-3\.14\.2-dist-gsap\.min-[0-9a-f]{8}\.js"/);
+      expect(readFileSync(join(project, 'CREDITS.md'), 'utf8')).toContain('GSAP Standard');
+      // a param of the item is the block's variable
+      const config = join(project, 'cuttle.json');
+      const raw = JSON.parse(readFileSync(config, 'utf8')) as { scenes: { params?: Record<string, unknown> }[] };
+      raw.scenes[0]!.params = { title: 'From Cuttle', accent: '#1a3cff' };
+      writeFileSync(config, JSON.stringify(raw));
+      server.kill();
+      const checked = run('-C', project, 'motion', 'check', 'motion/race/index.html', '--at', '1');
+      expect(checked.code).toBe(0);
+      expect(checked.json).toMatchObject({ errors: [] });
+      // at 1 s the timeline has moved the blue bar 500 px
+      const png = PNG.sync.read(readFileSync((checked.json.stills as { file: string }[])[0]!.file));
+      const at = (x: number) => [...png.data.subarray((400 * png.width + x) * 4, (400 * png.width + x) * 4 + 3)];
+      expect(at(600)[2]).toBeGreaterThan(200);
+      expect(at(100)).toEqual([255, 255, 255]);
+    } finally {
+      server.kill();
+      rmSync(root, { recursive: true, force: true });
+    }
+  }, 300_000);
 
   it('lands callouts on the take\'s clicks and kinetic captions on its words, over the video', () => {
     const dir = join(mkdtempSync(join(tmpdir(), 'cuttle-take-')), 'take');

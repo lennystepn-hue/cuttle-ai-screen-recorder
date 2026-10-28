@@ -18,6 +18,7 @@ import { motionAddCommand, motionCheckCommand, motionIconsCommand, motionNewComm
 import { musicCheckCommand, musicNewCommand, musicSetCommand, musicTemplatesCommand, soundAddCommand, soundListCommand } from './commands/music';
 import { previewCommand } from './commands/preview';
 import { REVIEW_KINDS, reviewCommand } from './commands/review';
+import { blocksAddCommand, blocksSearchCommand, blocksShowCommand } from './commands/blocks';
 import { shotFrameCommand, shotStylesCommand, shotTakeCommand, type ShotFrameArgs, type ShotTakeArgs } from './commands/shot';
 import { recordCommand } from './commands/record';
 import { recoverCommand } from './commands/recover';
@@ -278,6 +279,34 @@ export async function runCli(argv: readonly string[], streams?: Streams): Promis
     .action(
       action((output, project, options: { format?: string; out?: string; ignore?: string[]; remember?: boolean }) =>
         withSignal(output, (signal) => reviewCommand(project, options, output, signal)),
+      ),
+    );
+
+  const blocks = program.command('blocks').description("motion blocks, Lottie animations and icons from open collections (HyperFrames' registry, LottieFiles, Iconify), brought into the project to render offline, with their licences in CREDITS.md");
+  blocks
+    .command('search <words...>')
+    .description('find blocks (or icons, --source icons) by what they show, best first')
+    .option('--source <source>', 'hyperframes (blocks, the default) or icons (Iconify\'s)')
+    .option('--tag <tag>', 'only blocks with this tag (chart, transition, title, 3d, code, camera…)')
+    .option('--refresh', 'read the registry again now (it is kept for a day)')
+    .action(action((output, _project, words: string[], options: { source?: string; tag?: string; refresh?: boolean }) => withSignal(output, (signal) => blocksSearchCommand(words, options, output, signal))));
+  blocks
+    .command('show <name>')
+    .description("a block's preview picture (into preview/blocks/ in the project), to look at before it comes in")
+    .action(action((output, project, name: string) => withSignal(output, (signal) => blocksShowCommand(project, name, output, signal))));
+  blocks
+    .command('add <name>')
+    .description("bring a block (hyperframes:<name>), a Lottie animation (a URL or file of its JSON) or an icon (icons:<set>:<name>) into the project; a page goes into the video as motion add puts one")
+    .option('--name <name>', 'its folder in motion/ (default: from its name)')
+    .option('--as <kind>', 'scene or overlay (default: scene)')
+    .option('--label <text>', 'its name on the timeline')
+    .option('--duration <seconds>', "how long it lasts (default: the block's or the animation's)", positive)
+    .option('--first', 'a scene goes first instead of last')
+    .option('--after <scene>', 'a scene goes right after this one, by id or place from 0')
+    .option('--at <seconds>', "an overlay's start, in source seconds", seconds)
+    .action(
+      action((output, project, name: string, options: { name?: string; as?: string; label?: string; duration?: number; first?: boolean; after?: string; at?: number }) =>
+        withSignal(output, (signal) => blocksAddCommand(project, name, options, output, signal)),
       ),
     );
 

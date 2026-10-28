@@ -352,6 +352,9 @@ Then refine `cuttle.json` ([project.md](project.md)) and preview again:
 - **Sounds.** A sound at a moment, without the music: `cuttle -C "<project>" --json sound add whoosh --at 12.4`
   (source seconds) or `--scene s5 --at 0.2`; `sound list` has the built-in sounds. A motion page
   asks for its own with `cuttle.sound(…)` (motion.md); the templates come with theirs.
+- **Blocks.** `cuttle --json blocks search <words>` finds blocks of HyperFrames' registry (charts,
+  3D logos, transitions, carousels), `blocks add <name>` brings one in to render offline, with its
+  licence in CREDITS.md; also Lottie animations by URL and Iconify's icons (motion.md).
 - **Transitions.** A page in place of the crossfade into a scene: your own,
   `cuttle -C "<project>" --json motion add motion/<name>/index.html --as transition --into <scene id>`, or
   one of the kit's, `cuttle -C "<project>" --json motion new iris --into <scene id>` (fold, wipe, zoom,

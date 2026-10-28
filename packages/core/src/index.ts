@@ -50,3 +50,9 @@ export { ELEVENLABS_MODEL, elevenLabsKey, elevenLabsVoices, speakElevenLabs, wor
 export { speakLocal } from './voice/local';
 export { spokenWords, spreadWords } from './voice/words';
 export { VOICE_RATE, readRender, renderVoiceover, type RenderedLine, type VoiceoverOptions } from './voice/render';
+export { BLOCK_HOSTS, allowedUrl, blocksCache, fetchBytes, fetchJson, fetchText } from './blocks/net';
+export { kitModule, vendorPage, type Vendored } from './blocks/vendor';
+export { adaptBlock, blockFiles, blockNamed, findBlocks, hyperframesCatalog, type BlockCatalog, type BlockItem, type BlockVariable } from './blocks/hyperframes';
+export { lottieInfo, lottiePage, lottieSeconds, type LottieInfo } from './blocks/lottie';
+export { iconName, iconifyIcon, searchIconify, type IconSet } from './blocks/iconify';
+export { CREDITS_JSON, CREDITS_MD, addCredit, vendoredLicense, type Credit } from './blocks/credits';

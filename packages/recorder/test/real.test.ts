@@ -37,6 +37,31 @@ it.runIf(process.env.MODE === 'real')('records the primary monitor and a region 
 }, 60_000);
 
 /**
+ * The screen with the computer's sound beside it, and a screenshot while it records: on macOS three
+ * ScreenCaptureKit streams at once, which macOS 27 cuts off from each other when they run from the
+ * same file. Reads only metadata and the screenshot's size, and deletes the take.
+ */
+it.runIf(process.env.MODE === 'real')("records the screen with the computer's sound, and takes a screenshot meanwhile", async () => {
+  const devices = await listDevices({ media: false });
+  const monitor = devices.monitors.find((candidate) => candidate.primary) ?? devices.monitors[0];
+  if (!monitor) throw new Error('no monitor found');
+  const projectDir = mkdtempSync(join(tmpdir(), 'cuttle-real-sound-'));
+  try {
+    const recording = record({ projectDir, source: { kind: 'region', rect: [0, 0, 640, 360], monitor: monitor.index }, systemAudio: true, stop: { maxSeconds: 4 }, countdownSeconds: 0 });
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+    const shot = await takeShot({ source: { kind: 'region', monitor: monitor.index, rect: [0, 0, 64, 64] }, out: join(projectDir, 'shot.png'), devices });
+    const take = await recording.done;
+    console.log(`${take.seconds} s, system ${take.system ?? 'none'}, warnings ${JSON.stringify(take.warnings)}`);
+    expect(shot.width).toBe(64);
+    expect(take.seconds).toBeGreaterThan(3);
+    expect(take.system).toBeDefined();
+    expect(take.warnings.filter((warning) => /sound/.test(warning))).toEqual([]);
+  } finally {
+    rmSync(projectDir, { recursive: true, force: true });
+  }
+}, 60_000);
+
+/**
  * Screenshots of the primary monitor, a region of it and the first window: each at its pixels, the
  * display's scale in its resolution. Reads only the PNGs' sizes and deletes them.
  */

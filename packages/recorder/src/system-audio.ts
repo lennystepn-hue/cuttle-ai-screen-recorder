@@ -7,7 +7,7 @@ import { existsSync } from 'node:fs';
 import { dirname, join, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { Feeder } from './ffmpeg';
-import { captureHelper } from './mac-capture';
+import { captureHelperFor } from './mac-capture';
 import type { Platform, ScreenArea } from './sources';
 
 /** The helpers' sample rate. */
@@ -33,7 +33,7 @@ export function loopbackHelper(chosen = process.env.CUTTLE_LOOPBACK_HELPER): str
  */
 export function systemFeeder(platform: Platform, area: ScreenArea, hide: readonly number[]): Feeder | undefined {
   if (platform === 'macos') {
-    const helper = captureHelper();
+    const helper = captureHelperFor('audio');
     if (!helper) return undefined;
     const which = area.window !== undefined ? ['--window', String(area.window)] : hide.flatMap((pid) => ['--exclude-pid', String(pid)]);
     return { command: helper, args: ['audio', '--display', String(area.monitor.displayId ?? 0), ...which], stream: true, stamps: true };

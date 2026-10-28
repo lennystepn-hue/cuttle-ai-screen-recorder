@@ -2,7 +2,7 @@
 // leaves out the windows of given processes (the app's HUD, pill and pickers; avfoundation records
 // them), as raw BGRA frames that ffmpeg reads from a pipe at a steady frame rate.
 import { existsSync } from 'node:fs';
-import { dirname, join, sep } from 'node:path';
+import { basename, dirname, join, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { FRAME_RATE } from './args';
 import type { ScreenArea } from './sources';
@@ -17,6 +17,19 @@ export function captureHelper(chosen = process.env.CUTTLE_CAPTURE_HELPER): strin
   // a packaged app runs its bundle from app.asar; executables are unpacked beside it
   const unpacked = (path: string) => path.replace(`${sep}app.asar${sep}`, `${sep}app.asar.unpacked${sep}`);
   return [join(here, 'cuttle-capture'), join(here, '..', 'native', 'macos', 'cuttle-capture')].map(unpacked).find((file) => existsSync(file));
+}
+
+/**
+ * The helper for the system audio or a screenshot: its copy beside it under a name of its own
+ * (`cuttle-capture-audio`, `-shot`; build-macos.mjs makes them), else the helper itself. macOS's
+ * capture service (replayd) knows a client by its executable's path and keeps one connection for
+ * each: a second process of the same file cuts a take's screen stream off ("Stream failed due to
+ * interrupted app connection", macOS 27), and the two go on cutting each other off.
+ */
+export function captureHelperFor(role: 'audio' | 'shot', helper = captureHelper()): string | undefined {
+  if (!helper) return undefined;
+  const copy = join(dirname(helper), `${basename(helper)}-${role}`);
+  return existsSync(copy) ? copy : helper;
 }
 
 /**

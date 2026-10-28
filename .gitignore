@@ -5,5 +5,5 @@ out/
 .DS_Store
 .vitest/
 apps/desktop/build/
-packages/recorder/native/macos/cuttle-capture
+packages/recorder/native/macos/cuttle-capture*
 packages/recorder/native/windows/cuttle-loopback.exe

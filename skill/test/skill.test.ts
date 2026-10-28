@@ -182,6 +182,31 @@ describe('skill/install.mjs', () => {
     expect(existsSync(target)).toBe(false);
   });
 
+  it('refreshes only a skill this checkout installed (pnpm install, cli:install), with its files as they are now', () => {
+    const config = temp();
+    const target = join(config, 'skills', 'cuttle');
+    // nothing installed: nothing to refresh, and nothing made
+    expect(install(config, '--refresh').status).toBe(0);
+    expect(existsSync(target)).toBe(false);
+    // the app's install, and another checkout's (a worktree on another branch), stay as they are
+    mkdirSync(target, { recursive: true });
+    for (const marker of [{ app: true, version: '0.3.4', files: ['SKILL.md'] }, { repo: join(config, 'elsewhere'), files: ['SKILL.md'] }]) {
+      writeFileSync(join(target, '.cuttle-skill.json'), JSON.stringify(marker));
+      writeFileSync(join(target, 'SKILL.md'), 'not refreshed');
+      expect(install(config, '--refresh').status).toBe(0);
+      expect(readFileSync(join(target, 'SKILL.md'), 'utf8')).toBe('not refreshed');
+    }
+    // this checkout's older install: its files as they are now, a file it no longer has gone
+    writeFileSync(join(target, '.cuttle-skill.json'), JSON.stringify({ repo: REPO, files: ['SKILL.md', 'gone.md'] }));
+    writeFileSync(join(target, 'gone.md'), 'an old guide');
+    const refreshed = install(config, '--refresh');
+    expect(refreshed.status).toBe(0);
+    expect(refreshed.stdout).toMatch(/^refreshed the cuttle skill/);
+    expect(readFileSync(join(target, 'project.md'), 'utf8')).toBe(reference);
+    expect(readFileSync(join(target, 'SKILL.md'), 'utf8')).toContain(`(\`${REPO}\`)`);
+    expect(existsSync(join(target, 'gone.md'))).toBe(false);
+  });
+
   it('never touches a cuttle skill it did not install', () => {
     const config = temp();
     const target = join(config, 'skills', 'cuttle');

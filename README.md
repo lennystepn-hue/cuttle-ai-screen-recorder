@@ -257,7 +257,9 @@ private and renders the MP4.
 (`~/.claude/skills/cuttle/`, or under `CLAUDE_CONFIG_DIR`) with this repository's path filled in.
 `pnpm skill:uninstall` removes it; a `cuttle` skill it did not install is never touched. The skill
 needs `cuttle` on PATH (`pnpm cli:install`). Then ask Claude Code for a demo video, or type
-`/cuttle`.
+`/cuttle`. It stays current by itself: `pnpm install` and `pnpm cli:install` in this checkout install
+it again with the guides as they are now (a skill another checkout or the app installed is left as
+it is), and the app installs its own skill again after each update.
 
 ## From your own code (SDK)
 

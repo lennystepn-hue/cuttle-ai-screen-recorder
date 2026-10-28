@@ -3345,6 +3345,51 @@ describe.runIf(enabled)('the Cuttle app', () => {
   }, 60_000);
 });
 
+describe.runIf(enabled)('the skill after an update', () => {
+  let app: ElectronApplication;
+  let root: string;
+  const skill = () => join(root, 'claude', 'skills', 'cuttle');
+
+  beforeAll(async () => {
+    root = mkdtempSync(join(tmpdir(), 'cuttle-skill-update-'));
+    // the skill as an older version of the app installed it: a guide this version no longer has, and
+    // SKILL.md as it was then
+    mkdirSync(skill(), { recursive: true });
+    writeFileSync(join(skill(), '.cuttle-skill.json'), JSON.stringify({ app: true, version: '0.0.1', files: ['SKILL.md', 'gone.md'] }));
+    writeFileSync(join(skill(), 'SKILL.md'), 'the skill of 0.0.1');
+    writeFileSync(join(skill(), 'gone.md'), 'a guide of 0.0.1');
+    app = await _electron.launch({
+      executablePath: electronPath(),
+      args: [MAIN, '--cuttle-check'],
+      env: {
+        ...process.env,
+        CUTTLE_HIDDEN: '1',
+        CUTTLE_CHECK: '1',
+        CUTTLE_USER_DATA: join(root, 'user-data'),
+        CUTTLE_RECORDER_BACKEND: 'test',
+        CUTTLE_BIN_DIR: join(root, 'bin'),
+        CLAUDE_CONFIG_DIR: join(root, 'claude'),
+      },
+    });
+  }, 60_000);
+
+  afterAll(async () => {
+    await app?.close();
+    await rm(root, { recursive: true, force: true });
+  });
+
+  it("installs the app's skill again when another version installed it, without a click", async () => {
+    const version = await app.evaluate(({ app: electron }) => electron.getVersion());
+    await expect.poll(() => (JSON.parse(readFileSync(join(skill(), '.cuttle-skill.json'), 'utf8')) as { version?: string }).version, { timeout: 20_000 }).toBe(version);
+    const files = (JSON.parse(readFileSync(join(skill(), '.cuttle-skill.json'), 'utf8')) as { files: string[] }).files;
+    expect(files).toContain('story.md');
+    expect(existsSync(join(skill(), 'gone.md'))).toBe(false);
+    const installed = readFileSync(join(skill(), 'SKILL.md'), 'utf8');
+    expect(installed).toContain("open Cuttle's settings");
+    expect(installed).not.toContain('{{');
+  });
+});
+
 describe.runIf(enabled)('the first run', () => {
   let app: ElectronApplication;
   let root: string;

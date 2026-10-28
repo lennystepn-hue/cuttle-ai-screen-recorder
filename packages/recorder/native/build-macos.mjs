@@ -40,9 +40,23 @@ if (stale) {
   }
   console.log(`built ${binary}`);
 }
+/**
+ * The helper and its copies under names of their own, for the system audio and a screenshot beside a
+ * take's screen: macOS's capture service (replayd) keeps one connection per executable path, so a
+ * second process of the same file cuts the first one's stream off (macOS 27: "Stream failed due to
+ * interrupted app connection"). mac-capture.ts runs them (captureHelperFor).
+ */
+const NAMES = ['cuttle-capture', 'cuttle-capture-audio', 'cuttle-capture-shot'];
+const place = (dir, name) => {
+  copyFileSync(binary, join(dir, name));
+  chmodSync(join(dir, name), 0o755);
+};
+for (const name of NAMES.slice(1)) {
+  const copy = join(here, name);
+  if (!existsSync(copy) || statSync(copy).mtimeMs < statSync(binary).mtimeMs) place(here, name);
+}
 for (const folder of process.argv.slice(2)) {
   const dir = resolve(folder);
   mkdirSync(dir, { recursive: true });
-  copyFileSync(binary, join(dir, 'cuttle-capture'));
-  chmodSync(join(dir, 'cuttle-capture'), 0o755);
+  for (const name of NAMES) place(dir, name);
 }

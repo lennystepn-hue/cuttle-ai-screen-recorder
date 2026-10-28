@@ -9,7 +9,7 @@ import { rm } from 'node:fs/promises';
 import { listDevices } from './devices';
 import { RecorderError } from './errors';
 import { ffmpegMissing, ffmpegPath } from './ffmpeg';
-import { captureHelper } from './mac-capture';
+import { captureHelperFor } from './mac-capture';
 import { platformFor, resolveArea, type Platform, type ScreenArea } from './sources';
 import type { Backend, CaptureSource, Devices } from './types';
 import { hasWindowCapture } from './window-capture';
@@ -84,7 +84,7 @@ async function macShot(area: ScreenArea, options: AreaShot): Promise<{ width: nu
     mac.requestScreenAccess();
     throw new RecorderError('permission-denied', SCREEN_DENIED);
   }
-  const helper = captureHelper();
+  const helper = captureHelperFor('shot');
   if (!helper) throw new RecorderError('capture', 'the capture helper (cuttle-capture) is missing: build it with "pnpm install", or reinstall Cuttle');
   const { monitor, crop } = area;
   const args = [

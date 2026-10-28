@@ -1,8 +1,10 @@
 import { execFileSync } from 'node:child_process';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
+import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { describe, expect, it } from 'vitest';
-import { captureHelper, helperArgs, helperInput } from '../src/mac-capture';
+import { describe, expect, it, vi } from 'vitest';
+import { captureHelper, captureHelperFor, helperArgs, helperInput } from '../src/mac-capture';
 import { screenLatency } from '../src/sources';
 
 /** The oldest macOS a Mach-O file runs on (its LC_BUILD_VERSION's minos), as "13.0". */
@@ -46,6 +48,36 @@ describe('the macOS capture helper', () => {
     const minos = minosOf(helper!);
     expect(minos).toBeDefined();
     expect(compareVersions(minos!, app), `cuttle-capture needs macOS ${minos}, the app runs on ${app}`).toBeLessThanOrEqual(0);
+  });
+
+  it('runs the system audio and a screenshot from copies of their own, beside the take\'s screen', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'cuttle-helper-'));
+    try {
+      const helper = join(dir, 'cuttle-capture');
+      writeFileSync(helper, '');
+      // without the copies (a helper of one's own, CUTTLE_CAPTURE_HELPER): the helper itself
+      expect(captureHelperFor('audio', helper)).toBe(helper);
+      writeFileSync(join(dir, 'cuttle-capture-audio'), '');
+      writeFileSync(join(dir, 'cuttle-capture-shot'), '');
+      expect(captureHelperFor('audio', helper)).toBe(join(dir, 'cuttle-capture-audio'));
+      expect(captureHelperFor('shot', helper)).toBe(join(dir, 'cuttle-capture-shot'));
+      // no helper at all (one of one's own that is not there): none for the sound either
+      vi.stubEnv('CUTTLE_CAPTURE_HELPER', join(dir, 'missing'));
+      expect(captureHelperFor('audio')).toBeUndefined();
+    } finally {
+      vi.unstubAllEnvs();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it.runIf(process.platform === 'darwin')('is built with its copies, the same program under other names (macOS keeps one stream per path)', () => {
+    const helper = captureHelper('');
+    expect(helper, 'cuttle-capture is built (pnpm install)').toBeDefined();
+    for (const role of ['audio', 'shot'] as const) {
+      const copy = captureHelperFor(role, helper);
+      expect(copy).toBe(`${helper}-${role}`);
+      expect(readFileSync(copy!).equals(readFileSync(helper!)), `${copy} is the helper as built`).toBe(true);
+    }
   });
 
   it('takes a window by itself, at its size', () => {

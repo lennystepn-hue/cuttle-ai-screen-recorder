@@ -11,7 +11,7 @@ import { startPicking, startShooting, stopForQuit, recordingRuns } from './recor
 import { assetPath, registerSchemes } from './protocols';
 import { loadSettings, onSettingsChange, pillPlaceOf } from './settings';
 import { openSettings } from './settings-window';
-import { findFfmpeg } from './tools';
+import { findFfmpeg, refreshSkill } from './tools';
 import { createTray, updateTray, type TrayActions } from './tray';
 import { startUpdates } from './updates';
 import { launchOf, type Launch } from './launch';
@@ -116,6 +116,8 @@ if (!app.requestSingleInstanceLock(launched)) {
     else await showPill('start');
     // ffmpeg where the OS has it now (installed since the last login, say): the helpers start with it
     void findFfmpeg().catch(() => undefined);
+    // the skill the app installed for Claude Code, as this version has it (after an update)
+    void refreshSkill().catch((error: Error) => console.warn(`the skill was not refreshed: ${error.message}`));
     // a newer version from GitHub's releases, a little after the start and once a day (the packaged app)
     void startUpdates();
     onSettingsChange((latest) => updateTray(latest.recent, actions));

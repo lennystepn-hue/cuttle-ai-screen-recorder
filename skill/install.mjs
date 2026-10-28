@@ -1,8 +1,11 @@
 // Installs the Claude skill: copies skill/cuttle/ to <Claude's config folder>/skills/cuttle/
 // (CLAUDE_CONFIG_DIR, default ~/.claude), with {{REPO}} in SKILL.md replaced by this repository's
 // path. A file .cuttle-skill.json in the installed folder marks it as ours; a cuttle skill without
-// it belongs to someone else and is never touched. `--uninstall` removes our files.
-//   node skill/install.mjs [--uninstall]
+// it belongs to someone else and is never touched. `--uninstall` removes our files. `--refresh`
+// (pnpm install and cli:install run it) installs again only a skill this checkout installed, so it
+// follows the repository: one the app installed, another checkout's (a worktree on another branch)
+// or none stays as it is.
+//   node skill/install.mjs [--uninstall | --refresh]
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -43,7 +46,14 @@ if (process.argv.includes('--uninstall')) {
   process.exit(0);
 }
 
+/** The same folder, as Windows compares paths (ignoring case) and POSIX does. */
+const samePath = (a, b) => {
+  const key = (path) => resolve(path).replace(/\\/g, '/').replace(/\/+$/, '');
+  return process.platform === 'win32' ? key(a).toLowerCase() === key(b).toLowerCase() : key(a) === key(b);
+};
+const refresh = process.argv.includes('--refresh');
 const previous = installed();
+if (refresh && (typeof previous?.repo !== 'string' || !samePath(previous.repo, repo))) process.exit(0);
 if (existsSync(target) && !previous) {
   console.error(`${target} exists and was not installed by this script; move it away first`);
   process.exit(1);
@@ -58,6 +68,10 @@ for (const name of files) {
   // A function, so `$&` or `$'` in the path stays as it is.
   const text = readFileSync(join(source, name), 'utf8').replaceAll('{{INSTALL_CLI}}', () => `ask the user to run \`pnpm cli:install\` in the cuttle repository (\`${repoPath}\`)`);
   writeFileSync(join(target, name), text.replaceAll('{{REPO}}', () => repoPath));
+}
+if (refresh) {
+  console.log(`refreshed the cuttle skill in ${target} (${files.join(', ')})`);
+  process.exit(0);
 }
 console.log(`installed the cuttle skill in ${target} (${files.join(', ')})`);
 console.log('Claude Code uses it when you ask for a demo or type /cuttle (a session that was already running may need /reload-skills); it needs the cuttle command: pnpm cli:install');

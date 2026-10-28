@@ -17,6 +17,7 @@ import { CHECK } from './check';
 import { cliEntry } from './cli-path';
 import { mediaWorker } from './media-service';
 import { recorderHost } from './recorder-host';
+import { appSkillStale } from './skill-refresh';
 import { batchPath } from './batch';
 import { addToPath, readPaths } from './user-path';
 
@@ -242,12 +243,32 @@ async function installSkill(): Promise<void> {
   const source = skillSource();
   const files = readdirSync(source).filter(markdown);
   await mkdir(target, { recursive: true });
-  // the marker first: an install cut short still belongs to Cuttle
-  await writeFile(marker, `${JSON.stringify({ app: true, files }, null, 2)}\n`);
+  // the marker first: an install cut short still belongs to Cuttle; its version says when to install again
+  await writeFile(marker, `${JSON.stringify({ app: true, version: app.getVersion(), files }, null, 2)}\n`);
   for (const name of files) {
     const text = await readFile(join(source, name), 'utf8');
     await writeFile(join(target, name), text.replaceAll('{{INSTALL_CLI}}', () => APP_INSTALL_HINT));
   }
+}
+
+/**
+ * After an update: the skill the app installed is installed again when another version of the app
+ * wrote it, so new guides reach Claude Code without a click. A folder Cuttle did not write, and one
+ * the repository's install wrote (`pnpm skill:install`), stay as they are. Says whether it installed.
+ */
+export async function refreshSkill(): Promise<boolean> {
+  // the check writes only into a Claude folder of its own, never the user's
+  if (CHECK && !process.env.CLAUDE_CONFIG_DIR) return false;
+  const text = await readFile(join(skillDir(), SKILL_MARK), 'utf8').catch(() => undefined);
+  let marker: unknown;
+  try {
+    marker = text === undefined ? undefined : JSON.parse(text);
+  } catch {
+    return false;
+  }
+  if (!appSkillStale(marker, app.getVersion())) return false;
+  await installSkill();
+  return true;
 }
 
 // ---- status and install ------------------------------------------------------------------------

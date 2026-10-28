@@ -72,7 +72,7 @@ page in `motion/` you did not write.
 
 - **One design for the whole video:** a `motion/shared.css` and `motion/shared.js` (palette, type
   scale, easing curves, the background, the logo's mark, helpers you write) that every page imports,
-  so the scenes read as one film.
+  so the scenes read as one film (below, "Looks").
 - **Generate pages:** a script you write (Node, Python, anything) may write many pages from data:
   one scene per feature, per changelog entry, per number, per quote. Add each with `motion add`.
 - **Real content:** a page reads the project's files (`fetch('./data.json')`, images as
@@ -82,6 +82,39 @@ page in `motion/` you did not write.
   rebuilt in HTML and animated exactly: perfect text, any size, no private data to mask.
 - **Mix:** pages between clips, over them, and as the way between scenes; `card` and `still` scenes
   and recorded clips in the same video.
+
+## Looks
+
+A look is the rules of one medium, written once in `motion/shared.css` and `motion/shared.js` and
+imported by every page: its ground and texture, its inks and where each may appear, its type, and
+how things come in and leave in that medium (paper is laid down and lifted, ink is printed, a pen
+draws, a stamp lands). Each `shared.js` gives every page the same calls, so pages stay short and
+alike in behaviour while the look decides how it feels:
+
+```js
+import { look, ground, enter, exit } from '../shared.js';
+ground();
+cuttle.onFrame((t) => {
+  enter(title, t, { at: 0.2, by: 'word' }); // the medium's entrance, word by word
+  exit(title, t, { at: cuttle.duration - 0.4 });
+});
+```
+
+**Give each video a look of its own**, found in its subject (story.md: the medium, its numbers):
+`cuttle -C "<project>" --json look new` writes the frame of one (those calls, nothing decided), and
+you write the medium into it. The kit has eight looks as examples of how it is done, each with a
+sample page: `swiss` (a grid, one grotesque, one red, things slide and snap), `poster` (giant
+condensed capitals, two flat colours, stamped on the beat, hard cuts), `editorial` (a light serif,
+one italic word in red, grey to ink, a slow push), `data-desk` (a newsroom's chart, numbers that
+count, bars that grow), `paper-cut` (paper laid down on a spring with real shadows), `risograph`
+(two inks off register, halftone, printed plate by plate), `blueprint` (lines that draw themselves,
+typed labels) and `zine` (cut-out labels, tape, a highlighter, a shiver). `cuttle --json look list`
+names them, `cuttle -C "<project>" --json look show <name>` renders a sample on a sheet to look at,
+`cuttle -C "<project>" --json look apply <name>` writes it into the project (`--sample` adds its
+sample as the first scene; the ground goes around the pages, a look with hard cuts turns crossfades
+off, and it says which transition and music go with it). A look taken from the kit is a start:
+change its palette, type, texture and motion until it belongs to this video, and never give two
+videos the same one (`review` says when a video looks like one made before).
 
 ## Blocks from open collections
 

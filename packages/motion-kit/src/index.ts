@@ -13,6 +13,7 @@
 //   mediabunny/          mediabunny.min.mjs: reads video files for the take's frames
 //   fonts/               Inter, JetBrains Mono and display faces with character (woff2, Latin; see KIT_FONTS)
 //   templates/<name>/    the pages `cuttle motion new` copies into a project
+//   looks/<name>/        the looks `cuttle look apply` copies (shared.css, shared.js, sample.html), and blank/ for one of your own
 //   licenses/            the licenses of what it bundles
 
 /** The kit's origin in a motion page. */
@@ -165,4 +166,33 @@ export const BUILT_IN_SOUNDS: readonly (readonly [name: string, description: str
   ['error', 'two dull notes down: it did not'],
   ['type-burst', 'a burst of keys typed fast'],
   ['glitch', 'a digital stutter'],
+];
+
+/**
+ * A look of the kit: an art direction built from one medium (its ground, inks, type, how things come
+ * in and leave), as `motion/shared.css` and `motion/shared.js` every page imports. Examples of how a
+ * look is made, to start from and change: a video's own look comes from its subject.
+ */
+export interface Look {
+  name: string;
+  /** The medium and its rules, in a sentence. */
+  description: string;
+  /** Its ground, the colour around the pages (`look.background` gets it). */
+  ground: string;
+  /** Hard cuts between scenes rather than crossfades. */
+  hardCuts: boolean;
+  /** The transition template and the music template that go with it. */
+  transition: string;
+  music: string;
+}
+
+export const LOOKS: readonly Look[] = [
+  { name: 'swiss', description: 'a twelve-column grid, one grotesque, black, white and one red; things slide along the grid and snap', ground: '#f1efe9', hardCuts: false, transition: 'wipe', music: 'pulse' },
+  { name: 'poster', description: 'giant condensed capitals filling the frame, two flat colours and a disc; words stamped on the beat, hard cuts', ground: '#ffd23f', hardCuts: true, transition: 'whip', music: 'pulse' },
+  { name: 'editorial', description: 'a light serif set large with room around it, one italic word in red, paper with grain; words go from grey to ink, a slow push', ground: '#faf7f1', hardCuts: false, transition: 'push', music: 'drift' },
+  { name: 'data-desk', description: "a newsroom's chart: white, thin rules, one blue for the point, numbers that count, the source under it", ground: '#ffffff', hardCuts: false, transition: 'push', music: 'drift' },
+  { name: 'paper-cut', description: 'coloured paper on kraft with real shadows; pieces laid into place from above on a spring, lifted away', ground: '#efe2cf', hardCuts: false, transition: 'push', music: 'bright' },
+  { name: 'risograph', description: 'two inks on rough paper, blue and fluorescent pink overprinting off register, halftone dots; printed plate by plate', ground: '#f4efe3', hardCuts: true, transition: 'pixels', music: 'lofi' },
+  { name: 'blueprint', description: 'white lines on a blue sheet with its grid, condensed headlines, mono labels; drawings draw themselves, labels type in', ground: '#0d3b82', hardCuts: false, transition: 'wipe', music: 'drift' },
+  { name: 'zine', description: 'photocopied paper, words cut out as labels and taped down, a highlighter, a handwritten note; hard cuts and a hand-made shiver', ground: '#eeeae1', hardCuts: true, transition: 'glitch', music: 'lofi' },
 ];

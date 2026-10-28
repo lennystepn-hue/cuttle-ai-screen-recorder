@@ -1,0 +1,25 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Risograph</title>
+    <link rel="stylesheet" href="../shared.css" />
+  </head>
+  <body>
+    <main class="look-page">
+      <h1 class="look-title" id="title">Two inks, one take</h1>
+      <p class="look-line" id="line">Printed frame by frame, a little off register, as it should be.</p>
+    </main>
+    <script type="module">
+      import { ground, enter, exit } from '../shared.js';
+      ground();
+      cuttle.ready(document.fonts.load('400 118px "Rubik Mono One"'));
+      const $ = (id) => document.getElementById(id);
+      cuttle.onFrame((t) => {
+        enter($('title'), t, { at: 0.2 });
+        enter($('line'), t, { at: 0.8, offset: 3 });
+        for (const id of ['title', 'line']) exit($(id), t, { at: cuttle.duration - 0.2 });
+      });
+    </script>
+  </body>
+</html>

@@ -1,0 +1,30 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Zine</title>
+    <link rel="stylesheet" href="../shared.css" />
+  </head>
+  <body>
+    <main class="look-page">
+      <h1 class="look-title" id="title">Made by hand, cut by Cuttle</h1>
+      <p id="line">no editor, <span class="look-marker" id="marker">no timeline</span>, no evening lost</p>
+      <p class="look-note" id="note">← really.</p>
+    </main>
+    <div class="look-tape" id="tape" style="left: 8%; top: 22%; transform: rotate(-8deg)"></div>
+    <script type="module">
+      import { ground, enter, exit, marker } from '../shared.js';
+      ground();
+      cuttle.ready(Promise.all([document.fonts.load('400 150px Anton'), document.fonts.load('600 54px Caveat')]));
+      const $ = (id) => document.getElementById(id);
+      cuttle.onFrame((t) => {
+        enter($('title'), t, { at: 0.15, by: 'word' });
+        enter($('tape'), t, { at: 0.6 });
+        enter($('line'), t, { at: 1.0 });
+        marker($('marker'), t, { at: 1.3 });
+        enter($('note'), t, { at: 1.8 });
+        for (const id of ['title', 'tape', 'line', 'note']) exit($(id), t, { at: cuttle.duration - 0.15 });
+      });
+    </script>
+  </body>
+</html>

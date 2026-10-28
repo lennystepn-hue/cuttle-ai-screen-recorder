@@ -17,6 +17,7 @@ rmSync(target, { recursive: true, force: true });
 mkdirSync(target, { recursive: true });
 copy(join(root, 'kit'), '.');
 copy(join(root, 'templates'), 'templates');
+copy(join(root, 'looks'), 'looks');
 copy(join(modules, 'three', 'build', 'three.module.js'), 'three/three.module.js');
 copy(join(modules, 'three', 'build', 'three.core.js'), 'three/three.core.js');
 copy(join(modules, 'three', 'examples', 'jsm'), 'three/addons');

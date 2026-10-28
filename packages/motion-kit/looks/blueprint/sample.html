@@ -1,0 +1,36 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Blueprint</title>
+    <link rel="stylesheet" href="../shared.css" />
+  </head>
+  <body>
+    <main class="look-page">
+      <svg class="look-drawing" id="drawing" viewBox="0 0 1760 920" preserveAspectRatio="xMidYMid meet">
+        <rect x="900" y="160" width="620" height="420" rx="18" />
+        <line x1="900" y1="250" x2="1520" y2="250" />
+        <circle cx="940" cy="205" r="12" />
+        <circle cx="980" cy="205" r="12" />
+        <path d="M 980 420 L 1100 340 L 1220 400 L 1340 300 L 1460 330" />
+        <path d="M 900 640 L 1520 640 M 900 620 L 900 660 M 1520 620 L 1520 660" stroke="#ffd34d" />
+      </svg>
+      <h1 class="look-title" id="title">Built line<br />by line</h1>
+      <p class="look-label" id="label" style="position: absolute; left: 0; top: 46%">FIG. 1 — THE TAKE, AS DRAWN</p>
+      <p class="look-label is-accent" id="size" style="position: absolute; left: 51.5%; top: 72%">1920 × 1080 PX</p>
+    </main>
+    <script type="module">
+      import { ground, enter, exit, draw } from '../shared.js';
+      ground();
+      cuttle.ready(document.fonts.load('700 104px Archivo'));
+      const $ = (id) => document.getElementById(id);
+      cuttle.onFrame((t) => {
+        draw($('drawing'), t, { at: 0.2 });
+        enter($('title'), t, { at: 0.3 });
+        enter($('label'), t, { at: 0.9 });
+        enter($('size'), t, { at: 1.4 });
+        exit(document.querySelector('.look-page'), t, { at: cuttle.duration - 0.35 });
+      });
+    </script>
+  </body>
+</html>

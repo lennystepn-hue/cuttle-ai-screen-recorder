@@ -1,0 +1,28 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Editorial</title>
+    <link rel="stylesheet" href="../shared.css" />
+  </head>
+  <body>
+    <main class="look-page" id="page">
+      <h1 class="look-title" id="title">The demo that <em>edits</em> itself</h1>
+      <div class="look-rule" id="rule"></div>
+      <p class="look-line" id="line">One take, cut where it rests, zoomed where it matters, masked where it should be.</p>
+    </main>
+    <script type="module">
+      import { ground, enter, exit, push, rule } from '../shared.js';
+      ground();
+      cuttle.ready(document.fonts.load('300 124px Fraunces'));
+      const $ = (id) => document.getElementById(id);
+      cuttle.onFrame((t) => {
+        push($('page'), t);
+        enter($('title'), t, { at: 0.2 });
+        rule($('rule'), t, { at: 0.9 });
+        enter($('line'), t, { at: 1.2, each: 0.03 });
+        exit($('page'), t, { at: cuttle.duration - 0.4 });
+      });
+    </script>
+  </body>
+</html>

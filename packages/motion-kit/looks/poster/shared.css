@@ -1,0 +1,50 @@
+/* Poster: giant condensed capitals that fill the frame, two flat colours and a red disc; words are
+   stamped on the beat, never faded, and the scene ends on a hard cut. */
+:root {
+  --u: calc(100vmin / 1080);
+  --look-ground: #ffd23f;
+  --look-ink: #141414;
+  --look-accent: #ff3d2e;
+  --look-muted: #141414;
+}
+html,
+body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+}
+body {
+  background: var(--look-ground);
+  color: var(--look-ink);
+  font-synthesis: none;
+}
+.look-shape {
+  position: absolute;
+  width: calc(640 * var(--u));
+  aspect-ratio: 1;
+  border-radius: 50%;
+  background: var(--look-accent);
+  right: calc(-140 * var(--u));
+  top: calc(-180 * var(--u));
+}
+.look-page {
+  position: absolute;
+  inset: calc(56 * var(--u));
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+}
+.look-title {
+  margin: 0;
+  font: 400 calc(330 * var(--u)) / 0.84 Anton, sans-serif;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.look-title > span {
+  display: block;
+}
+.look-line {
+  margin: calc(24 * var(--u)) 0 0;
+  font: 400 calc(64 * var(--u)) / 1 'Bebas Neue', sans-serif;
+  letter-spacing: 0.02em;
+}

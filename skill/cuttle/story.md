@@ -166,8 +166,10 @@ paper with fibre, two inks, a third colour where they overlap, halftone dots ins
 and it moves the way print does: plate by plate, not by fading in. Write any look this way: its
 parts, what each may carry, and how the medium itself moves (paper is cut and lifted, ink is
 printed, glass refracts, the product's UI answers the cursor). `motion/shared.css` and
-`motion/shared.js` are the look in code, imported by every page; the numbers for its motion are in
-[motion.md](motion.md) ("Motion that feels designed").
+`motion/shared.js` are the look in code, imported by every page (`cuttle look new` writes their
+frame); the numbers for its motion are in [motion.md](motion.md) ("Motion that feels designed").
+The kit's looks (motion.md, "Looks") show eight media worked out this way: read them for how, and
+give this video its own, so no two videos come out alike.
 
 ## 7. Copy
 

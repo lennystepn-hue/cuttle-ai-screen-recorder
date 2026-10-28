@@ -1,0 +1,52 @@
+/* Editorial: a light serif set large with room around it, one italic word in a deep red, a paper
+   ground with a little grain; words come in from grey to ink, the camera pushes in slowly. */
+:root {
+  --u: calc(100vmin / 1080);
+  --look-ground: #faf7f1;
+  --look-ink: #191714;
+  --look-accent: #b4321f;
+  --look-muted: #8b857b;
+  --look-faint: #d9d3c8;
+}
+html {
+  background: var(--look-ground);
+}
+html,
+body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+}
+body {
+  color: var(--look-ink);
+  font: 400 calc(30 * var(--u)) / 1.5 Inter, sans-serif;
+  font-synthesis: none;
+}
+.look-page {
+  position: absolute;
+  left: calc(150 * var(--u));
+  right: calc(150 * var(--u));
+  top: 50%;
+  transform-origin: 30% 50%;
+}
+.look-title {
+  margin: 0;
+  max-width: 16ch;
+  font: 340 calc(124 * var(--u)) / 1.02 Fraunces, serif;
+  letter-spacing: -0.02em;
+}
+.look-title em {
+  color: var(--look-accent);
+}
+.look-rule {
+  height: 1px;
+  margin: calc(40 * var(--u)) 0;
+  background: var(--look-ink);
+  opacity: 0.25;
+  transform-origin: left;
+}
+.look-line {
+  margin: 0;
+  max-width: 40ch;
+  color: var(--look-muted);
+}

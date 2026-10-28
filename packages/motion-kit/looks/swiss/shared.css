@@ -1,0 +1,72 @@
+/* Swiss grid: twelve columns and their margins, one grotesque in two weights, black and white and
+   one red; things slide along the grid's lines and snap to them. */
+:root {
+  --u: calc(100vmin / 1080);
+  --look-ground: #f1efe9;
+  --look-ink: #111111;
+  --look-accent: #e30613;
+  --look-muted: #6b6b6b;
+  --look-line: rgba(17, 17, 17, 0.06);
+  --look-margin: calc(96 * var(--u));
+}
+html,
+body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+}
+body {
+  background: var(--look-ground);
+  color: var(--look-ink);
+  font: 500 calc(30 * var(--u)) / 1.3 Inter, sans-serif;
+  font-synthesis: none;
+}
+.look-grid {
+  position: fixed;
+  inset: 0 var(--look-margin);
+  background: linear-gradient(to right, var(--look-line) 1px, transparent 1px) 0 0 / calc(100% / 12) 100%;
+  border-right: 1px solid var(--look-line);
+}
+.look-page {
+  position: absolute;
+  inset: var(--look-margin);
+  display: grid;
+  grid-template-columns: repeat(12, 1fr);
+  align-content: end;
+  row-gap: calc(28 * var(--u));
+}
+.look-title {
+  grid-column: 1 / span 10;
+  margin: 0;
+  font: 800 calc(150 * var(--u)) / 0.92 Inter;
+  letter-spacing: -0.045em;
+}
+.look-line {
+  grid-column: 1 / span 6;
+  margin: 0;
+  font-size: calc(34 * var(--u));
+  color: var(--look-muted);
+}
+.look-rule {
+  grid-column: 1 / span 12;
+  height: calc(14 * var(--u));
+  background: var(--look-accent);
+  transform-origin: left;
+}
+.look-number {
+  grid-column: 9 / span 4;
+  justify-self: end;
+  font: 800 calc(300 * var(--u)) / 0.8 Inter;
+  letter-spacing: -0.06em;
+  color: var(--look-accent);
+}
+@media (max-aspect-ratio: 1/1) {
+  .look-title,
+  .look-line {
+    grid-column: 1 / -1;
+  }
+  .look-number {
+    grid-column: 1 / -1;
+    justify-self: start;
+  }
+}

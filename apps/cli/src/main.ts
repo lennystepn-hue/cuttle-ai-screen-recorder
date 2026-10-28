@@ -19,6 +19,7 @@ import { musicCheckCommand, musicNewCommand, musicSetCommand, musicTemplatesComm
 import { previewCommand } from './commands/preview';
 import { REVIEW_KINDS, reviewCommand } from './commands/review';
 import { blocksAddCommand, blocksSearchCommand, blocksShowCommand } from './commands/blocks';
+import { lookApplyCommand, lookListCommand, lookNewCommand, lookShowCommand } from './commands/look';
 import { shotFrameCommand, shotStylesCommand, shotTakeCommand, type ShotFrameArgs, type ShotTakeArgs } from './commands/shot';
 import { recordCommand } from './commands/record';
 import { recoverCommand } from './commands/recover';
@@ -281,6 +282,27 @@ export async function runCli(argv: readonly string[], streams?: Streams): Promis
         withSignal(output, (signal) => reviewCommand(project, options, output, signal)),
       ),
     );
+
+  const lookCommand = program.command('look').description("art directions built from a medium (motion/shared.css and shared.js): the kit's are examples; a video's own look comes from its subject");
+  lookCommand
+    .command('list')
+    .description("the kit's looks: examples of how a look is built from a medium")
+    .action(action((output) => lookListCommand(output)));
+  lookCommand
+    .command('show <name>')
+    .description("a look's sample page rendered on a sheet (into preview/looks/ in the project)")
+    .action(action((output, project, name: string) => withSignal(output, (signal) => lookShowCommand(project, name, output, signal))));
+  lookCommand
+    .command('apply <name>')
+    .description("a look of the kit as the project's motion/shared.css and shared.js, its ground around the pages; then make it this video's own")
+    .option('--sample', 'also its sample page, as the first scene')
+    .option('--force', 'replace a motion/shared.css or shared.js that is there')
+    .action(action((output, project, name: string, options: { sample?: boolean; force?: boolean }) => lookApplyCommand(project, name, options, output)));
+  lookCommand
+    .command('new')
+    .description("the frame of the video's own look (motion/shared.css and shared.js with the functions every page calls, nothing decided)")
+    .option('--force', 'replace a motion/shared.css or shared.js that is there')
+    .action(action((output, project, options: { force?: boolean }) => lookNewCommand(project, options, output)));
 
   const blocks = program.command('blocks').description("motion blocks, Lottie animations and icons from open collections (HyperFrames' registry, LottieFiles, Iconify), brought into the project to render offline, with their licences in CREDITS.md");
   blocks

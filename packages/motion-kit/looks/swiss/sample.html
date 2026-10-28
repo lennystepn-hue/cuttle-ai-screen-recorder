@@ -1,0 +1,29 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Swiss grid</title>
+    <link rel="stylesheet" href="../shared.css" />
+  </head>
+  <body>
+    <main class="look-page">
+      <div class="look-number" id="number">12×</div>
+      <h1 class="look-title" id="title">The waiting, cut.</h1>
+      <div class="look-rule" id="rule"></div>
+      <p class="look-line" id="line">Cuttle speeds up what you waited for and keeps what you did.</p>
+    </main>
+    <script type="module">
+      import { ground, enter, exit, rule } from '../shared.js';
+      ground();
+      cuttle.ready(document.fonts.load('800 150px Inter'));
+      const $ = (id) => document.getElementById(id);
+      cuttle.onFrame((t) => {
+        enter($('number'), t, { at: 0 });
+        enter($('title'), t, { at: 0.25, by: 'word' });
+        rule($('rule'), t, { at: 0.6 });
+        enter($('line'), t, { at: 0.9 });
+        for (const id of ['number', 'title', 'line']) exit($(id), t, { at: cuttle.duration - 0.45 });
+      });
+    </script>
+  </body>
+</html>

@@ -112,6 +112,7 @@ describe('cuttle mcp', () => {
     // the guides
     expect(text(await call('guide', { topic: 'project' }))).toContain('cuttle.json');
     expect(text(await call('guide', { topic: 'motion' })).length).toBeGreaterThan(1000);
+    expect(text(await call('guide', { topic: 'story' }))).toContain('STORY.md');
   });
 
   it('reports progress while a command runs, as the CLI says it', async () => {

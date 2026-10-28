@@ -1,0 +1,52 @@
+/* Paper cut: layers of coloured paper on kraft, each with a real shadow; things are cut out and
+   laid into place from above, settling on a spring with a little wobble, and lifted away. */
+:root {
+  --u: calc(100vmin / 1080);
+  --look-ground: #efe2cf;
+  --look-ink: #2b2119;
+  --look-accent: #e4572e;
+  --paper-1: #e4572e;
+  --paper-2: #2e6f6a;
+  --paper-3: #f3c14b;
+}
+html {
+  background: var(--look-ground);
+}
+html,
+body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+}
+
+body {
+  color: var(--look-ink);
+  font: 500 calc(32 * var(--u)) / 1.35 'Bricolage Grotesque', sans-serif;
+  font-synthesis: none;
+}
+.look-page {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+}
+.look-paper {
+  position: absolute;
+  border-radius: calc(8 * var(--u));
+}
+.look-card {
+  position: relative;
+  max-width: 70vw;
+  padding: calc(56 * var(--u)) calc(72 * var(--u));
+  background: var(--paper-3);
+  border-radius: calc(6 * var(--u));
+}
+.look-title {
+  margin: 0;
+  font: 800 calc(132 * var(--u)) / 0.95 'Bricolage Grotesque', sans-serif;
+  font-stretch: 85%;
+  letter-spacing: -0.02em;
+}
+.look-line {
+  margin: calc(20 * var(--u)) 0 0;
+}

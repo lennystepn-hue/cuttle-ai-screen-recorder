@@ -1,0 +1,69 @@
+/* Data desk: a newsroom's chart on white, thin rules, one blue that carries the point, numbers
+   that count, a source under it; things grow from their baseline and nothing decorates. */
+:root {
+  --u: calc(100vmin / 1080);
+  --look-ground: #ffffff;
+  --look-ink: #121212;
+  --look-accent: #1550ff;
+  --look-muted: #8a8f98;
+  --look-rule: #e3e5e8;
+}
+html,
+body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+}
+body {
+  background: var(--look-ground);
+  color: var(--look-ink);
+  font: 400 calc(28 * var(--u)) / 1.35 Inter, sans-serif;
+  font-variant-numeric: tabular-nums;
+  font-synthesis: none;
+}
+.look-page {
+  position: absolute;
+  inset: calc(96 * var(--u));
+  display: grid;
+  grid-template-rows: auto auto 1fr auto;
+  gap: calc(22 * var(--u));
+}
+.look-title {
+  margin: 0;
+  max-width: 26ch;
+  font: 700 calc(60 * var(--u)) / 1.1 Inter;
+  letter-spacing: -0.02em;
+}
+.look-line {
+  margin: 0;
+  color: var(--look-muted);
+}
+.look-chart {
+  display: flex;
+  align-items: flex-end;
+  gap: calc(28 * var(--u));
+  padding-top: calc(60 * var(--u));
+  border-bottom: calc(2 * var(--u)) solid var(--look-ink);
+  background: repeating-linear-gradient(to top, var(--look-rule) 0 1px, transparent 1px 25%);
+}
+.look-bar {
+  position: relative;
+  flex: 1;
+  background: #c9ccd2;
+  transform-origin: bottom;
+}
+.look-bar.is-accent {
+  background: var(--look-accent);
+}
+.look-bar span {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: calc(-46 * var(--u));
+  text-align: center;
+  font-weight: 700;
+}
+.look-source {
+  font-size: calc(20 * var(--u));
+  color: var(--look-muted);
+}

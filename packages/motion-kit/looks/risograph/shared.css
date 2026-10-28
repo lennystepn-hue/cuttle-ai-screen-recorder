@@ -1,0 +1,50 @@
+/* Risograph: two inks on rough paper, blue and a fluorescent pink that overprint where they meet,
+   the pink plate a few pixels off register, tones as halftone dots; a frame is printed plate by
+   plate and cut, never faded. */
+:root {
+  --u: calc(100vmin / 1080);
+  --look-ground: #f4efe3;
+  --look-ink: #2b59c3;
+  --look-accent: #ff4fa3;
+  --ink-a: #2b59c3;
+  --ink-b: #ff4fa3;
+}
+html {
+  background: var(--look-ground);
+}
+html,
+body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+}
+
+body {
+  color: var(--ink-a);
+  font: 400 calc(30 * var(--u)) / 1.4 'Space Mono', monospace;
+  font-synthesis: none;
+}
+.look-page {
+  position: absolute;
+  inset: calc(90 * var(--u));
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+.look-title {
+  position: relative;
+  margin: 0;
+  font: 400 calc(118 * var(--u)) / 1.04 'Rubik Mono One', sans-serif;
+  text-transform: uppercase;
+}
+.look-plate {
+  position: absolute;
+  inset: 0;
+  color: var(--ink-b);
+  mix-blend-mode: multiply;
+  pointer-events: none;
+}
+.look-line {
+  margin: calc(36 * var(--u)) 0 0;
+  max-width: 34ch;
+}

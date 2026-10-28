@@ -1,0 +1,37 @@
+/* This video's own look (cuttle look new wrote the frame of it). Build it from one medium the
+   subject suggests (paper and ink, glass, clay, a terminal, a newspaper, neon signage, the
+   product's own UI…), and write its rules here: its ground and texture, its inks and where each
+   may appear, its type with sizes as shares of the frame. Name what this video must not look like
+   (STORY.md's BANNED line), and keep away from it. */
+:root {
+  --u: calc(100vmin / 1080);
+  /* the ground, the ink everything to be read is in, one accent for the point, a quieter ink */
+  --look-ground: #000000;
+  --look-ink: #ffffff;
+  --look-accent: #ffffff;
+  --look-muted: #999999;
+}
+html,
+body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+}
+body {
+  background: var(--look-ground);
+  color: var(--look-ink);
+  /* a face of the kit (motion.md lists them) that belongs to the medium */
+  font: 400 calc(30 * var(--u)) / 1.35 Inter, sans-serif;
+  font-synthesis: none;
+}
+.look-page {
+  position: absolute;
+  inset: calc(96 * var(--u));
+}
+.look-title {
+  margin: 0;
+  font-size: calc(120 * var(--u));
+}
+.look-line {
+  margin: 0;
+}

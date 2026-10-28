@@ -516,6 +516,20 @@ cuttle.timeline(createTimeline({ autoplay: false })).add('#box', { x: [0, 1000],
     }
   }, 300_000);
 
+  it("renders each of the kit's looks: its sample on its ground, without an error", () => {
+    const shows = mkdtempSync(join(tmpdir(), 'cuttle-looks-'));
+    try {
+      expect(cuttle('init', join(shows, 'p')).code).toBe(0);
+      for (const look of ['swiss', 'poster', 'editorial', 'data-desk', 'paper-cut', 'risograph', 'blueprint', 'zine']) {
+        const { code, json } = cuttleWithin(300_000, '-C', join(shows, 'p'), 'look', 'show', look);
+        expect(code, look).toBe(0);
+        expect(pngSize(json.sheet as string)[0], look).toBeGreaterThan(1900);
+      }
+    } finally {
+      rmSync(shows, { recursive: true, force: true });
+    }
+  }, 900_000);
+
   it('lands callouts on the take\'s clicks and kinetic captions on its words, over the video', () => {
     const dir = join(mkdtempSync(join(tmpdir(), 'cuttle-take-')), 'take');
     cpSync(project, dir, { recursive: true });

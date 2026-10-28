@@ -1,0 +1,38 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Data desk</title>
+    <link rel="stylesheet" href="../shared.css" />
+  </head>
+  <body>
+    <main class="look-page">
+      <h1 class="look-title" id="title">A demo takes a fifth of the time it took</h1>
+      <p class="look-line" id="line">Minutes from the take to the posted video (illustrative)</p>
+      <div class="look-chart" id="chart">
+        <div class="look-bar" style="height: 92%"><span>46</span></div>
+        <div class="look-bar" style="height: 64%"><span>32</span></div>
+        <div class="look-bar is-accent" style="height: 18%"><span>9</span></div>
+      </div>
+      <p class="look-source" id="source">Illustrative numbers. Source: the Cuttle team</p>
+    </main>
+    <script type="module">
+      import { ground, enter, exit, grow, count } from '../shared.js';
+      ground();
+      cuttle.ready(document.fonts.load('700 60px Inter'));
+      const $ = (id) => document.getElementById(id);
+      const bars = [...document.querySelectorAll('.look-bar')];
+      const values = bars.map((bar) => Number(bar.textContent));
+      cuttle.onFrame((t) => {
+        enter($('title'), t, { at: 0.1 });
+        enter($('line'), t, { at: 0.35 });
+        bars.forEach((bar, i) => {
+          grow(bar, t, { at: 0.7 + i * 0.15 });
+          count(bar.querySelector('span'), t, { at: 0.7 + i * 0.15, to: values[i] });
+        });
+        enter($('source'), t, { at: 1.5 });
+        exit(document.querySelector('.look-page'), t, { at: cuttle.duration - 0.3 });
+      });
+    </script>
+  </body>
+</html>

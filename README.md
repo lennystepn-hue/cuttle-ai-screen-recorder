@@ -137,6 +137,7 @@ cuttle music new pulse                       # a score for this video (pulse, dr
 cuttle motion check motion/title/index.html  # its frames, a contact sheet, what the page threw
 cuttle watch                                 # each page saved checked again, as you write
 cuttle music check                           # the music alone: a WAV, its levels, the hits on the cuts
+cuttle look new                              # the frame of this video's own look (motion/shared.css and shared.js); look list shows eight examples
 cuttle blocks search chart race              # blocks from HyperFrames' registry (about 200), Lottie animations, Iconify's icons
 cuttle blocks add bar-chart-race             # into motion/, what it loads beside it (offline), its licence in CREDITS.md
 cuttle review                                # what makes it dull, measured: an empty first frame, dead stretches, scenes alike, lines too short or small

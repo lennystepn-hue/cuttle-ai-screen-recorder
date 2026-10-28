@@ -1,0 +1,59 @@
+/* Blueprint: white lines on a deep blue sheet with its grid, a condensed headline and mono
+   labels; drawings draw themselves line by line, labels type in, a yellow mark for the point. */
+:root {
+  --u: calc(100vmin / 1080);
+  --look-ground: #0d3b82;
+  --look-ink: #e8f0ff;
+  --look-accent: #ffd34d;
+  --look-minor: rgba(232, 240, 255, 0.07);
+  --look-major: rgba(232, 240, 255, 0.16);
+}
+html,
+body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+}
+
+body {
+  background:
+    linear-gradient(var(--look-major) 1px, transparent 1px) 0 0 / calc(200 * var(--u)) calc(200 * var(--u)),
+    linear-gradient(90deg, var(--look-major) 1px, transparent 1px) 0 0 / calc(200 * var(--u)) calc(200 * var(--u)),
+    linear-gradient(var(--look-minor) 1px, transparent 1px) 0 0 / calc(40 * var(--u)) calc(40 * var(--u)),
+    linear-gradient(90deg, var(--look-minor) 1px, transparent 1px) 0 0 / calc(40 * var(--u)) calc(40 * var(--u)),
+    var(--look-ground);
+  color: var(--look-ink);
+  font: 400 calc(24 * var(--u)) / 1.4 'JetBrains Mono', monospace;
+  font-synthesis: none;
+}
+.look-page {
+  position: absolute;
+  inset: calc(80 * var(--u));
+}
+.look-title {
+  margin: 0;
+  font: 700 calc(104 * var(--u)) / 0.95 Archivo, sans-serif;
+  font-stretch: 70%;
+  text-transform: uppercase;
+  letter-spacing: 0.01em;
+}
+.look-label {
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  white-space: pre;
+}
+.look-label.is-accent {
+  color: var(--look-accent);
+}
+.look-drawing {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  fill: none;
+  stroke: var(--look-ink);
+  stroke-width: calc(3 * var(--u));
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}

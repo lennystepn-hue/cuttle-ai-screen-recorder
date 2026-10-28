@@ -1,0 +1,25 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Poster</title>
+    <link rel="stylesheet" href="../shared.css" />
+  </head>
+  <body>
+    <main class="look-page">
+      <h1 class="look-title" id="title"><span>Record</span><span>once.</span></h1>
+      <p class="look-line" id="line">Cuttle cuts the rest</p>
+    </main>
+    <script type="module">
+      import { ground, fill, enter, exit } from '../shared.js';
+      ground();
+      const title = document.getElementById('title');
+      cuttle.ready(fill(title));
+      cuttle.sound('impact', { at: 0.2, volume: 0.5 });
+      cuttle.onFrame((t) => {
+        title.querySelectorAll('span').forEach((line, i) => enter(line, t, { at: 0.2 + i * 0.24 }));
+        enter(document.getElementById('line'), t, { at: 0.9 });
+      });
+    </script>
+  </body>
+</html>

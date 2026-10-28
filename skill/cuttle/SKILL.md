@@ -164,7 +164,11 @@ video as pages. Read [story.md](story.md) first (what the video is, before any s
    numbers, a line per shot with its one move and how it hands over, and what is banned.
 3. Give the video one design, from `STORY.md`'s look: `motion/shared.css` and `motion/shared.js`
    (palette, type scale, easing, shapes, the ground, the logo) that every page imports, so the
-   scenes look like one film, not a set of templates.
+   scenes look like one film, not a set of templates. A look of its own first:
+   `cuttle -C "<project>" --json look new` writes their frame (`ground`, `enter`, `exit`, nothing
+   decided). The kit's looks (`cuttle --json look list`, `look show <name>`, `look apply <name>`:
+   swiss, poster, editorial, data-desk, paper-cut, risograph, blueprint, zine) show how a look is
+   built from a medium; one taken as a start is changed until it is this video's (motion.md, "Looks").
 4. Write each scene as `motion/<name>/index.html`, from nothing first: a template's page is a part
    to take apart, not a scene to fill in. Pages can read data and images of the project (`./data.json`, `/stills/home.png` from
    `capture-page`), and a script you write may generate many pages from data (one per feature, per

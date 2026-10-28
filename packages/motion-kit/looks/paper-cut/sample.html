@@ -1,0 +1,31 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Paper cut</title>
+    <link rel="stylesheet" href="../shared.css" />
+  </head>
+  <body>
+    <main class="look-page">
+      <div class="look-paper" id="a" style="width: 34vmin; height: 34vmin; border-radius: 50%; background: var(--paper-2); left: 12%; top: 14%"></div>
+      <div class="look-paper" id="b" style="width: 46vmin; height: 20vmin; background: var(--paper-1); right: 10%; bottom: 14%"></div>
+      <div class="look-card" id="card">
+        <h1 class="look-title">Cut, laid, done</h1>
+        <p class="look-line">Your take, trimmed where it rests.</p>
+      </div>
+    </main>
+    <script type="module">
+      import { ground, enter, exit } from '../shared.js';
+      ground();
+      cuttle.ready(document.fonts.load('800 132px "Bricolage Grotesque"'));
+      cuttle.sound('pop', { at: 0.3, volume: 0.4 });
+      const $ = (id) => document.getElementById(id);
+      cuttle.onFrame((t) => {
+        enter($('a'), t, { at: 0.1 });
+        enter($('b'), t, { at: 0.25 });
+        enter($('card'), t, { at: 0.45 });
+        for (const id of ['a', 'b', 'card']) exit($(id), t, { at: cuttle.duration - 0.55 });
+      });
+    </script>
+  </body>
+</html>

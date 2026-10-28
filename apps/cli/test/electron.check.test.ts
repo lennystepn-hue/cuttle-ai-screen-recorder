@@ -35,6 +35,14 @@ function pngSize(file: string): [number, number] {
   return [bytes.readUInt32BE(16), bytes.readUInt32BE(20)];
 }
 
+/** How long the transition into the second scene lasts (`motion new <template> --into s2` set it). */
+function transitionSeconds(project: string, template: string): number {
+  const raw = JSON.parse(readFileSync(join(project, 'cuttle.json'), 'utf8')) as { scenes: { transition?: { src: string; duration: number } }[] };
+  const transition = raw.scenes[1]!.transition!;
+  expect(transition.src).toBe(`motion/${template}/index.html`);
+  return transition.duration;
+}
+
 function probe(file: string): string {
   return spawnSync('ffprobe', ['-v', 'error', '-show_entries', 'stream=codec_name,width,height:format=duration', '-of', 'csv=p=0', file], { encoding: 'utf8' }).stdout.trim();
 }
@@ -415,6 +423,37 @@ cuttle.timeline(createTimeline({ autoplay: false })).add('#box', { x: [0, 1000],
       rmSync(dirname(kit), { recursive: true, force: true });
     }
   }, 300_000);
+
+  it("goes into a scene through each of the kit's shader transitions: the old scene at its start, the new one at its end", () => {
+    const cut = join(mkdtempSync(join(tmpdir(), 'cuttle-transitions-')), 'cut');
+    try {
+      expect(cuttle('init', cut).code).toBe(0);
+      for (const [name, color] of [['old', '#e2572f'], ['new', '#1a3cff']] as const) {
+        mkdirSync(join(cut, 'motion', name), { recursive: true });
+        writeFileSync(join(cut, 'motion', name, 'index.html'), `<!doctype html><style>html,body{margin:0;height:100%;background:${color}}</style>`);
+        expect(cuttle('-C', cut, 'motion', 'add', `motion/${name}/index.html`, '--duration', '2').code).toBe(0);
+      }
+      /** The share of a still that shows the new scene (blue). */
+      const blue = (file: string) => {
+        const png = PNG.sync.read(readFileSync(file));
+        let count = 0;
+        let all = 0;
+        for (let i = 0; i < png.data.length; i += 4 * 97, all++) count += png.data[i + 2]! > 200 && png.data[i]! < 80 ? 1 : 0;
+        return count / all;
+      };
+      for (const template of ['wipe', 'zoom', 'whip', 'push', 'iris', 'glitch', 'pixels', 'liquid', 'flood', 'burn']) {
+        expect(cuttle('-C', cut, 'motion', 'new', template, '--into', 's2').code, template).toBe(0);
+        const { code, json } = cuttleWithin(300_000, '-C', cut, 'motion', 'check', `motion/${template}/index.html`, '--at', '0', '--at', `${(transitionSeconds(cut, template) - 0.04).toFixed(2)}`);
+        expect(code, template).toBe(0);
+        expect(json, template).toMatchObject({ kind: 'transition', errors: [] });
+        const [start, end] = json.stills as { file: string }[];
+        expect(blue(start!.file), `${template} at its start`).toBeLessThan(0.02);
+        expect(blue(end!.file), `${template} at its end`).toBeGreaterThan(0.95);
+      }
+    } finally {
+      rmSync(dirname(cut), { recursive: true, force: true });
+    }
+  }, 900_000);
 
   it('lands callouts on the take\'s clicks and kinetic captions on its words, over the video', () => {
     const dir = join(mkdtempSync(join(tmpdir(), 'cuttle-take-')), 'take');

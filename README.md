@@ -129,7 +129,7 @@ seconds):
 
 ```bash
 cuttle init launch && cd launch
-cuttle motion templates                      # title, end-card, code-typing, device-3d, fold, lower-third, click-callouts, kinetic-captions
+cuttle motion templates                      # title, end-card, code-typing, device-3d, lower-third, click-callouts, kinetic-captions, and transitions (fold, wipe, zoom, whip, push, iris, glitch, pixels, liquid, flood, burn)
 cuttle motion new title                      # copies the page into motion/title/ and adds it as a scene
 cuttle motion new code-typing                # a file typing itself, with syntax colours and key clicks
 cuttle motion new end-card                   # your logo, a line, the URL typing itself

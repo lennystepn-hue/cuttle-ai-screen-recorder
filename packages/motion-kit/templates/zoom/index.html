@@ -1,0 +1,59 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Zoom through</title>
+    <!-- A transition: the camera rushes into a point of the outgoing frame, a zoom blur
+         streaming out of it, and comes out in the incoming one, which settles to its size as
+         the blur fades. A whoosh peaks as it passes (the "sounds" param). -->
+    <script type="application/json" id="cuttle-params">
+      [
+        { "name": "x", "label": "Into the point at (0 left, 1 right)", "type": "number", "default": 0.5, "min": 0, "max": 1 },
+        { "name": "y", "label": "… (0 top, 1 bottom)", "type": "number", "default": 0.5, "min": 0, "max": 1 },
+        { "name": "strength", "label": "How far in", "type": "number", "default": 4, "min": 1.5, "max": 10 },
+        { "name": "sounds", "label": "Sounds", "type": "bool", "default": true }
+      ]
+    </script>
+    <style>
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        overflow: hidden;
+        background: #000;
+      }
+    </style>
+  </head>
+  <body>
+    <script type="module">
+      import { shader } from 'cuttle/shader';
+
+      const { params, duration } = cuttle;
+      const number = (value, fallback, min, max) => Math.min(max, Math.max(min, Number.isFinite(Number(value)) && value !== '' ? Number(value) : fallback));
+
+      if (params.sounds !== false) cuttle.sound('whoosh', { at: duration * 0.5, volume: 0.6 });
+
+      shader(
+        /* glsl */ `
+        vec3 zoomed(bool incoming, vec2 uv, float scale, float blur) {
+          vec3 sum = vec3(0.0);
+          for (int i = 0; i < 16; i++) {
+            vec2 q = at + (uv - at) / scale * (1.0 - blur * float(i) / 16.0);
+            sum += incoming ? toColor(q).rgb : fromColor(q).rgb;
+          }
+          return sum / 16.0;
+        }
+        vec4 effect(vec2 uv) {
+          if (progress < 0.5) {
+            float e = inExpo(progress * 2.0);
+            return vec4(mix(zoomed(false, uv, 1.0 + (strength - 1.0) * e, 0.3 * e), vec3(1.0), 0.2 * e * e), 1.0);
+          }
+          float e = outExpo((progress - 0.5) * 2.0);
+          return vec4(mix(zoomed(true, uv, mix(sqrt(strength), 1.0, e), 0.3 * (1.0 - e)), vec3(1.0), 0.2 * (1.0 - e) * (1.0 - e)), 1.0);
+        }
+        `,
+        { uniforms: { at: [number(params.x, 0.5, 0, 1), number(params.y, 0.5, 0, 1)], strength: number(params.strength, 4, 1.5, 10) } },
+      );
+    </script>
+  </body>
+</html>

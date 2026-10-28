@@ -3,7 +3,7 @@
 A motion item is a web page that Cuttle renders frame by frame into the video. Anything a browser
 draws can be in it: kinetic type, shapes and patterns, a chart that builds, particles, a 3D scene,
 an After Effects animation (Lottie), a code editor that types itself, the product's interface
-rebuilt in HTML. **You write these pages.** The templates are eight examples, not the choice: read
+rebuilt in HTML. **You write these pages.** The templates are examples, not the choice: read
 them for technique, copy one to start fast, or write every page from nothing. A page can be plain
 HTML and CSS, a canvas, SVG, WebGL, Three.js or all of them at once, as many as the video needs.
 Make it look like the work of a great motion designer, and like this video's, not like a template.
@@ -42,7 +42,7 @@ Make it look like the work of a great motion designer, and like this video's, no
    ```
 
    Or start from a template: `cuttle -C "<project>" --json motion new <template>` (title, end-card,
-   code-typing, device-3d, fold, lower-third, click-callouts, kinetic-captions;
+   code-typing, device-3d, lower-third, click-callouts, kinetic-captions, and the transitions below;
    `cuttle --json motion templates` says what each shows; a transition takes `--into <scene id>`)
    copies the page and adds it to cuttle.json. Then change the copy as much as you like. Most
    templates make their sounds (a whoosh with the title, a pop on each callout, keys while code
@@ -127,10 +127,21 @@ look, the window and the cursor in:
 - `cuttle.progress`: 0 to 1 through the transition.
 
 Draw the whole frame from them: at 0 it should look like `from`, at 1 like `to`, so the cut is
-seamless. `fold` turns the outgoing frame over its middle like a page. `motion check` shows a
-transition in the video, between its two scenes. A first scene, or one right after a cut, has
-nothing to go between. The export, `cuttle preview` and the Cuttle app draw the page (the app
-makes its frames a moment after an edit, and crossfades until then).
+seamless. `motion check` shows a transition in the video, between its two scenes. A first scene, or
+one right after a cut, has nothing to go between. The export, `cuttle preview` and the Cuttle app
+draw the page (the app makes its frames a moment after an edit, and crossfades until then).
+
+The kit's transitions, each `motion new <name> --into <scene id>` with its params and its sound:
+`fold` (a page turned over in 3D), `wipe` (a tilted edge, soft or hard, an accent line; `direction`,
+`softness`, `angle`), `zoom` (a rush into a point in a zoom blur; `x`, `y`, `strength`), `whip` (a
+whip pan, both frames smeared; `direction`, `blur`), `push` (the new frame pushes the old one out,
+which sinks into its shadow), `iris` (a circle opens from a point: the button that was clicked;
+`x`, `y`), `glitch` (bands, split colours, scan lines), `pixels` (blocks to the cut and back),
+`liquid` (melts away in waves of noise), `flood` (a colour floods out from a point and opens onto the
+next scene; `color`, `x`, `y`) and `burn` (burns away like paper, a glowing edge). Pick the one the
+cut has a cause for (story.md): an iris from the click, a zoom into the button, a flood in the
+brand's colour; a whip or a glitch on the beat. All but the fold are drawn with `cuttle/shader`
+(below): a copy is a short page to change, or the start of a transition of your own.
 
 ## Sounds from the page
 
@@ -184,6 +195,24 @@ for (const click of cuttle.take.clicks) {
   of seconds. Pages written for HyperFrames, whose paused timelines sit in `window.__timelines`,
   play as they are. Tweens a page starts on no timeline it hands over follow the clock too, but only
   a handed timeline lands exactly on a frame after a jump.
+- **Shaders** in a few lines: `import { shader } from 'cuttle/shader'`. A canvas fills the page and
+  runs your `vec4 effect(vec2 uv)` for every pixel of every frame (`uv` from 0,0 at the top left),
+  with `time`, `progress`, `resolution`, `aspect`, the theme's `accent`, `fg` and `bg`, a
+  transition's `fromColor(uv)` and `toColor(uv)`, uniforms of your own (`set(name, value)` changes
+  them) and a library: `noise`, `gnoise`, `fbm` (2D and 3D), `curl`, `grain`, `vignette`,
+  `halftone`, `bayer` (dithering), `grade`, `luma`, `rotate` and easing (`inOutCubic`, `outExpo`…).
+  A moving ground, grain over a scene, a halftone or risograph treatment, a transition: GLSL's
+  errors come back with the effect's own line numbers. `GLSL` is the library as text, for a
+  Three.js `ShaderMaterial` of your own.
+
+  ```js
+  import { shader } from 'cuttle/shader';
+  shader(`vec4 effect(vec2 uv) {
+    float n = fbm(vec3(uv * vec2(aspect, 1.0) * 2.5, time * 0.15));
+    vec3 c = mix(bg, accent, smoothstep(0.35, 0.75, n)) + 0.06 * grain(uv, time);
+    return vec4(c * vignette(uv, 0.35), 1.0);
+  }`);
+  ```
 - **Icons**: about 2,000 of Lucide's, as SVG, `import { icon, iconImage } from 'cuttle/icons'`:
   `cuttle.ready(icon('rocket', { size: 180, color: 'var(--cuttle-accent)', stroke: 1.5 }).then((svg) =>
   stage.append(svg)))`; `iconImage(name, options)` is one to draw on a canvas or as a texture. Find a

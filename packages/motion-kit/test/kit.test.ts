@@ -8,6 +8,8 @@ import { copyTemplate, findIcons, iconWords, MissingTemplateError, templatePage 
 import { BUILT_IN_SOUNDS, KIT_FONTS, KIT_IMPORTS, KIT_ORIGIN, MOTION_TEMPLATES, MUSIC_TEMPLATES, importMapTag, withImportMap } from '../src/index';
 
 const TEMPLATES = fileURLToPath(new URL('../templates/', import.meta.url));
+/** The transitions drawn with the kit's shader (`cuttle/shader`), after the fold. */
+const TRANSITIONS = ['wipe', 'zoom', 'whip', 'push', 'iris', 'glitch', 'pixels', 'liquid', 'flood', 'burn'];
 
 describe('the motion kit', () => {
   it('maps the bare names a page imports to the kit', () => {
@@ -16,6 +18,7 @@ describe('the motion kit', () => {
       'three/addons/': 'cuttle-motion://kit/three/addons/',
       cuttle: 'cuttle-motion://kit/motion.js',
       'cuttle/icons': 'cuttle-motion://kit/icons.js',
+      'cuttle/shader': 'cuttle-motion://kit/shader.js',
       'cuttle/sound': 'cuttle-motion://kit/sound.js',
       'lottie-web': 'cuttle-motion://kit/lottie/lottie.mjs',
       animejs: 'cuttle-motion://kit/anime/anime.esm.min.js',
@@ -66,8 +69,8 @@ describe('the motion kit', () => {
   });
 
   it('has a page for every template, and each says when it is one (a scene, an overlay or a transition)', () => {
-    expect(MOTION_TEMPLATES.map((template) => template.name)).toEqual(['title', 'end-card', 'code-typing', 'device-3d', 'fold', 'lower-third', 'click-callouts', 'kinetic-captions']);
-    expect(MOTION_TEMPLATES.find((template) => template.name === 'fold')?.kind).toBe('transition');
+    expect(MOTION_TEMPLATES.map((template) => template.name)).toEqual(['title', 'end-card', 'code-typing', 'device-3d', 'fold', ...TRANSITIONS, 'lower-third', 'click-callouts', 'kinetic-captions']);
+    for (const name of ['fold', ...TRANSITIONS]) expect(MOTION_TEMPLATES.find((template) => template.name === name)?.kind, name).toBe('transition');
     for (const template of MOTION_TEMPLATES) {
       const file = `${TEMPLATES}${template.name}/index.html`;
       expect(existsSync(file), template.name).toBe(true);
@@ -90,7 +93,7 @@ describe('the motion kit', () => {
       expect(html, template.name).toContain('params.sounds !== false');
       for (const name of asked) expect(names.has(name), `${template.name}: ${name}`).toBe(true);
     }
-    expect(making).toEqual(['title', 'end-card', 'code-typing', 'device-3d', 'fold', 'lower-third', 'click-callouts']);
+    expect(making).toEqual(['title', 'end-card', 'code-typing', 'device-3d', 'fold', ...TRANSITIONS, 'lower-third', 'click-callouts']);
   });
 
   it('has a page for every music template that composes with cuttle.music and declares its params', () => {

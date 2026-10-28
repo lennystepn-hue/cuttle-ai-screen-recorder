@@ -919,7 +919,7 @@ function TimelineBar({ status, duration, fit, zoomValue, onScale }: { status: st
       </button>
       <Select
         value={undefined}
-        options={MOTION_TEMPLATES.map((template) => ({ value: template.name, label: templateLabel(template.name), note: template.kind === 'scene' ? 'scene' : template.whole ? 'over the take' : 'overlay' }))}
+        options={MOTION_TEMPLATES.map((template) => ({ value: template.name, label: templateLabel(template.name), note: template.kind === 'scene' ? 'scene' : template.kind === 'transition' ? 'into the scene' : template.whole ? 'over the take' : 'overlay' }))}
         onChange={(name) => void addMotion(name)}
         label="Add a motion template"
         variant="bare"

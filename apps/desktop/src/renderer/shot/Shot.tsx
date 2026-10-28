@@ -96,6 +96,7 @@ export function Shot() {
   const [library, setLibrary] = useState<(ShotEntry & { url?: string })[]>([]);
   const preview = useRef<HTMLCanvasElement>(null);
   const changed = useRef(false);
+  const writing = useRef(Promise.resolve());
   const ready = useMemo(() => loadEngineAssets(), []);
 
   // the shot shown: the one the window opened on, a new one, one from the library
@@ -163,15 +164,18 @@ export function Shot() {
     };
   }, [shot, pictures, outScale, ready]);
 
-  // each change written a moment later: shot.json, then its shot.png
+  // each change written a moment later: shot.json, then its shot.png, one change after the other
+  // (an earlier one never lands over a later one); one that could not be written says so
   useEffect(() => {
     if (!raw || !changed.current || !shot || !pictures) return;
     const timer = setTimeout(() => {
-      void (async () => {
-        const answer = await bridge.invoke('shot:change', { raw });
-        if (answer.issues) return setNote({ text: answer.issues.join('; '), tone: 'warn' });
-        await bridge.invoke('shot:save', { data: await encode(shot, pictures, outScale, 'png'), format: 'png', as: false });
-      })();
+      writing.current = writing.current
+        .then(async () => {
+          const answer = await bridge.invoke('shot:change', { raw });
+          if (answer.issues) return setNote({ text: answer.issues.join('; '), tone: 'warn' });
+          await bridge.invoke('shot:save', { data: await encode(shot, pictures, outScale, 'png'), format: 'png', as: false });
+        })
+        .catch((error: Error) => setNote({ text: `The change could not be written: ${error.message}`, tone: 'warn' }));
     }, WRITE_MS);
     return () => clearTimeout(timer);
   }, [raw, shot, pictures, outScale]);

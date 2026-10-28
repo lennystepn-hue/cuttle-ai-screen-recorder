@@ -120,7 +120,7 @@ let writing = Promise.resolve();
  * Replaces `to` with `from`. Windows refuses a rename over a file another program has open for a
  * moment (a reader, a scanner, OneDrive): it is tried again for about a second.
  */
-async function replace(from: string, to: string): Promise<void> {
+export async function replaceFile(from: string, to: string): Promise<void> {
   for (let attempt = 1; ; attempt++) {
     try {
       return await rename(from, to);
@@ -146,7 +146,7 @@ export async function updateSettings(change: (settings: Settings) => void): Prom
   writing = writing.then(async () => {
     await mkdir(dirname(file()), { recursive: true });
     await writeFile(`${file()}.part`, text);
-    await replace(`${file()}.part`, file());
+    await replaceFile(`${file()}.part`, file());
   }).catch(() => {});
   await writing;
   for (const listener of listeners) listener(settings);

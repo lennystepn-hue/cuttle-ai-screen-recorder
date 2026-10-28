@@ -4,7 +4,7 @@
 // (quick), or opened in the screenshot editor, which draws the shot itself (the engine's drawShot)
 // and keeps its shot.json and shot.png as it goes.
 import { existsSync } from 'node:fs';
-import { copyFile, mkdir, mkdtemp, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { copyFile, mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, extname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { app, BrowserWindow, clipboard, ClipboardItem, dialog, nativeImage, screen, session, shell, type Rectangle } from 'electron';
@@ -17,7 +17,7 @@ import { CHECK, CHECK_IMAGE, HIDDEN } from './check';
 import { bindRequests, send } from './ipc';
 import { APP_ORIGIN, assetPath, bundlePath, serveApp } from './protocols';
 import { recorderHost } from './recorder-host';
-import { loadSettings, updateSettings } from './settings';
+import { loadSettings, replaceFile, updateSettings } from './settings';
 import { bringToFront, guard, lockDown, titleBar, webPreferences } from './windows';
 
 /** The shot's picture as taken, and its last render, in its folder. */
@@ -151,11 +151,17 @@ export async function copyImage(png: Uint8Array): Promise<void> {
 let writes = 0;
 const tempOf = (file: string) => `${file}.${process.pid}.${++writes}.tmp`;
 
-async function writeJson(file: string, value: unknown): Promise<void> {
+/** Writes a file whole: a temporary file renamed over it (a reader never sees half), Windows' refusals waited out. */
+async function writeWhole(file: string, data: string | Uint8Array): Promise<void> {
   const temp = tempOf(file);
-  await writeFile(temp, `${JSON.stringify(value, null, 2)}\n`);
-  await rename(temp, file);
+  await writeFile(temp, data);
+  await replaceFile(temp, file).catch(async (error: unknown) => {
+    await rm(temp, { force: true });
+    throw error;
+  });
 }
+
+const writeJson = (file: string, value: unknown) => writeWhole(file, `${JSON.stringify(value, null, 2)}\n`);
 
 /** Frames a shot in its look (the export's renderer), copies it and shows the toast. */
 async function quickShot(folder: string, display: PickerDisplay): Promise<void> {
@@ -315,32 +321,44 @@ export async function openShotEditor(dir: string): Promise<void> {
   window.on('closed', () => {
     if (editor === current) editor = undefined;
   });
-  const shotJson = () => join(current.dir, SHOT_FILE);
   const render = () => join(current.dir, RENDER);
-  /** Writes a render as the shot's shot.png (temp file and rename, so a reader never sees half). */
-  const keep = async (bytes: Uint8Array) => {
-    const temp = tempOf(render());
-    await writeFile(temp, bytes);
-    await rename(temp, render());
+  /**
+   * The shot's writes one after another, in the order they were asked for: one that waits for a
+   * file (Windows) never lands over a later one, which would put an older look back.
+   */
+  let writing: Promise<unknown> = Promise.resolve();
+  const inTurn = <T>(write: () => Promise<T>): Promise<T> => {
+    const done = writing.then(write);
+    writing = done.catch(() => {});
+    return done;
+  };
+  /** Writes a render as the shot's shot.png. */
+  const keep = (bytes: Uint8Array) => {
+    const file = render();
+    return inTurn(() => writeWhole(file, bytes));
   };
   bindRequests(contents, 'shot', {
     'shot:view': () => viewOf(current.dir),
-    'shot:change': async ({ raw }) => {
-      const before = (await viewOf(current.dir)).raw;
-      // the shot keeps its own image; a background image stays inside its folder
-      const next: Record<string, unknown> = { ...raw, version: SHOT_VERSION, source: before.source };
-      for (const key of ['background', 'watermark'] as const) {
-        const image = (next[key] as Record<string, unknown> | undefined)?.image;
-        if (typeof image === 'string' && !inside(current.dir, image)) return { issues: [`${key}.image: not an image of this shot`] };
-      }
-      const parsed = parseShot(next);
-      if (!parsed.ok) return { issues: parsed.issues.map((issue) => `${issue.path}: ${issue.message}`) };
-      await writeJson(shotJson(), next);
-      // the next shot takes this look
-      await updateSettings((settings) => {
-        settings.shots.look = lookFrom(next, current.dir);
+    'shot:change': ({ raw }) => {
+      // the shot it was asked for, though another opens meanwhile
+      const dir = current.dir;
+      return inTurn(async () => {
+        const before = (await viewOf(dir)).raw;
+        // the shot keeps its own image; a background image stays inside its folder
+        const next: Record<string, unknown> = { ...raw, version: SHOT_VERSION, source: before.source };
+        for (const key of ['background', 'watermark'] as const) {
+          const image = (next[key] as Record<string, unknown> | undefined)?.image;
+          if (typeof image === 'string' && !inside(dir, image)) return { issues: [`${key}.image: not an image of this shot`] };
+        }
+        const parsed = parseShot(next);
+        if (!parsed.ok) return { issues: parsed.issues.map((issue) => `${issue.path}: ${issue.message}`) };
+        await writeJson(join(dir, SHOT_FILE), next);
+        // the next shot takes this look
+        await updateSettings((settings) => {
+          settings.shots.look = lookFrom(next, dir);
+        });
+        return {};
       });
-      return {};
     },
     'shot:palette': async () => {
       const raw = (await viewOf(current.dir)).raw;

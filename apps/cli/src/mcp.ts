@@ -16,10 +16,11 @@ import skillGuide from '../../../skill/cuttle/SKILL.md?raw';
 import motionGuide from '../../../skill/cuttle/motion.md?raw';
 import musicGuide from '../../../skill/cuttle/music.md?raw';
 import projectGuide from '../../../skill/cuttle/project.md?raw';
+import storyGuide from '../../../skill/cuttle/story.md?raw';
 import { VERSION, runCli } from './main';
 
 /** How an agent starts: what the server says about itself when a client connects. */
-const INSTRUCTIONS = `Cuttle makes videos two ways that mix freely: screen recordings turned into polished demos, and videos written entirely in code (every scene a web page you write, music composed in code). Read the guide first (guide topic "workflow"; "project" is cuttle.json's reference, "motion" how to write scenes, "music" how to compose). Every project tool takes "project": the project folder's absolute path. Make a project with init, write scenes as pages in its folder and add them with motion_add, check them with motion_check and preview (both answer with images), then render. open_in_editor shows the project to the person in the Cuttle app, where they see each change you make. Recording is the person's: ask them to record in the Cuttle app or with "cuttle record".`;
+const INSTRUCTIONS = `Cuttle makes videos two ways that mix freely: screen recordings turned into polished demos, and videos written entirely in code (every scene a web page you write, music composed in code). Read the guide first (guide topic "workflow"; "story" finds what a video is before any scene, "project" is cuttle.json's reference, "motion" how to write scenes, "music" how to compose; a guide that names story.md, motion.md, music.md or project.md means that topic). Every project tool takes "project": the project folder's absolute path. Make a project with init, write scenes as pages in its folder and add them with motion_add, check them with motion_check and preview (both answer with images), then render. open_in_editor shows the project to the person in the Cuttle app, where they see each change you make. Recording is the person's: ask them to record in the Cuttle app or with "cuttle record".`;
 
 const project = z.string().min(1).describe("the project folder's absolute path");
 const seconds = z.number().nonnegative();
@@ -595,7 +596,7 @@ export const COMMAND_TOOLS: readonly CommandTool[] = [
 ];
 
 /** The guides, as the skill has them. */
-const GUIDES = { workflow: skillGuide, project: projectGuide, motion: motionGuide, music: musicGuide } as const;
+const GUIDES = { workflow: skillGuide, story: storyGuide, project: projectGuide, motion: motionGuide, music: musicGuide } as const;
 
 /** What a command said, as the tool's answer. */
 interface Ran {
@@ -653,8 +654,8 @@ export function createMcpServer(): McpServer {
     'guide',
     {
       title: 'Read a guide',
-      description: 'The guides to making videos with Cuttle: workflow (how to plan, record, edit and render), project (cuttle.json\'s reference), motion (writing scenes as pages), music (composing in code).',
-      inputSchema: { topic: z.enum(['workflow', 'project', 'motion', 'music']) },
+      description: 'The guides to making videos with Cuttle: workflow (how to plan, record, edit and render), story (what a video is before any scene: its one idea, three storylines, the hook, the banned defaults, the review), project (cuttle.json\'s reference), motion (writing scenes as pages), music (composing in code).',
+      inputSchema: { topic: z.enum(['workflow', 'story', 'project', 'motion', 'music']) },
       annotations: { readOnlyHint: true },
     },
     async ({ topic }) => ({ content: [{ type: 'text', text: GUIDES[topic] }] }),

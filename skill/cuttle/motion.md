@@ -220,13 +220,54 @@ cuttle.onFrame(() => {
 
 ## Motion that feels designed
 
-- Hard cuts between full scenes are strong (set `look.transition.enabled: false` for a reel);
-  crossfades suit calmer videos; a transition page marks a real change (into the result, into
-  the end card). One or two a video, not at every cut.
+What the video is comes first ([story.md](story.md)); these are the numbers for how it moves. They
+are defaults: a reference the person gave, or a moment that breaks them on purpose, wins.
+
+- **One hero move a shot.** Secondary moves travel about half as far and start 0.1–0.2 s after it;
+  everything else holds still.
+- **Arrive slow, leave clean.** An entrance lands on a long ease-out (`ease.outExpo`,
+  `ease.outQuint`) over 0.5–0.9 s; an exit takes about half as long on an ease-in (`ease.in`), in
+  one motion, never slide, stop, then leave. A camera move or a colour flood eases both ways
+  (`ease.inOut`); linear only for what is constant (a rotation, a ticker, a progress bar). One curve
+  and one duration on everything is what makes a video look generated.
+- **Overlap.** The next element starts when the one before is a third to half done. Stagger
+  letters about 0.03 s apart (a frame), words 0.06–0.12 s, the items of a list 0.04–0.08 s
+  (`stagger`).
+- **Springs** (`spring(seconds, { stiffness, damping, mass })`): the default (stiffness 170,
+  damping 20, a damping ratio of about 0.77) settles calmly; a damping of about 12 is playful; about
+  26 does not bounce. Position and scale may overshoot; opacity and colour never do.
+- **Titles land, then stay still**: the motion moves on to the next element, the camera or the
+  world behind. Vary how titles come in within a video: per word out of a blur without moving, per
+  word from a light grey into the ink, a mask that wipes the line in, a stamp (from 1.15 to 1 in two
+  frames, with a hit), letter by letter for a name, one word rolling through options like a slot
+  machine. Never the same entrance in every scene.
+- **Holds.** A line the viewer must read stays 0.5 s plus 0.3 s a word; the video's last line at
+  least 2 s. Too many words: cut words, never shrink the type.
+- **Sizes.** Text to be read is at least 2.6 % of the short side (`calc(28 * var(--u))`, 28 px at
+  1080). The hero of a shot fills at least 40 % of the frame's width or height: a small thing alone
+  in the middle of an empty frame is not a shot; push in, crop, or give it a world.
+- **Pace.** Something new every 2–4 s; with music, a new layout on the bar. Contrast the speeds:
+  quick cuts through the work, a breath of 0.3–0.7 s before the payoff, the payoff at normal speed.
+- **Cuts.** Cut on the fastest frame of a move, with the same direction and speed on both sides: a
+  page that ends in motion hands it to the next. Hard cuts between full scenes are strong (set
+  `look.transition.enabled: false` for a reel); crossfades suit calmer videos.
+- **Transitions with a cause.** Hand over in three to five ways across a video, each caused by
+  something on screen: a match cut, a shape that grows into the next ground, a colour flood, an
+  iris that opens from the click, a whip with motion blur. A transition page marks the one or two
+  real changes (into the result, into the end card), never every cut.
 - Give fast motion **motion blur**: `"motionBlur": { "samples": 8, "shutter": 0.5 }` on the item
   renders 8 moments per frame while the shutter is open (8× the time) and averages them.
-- Ease everything (`ease.outExpo` in, `ease.in` out), stagger groups, let shapes overshoot
-  (`spring`, `ease.outBack`), animate type on the width and weight axes, and match exits to the
-  next scene's entrance (a shape that grows to fill the frame in the next scene's colour).
+- Let shapes overshoot (`spring`, `ease.outBack`), animate type on the width and weight axes, and
+  match exits to the next scene's entrance (a shape that grows to fill the frame in the next scene's
+  colour).
 - `output.fps` may be 60 for very smooth motion (twice the frames to render).
 - Keep the DOM light per frame; draw particles and patterns on a canvas; reuse geometry in Three.js.
+
+When it does not work:
+
+- **It feels like slides**: enter the next scene through something on screen, and cut in the middle
+  of a move instead of after it settles.
+- **It is too busy**: take out a third of the motion and keep the moves that lead the eye.
+- **The titles feel cheap**: land them and hold them still, give each its own entrance, and put one
+  word in the accent colour, not three.
+- **It is too fast**: slow the camera's moves to about 0.7 of their speed, and nothing else.

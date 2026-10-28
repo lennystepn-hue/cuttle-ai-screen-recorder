@@ -1,0 +1,58 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Glitch</title>
+    <!-- A transition: the picture breaks into bands that jump sideways, its colours split apart
+         and scan lines run through it, and band by band it comes back as the incoming frame. A
+         digital stutter goes with it (the "sounds" param). -->
+    <script type="application/json" id="cuttle-params">
+      [
+        { "name": "strength", "label": "How hard it breaks", "type": "number", "default": 0.7, "min": 0.1, "max": 1.5 },
+        { "name": "sounds", "label": "Sounds", "type": "bool", "default": true }
+      ]
+    </script>
+    <style>
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        overflow: hidden;
+        background: #000;
+      }
+    </style>
+  </head>
+  <body>
+    <script type="module">
+      import { shader } from 'cuttle/shader';
+
+      const { params, duration } = cuttle;
+      const number = (value, fallback, min, max) => Math.min(max, Math.max(min, Number.isFinite(Number(value)) && value !== '' ? Number(value) : fallback));
+
+      if (params.sounds !== false) cuttle.sound('glitch', { at: duration * 0.35, volume: 0.5 });
+
+      shader(
+        /* glsl */ `
+        vec3 split(bool incoming, vec2 q, float apart) {
+          vec2 o = vec2(apart, 0.0);
+          return incoming ? vec3(toColor(q + o).r, toColor(q).g, toColor(q - o).b) : vec3(fromColor(q + o).r, fromColor(q).g, fromColor(q - o).b);
+        }
+        vec4 effect(vec2 uv) {
+          float burst = sin(3.14159265 * progress);
+          // new bands every frame (at 30 fps), of 18 to 48 rows
+          float tick = floor(time * 30.0);
+          float band = floor(uv.y * (18.0 + 30.0 * hash(vec2(tick, 1.0))));
+          float jump = (hash(vec2(band, tick)) - 0.5) * 0.25 * strength * burst * step(0.55, hash(vec2(band, tick + 7.0)));
+          vec2 q = vec2(fract(uv.x + jump), uv.y);
+          bool incoming = hash(vec2(band, floor(time * 15.0) + 3.0)) < smoothstep(0.2, 0.8, progress);
+          vec3 color = split(incoming, q, 0.012 * strength * burst);
+          color *= 1.0 - 0.15 * burst * step(0.5, fract(uv.y * resolution.y / 3.0));
+          color += 0.08 * burst * grain(uv, time);
+          return vec4(color, 1.0);
+        }
+        `,
+        { uniforms: { strength: number(params.strength, 0.7, 0.1, 1.5) } },
+      );
+    </script>
+  </body>
+</html>

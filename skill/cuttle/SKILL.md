@@ -353,9 +353,10 @@ Then refine `cuttle.json` ([project.md](project.md)) and preview again:
   (source seconds) or `--scene s5 --at 0.2`; `sound list` has the built-in sounds. A motion page
   asks for its own with `cuttle.sound(…)` (motion.md); the templates come with theirs.
 - **Transitions.** A page in place of the crossfade into a scene: your own,
-  `cuttle -C "<project>" --json motion add motion/<name>/index.html --as transition --into <scene id>`, or the
-  fold, `cuttle -C "<project>" --json motion new fold --into <scene id>` (motion.md). One or two a
-  video, where something changes.
+  `cuttle -C "<project>" --json motion add motion/<name>/index.html --as transition --into <scene id>`, or
+  one of the kit's, `cuttle -C "<project>" --json motion new iris --into <scene id>` (fold, wipe, zoom,
+  whip, push, iris, glitch, pixels, liquid, flood, burn; motion.md). A few kinds a video, each with a
+  cause on screen.
 - **End card.** Built, not a still: a `motion` scene that carries the mark in and lands the name
   and the call to action, held 2–3 s; a `card` scene with the product name and URL for a quick one.
 - **Review.** Before the render, `cuttle -C "<project>" --json review` (2b, step 7): its notes and

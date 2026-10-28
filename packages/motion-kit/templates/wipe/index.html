@@ -1,0 +1,56 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Wipe</title>
+    <!-- A transition: the incoming frame wipes across the outgoing one behind a slightly tilted
+         edge, soft or hard, with a thin line in the accent colour along it. A swoosh lands with
+         it (the "sounds" param). -->
+    <script type="application/json" id="cuttle-params">
+      [
+        { "name": "direction", "label": "Moves towards", "type": "select", "default": "right", "options": ["right", "left", "up", "down"] },
+        { "name": "softness", "label": "Soft edge", "type": "number", "default": 0.02, "min": 0, "max": 0.3 },
+        { "name": "angle", "label": "Tilt of the edge (degrees)", "type": "number", "default": 12, "min": -40, "max": 40 },
+        { "name": "line", "label": "A line along the edge", "type": "bool", "default": true },
+        { "name": "sounds", "label": "Sounds", "type": "bool", "default": true }
+      ]
+    </script>
+    <style>
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        overflow: hidden;
+        background: #000;
+      }
+    </style>
+  </head>
+  <body>
+    <script type="module">
+      import { shader } from 'cuttle/shader';
+
+      const { params, duration } = cuttle;
+      const number = (value, fallback, min, max) => Math.min(max, Math.max(min, Number.isFinite(Number(value)) && value !== '' ? Number(value) : fallback));
+      const towards = { left: [-1, 0], right: [1, 0], up: [0, -1], down: [0, 1] }[params.direction] ?? [1, 0];
+      if (params.sounds !== false) cuttle.sound('swoosh-in', { at: duration * 0.6, volume: 0.5 });
+
+      shader(
+        /* glsl */ `
+        vec4 effect(vec2 uv) {
+          // across the frame in the direction it moves: 0 where the edge starts, 1 where it ends; tilted
+          vec2 c = (uv - 0.5) * vec2(aspect, 1.0);
+          float span = abs(towards.x) * aspect + abs(towards.y);
+          float s = dot(c, towards) / span + 0.5 + dot(c, vec2(-towards.y, towards.x)) * tan(radians(angle)) / span;
+          float reach = softness + 0.5 * abs(tan(radians(angle))) + 0.01;
+          float edge = mix(-reach, 1.0 + reach, inOutCubic(progress));
+          float shown = 1.0 - smoothstep(edge - softness - 0.001, edge + softness + 0.001, s);
+          vec3 color = mix(fromColor(uv).rgb, toColor(uv).rgb, shown);
+          float along = line * (1.0 - smoothstep(0.0, 3.0 / resolution.y, abs(s - edge) * span)) * step(0.001, progress) * step(progress, 0.999);
+          return vec4(mix(color, accent, along), 1.0);
+        }
+        `,
+        { uniforms: { towards, softness: number(params.softness, 0.02, 0, 0.3), angle: number(params.angle, 12, -40, 40), line: params.line !== false } },
+      );
+    </script>
+  </body>
+</html>

@@ -1,0 +1,48 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Pixels</title>
+    <!-- A transition: the outgoing frame breaks into blocks that grow coarser until the cut,
+         where the incoming frame takes their place and sharpens again block by block. A short
+         stutter goes with it (the "sounds" param). -->
+    <script type="application/json" id="cuttle-params">
+      [
+        { "name": "size", "label": "Largest blocks (px at 1080)", "type": "number", "default": 48, "min": 8, "max": 160 },
+        { "name": "sounds", "label": "Sounds", "type": "bool", "default": true }
+      ]
+    </script>
+    <style>
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        overflow: hidden;
+        background: #000;
+      }
+    </style>
+  </head>
+  <body>
+    <script type="module">
+      import { shader } from 'cuttle/shader';
+
+      const { params, duration } = cuttle;
+      const number = (value, fallback, min, max) => Math.min(max, Math.max(min, Number.isFinite(Number(value)) && value !== '' ? Number(value) : fallback));
+
+      if (params.sounds !== false) cuttle.sound('glitch', { at: duration * 0.45, volume: 0.3 });
+
+      shader(
+        /* glsl */ `
+        vec4 effect(vec2 uv) {
+          float k = sin(3.14159265 * progress);
+          float cell = max(1.0, floor(mix(1.0, size, k * k)));
+          vec2 grid = resolution / cell;
+          vec2 q = cell > 1.0 ? (floor(uv * grid) + 0.5) / grid : uv;
+          return vec4(mix(fromColor(q).rgb, toColor(q).rgb, smoothstep(0.45, 0.55, progress)), 1.0);
+        }
+        `,
+        { uniforms: { size: number(params.size, 48, 8, 160) * (Math.min(cuttle.size.width, cuttle.size.height) / 1080) } },
+      );
+    </script>
+  </body>
+</html>

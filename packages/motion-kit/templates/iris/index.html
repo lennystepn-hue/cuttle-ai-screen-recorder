@@ -1,0 +1,54 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Iris</title>
+    <!-- A transition: a circle opens from a point of the outgoing frame (where something was
+         clicked, say) onto the incoming one, with a thin ring in the accent colour at its edge.
+         A swoosh lands with it (the "sounds" param). -->
+    <script type="application/json" id="cuttle-params">
+      [
+        { "name": "x", "label": "Opens from (0 left, 1 right)", "type": "number", "default": 0.5, "min": 0, "max": 1 },
+        { "name": "y", "label": "… (0 top, 1 bottom)", "type": "number", "default": 0.5, "min": 0, "max": 1 },
+        { "name": "ring", "label": "A ring at its edge", "type": "bool", "default": true },
+        { "name": "sounds", "label": "Sounds", "type": "bool", "default": true }
+      ]
+    </script>
+    <style>
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        overflow: hidden;
+        background: #000;
+      }
+    </style>
+  </head>
+  <body>
+    <script type="module">
+      import { shader } from 'cuttle/shader';
+
+      const { params, duration } = cuttle;
+      const number = (value, fallback, min, max) => Math.min(max, Math.max(min, Number.isFinite(Number(value)) && value !== '' ? Number(value) : fallback));
+
+      if (params.sounds !== false) cuttle.sound('swoosh-in', { at: duration * 0.55, volume: 0.45 });
+
+      shader(
+        /* glsl */ `
+        vec4 effect(vec2 uv) {
+          vec2 c = (uv - at) * vec2(aspect, 1.0);
+          float far = length(max(at, 1.0 - at) * vec2(aspect, 1.0)) + 0.01;
+          float r = inOutCubic(progress) * far;
+          float px = 1.5 / resolution.y;
+          float d = length(c);
+          float inside = (1.0 - smoothstep(r - px, r + px, d)) * step(0.001, progress);
+          vec3 color = mix(fromColor(uv).rgb, toColor(uv).rgb, inside);
+          float line = edge * (1.0 - smoothstep(0.0, 4.0 / resolution.y, abs(d - r))) * step(0.001, progress) * step(progress, 0.999);
+          return vec4(mix(color, accent, line), 1.0);
+        }
+        `,
+        { uniforms: { at: [number(params.x, 0.5, 0, 1), number(params.y, 0.5, 0, 1)], edge: params.ring !== false } },
+      );
+    </script>
+  </body>
+</html>

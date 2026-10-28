@@ -3,6 +3,7 @@
 // the app's, the export check's):
 //   motion.js            Cuttle's helpers (easing, tweens, text, code)
 //   icons.js             Lucide's icons as SVG (`cuttle/icons`), their shapes in icons/icons.js, their words in icons/tags.json
+//   shader.js            a full-page fragment shader on the video's clock and a GLSL library (`cuttle/shader`)
 //   sound.js             Cuttle's sound kit for music pages (instruments, effects, harmony, the video's parts)
 //   blank.html           the page a video's sounds render in when it has no music page
 //   take-worker.js       reads the screen recording's frames for `cuttle.take.frame`, its masks painted (take.js)
@@ -26,6 +27,7 @@ export const KIT_IMPORTS: Readonly<Record<string, string>> = {
   'three/addons/': `${KIT_ORIGIN}/three/addons/`,
   cuttle: `${KIT_ORIGIN}/motion.js`,
   'cuttle/icons': `${KIT_ORIGIN}/icons.js`,
+  'cuttle/shader': `${KIT_ORIGIN}/shader.js`,
   'cuttle/sound': `${KIT_ORIGIN}/sound.js`,
   'lottie-web': `${KIT_ORIGIN}/lottie/lottie.mjs`,
   animejs: `${KIT_ORIGIN}/anime/anime.esm.min.js`,
@@ -102,6 +104,16 @@ export const MOTION_TEMPLATES: readonly MotionTemplate[] = [
   { name: 'code-typing', kind: 'scene', duration: 6, description: 'a code editor that types a file with syntax colours, line by line, keys clattering' },
   { name: 'device-3d', kind: 'scene', duration: 5, description: 'a laptop or tablet in 3D whose screen plays the take: it turns in as the lid opens, then flies into the screen' },
   { name: 'fold', kind: 'transition', duration: 0.9, description: 'the way into a scene: the outgoing frame turns over its middle like a page, onto the incoming one' },
+  { name: 'wipe', kind: 'transition', duration: 0.7, description: 'the incoming frame wipes across behind a tilted edge, soft or hard, an accent line along it (towards right, left, up or down)' },
+  { name: 'zoom', kind: 'transition', duration: 0.8, description: 'the camera rushes into a point of the outgoing frame in a zoom blur and comes out in the incoming one' },
+  { name: 'whip', kind: 'transition', duration: 0.5, description: 'a whip pan: both frames smeared along a fast move, sharp where it is slow' },
+  { name: 'push', kind: 'transition', duration: 0.8, description: 'the incoming frame slides in and pushes the outgoing one out, which sinks back into the shadow of its edge' },
+  { name: 'iris', kind: 'transition', duration: 0.7, description: 'a circle opens from a point (where something was clicked) onto the incoming frame, a ring at its edge' },
+  { name: 'glitch', kind: 'transition', duration: 0.6, description: 'the picture breaks into jumping bands with split colours and scan lines and comes back as the incoming frame' },
+  { name: 'pixels', kind: 'transition', duration: 0.7, description: 'blocks that grow coarser to the cut and sharpen again on the incoming frame' },
+  { name: 'liquid', kind: 'transition', duration: 1, description: 'the outgoing frame melts away in waves of noise, pulled along their flow, the incoming one running in' },
+  { name: 'flood', kind: 'transition', duration: 0.9, description: 'a colour (the accent) floods out from a point, fills the frame and opens from it onto the incoming one' },
+  { name: 'burn', kind: 'transition', duration: 1.2, description: 'the outgoing frame burns away like paper, a charred edge with a glow ahead of it, the incoming frame beneath' },
   { name: 'lower-third', kind: 'overlay', duration: 4, description: 'a name and a role in a bar that wipes in (a swoosh) and out' },
   { name: 'click-callouts', kind: 'overlay', duration: 0, whole: true, description: 'a ring, a number and a pop at every click the video shows, on the click' },
   { name: 'kinetic-captions', kind: 'overlay', duration: 0, whole: true, description: 'the spoken words, word by word, the current one in the accent colour' },

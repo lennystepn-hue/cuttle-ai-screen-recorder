@@ -1,0 +1,51 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Liquid</title>
+    <!-- A transition: the outgoing frame melts away in waves of noise, its picture pulled along
+         their flow, while the incoming one runs in where it has gone. A soft whoosh goes with
+         it (the "sounds" param). -->
+    <script type="application/json" id="cuttle-params">
+      [
+        { "name": "strength", "label": "How far the picture is pulled", "type": "number", "default": 0.12, "min": 0, "max": 0.4 },
+        { "name": "scale", "label": "Size of the waves (more: smaller)", "type": "number", "default": 3, "min": 1, "max": 10 },
+        { "name": "sounds", "label": "Sounds", "type": "bool", "default": true }
+      ]
+    </script>
+    <style>
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        overflow: hidden;
+        background: #000;
+      }
+    </style>
+  </head>
+  <body>
+    <script type="module">
+      import { shader } from 'cuttle/shader';
+
+      const { params, duration } = cuttle;
+      const number = (value, fallback, min, max) => Math.min(max, Math.max(min, Number.isFinite(Number(value)) && value !== '' ? Number(value) : fallback));
+
+      if (params.sounds !== false) cuttle.sound('whoosh', { at: duration * 0.5, volume: 0.35 });
+
+      shader(
+        /* glsl */ `
+        vec4 effect(vec2 uv) {
+          float p = inOutCubic(progress);
+          vec2 w = uv * vec2(aspect, 1.0) * scale;
+          float n = fbm(vec3(w, time * 0.6));
+          vec2 pull = (vec2(fbm(w + 3.1), fbm(w + 7.7)) - 0.5) * strength;
+          vec3 a = fromColor(uv + pull * p).rgb;
+          vec3 b = toColor(uv - pull * (1.0 - p)).rgb;
+          return vec4(mix(a, b, smoothstep(n - 0.12, n + 0.12, p * 1.24 - 0.12)), 1.0);
+        }
+        `,
+        { uniforms: { strength: number(params.strength, 0.12, 0, 0.4), scale: number(params.scale, 3, 1, 10) } },
+      );
+    </script>
+  </body>
+</html>

@@ -2635,6 +2635,12 @@ describe.runIf(enabled)('the Cuttle app', () => {
     expect(played.transitions).toBeGreaterThan(8);
     await click(page, '[data-testid=transition-remove]');
     await expect.poll(() => clipOf()?.transition).toBeUndefined();
+    // + Motion → Iris with the playhead on the clip: the way into it, not an overlay on it
+    const overlays = saved().overlays.length;
+    await seekTo(cut + 1);
+    await chooseIn(page, '[data-testid=add-motion]', 'Iris');
+    await expect.poll(() => clipOf()?.transition).toEqual({ src: 'motion/iris/index.html', duration: 0.7 });
+    expect(saved().overlays.length).toBe(overlays);
     await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find((window) => window.getTitle() === 'motion-editor · Cuttle')?.close());
   }, 240_000);
 

@@ -362,8 +362,9 @@ export const templateLabel = (name: string) => `${name.charAt(0).toUpperCase()}$
 
 /**
  * A motion template of the kit: its page is copied into the project's `motion/` folder, and it goes
- * in as a scene after the scene under the playhead, or as an overlay on the clip there (one that
- * follows the take, over all the clips). The playhead moves to it.
+ * in as a scene after the scene under the playhead, as an overlay on the clip there (one that
+ * follows the take, over all the clips), or as the way into the scene under the playhead (into the
+ * second from the first). The playhead moves to it.
  */
 export async function addMotion(name: string): Promise<void> {
   const template = MOTION_TEMPLATES.find((candidate) => candidate.name === name);
@@ -372,6 +373,11 @@ export async function addMotion(name: string): Promise<void> {
   if (store.get().doc?.issues) return toast('cuttle.json has a mistake; fix it first (Claude or a text editor), then edit here again.', { tone: 'warning' });
   const clips = project.scenes.filter((scene): scene is ClipScene => scene.type === 'clip');
   const place = playheadPlace();
+  // a transition: the way into the scene under the playhead, or into the second from the first
+  const into = template.kind === 'transition' ? sceneSpans(project.scenes, project.cuts)[Math.max(1, place?.span.index ?? 0)] : undefined;
+  const target = into ? project.scenes[into.sceneIndex] : undefined;
+  if (template.kind === 'transition' && !target) return toast('A transition goes between two scenes, and this video has one: add another scene first.', { tone: 'warning' });
+  if (template.kind === 'transition' && !target?.id) return toast('This scene has no id for its transition: give it one in cuttle.json (Claude can), then add it here.', { tone: 'warning' });
   if (template.kind === 'overlay' && clips.length === 0) return toast('A motion overlay goes over a clip, and this video has none: add a motion scene instead.', { tone: 'warning' });
   if (template.kind === 'overlay' && !template.whole && !place?.clip) return toast('A motion overlay goes on a clip: move the playhead onto one.', { tone: 'warning' });
   let src: string;
@@ -381,6 +387,10 @@ export async function addMotion(name: string): Promise<void> {
     return toast(`The template could not be copied: ${error instanceof Error ? error.message : String(error)}`, { tone: 'warning' });
   }
   const label = templateLabel(src.split('/')[1] ?? name);
+  if (template.kind === 'transition') {
+    if (edit([{ type: 'set', list: 'scenes', id: target!.id!, fields: { transition: { src, duration: template.duration } } }], `${label} into ${target!.label ?? target!.id}`)) select({ kind: 'scene', id: target!.id! });
+    return;
+  }
   let command: Extract<Command, { type: 'add' }>;
   if (template.kind === 'scene') command = { type: 'add', list: 'scenes', index: insertIndex(), item: { type: 'motion', label, src, duration: template.duration } };
   else if (template.whole) {

@@ -52,7 +52,7 @@ export function editorCommands(): EditorCommand[] {
     ...MOTION_TEMPLATES.map(
       (template): EditorCommand => ({
         id: `add-motion-${template.name}`,
-        name: `Add motion: ${templateLabel(template.name)}${template.kind === 'scene' ? '' : ' (over the video)'}`,
+        name: `Add motion: ${templateLabel(template.name)}${template.kind === 'scene' ? '' : template.kind === 'transition' ? ' (the way into the scene)' : ' (over the video)'}`,
         keywords: `motion template animation ${template.kind} ${template.description}`,
         group: 'Add',
         run: () => void addMotion(template.name),

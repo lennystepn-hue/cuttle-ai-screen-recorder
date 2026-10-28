@@ -1,0 +1,53 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Colour flood</title>
+    <!-- A transition: a colour floods out from a point and fills the frame, then opens from the
+         same point onto the incoming frame. The brand's accent colour unless another is given.
+         A swoosh lands with it (the "sounds" param). -->
+    <script type="application/json" id="cuttle-params">
+      [
+        { "name": "color", "label": "Colour (empty: the accent)", "type": "color", "default": "" },
+        { "name": "x", "label": "From (0 left, 1 right)", "type": "number", "default": 0.5, "min": 0, "max": 1 },
+        { "name": "y", "label": "… (0 top, 1 bottom)", "type": "number", "default": 0.5, "min": 0, "max": 1 },
+        { "name": "sounds", "label": "Sounds", "type": "bool", "default": true }
+      ]
+    </script>
+    <style>
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        overflow: hidden;
+        background: #000;
+      }
+    </style>
+  </head>
+  <body>
+    <script type="module">
+      import { shader } from 'cuttle/shader';
+
+      const { params, duration } = cuttle;
+      const number = (value, fallback, min, max) => Math.min(max, Math.max(min, Number.isFinite(Number(value)) && value !== '' ? Number(value) : fallback));
+
+      if (params.sounds !== false) cuttle.sound('swoosh-in', { at: duration * 0.5, volume: 0.45 });
+
+      shader(
+        /* glsl */ `
+        vec4 effect(vec2 uv) {
+          float d = length((uv - at) * vec2(aspect, 1.0));
+          float far = length(max(at, 1.0 - at) * vec2(aspect, 1.0)) + 0.01;
+          float px = 1.5 / resolution.y;
+          float spread = inOutCubic(clamp(progress / 0.55, 0.0, 1.0)) * far;
+          float opened = inOutCubic(clamp((progress - 0.45) / 0.55, 0.0, 1.0)) * far;
+          vec3 color = mix(fromColor(uv).rgb, tint, (1.0 - smoothstep(spread - px, spread + px, d)) * step(0.001, progress));
+          color = mix(color, toColor(uv).rgb, (1.0 - smoothstep(opened - px, opened + px, d)) * step(0.45, progress));
+          return vec4(color, 1.0);
+        }
+        `,
+        { uniforms: { tint: params.color || cuttle.theme['--cuttle-accent'] || '#d97757', at: [number(params.x, 0.5, 0, 1), number(params.y, 0.5, 0, 1)] } },
+      );
+    </script>
+  </body>
+</html>

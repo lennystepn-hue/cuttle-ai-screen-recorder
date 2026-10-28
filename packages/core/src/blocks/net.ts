@@ -21,6 +21,14 @@ export const BLOCK_HOSTS: readonly string[] = [
   'assets.lottiefiles.com',
   'assets-v2.lottiefiles.com',
   'api.iconify.design',
+  // stock footage, photographs and sounds (media.ts), with the person's own keys
+  'api.pexels.com',
+  'videos.pexels.com',
+  'images.pexels.com',
+  'pixabay.com',
+  'cdn.pixabay.com',
+  'freesound.org',
+  'cdn.freesound.org',
 ];
 
 /** The largest file a block may bring. */
@@ -44,35 +52,39 @@ export function allowedUrl(url: string): boolean {
   }
 }
 
-/** The bytes at `url` (from an allowed host), or a `download` error that says why not. */
-export async function fetchBytes(url: string, signal?: AbortSignal): Promise<Uint8Array> {
-  if (!allowedUrl(url)) throw new CoreError('download', `${url} is not on a host blocks come from (${BLOCK_HOSTS.join(', ')})`);
+/** `url` as it may be said: an API key in its query left out. */
+export const sayable = (url: string): string => url.replace(/([?&](?:key|token)=)[^&]+/gi, '$1…');
+
+/** The bytes at `url` (from an allowed host, with `headers`), or a `download` error that says why not. */
+export async function fetchBytes(url: string, signal?: AbortSignal, headers: Record<string, string> = {}): Promise<Uint8Array> {
+  if (!allowedUrl(url)) throw new CoreError('download', `${sayable(url)} is not on a host blocks come from (${BLOCK_HOSTS.join(', ')})`);
   const proxy = process.env.CUTTLE_BLOCKS_PROXY;
   const parsed = new URL(url);
   const target = proxy ? `${proxy.replace(/\/+$/, '')}/${parsed.hostname}${parsed.pathname}${parsed.search}` : url;
   let response: Response;
   try {
-    response = await fetch(target, { redirect: 'follow', headers: { 'user-agent': USER_AGENT }, signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(TIMEOUT_MS)]) : AbortSignal.timeout(TIMEOUT_MS) });
+    response = await fetch(target, { redirect: 'follow', headers: { 'user-agent': USER_AGENT, ...headers }, signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(TIMEOUT_MS)]) : AbortSignal.timeout(TIMEOUT_MS) });
   } catch (error) {
     if (signal?.aborted) throw new CoreError('cancelled', 'cancelled');
-    throw new CoreError('download', `${url} could not be fetched: ${(error as Error).message}`);
+    throw new CoreError('download', `${sayable(url)} could not be fetched: ${sayable((error as Error).message)}`);
   }
-  if (!response.ok) throw new CoreError('download', `${url} answered HTTP ${response.status}`);
+  if (response.status === 401 || response.status === 403) throw new CoreError('media-key', `${sayable(url)} refused the key (HTTP ${response.status})`);
+  if (!response.ok) throw new CoreError('download', `${sayable(url)} answered HTTP ${response.status}`);
   const bytes = new Uint8Array(await response.arrayBuffer());
-  if (bytes.byteLength > MAX_BYTES) throw new CoreError('download', `${url} is larger than ${MAX_BYTES / 1024 / 1024} MB`);
+  if (bytes.byteLength > MAX_BYTES) throw new CoreError('download', `${sayable(url)} is larger than ${MAX_BYTES / 1024 / 1024} MB`);
   return bytes;
 }
 
-export async function fetchText(url: string, signal?: AbortSignal): Promise<string> {
-  return new TextDecoder().decode(await fetchBytes(url, signal));
+export async function fetchText(url: string, signal?: AbortSignal, headers?: Record<string, string>): Promise<string> {
+  return new TextDecoder().decode(await fetchBytes(url, signal, headers));
 }
 
-export async function fetchJson<T>(url: string, signal?: AbortSignal): Promise<T> {
-  const text = await fetchText(url, signal);
+export async function fetchJson<T>(url: string, signal?: AbortSignal, headers?: Record<string, string>): Promise<T> {
+  const text = await fetchText(url, signal, headers);
   try {
     return JSON.parse(text) as T;
   } catch {
-    throw new CoreError('download', `${url} is not JSON`);
+    throw new CoreError('download', `${sayable(url)} is not JSON`);
   }
 }
 

@@ -76,9 +76,9 @@ async function help(command: string): Promise<string> {
 
 /** `--flag` as a whole option in a help text (not `--until` inside `--until-file`). */
 const hasFlag = (text: string, flag: string) => new RegExp(`${flag}(?![\\w-])`).test(text);
-const COMMANDS = ['devices', 'record', 'import', 'suggest', 'transcribe', 'models', 'transcript', 'preview', 'review', 'fit', 'frame', 'capture-page', 'motion check', 'motion add', 'motion new', 'motion templates', 'motion icons', 'blocks search', 'blocks show', 'blocks add', 'look list', 'look show', 'look apply', 'look new', 'music new', 'music templates', 'music set', 'music check', 'sound add', 'sound list', 'voice use', 'voice add', 'voice render', 'voice list', 'voice download', 'annotate', 'camera', 'captions set', 'items', 'zoom-path', 'watch', 'brand list', 'brand save', 'brand apply', 'brand remove', 'background', 'init', 'render', 'open', 'chapters', 'recover', 'webcam background', 'shot frame', 'shot take', 'shot styles'];
+const COMMANDS = ['devices', 'record', 'import', 'suggest', 'transcribe', 'models', 'transcript', 'preview', 'review', 'fit', 'frame', 'capture-page', 'motion check', 'motion add', 'motion new', 'motion templates', 'motion icons', 'blocks search', 'blocks show', 'blocks add', 'look list', 'look show', 'look apply', 'look new', 'media search', 'media show', 'media add', 'music new', 'music templates', 'music set', 'music check', 'sound add', 'sound list', 'voice use', 'voice add', 'voice render', 'voice list', 'voice download', 'annotate', 'camera', 'captions set', 'items', 'zoom-path', 'watch', 'brand list', 'brand save', 'brand apply', 'brand remove', 'background', 'init', 'render', 'open', 'chapters', 'recover', 'webcam background', 'shot frame', 'shot take', 'shot styles'];
 /** Commands with subcommands: the subcommand is part of the command (`motion check`). */
-const GROUPS = ['motion', 'blocks', 'look', 'music', 'sound', 'brand', 'voice', 'captions', 'webcam', 'shot'];
+const GROUPS = ['motion', 'blocks', 'look', 'media', 'music', 'sound', 'brand', 'voice', 'captions', 'webcam', 'shot'];
 
 describe('the cuttle commands in the skill', () => {
   // Code blocks and inline code: what Claude runs.

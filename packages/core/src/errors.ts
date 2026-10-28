@@ -16,6 +16,8 @@ export type CoreErrorCode =
   | 'voice-key'
   /** A voice could not speak a line (the engine failed, ElevenLabs answered with an error). */
   | 'voice'
+  /** Stock media is asked for and its service has no key (PEXELS_API_KEY, PIXABAY_API_KEY, FREESOUND_API_KEY), or refused it. */
+  | 'media-key'
   /** ffmpeg has no `whisper` filter (before 8.0, or a build without it). */
   | 'ffmpeg-old'
   /** The screen's text cannot be read here (neither Windows nor macOS, PowerShell refused, no OCR language, no cuttle-capture). */

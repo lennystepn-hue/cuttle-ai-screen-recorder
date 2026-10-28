@@ -108,3 +108,12 @@ export async function importTake(projectDir: string, file: string, options: Impo
     throw error;
   }
 }
+
+/**
+ * A video file made as `import` makes a take's picture (30 fps, BT.709 H.264, an even size at most
+ * `maxSide` on its longest side, without sound): stock footage a page plays with `cuttle.video`.
+ */
+export async function convertVideo(input: string, output: string, maxSide = IMPORT_RULES.maxSide): Promise<void> {
+  const size = `scale=w='min(iw,${maxSide})':h='min(ih,${maxSide})':force_original_aspect_ratio=decrease:force_divisible_by=2`;
+  await runFfmpeg(['-i', input, '-map', '0:v:0', '-vf', `fps=${IMPORT_RULES.fps},${size},${VIDEO_CHAIN}`, ...VIDEO_CODEC, '-an', '-movflags', '+faststart', '-y', output]);
+}

@@ -356,6 +356,8 @@ Then refine `cuttle.json` ([project.md](project.md)) and preview again:
 - **Sounds.** A sound at a moment, without the music: `cuttle -C "<project>" --json sound add whoosh --at 12.4`
   (source seconds) or `--scene s5 --at 0.2`; `sound list` has the built-in sounds. A motion page
   asks for its own with `cuttle.sound(…)` (motion.md); the templates come with theirs.
+- **Stock.** `cuttle --json media search <words>` (`--photo`, `--sound`) finds footage, photographs and
+  sounds with the user's own keys; `media add <name> --scene` brings one in, licence in CREDITS.md.
 - **Blocks.** `cuttle --json blocks search <words>` finds blocks of HyperFrames' registry (charts,
   3D logos, transitions, carousels), `blocks add <name>` brings one in to render offline, with its
   licence in CREDITS.md; also Lottie animations by URL and Iconify's icons (motion.md).

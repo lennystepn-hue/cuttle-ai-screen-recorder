@@ -10,7 +10,7 @@ export { BACKUPS, PROJECT_FILE, PROJECT_GITIGNORE, backupFile, newProjectFile, p
 export { samePath, useTake, type TakeFiles } from './use-take';
 export { suggestProject, type SuggestOptions, type SuggestResult } from './suggest';
 export { recoverTake, type RecoverResult } from './recover';
-export { IMPORT_RULES, importTake, type ImportOptions, type ImportResult } from './import';
+export { IMPORT_RULES, convertVideo, importTake, type ImportOptions, type ImportResult } from './import';
 export { GRID_STEP, grabFrame, gridFilter, type FrameOptions, type FrameResult } from './frame';
 export { ANALYSIS_DIR, analyseScreen, cachedAnalysis, grabGray, parseAnalysis, probeScreen, streamSeconds, type Gray, type ScreenAnalysis } from './suggest/media';
 export { applyLengthFit, withLengthFit, withoutLengthFit, type LengthApplied, type LengthFitResult, type LengthInput } from './suggest/length';
@@ -50,9 +50,10 @@ export { ELEVENLABS_MODEL, elevenLabsKey, elevenLabsVoices, speakElevenLabs, wor
 export { speakLocal } from './voice/local';
 export { spokenWords, spreadWords } from './voice/words';
 export { VOICE_RATE, readRender, renderVoiceover, type RenderedLine, type VoiceoverOptions } from './voice/render';
-export { BLOCK_HOSTS, allowedUrl, blocksCache, fetchBytes, fetchJson, fetchText } from './blocks/net';
+export { BLOCK_HOSTS, allowedUrl, blocksCache, fetchBytes, fetchJson, fetchText, sayable } from './blocks/net';
 export { kitModule, vendorPage, type Vendored } from './blocks/vendor';
 export { adaptBlock, blockFiles, blockNamed, findBlocks, hyperframesCatalog, type BlockCatalog, type BlockItem, type BlockVariable } from './blocks/hyperframes';
 export { lottieInfo, lottiePage, lottieSeconds, type LottieInfo } from './blocks/lottie';
 export { iconName, iconifyIcon, searchIconify, type IconSet } from './blocks/iconify';
 export { CREDITS_JSON, CREDITS_MD, addCredit, vendoredLicense, type Credit } from './blocks/credits';
+export { STOCK_KINDS, STOCK_SOURCES, searchStock, sourcesOf, stockCreditLine, stockItem, stockName, type StockItem, type StockKind, type StockSearch, type StockSource } from './blocks/stock';

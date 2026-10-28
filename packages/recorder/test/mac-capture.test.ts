@@ -3,7 +3,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { captureHelper, captureHelperFor, helperArgs, helperInput } from '../src/mac-capture';
 import { screenLatency } from '../src/sources';
 
@@ -61,8 +61,11 @@ describe('the macOS capture helper', () => {
       writeFileSync(join(dir, 'cuttle-capture-shot'), '');
       expect(captureHelperFor('audio', helper)).toBe(join(dir, 'cuttle-capture-audio'));
       expect(captureHelperFor('shot', helper)).toBe(join(dir, 'cuttle-capture-shot'));
-      expect(captureHelperFor('audio', undefined)).toBeUndefined();
+      // no helper at all (one of one's own that is not there): none for the sound either
+      vi.stubEnv('CUTTLE_CAPTURE_HELPER', join(dir, 'missing'));
+      expect(captureHelperFor('audio')).toBeUndefined();
     } finally {
+      vi.unstubAllEnvs();
       rmSync(dir, { recursive: true, force: true });
     }
   });

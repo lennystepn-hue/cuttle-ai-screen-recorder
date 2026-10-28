@@ -29,6 +29,10 @@ Cuttle runs on **Windows and macOS**. A change made on one has to keep working o
   done in it (none while another window is in front, no popups, the origin following the window).
   Windows still records the screen where the window is, so whatever covers it shows: Windows'
   counterpart would be Windows.Graphics.Capture.
+- **Several ScreenCaptureKit streams at once** (macOS): replayd keeps one connection per executable
+  path, so a capture beside a take's screen (the computer's sound, a screenshot) runs from its own
+  copy of the helper (`cuttle-capture-audio`, `-shot`, made by `build-macos.mjs`; `captureHelperFor`
+  in `mac-capture.ts`). From the same file the two cut each other off.
 - **Windows of the app**: title bar buttons sit on the right on Windows, the traffic lights on the
   left on macOS (`titleBar()` in `windows.ts`, `:root[data-platform='darwin']` in CSS). macOS opens
   an app's windows behind the active app: show what the person asked for with `bringToFront()`.

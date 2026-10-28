@@ -17,6 +17,7 @@ import motionGuide from '../../../skill/cuttle/motion.md?raw';
 import musicGuide from '../../../skill/cuttle/music.md?raw';
 import projectGuide from '../../../skill/cuttle/project.md?raw';
 import storyGuide from '../../../skill/cuttle/story.md?raw';
+import { REVIEW_KINDS } from './commands/review';
 import { VERSION, runCli } from './main';
 
 /** How an agent starts: what the server says about itself when a client connects. */
@@ -148,6 +149,14 @@ export const COMMAND_TOOLS: readonly CommandTool[] = [
     input: { project, at: z.array(seconds).optional().describe('output seconds'), format: format.optional(), sheet: z.boolean().optional() },
     readOnly: true,
     argv: (input) => ['preview', ...options('at', input.at), ...option('format', input.format), ...on('sheet', input.sheet)],
+  }),
+  tool({
+    name: 'review',
+    title: 'Review the video',
+    description: "Measures what makes the video dull or hard to follow before it renders (an empty first frame, stretches where nothing changes, scenes that look alike or all come in the same way, lines too short to read or too small for a phone, no sound, the look of a recent video) and answers with notes (P0 first) and a sheet of each scene and each cut as an image. Fix the P0 and P1 notes, then review again.",
+    input: { project, format: format.optional(), ignore: z.array(z.enum(REVIEW_KINDS)).optional() },
+    readOnly: true,
+    argv: (input) => ['review', ...option('format', input.format), ...options('ignore', input.ignore)],
   }),
   tool({
     name: 'frame',

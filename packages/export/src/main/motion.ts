@@ -14,6 +14,7 @@ import { fileURLToPath } from 'node:url';
 import { KIT_FOLDER, withImportMap } from '@cuttle/motion-kit';
 import { BrowserWindow, screen, session, type NativeImage, type Session } from 'electron';
 import { motionRuntime, type MotionInit, type MotionView, type PageSound } from '../motion/runtime';
+import { visibleText, type PageText } from '../motion/text';
 
 export const MOTION_SCHEME = 'cuttle-motion';
 
@@ -454,6 +455,12 @@ export class MotionPage {
     return ((await this.win.webContents.executeJavaScript('window.__cuttleSounds ?? []').catch(() => [])) as PageSound[]).filter(
       (sound) => typeof sound?.sound === 'string' && typeof sound.volume === 'number' && (typeof sound.at === 'number' || typeof sound.video === 'number'),
     );
+  }
+
+  /** The text the page shows in the frame it drew last, by block (`cuttle review`). */
+  async text(): Promise<PageText[]> {
+    if (this.win.isDestroyed()) return [];
+    return (await this.win.webContents.executeJavaScript(`(${visibleText.toString()})()`).catch(() => [])) as PageText[];
   }
 
   /** What went wrong in the page so far (uncaught errors and rejections), and its console. */

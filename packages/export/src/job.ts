@@ -107,6 +107,10 @@ export interface StillsJob extends Omit<ExportJob, 'kind' | 'encoder'> {
   kind: 'stills';
   times: number[];
   sheet?: { columns: number };
+  /** The times (their places in `times`) written as PNGs and put on the sheet; all of them when left out. */
+  png?: number[];
+  /** Also each time's frame this small (`cuttle review` measures them): RGB, row by row, in base64. */
+  thumbs?: { width: number; height: number };
 }
 
 /** The image formats a shot is written in. */
@@ -167,6 +171,8 @@ export interface PageStillsSuccess {
   stills: number;
   /** Per time: the source second the still shows (its frame's most visible clip), null on a still or card. */
   sources: (number | null)[];
+  /** With `thumbs`: per time, its frame that small (RGB in base64). */
+  thumbs?: string[];
   width: number;
   height: number;
   gpu: string;

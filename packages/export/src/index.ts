@@ -16,5 +16,6 @@ export { motionSoundCues, type ItemSounds, type PageSoundCache } from './main/mo
 export type { MusicInfo } from './music/runtime';
 export type { SoundtrackReport } from './main/export';
 export type { MotionItemReport } from './main/motion-host';
+export type { PageText } from './motion/text';
 export { MotionPreview, type MotionPreviewOptions, type MotionStatus, type PreviewMode } from './main/motion-preview';
 export type { MotionFrameRequest, MotionPixels } from './job';

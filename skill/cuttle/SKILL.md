@@ -179,9 +179,11 @@ video as pages. Read [story.md](story.md) first (what the video is, before any s
 6. Write the music for these scenes (music.md): from a template you make your own, or a page from
    nothing that you make the music with `cuttle -C "<project>" --json music set --src music/<name>/index.html`.
    Hit the scene changes.
-7. `cuttle -C "<project>" --json preview` for the whole video, and review it against `STORY.md`
-   before you render ([story.md](story.md), section 9): frame 0, the seams around each cut, the
-   phone, the defaults that crept in. Fix what it finds, then render (section 4). Render each
+7. `cuttle -C "<project>" --json review` before you render: it measures what makes a video dull
+   (an empty frame 0, stretches where nothing changes, scenes alike or all coming in the same way,
+   lines too short to read or too small for a phone, no sound) and answers with notes, P0 first, and
+   a sheet of each scene and each seam. Fix the P0 and P1 notes, look at the sheet against `STORY.md`
+   ([story.md](story.md), section 9), review again, then render (section 4). Render each
    format the user wants: pages size themselves from the short side, so one set serves 16:9, 1:1
    and 9:16 (check each with `preview --format`).
 
@@ -356,6 +358,8 @@ Then refine `cuttle.json` ([project.md](project.md)) and preview again:
   video, where something changes.
 - **End card.** Built, not a still: a `motion` scene that carries the mark in and lands the name
   and the call to action, held 2–3 s; a `card` scene with the product name and URL for a quick one.
+- **Review.** Before the render, `cuttle -C "<project>" --json review` (2b, step 7): its notes and
+  its sheet, P0 first. Fix them, or keep one on purpose and say why (`--ignore still` leaves a kind out).
 
 ## 4. Render
 

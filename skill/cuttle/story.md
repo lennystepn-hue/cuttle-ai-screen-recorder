@@ -213,18 +213,32 @@ it.
 ## 9. Review
 
 You wrote the pages, so you know what they mean; the viewer sees the video once, at full speed,
-often on a phone. After the first full preview, look at it as a harsh director would, not as its
+often on a phone. First let Cuttle measure what an author does not see:
+
+```bash
+cuttle -C "<project>" --json review
+```
+
+It renders the video small, every quarter second or so, and reads the text its pages show. Its
+`notes` (each with `weight`, `kind`, `t`, `scene` and a sentence) say where frame 0 is empty or text
+alone on a plain ground (`first-frame`), where nothing changes for more than 3 s (`still`), which
+scenes look alike (`alike`) or all build up from an empty frame (`entrances`), which lines show too
+briefly for their words (`unread`: 0.5 s and 0.3 s a word) or are too small for a phone (`small-text`:
+under 2.6 % of the short side, 28 px at 1080), whether a video over 15 s makes no sound (`silent`),
+and whether it looks like a video reviewed before (`same-as-before`: Cuttle keeps a few numbers of
+each, no pictures). Its sheet shows each scene once it has come in and at its middle, and 0.2 s
+before each seam. A note is a question, not a rule: fix it, or keep it on purpose, say why, and
+leave its kind out next time (`--ignore still`). Then look as a harsh director would, not as the
 author:
 
 ```bash
-cuttle -C "<project>" --json preview
 cuttle -C "<project>" --json preview --at 4.8 --at 5.2
 cuttle -C "<project>" --json preview --format 9:16
 cuttle -C "<project>" --json render --still 0
 ```
 
-The sheet of the whole video; the seams, 0.2 s before and after each cut (here one at 5.0 s); the
-smallest format the video goes to, for the phone; frame 0. Then:
+The seams up close, 0.2 s before and after each cut (here one at 5.0 s); the smallest format the
+video goes to, for the phone; frame 0, the thumbnail. Then:
 
 1. Describe each still in one sentence as a stranger would, naming what is in it. A thing you would
    have to explain ("those bars are the takes") is a P0.
@@ -235,8 +249,8 @@ smallest format the video goes to, for the phone; frame 0. Then:
 4. Write each problem as one line, `t=4.2 s · scene s3 · problem → change`, and weigh it: **P0**
    breaks the read (unreadable, wrong, broken, a default in the hero shot), **P1** weakens the video
    (a dead stretch, a soft payoff, a seam that jumps), **P2** is polish.
-5. Fix the P0s and the P1s worth their time: the words first, then the timing, then the detail. Look
-   again only at what you changed. A video that feels busy loses a third of its motion and keeps the
+5. Fix the P0s and the P1s worth their time, `review`'s and yours: the words first, then the timing,
+   then the detail. Review again, and look again only at what you changed. A video that feels busy loses a third of its motion and keeps the
    moves that lead the eye.
 
 Then write into `STORY.md` the calls you made, the weakest shot and what you would change with more

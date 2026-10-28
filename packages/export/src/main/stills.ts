@@ -40,14 +40,23 @@ export interface StillsOptions {
   signal?: AbortSignal;
   /** Renders another version of the project (its folder's files): `cuttle motion check` shows one page as a scene. */
   project?: (project: CuttleProject) => CuttleProject;
+  /** The times (their places in `times`) written as PNGs and put on the sheet; all of them when left out. */
+  png?: number[];
+  /** Also each time's frame this many pixels wide (`cuttle review` measures them). */
+  thumbs?: number;
+  /** Also the text each motion page shows in each frame it draws (`cuttle review`). */
+  text?: boolean;
 }
 
 export interface StillsResult {
   /**
-   * One PNG per time, in the order of `times`, with the source second it shows (`source`: the frame's
-   * most visible clip; absent on a still or card scene), for placing masks, zooms and texts.
+   * One PNG per time, in the order of `times` (with `png`, those it names), with the source second it
+   * shows (`source`: the frame's most visible clip; absent on a still or card scene), for placing
+   * masks, zooms and texts.
    */
   stills: { t: number; file: string; source?: number }[];
+  /** With `thumbs`: each time's frame that small, RGB row by row in base64, in the order of `times`. */
+  thumbs?: { width: number; height: number; frames: string[] };
   sheet?: string;
   /** The output size (each still's size). */
   width: number;
@@ -91,6 +100,9 @@ export async function renderStills(opts: StillsOptions): Promise<StillsResult> {
   const motionFiles = opts.project ? await motionPages(resolve(opts.projectDir), project) : sources.motion;
   const take = motionFiles ? (sources.motionTake ?? (await motionTake(resolve(opts.projectDir), project))) : undefined;
   const columns = opts.sheet ? Math.max(1, Math.round(opts.sheet.columns ?? DEFAULT_SHEET_COLUMNS)) : undefined;
+  const written = opts.png ? [...new Set(opts.png)].filter((n) => Number.isInteger(n) && n >= 0 && n < opts.times.length).sort((a, b) => a - b) : opts.times.map((_, n) => n);
+  const { width, height } = project.output;
+  const thumbs = opts.thumbs ? { width: Math.max(1, Math.round(opts.thumbs)), height: Math.max(1, Math.round((opts.thumbs * height) / width)) } : undefined;
   // the narration's words, for the captions the stills show
   const narration = sources.narration ? placeNarration(project, sceneSpans(project.scenes, project.cuts), sources.narration) : undefined;
   const segmenter = segmenterPaths(project, opts.pageDir ?? defaultPageDir());
@@ -112,6 +124,8 @@ export async function renderStills(opts: StillsOptions): Promise<StillsResult> {
     ...(segmenter && { segmenter }),
     times: opts.times,
     ...(columns !== undefined && { sheet: { columns } }),
+    ...(opts.png && { png: written }),
+    ...(thumbs && { thumbs }),
   };
   // The page writes into a work folder; the PNGs move to outDir only when every one is done.
   const work = join(outDir, `.cuttle-stills-${process.pid}`);
@@ -120,8 +134,8 @@ export async function renderStills(opts: StillsOptions): Promise<StillsResult> {
   } catch (error) {
     throw new ExportError('invalid-project', `cannot create the folder ${outDir}: ${(error as Error).message}`, { cause: error });
   }
-  const names = new Map(opts.times.map((t, n) => [`still-${n}`, stillName(n, t)]));
-  if (columns !== undefined) names.set('sheet', SHEET_NAME);
+  const names = new Map(written.map((n) => [`still-${n}`, stillName(n, opts.times[n]!)]));
+  if (columns !== undefined && written.length > 0) names.set('sheet', SHEET_NAME);
 
   const cancel = whenCancelled(opts.signal);
   const guard = watchdog();
@@ -130,7 +144,7 @@ export async function renderStills(opts: StillsOptions): Promise<StillsResult> {
   // Reads only: stills mode writes PNGs through writeStill, never into a video file.
   const host = new FileHost([...(sources.screen ? [sources.screen] : []), ...(sources.webcam ? [sources.webcam.path] : [])], join(outDir, '.unused'), images);
   let window: ExportWindow | undefined;
-  const motion = motionFiles && take ? new MotionHost(project, motionFiles, take) : undefined;
+  const motion = motionFiles && take ? new MotionHost(project, motionFiles, take, opts.text ? { text: true } : {}) : undefined;
   try {
     window = await openExportWindow(opts.pageDir ?? defaultPageDir());
     const ipc = window.win.webContents.ipc;
@@ -162,11 +176,12 @@ export async function renderStills(opts: StillsOptions): Promise<StillsResult> {
     const said = await motion?.close();
     await publish(work, outDir, [...names.values()], opts.clean ?? false);
     return {
-      stills: opts.times.map((t, n) => {
+      stills: written.map((n) => {
         const source = page.sources[n];
-        return { t, file: join(outDir, names.get(`still-${n}`)!), ...(typeof source === 'number' && { source }) };
+        return { t: opts.times[n]!, file: join(outDir, names.get(`still-${n}`)!), ...(typeof source === 'number' && { source }) };
       }),
-      ...(columns !== undefined && { sheet: join(outDir, SHEET_NAME) }),
+      ...(thumbs && page.thumbs && { thumbs: { ...thumbs, frames: page.thumbs } }),
+      ...(names.has('sheet') && { sheet: join(outDir, SHEET_NAME) }),
       width: page.width,
       height: page.height,
       ...(said && { motion: said }),

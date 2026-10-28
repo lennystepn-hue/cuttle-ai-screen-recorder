@@ -22,7 +22,21 @@ export interface MotionCheck {
 
 export type ElectronRequest = (
   | { command: 'render'; projectDir: string; targets: { format?: string; out: string }[]; encoder?: string; captions?: boolean; subtitles?: string[]; loudness?: string; transparent?: boolean; size?: string; fps?: number; codec?: string }
-  | { command: 'preview'; projectDir: string; outDir: string; times: number[]; format?: string; sheet?: { columns?: number }; clean?: boolean; motion?: MotionCheck; transparent?: boolean }
+  | {
+      command: 'preview';
+      projectDir: string;
+      outDir: string;
+      times: number[];
+      format?: string;
+      sheet?: { columns?: number };
+      clean?: boolean;
+      motion?: MotionCheck;
+      transparent?: boolean;
+      /** `cuttle review`: the times written as PNGs (their places in `times`), each time's frame this many pixels wide, and the pages' text. */
+      png?: number[];
+      thumbs?: number;
+      text?: boolean;
+    }
   | { command: 'capture-page'; target: string; out: string; width: number; height: number; fullPage: boolean; waitMs: number }
   | { command: 'music'; projectDir: string; out: string; sheet?: string; src?: string }
   | { command: 'shot'; shot: Shot; dir: string; out: string; scale?: number; quality?: number }

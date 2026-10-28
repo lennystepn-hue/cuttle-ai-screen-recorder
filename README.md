@@ -137,6 +137,7 @@ cuttle music new pulse                       # a score for this video (pulse, dr
 cuttle motion check motion/title/index.html  # its frames, a contact sheet, what the page threw
 cuttle watch                                 # each page saved checked again, as you write
 cuttle music check                           # the music alone: a WAV, its levels, the hits on the cuts
+cuttle review                                # what makes it dull, measured: an empty first frame, dead stretches, scenes alike, lines too short or small
 cuttle render --format 9:16 --format 1:1     # out/9x16.mp4 and out/1x1.mp4 in one go; also 16:9
 ```
 
@@ -484,6 +485,7 @@ cuttle voice render                  # speaks the lines (21 MB voice, downloaded
 cuttle import phone.mp4 --to 40      # or a video made elsewhere as the take (30 fps, BT.709), its sound as the mic
 cuttle suggest                       # scenes: quiet start and end trimmed, idle cut, waiting sped up, zooms on the answer and on clicks
 cuttle preview                       # 12 stills and a contact sheet in preview/
+cuttle review                        # notes on what makes it dull or hard to follow, P0 first, and a sheet of each scene and cut
 cuttle frame 42.5 --grid             # a source frame with a numbered pixel grid, for masks and zooms
 cuttle capture-page https://example.com --scroll --add
 cuttle motion new title --first      # a motion page as the intro, from a template (motion templates lists them)
